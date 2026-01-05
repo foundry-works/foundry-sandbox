@@ -1,0 +1,39 @@
+services:
+  dev:
+    build:
+      context: .
+      args:
+        UID: ${DOCKER_UID:-1000}
+        GID: ${DOCKER_GID:-1000}
+    image: ai-dev-sandbox
+
+    volumes:
+      # Workspace (set by sandbox.sh via WORKSPACE_PATH)
+      - ${WORKSPACE_PATH:-.}:/workspace
+      # foundry-mcp errors and metrics (shared across all sandboxes)
+      - ${HOME}/.foundry-mcp:/home/ubuntu/.foundry-mcp
+      # Bikelane project directory
+      - ${HOME}/GitHub/_bikelane:/home/ubuntu/bikelane
+
+    # Interactive shell
+    stdin_open: true
+    tty: true
+
+    working_dir: /workspace
+
+    # Restart on reboot unless explicitly stopped
+    restart: unless-stopped
+
+    environment:
+      # Host username for path compatibility
+      - HOST_USER=${HOST_USER:-}
+      # Claude config directory
+      - CLAUDE_CONFIG_DIR=/home/ubuntu/.claude
+      # Optional API keys if needed
+      - ANTHROPIC_API_KEY
+      - GEMINI_API_KEY
+      - GITHUB_TOKEN
+      - CURSOR_API_KEY
+      - OPENAI_API_KEY
+      - CLAUDE_CODE_OAUTH_TOKEN
+      - TERM=xterm-256color
