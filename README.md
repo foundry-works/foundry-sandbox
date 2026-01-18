@@ -274,13 +274,10 @@ The sandbox automatically copies credential files from your host into containers
 ```bash
 cat > ~/.api_keys << 'EOF'
 export CLAUDE_CODE_OAUTH_TOKEN="..."   # Get via: claude setup-token
-export OPENAI_API_KEY="sk-..."
 export CURSOR_API_KEY="key-..."
 # Deep research providers (foundry-mcp)
 export TAVILY_API_KEY="..."
 export PERPLEXITY_API_KEY="..."
-export GOOGLE_API_KEY="..."
-export GOOGLE_CSE_ID="..."
 EOF
 chmod 600 ~/.api_keys
 ```
