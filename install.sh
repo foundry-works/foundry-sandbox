@@ -7,6 +7,7 @@
 #
 # Or with options:
 #   curl -fsSL ... | bash -s -- --no-build
+#   curl -fsSL ... | bash -s -- --no-cache   # Force rebuild without cache
 #
 
 set -e
@@ -25,12 +26,17 @@ NC='\033[0m'
 
 # Options
 BUILD_IMAGE=true
+NO_CACHE=""
 
 # Parse arguments
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --no-build)
             BUILD_IMAGE=false
+            shift
+            ;;
+        --no-cache)
+            NO_CACHE="--no-cache"
             shift
             ;;
         --dir)
@@ -81,6 +87,104 @@ if ! docker info &>/dev/null; then
     exit 1
 fi
 echo -e "  ${GREEN}✓${NC} docker daemon"
+
+echo ""
+
+# Check API keys
+echo -e "${BLUE}Checking API keys...${NC}"
+
+# Determine script directory for local install, or use temp for curl install
+if [[ -n "${BASH_SOURCE[0]:-}" ]] && [[ -f "$(dirname "${BASH_SOURCE[0]}")/lib/api_keys.sh" ]]; then
+    source "$(dirname "${BASH_SOURCE[0]}")/lib/api_keys.sh"
+elif [[ -d "$INSTALL_DIR" ]] && [[ -f "$INSTALL_DIR/lib/api_keys.sh" ]]; then
+    source "$INSTALL_DIR/lib/api_keys.sh"
+else
+    # Inline minimal check for curl-piped install (before repo is cloned)
+    _check_api_keys_inline() {
+        local has_ai_key=false
+        local has_search_key=false
+
+        if [ -f "$HOME/.api_keys" ]; then
+            source "$HOME/.api_keys"
+            # Check AI provider keys (Gemini uses OAuth via ~/.gemini/, not an API key)
+            for key in CLAUDE_CODE_OAUTH_TOKEN OPENAI_API_KEY CURSOR_API_KEY; do
+                if [ -n "${!key:-}" ]; then
+                    has_ai_key=true
+                    break
+                fi
+            done
+            # Check search provider keys
+            if [ -n "${TAVILY_API_KEY:-}" ]; then
+                has_search_key=true
+            elif [ -n "${GOOGLE_API_KEY:-}" ] && [ -n "${GOOGLE_CSE_ID:-}" ]; then
+                has_search_key=true
+            elif [ -n "${PERPLEXITY_API_KEY:-}" ]; then
+                has_search_key=true
+            fi
+        fi
+
+        # All keys present
+        if [ "$has_ai_key" = "true" ] && [ "$has_search_key" = "true" ]; then
+            echo -e "  ${GREEN}✓${NC} API keys configured"
+            return 0
+        fi
+
+        # AI key present but no search key - warn but continue
+        if [ "$has_ai_key" = "true" ]; then
+            echo -e "  ${GREEN}✓${NC} AI provider keys configured"
+            echo -e "${YELLOW}Warning: No search provider API keys found.${NC}"
+            echo "Deep research features (foundry-mcp) will be unavailable."
+            echo ""
+            echo "Expected at least one of:"
+            echo "  - TAVILY_API_KEY"
+            echo "  - GOOGLE_API_KEY + GOOGLE_CSE_ID (both required)"
+            echo "  - PERPLEXITY_API_KEY"
+            echo ""
+            return 0
+        fi
+
+        # No AI key - prompt to continue
+        echo -e "${YELLOW}Warning: No AI provider API keys found.${NC}"
+        echo ""
+        echo "Expected at least one of:"
+        echo "  - CLAUDE_CODE_OAUTH_TOKEN (Claude Code)"
+        echo "  - OPENAI_API_KEY (OpenAI/Codex)"
+        echo "  - CURSOR_API_KEY (Cursor)"
+        echo "  - ~/.gemini/oauth_creds.json (Gemini CLI via 'gemini auth')"
+        echo ""
+        if [ "$has_search_key" = "false" ]; then
+            echo -e "${YELLOW}Warning: No search provider API keys found.${NC}"
+            echo "Deep research features (foundry-mcp) will be unavailable."
+            echo ""
+            echo "Expected at least one of:"
+            echo "  - TAVILY_API_KEY"
+            echo "  - GOOGLE_API_KEY + GOOGLE_CSE_ID (both required)"
+            echo "  - PERPLEXITY_API_KEY"
+            echo ""
+        fi
+        echo "Create ~/.api_keys with your keys:"
+        echo "  export CLAUDE_CODE_OAUTH_TOKEN=\"your-token\""
+        echo "  export TAVILY_API_KEY=\"your-key\""
+        echo ""
+        read -p "Continue without API keys? [y/N]: " response
+        case "$response" in
+            [yY]|[yY][eE][sS])
+                echo -e "${YELLOW}Continuing without API keys...${NC}"
+                return 0
+                ;;
+            *)
+                echo -e "${RED}Installation cancelled.${NC}"
+                return 1
+                ;;
+        esac
+    }
+    _check_api_keys_inline || exit 1
+fi
+
+# If we loaded api_keys.sh, use its functions
+if type check_api_keys_with_prompt &>/dev/null; then
+    check_api_keys_with_prompt "Installation" || exit 1
+fi
 
 echo ""
 
@@ -164,7 +268,7 @@ if [[ "$BUILD_IMAGE" == true ]]; then
     echo ""
 
     cd "$INSTALL_DIR"
-    if ./sandbox.sh build; then
+    if ./sandbox.sh build $NO_CACHE; then
         echo ""
         echo -e "${GREEN}Docker image built successfully.${NC}"
     else

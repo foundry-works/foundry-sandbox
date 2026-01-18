@@ -6,12 +6,14 @@
 # other outbound traffic. Used in "limited" network mode.
 #
 # Whitelisted domains by default:
-# - github.com, api.github.com (code hosting)
-# - registry.npmjs.org (npm packages)
-# - pypi.org, files.pythonhosted.org (Python packages)
-# - api.anthropic.com (Claude API)
-# - generativelanguage.googleapis.com (Gemini API)
-# - api.openai.com (OpenAI API)
+# - GitHub: github.com, api.github.com, gist.github.com, etc.
+# - Package registries: npm, pypi, go, cargo
+# - AI APIs: Anthropic, OpenAI, Google (Gemini)
+# - AI Tools: Cursor
+# - Research: Tavily, Perplexity, Semantic Scholar, Google CSE
+# - Docker Hub
+#
+# Add custom domains via: SANDBOX_ALLOWED_DOMAINS="domain1.com,domain2.com"
 #
 
 set -e
@@ -24,6 +26,8 @@ DEFAULT_DOMAINS=(
     "raw.githubusercontent.com"
     "objects.githubusercontent.com"
     "codeload.github.com"
+    "gist.github.com"
+    "gist.githubusercontent.com"
 
     # NPM Registry
     "registry.npmjs.org"
@@ -36,10 +40,75 @@ DEFAULT_DOMAINS=(
     "proxy.golang.org"
     "sum.golang.org"
 
-    # AI APIs
+    # Rust/Cargo
+    "crates.io"
+    "static.crates.io"
+
+    # AI Provider APIs (major)
     "api.anthropic.com"
     "generativelanguage.googleapis.com"
     "api.openai.com"
+
+    # OpenAI OAuth (needed for Codex CLI)
+    "auth.openai.com"
+    "auth0.openai.com"
+    "platform.openai.com"
+    "chatgpt.com"
+
+    # Claude Code OAuth
+    "claude.ai"
+    "console.anthropic.com"
+
+    # Google OAuth (needed for Gemini CLI auth)
+    "accounts.google.com"
+    "oauth2.googleapis.com"
+
+    # Azure OpenAI
+    "openai.azure.com"
+    "cognitiveservices.azure.com"
+
+    # AI Provider APIs (alternative)
+    "api.groq.com"
+    "api.mistral.ai"
+    "api.deepseek.com"
+    "api.together.xyz"
+    "api.cohere.com"
+    "api.fireworks.ai"
+    "openrouter.ai"
+
+    # Z.AI / Zhipu (GLM models)
+    "api.z.ai"
+    "open.bigmodel.cn"
+
+    # AI Coding Tools
+    "cursor.com"
+    "api.cursor.com"
+    "api2.cursor.sh"
+    "api3.cursor.sh"
+    "api4.cursor.sh"
+    "api5.cursor.sh"
+    "api6.cursor.sh"
+    "api7.cursor.sh"
+    "api8.cursor.sh"
+    "www2.cursor.sh"
+    "authenticate.cursor.sh"
+    "authenticator.cursor.sh"
+    "us-asia.gcpp.cursor.sh"
+    "us-eu.gcpp.cursor.sh"
+    "us-only.gcpp.cursor.sh"
+    "marketplace.cursorapi.com"
+    "cursor-cdn.com"
+    "downloads.cursor.com"
+    "opencode.ai"
+    "models.dev"
+    "opncd.ai"
+    "api.githubcopilot.com"
+
+    # Deep Research APIs (content extraction handled server-side)
+    "api.tavily.com"
+    "api.perplexity.ai"
+    "api.semanticscholar.org"
+    "www.googleapis.com"
 
     # Docker Hub (for pulling images if needed)
     "registry-1.docker.io"
@@ -84,33 +153,100 @@ else
     iptables -A OUTPUT -p tcp --dport 53 -j ACCEPT
 fi
 
+# Domains that use load balancer IP rotation (resolve multiple times)
+ROTATING_IP_DOMAINS=(
+    "api2.cursor.sh"
+    "api3.cursor.sh"
+    "api4.cursor.sh"
+    "api5.cursor.sh"
+    "api6.cursor.sh"
+    "api7.cursor.sh"
+    "api8.cursor.sh"
+)
+
+# Known IPs for domains that don't resolve via public DNS
+# (e.g., api5.cursor.sh uses hardcoded IPs in the agent binary)
+KNOWN_IPS=(
+    # api5.cursor.sh - Cursor Agent backend (discovered via SSL cert inspection)
+    "44.197.141.31"
+)
+
+# Track already-added IPs to avoid duplicates
+declare -A ADDED_IPS
+
+# Function to add a single IP to firewall (with deduplication)
+add_ip_rule() {
+    local ip="$1"
+    if [ -z "${ADDED_IPS[$ip]:-}" ]; then
+        iptables -A OUTPUT -d "$ip" -j ACCEPT 2>/dev/null || true
+        ADDED_IPS[$ip]=1
+    fi
+}
+
+# Function to add a single IPv6 to firewall (with deduplication)
+add_ipv6_rule() {
+    local ip="$1"
+    if command -v ip6tables &>/dev/null && [ -z "${ADDED_IPS[$ip]:-}" ]; then
+        ip6tables -A OUTPUT -d "$ip" -j ACCEPT 2>/dev/null || true
+        ADDED_IPS[$ip]=1
+    fi
+}
+
 # Function to resolve domain and add rules
 allow_domain() {
     local domain="$1"
     echo "  Allowing: $domain"
 
-    # Resolve domain to IP addresses (may return multiple)
-    local ips
-    ips=$(dig +short "$domain" A 2>/dev/null | grep -E '^[0-9]+\.' || true)
-
-    # Also try AAAA records for IPv6
-    local ipv6s
-    ipv6s=$(dig +short "$domain" AAAA 2>/dev/null | grep -E '^[0-9a-f:]+' || true)
-
-    if [ -z "$ips" ] && [ -z "$ipv6s" ]; then
-        echo "    Warning: Could not resolve $domain"
-        return
-    fi
-
-    # Add rules for each resolved IP
-    for ip in $ips; do
-        iptables -A OUTPUT -d "$ip" -j ACCEPT 2>/dev/null || true
+    # Check if this domain uses rotating IPs
+    local is_rotating=false
+    for rotating in "${ROTATING_IP_DOMAINS[@]}"; do
+        if [ "$domain" = "$rotating" ]; then
+            is_rotating=true
+            break
+        fi
     done
 
-    # Add rules for IPv6 if ip6tables is available
-    if command -v ip6tables &>/dev/null; then
+    if [ "$is_rotating" = true ]; then
+        # Resolve multiple times to capture more IPs from the rotation pool
+        echo "    (rotating IP domain - resolving multiple times)"
+        local all_ips=""
+        for i in {1..5}; do
+            local ips
+            ips=$(dig +short "$domain" A 2>/dev/null | grep -E '^[0-9]+\.' || true)
+            all_ips="$all_ips $ips"
+            sleep 0.2
+        done
+        # Deduplicate and add
+        local unique_ips
+        unique_ips=$(echo "$all_ips" | tr ' ' '\n' | sort -u | grep -E '^[0-9]+\.' || true)
+        local ip_count=0
+        for ip in $unique_ips; do
+            add_ip_rule "$ip"
+            ((ip_count++)) || true
+        done
+        echo "    Added $ip_count unique IPs"
+    else
+        # Standard single resolution
+        local ips
+        ips=$(dig +short "$domain" A 2>/dev/null | grep -E '^[0-9]+\.' || true)
+
+        # Also try AAAA records for IPv6
+        local ipv6s
+        ipv6s=$(dig +short "$domain" AAAA 2>/dev/null | grep -E '^[0-9a-f:]+' || true)
+
+        if [ -z "$ips" ] && [ -z "$ipv6s" ]; then
+            echo "    Warning: Could not resolve $domain"
+            return
+        fi
+
+        # Add rules for each resolved IP
+        for ip in $ips; do
+            add_ip_rule "$ip"
+        done
+
+        # Add rules for IPv6
         for ip in $ipv6s; do
-            ip6tables -A OUTPUT -d "$ip" -j ACCEPT 2>/dev/null || true
+            add_ipv6_rule "$ip"
         done
     fi
 }
@@ -118,6 +254,13 @@ allow_domain() {
 # Allow traffic to whitelisted domains
 for domain in "${ALL_DOMAINS[@]}"; do
     allow_domain "$domain"
+done
+
+# Add known IPs that don't resolve via public DNS
+echo "  Adding known IPs (non-DNS resolved)..."
+for ip in "${KNOWN_IPS[@]}"; do
+    add_ip_rule "$ip"
+    echo "    Added: $ip"
 done
 
 # Allow Docker gateway (for host communication)
@@ -141,3 +284,27 @@ fi
 echo "Firewall rules applied successfully."
 echo "Allowed: ${#ALL_DOMAINS[@]} domains + Docker gateway + DNS (gateway only) + loopback"
 echo "All other outbound traffic is blocked."
+
+# Function to refresh rotating domain IPs (can be called separately)
+refresh_rotating_ips() {
+    echo "Refreshing IPs for rotating domains..."
+    for domain in "${ROTATING_IP_DOMAINS[@]}"; do
+        echo "  Refreshing: $domain"
+        for i in {1..5}; do
+            local ips
+            ips=$(dig +short "$domain" A 2>/dev/null | grep -E '^[0-9]+\.' || true)
+            for ip in $ips; do
+                # Add rule if not already present (iptables will just fail silently on duplicate)
+                iptables -C OUTPUT -d "$ip" -j ACCEPT 2>/dev/null || \
+                    iptables -I OUTPUT -d "$ip" -j ACCEPT 2>/dev/null || true
+            done
+            sleep 0.2
+        done
+    done
+    echo "Refresh complete."
+}
+
+# If called with "refresh" argument, just refresh rotating IPs
+if [ "${1:-}" = "refresh" ]; then
+    refresh_rotating_ips
+fi

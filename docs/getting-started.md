@@ -181,8 +181,8 @@ Set these before running `cast` for API access inside containers:
 ```bash
 export ANTHROPIC_API_KEY="sk-ant-..."
 export GITHUB_TOKEN="ghp_..."
-export GEMINI_API_KEY="..."
 export OPENAI_API_KEY="sk-..."
+# For Gemini CLI, run: gemini auth (OAuth creds in ~/.gemini/ are copied to container)
 ```
 
 These are passed into containers automatically.

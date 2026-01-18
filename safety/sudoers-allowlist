@@ -14,7 +14,7 @@ ubuntu ALL=(ALL) NOPASSWD: /usr/sbin/service * status
 # Network mode switching (iptables)
 ubuntu ALL=(ALL) NOPASSWD: /usr/sbin/iptables *
 ubuntu ALL=(ALL) NOPASSWD: /usr/sbin/ip6tables *
-ubuntu ALL=(ALL) NOPASSWD: /home/ubuntu/network-firewall.sh
+ubuntu ALL=(ALL) NOPASSWD: /usr/local/bin/network-firewall.sh
 ubuntu ALL=(ALL) NOPASSWD: /usr/local/bin/network-mode *
 
 # Add other safe commands as needed:

@@ -7,7 +7,7 @@
 #
 # Modes:
 #   full       - Unrestricted network access
-#   limited    - Whitelist domains only (github, npm, pypi, AI APIs)
+#   limited    - Whitelist domains only (github, npm, pypi, AI APIs, deep research APIs)
 #   host-only  - Local network only (Docker gateway, common subnets)
 #   none       - Complete block (loopback only, simulated via iptables)
 #
@@ -43,8 +43,10 @@ NC='\033[0m' # No Color
 
 # Determine current mode by checking network interface and iptables rules
 get_current_mode() {
-    # Check if we have network at all (true Docker none mode)
-    if ! ip link show eth0 &>/dev/null 2>&1; then
+    # Check if we have any non-loopback network interface (true Docker none mode has only lo)
+    # Use /sys/class/net/ which doesn't require iproute2
+    local has_network_if=$(ls /sys/class/net/ 2>/dev/null | grep -v '^lo$' || true)
+    if [ -z "$has_network_if" ]; then
         echo "none-docker"
         return
     fi
@@ -53,7 +55,8 @@ get_current_mode() {
     local rules=$(sudo iptables -L OUTPUT -n 2>/dev/null)
 
     # If no DROP rule at all = full mode
-    if ! echo "$rules" | grep -q "DROP.*all.*0.0.0.0/0"; then
+    # Note: -n flag shows "0" for protocol instead of "all"
+    if ! echo "$rules" | grep -q "DROP.*0\.0\.0\.0/0"; then
         echo "full"
         return
     fi
@@ -302,7 +305,7 @@ enable_limited() {
     echo "Enabling limited network mode..."
 
     # Run the firewall script
-    if /home/ubuntu/network-firewall.sh; then
+    if SANDBOX_NETWORK_MODE=limited /home/ubuntu/network-firewall.sh; then
         echo -e "${YELLOW}Limited network mode enabled.${NC}"
         echo "Only whitelisted domains are accessible."
     else
@@ -419,7 +422,7 @@ show_help() {
     echo ""
     echo "Modes:"
     echo "  full       All outbound traffic allowed"
-    echo "  limited    Only whitelisted domains (github, npm, pypi, AI APIs)"
+    echo "  limited    Only whitelisted domains (github, npm, pypi, AI APIs, deep research)"
     echo "  host-only  Local network only (Docker gateway, private subnets)"
     echo "  none       Block all outbound except loopback (simulated)"
     echo ""

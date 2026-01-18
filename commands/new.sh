@@ -8,6 +8,7 @@ cmd_new() {
     local mounts=("${NEW_MOUNTS[@]}")
     local copies=("${NEW_COPIES[@]}")
     local network_mode="$NEW_NETWORK_MODE"
+    local skip_key_check="$NEW_SKIP_KEY_CHECK"
 
     if [ -z "$branch" ]; then
         local timestamp
@@ -26,6 +27,7 @@ cmd_new() {
         echo "  --copy, -c  host:container       Copy host path into container (once at creation)"
         echo "  --network, -n <mode>             Network isolation mode (default: full)"
         echo "                                   Modes: full, limited, host-only, none"
+        echo "  --skip-key-check                 Skip API key validation"
         echo ""
         echo "Examples:"
         echo "  $0 new user/repo                     # auto-create sandbox branch from main"
@@ -35,6 +37,30 @@ cmd_new() {
         echo "  $0 new user/repo feature --copy /path/to/models:/models"
         echo "  $0 new user/repo feature --network=limited  # restrict network to whitelist"
         exit 1
+    fi
+
+    # Check API keys unless skipped
+    if [ "$skip_key_check" != "true" ]; then
+        load_api_keys
+        if ! check_any_ai_key; then
+            # No AI key - prompt to continue
+            if ! prompt_missing_keys; then
+                die "Sandbox creation cancelled."
+            fi
+        elif ! check_any_search_key; then
+            # AI key present but no search key - just warn
+            show_missing_search_keys_warning
+        fi
+    fi
+
+    # Validate --copy source paths exist before creating anything
+    if [ ${#copies[@]} -gt 0 ]; then
+        for copy_spec in "${copies[@]}"; do
+            local src="${copy_spec%%:*}"
+            if [ ! -e "$src" ]; then
+                die "Copy source does not exist: $src"
+            fi
+        done
     fi
 
     if [[ "$repo_url" != http* && "$repo_url" != git@* ]]; then
