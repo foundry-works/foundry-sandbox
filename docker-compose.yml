@@ -7,6 +7,10 @@ services:
         GID: ${DOCKER_GID:-1000}
     image: ai-dev-sandbox
 
+    # Layer 0: Read-only root filesystem (primary security boundary)
+    # Prevents rm -rf / even via /bin/rm bypass
+    read_only: true
+
     volumes:
       # Workspace (set by sandbox.sh via WORKSPACE_PATH)
       - ${WORKSPACE_PATH:-.}:/workspace
@@ -14,6 +18,17 @@ services:
       - ${HOME}/.foundry-mcp:/home/ubuntu/.foundry-mcp
       # Bikelane project directory
       - ${HOME}/GitHub/_bikelane:/home/ubuntu/bikelane
+
+    # Writable tmpfs mounts (RAM-backed, cleared on container stop)
+    tmpfs:
+      - /tmp:mode=1777,size=512m
+      - /var/tmp:mode=1777,size=256m
+      - /run:mode=755,size=64m
+      - /var/cache/apt:mode=755,size=256m
+      - /var/lib/apt/lists:mode=755,size=128m
+      # Home directory - writable for configs, caches, local packages
+      # Use a named volume instead if you need persistence across restarts
+      - /home/ubuntu:mode=755,uid=1000,gid=1000,size=1g
 
     # Interactive shell
     stdin_open: true

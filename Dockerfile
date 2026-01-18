@@ -6,7 +6,7 @@ ARG GID=1000
 # Avoid prompts during package installation
 ENV DEBIAN_FRONTEND=noninteractive
 
-# Basics
+# Basics + iptables for network mode switching
 RUN apt-get update && apt-get install -y \
     curl \
     git \
@@ -22,6 +22,8 @@ RUN apt-get update && apt-get install -y \
     lsof \
     python3 \
     python3-pip \
+    iptables \
+    dnsutils \
     && rm -rf /var/lib/apt/lists/* \
     && ln -s /usr/bin/python3 /usr/bin/python
 
@@ -42,29 +44,41 @@ RUN curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg \
     && rm -rf /var/lib/apt/lists/*
 
 # Ubuntu 24.04 already has ubuntu user with UID/GID 1000
-# Just add sudo access
-RUN echo "ubuntu ALL=(ALL) NOPASSWD:ALL" >> /etc/sudoers
+# Install safety guardrails (before switching to ubuntu user)
 
-USER ubuntu
-WORKDIR /home/ubuntu
+# Layer 1: Shell function overrides (loaded by all bash sessions)
+COPY safety/shell-overrides.sh /etc/profile.d/shell-overrides.sh
+RUN chmod 644 /etc/profile.d/shell-overrides.sh
 
-# Set up paths for user
-ENV PATH="/usr/local/go/bin:/home/ubuntu/go/bin:/home/ubuntu/.local/bin:$PATH"
-ENV GOPATH="/home/ubuntu/go"
+# Layer 1b: Credential redaction (automatically redacts API keys in env output)
+COPY safety/credential-redaction.sh /etc/profile.d/credential-redaction.sh
+RUN chmod 644 /etc/profile.d/credential-redaction.sh
 
-# Install AI tools as user
-RUN npm config set prefix '/home/ubuntu/.local' \
-    && npm install -g @anthropic-ai/claude-code \
+# Layer 2: Strict sudoers allowlist (no NOPASSWD:ALL fallback)
+COPY safety/sudoers-allowlist /etc/sudoers.d/allowlist
+RUN chmod 440 /etc/sudoers.d/allowlist && visudo -c
+
+# Layer 3: Operator approval wrapper (NOT in AI's PATH)
+RUN mkdir -p /opt/operator/bin
+COPY safety/operator-approve /opt/operator/bin/operator-approve
+RUN chmod 755 /opt/operator/bin/operator-approve
+
+# Layer 4: Network isolation scripts
+COPY safety/network-firewall.sh /home/ubuntu/network-firewall.sh
+COPY safety/network-mode /usr/local/bin/network-mode
+RUN chmod +x /home/ubuntu/network-firewall.sh /usr/local/bin/network-mode
+
+# Remove PEP 668 protection (run as root before switching users)
+# Safe in Docker containers where isolation already exists
+RUN rm -f /usr/lib/python*/EXTERNALLY-MANAGED
+
+# Install AI tools globally as root (to /usr/local, survives tmpfs on /home)
+RUN npm install -g @anthropic-ai/claude-code \
     && npm install -g @google/gemini-cli \
-    && npm install -g @openai/codex
+    && npm install -g @openai/codex \
+    && npm install -g opencode-ai @opencode-ai/sdk
 
-# Install opencode CLI and SDK
-RUN npm install -g opencode-ai @opencode-ai/sdk
-
-# Remove PEP 668 protection - safe in Docker containers where isolation already exists
-RUN sudo rm -f /usr/lib/python*/EXTERNALLY-MANAGED
-
-# Install foundry-mcp for MCP server support
+# Install Python packages globally (to /usr/local/lib/python3)
 RUN pip3 install foundry-mcp pytest-asyncio hypothesis
 
 # Fix ESM module resolution for OpenCode SDK wrapper
@@ -72,30 +86,27 @@ RUN pip3 install foundry-mcp pytest-asyncio hypothesis
 # providers directory to the globally installed SDK
 RUN PROVIDERS_DIR=$(python3 -c "import foundry_mcp.core.providers as p; print(p.__path__[0])") && \
     mkdir -p "$PROVIDERS_DIR/node_modules" && \
-    ln -sf /home/ubuntu/.local/lib/node_modules/@opencode-ai "$PROVIDERS_DIR/node_modules/@opencode-ai"
+    ln -sf /usr/local/lib/node_modules/@opencode-ai "$PROVIDERS_DIR/node_modules/@opencode-ai"
 
-# Install Cursor CLI (cursor-agent)
-RUN curl https://cursor.com/install -fsS | bash
+# Install Cursor CLI system-wide
+RUN curl https://cursor.com/install -fsS | CURSOR_INSTALL_DIR=/usr/local/bin bash
 
-# Create directories for mounted configs
-RUN mkdir -p /home/ubuntu/.claude \
-    /home/ubuntu/.config/gh \
-    /home/ubuntu/.gemini \
-    /home/ubuntu/.config/opencode \
-    /home/ubuntu/.cursor \
-    /home/ubuntu/.codex \
-    /home/ubuntu/.ssh
+# Add useful aliases to system bashrc (before switching to non-root user)
+# Home directory is tmpfs at runtime, so user .bashrc won't persist
+RUN echo "alias cdsp='claude --dangerously-skip-permissions'" >> /etc/bash.bashrc && \
+    echo "alias cdspr='claude --dangerously-skip-permissions --resume'" >> /etc/bash.bashrc && \
+    echo '[ -f "$HOME/.api_keys" ] && source "$HOME/.api_keys"' >> /etc/bash.bashrc
 
-# Add useful aliases to bashrc
-RUN echo "alias cdsp='claude --dangerously-skip-permissions'" >> /home/ubuntu/.bashrc && \
-    echo "alias cdspr='claude --dangerously-skip-permissions --resume'" >> /home/ubuntu/.bashrc && \
-    echo '[ -f "$HOME/.api_keys" ] && source "$HOME/.api_keys"' >> /home/ubuntu/.bashrc
+# Copy entrypoint to system path (not /home which is tmpfs)
+COPY entrypoint.sh /usr/local/bin/entrypoint.sh
+RUN chmod +x /usr/local/bin/entrypoint.sh
 
+USER ubuntu
 WORKDIR /workspace
 
-# Copy and set entrypoint script
-COPY --chown=ubuntu:ubuntu entrypoint.sh /home/ubuntu/entrypoint.sh
-RUN chmod +x /home/ubuntu/entrypoint.sh
+# Set up paths for user
+ENV PATH="/usr/local/go/bin:/home/ubuntu/go/bin:/home/ubuntu/.local/bin:$PATH"
+ENV GOPATH="/home/ubuntu/go"
 
-ENTRYPOINT ["/home/ubuntu/entrypoint.sh"]
+ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]
 CMD ["/bin/bash"]

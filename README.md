@@ -21,8 +21,8 @@ alias sb='/path/to/foundry-sandbox/sandbox.sh'
 Optional shortcut aliases for frequently-used repos:
 
 ```bash
-alias sbf='sb new tylerburleigh/foundry-mcp'
-alias sbc='sb new tylerburleigh/claude-foundry'
+alias sbf='sb new owner/repo-one'
+alias sbc='sb new owner/repo-two'
 ```
 
 ### 3. Enable bash completion (optional)
@@ -52,14 +52,55 @@ sb attach sandbox-name
 sb stop sandbox-name
 sb start sandbox-name
 sb destroy sandbox-name
+sb destroy sandbox-name --yes
+
+# Status for one or all sandboxes
+sb status
+sb status sandbox-name
+sb status --json
+sb list --json
+
+# Config and environment checks
+sb config
+sb config --json
+
+# Combined info
+sb info
+sb info --json
+
+# Prune orphaned configs
+sb prune
+sb prune --json
 
 # Show help
 sb help
 ```
+
+## Debugging
+
+Set these env vars when running `sb` for more output:
+
+```bash
+SANDBOX_DEBUG=1 sb list
+SANDBOX_VERBOSE=1 sb start sandbox-name
+```
+
+## Documentation
+
+For detailed documentation, see the [docs/](docs/) directory:
+
+- [Getting Started](docs/getting-started.md) - Installation and first sandbox
+- [Architecture](docs/architecture.md) - Technical design and diagrams
+- [Security: Threat Model](docs/security/threat-model.md) - What we protect against
+- [Security: Safety Layers](docs/security/safety-layers.md) - Defense in depth
+- [Command Reference](docs/usage/commands.md) - All commands explained
+- [Workflows](docs/usage/workflows.md) - Common patterns and recipes
+- [Contributing](docs/development/contributing.md) - For contributors
 
 ## How it works
 
 - Clones repos as bare git repositories to `~/.sandboxes/repos/`
 - Creates worktrees for each sandbox in `~/.sandboxes/worktrees/`
 - Runs each sandbox in an isolated Docker container
-- Automatically launches Claude Code inside the container
+- Includes security guardrails (shell overrides, sudoers allowlist, read-only root)
+- Pre-installed AI tools: Claude Code, Gemini CLI, OpenCode

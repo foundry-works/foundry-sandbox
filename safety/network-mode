@@ -1,0 +1,469 @@
+#!/bin/bash
+#
+# Network Mode Toggle Script
+#
+# Allows switching between ALL four network modes at runtime using iptables.
+# No container restart required when the container has a network interface.
+#
+# Modes:
+#   full       - Unrestricted network access
+#   limited    - Whitelist domains only (github, npm, pypi, AI APIs)
+#   host-only  - Local network only (Docker gateway, common subnets)
+#   none       - Complete block (loopback only, simulated via iptables)
+#
+# Usage:
+#   network-mode              # Show current mode
+#   network-mode status       # Show current mode with details
+#   network-mode full         # Enable full network access
+#   network-mode limited      # Enable limited mode (whitelist only)
+#   network-mode host-only    # Enable host-only mode (local network only)
+#   network-mode none         # Enable none mode (complete block, simulated)
+#   network-mode allow <domain>   # Add domain to whitelist (limited mode)
+#   network-mode list         # List whitelisted domains
+#
+
+set -e
+
+# Check if running as root (required for mode changes)
+require_root() {
+    if [ "$EUID" -ne 0 ]; then
+        echo -e "${RED}Error:${NC} This command requires root privileges."
+        echo "Run with: sudo network-mode $1"
+        exit 1
+    fi
+}
+
+# Colors for output
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+BLUE='\033[0;34m'
+CYAN='\033[0;36m'
+NC='\033[0m' # No Color
+
+# Determine current mode by checking network interface and iptables rules
+get_current_mode() {
+    # Check if we have network at all (true Docker none mode)
+    if ! ip link show eth0 &>/dev/null 2>&1; then
+        echo "none-docker"
+        return
+    fi
+
+    # Check iptables rules
+    local rules=$(sudo iptables -L OUTPUT -n 2>/dev/null)
+
+    # If no DROP rule at all = full mode
+    if ! echo "$rules" | grep -q "DROP.*all.*0.0.0.0/0"; then
+        echo "full"
+        return
+    fi
+
+    # Has a DROP rule - need to determine which restricted mode
+    # Check if DNS (port 53) is allowed - limited mode has DNS, none/host-only don't necessarily
+    local has_dns=$(echo "$rules" | grep -E "ACCEPT.*dpt:53" || true)
+
+    # Check if private subnets are allowed (host-only allows them)
+    local has_private=$(echo "$rules" | grep -E "ACCEPT.*(172\.(1[6-9]|2[0-9]|3[0-1])\.|10\.|192\.168\.)" || true)
+
+    # Check if specific IPs are whitelisted (limited mode has many specific IPs)
+    # Count number of ACCEPT rules with specific destination IPs
+    local accept_count=$(echo "$rules" | grep -c "ACCEPT" || echo "0")
+
+    # Determine mode based on rule patterns
+    if [ -n "$has_dns" ] && [ "$accept_count" -gt 10 ]; then
+        # Has DNS + many accept rules = limited mode
+        echo "limited"
+    elif [ -n "$has_private" ]; then
+        # Has private subnet rules = host-only mode
+        echo "host-only"
+    else
+        # Only loopback allowed = none (simulated)
+        echo "none"
+    fi
+}
+
+# Check if this is true Docker isolation vs iptables simulation
+is_simulated_mode() {
+    local mode=$(get_current_mode)
+    case "$mode" in
+        none-docker) return 1 ;;  # True Docker isolation
+        none|host-only) return 0 ;;  # Simulated via iptables
+        limited) return 0 ;;  # Always via iptables
+        full) return 1 ;;  # No restrictions = not simulated
+        *) return 1 ;;
+    esac
+}
+
+# Show status
+show_status() {
+    local mode=$(get_current_mode)
+
+    echo -e "${BLUE}Network Mode Status${NC}"
+    echo "===================="
+
+    case "$mode" in
+        none-docker)
+            echo -e "Current mode: ${RED}none${NC} (Docker network isolation)"
+            echo ""
+            echo "No network interfaces available except loopback."
+            echo "This is TRUE Docker isolation - cannot be changed at runtime."
+            echo ""
+            echo "To switch modes, restart the container with a different --network flag."
+            ;;
+        none)
+            echo -e "Current mode: ${RED}none${NC} (simulated via iptables)"
+            echo ""
+            echo "All outbound traffic is blocked except loopback."
+            echo ""
+            echo -e "${YELLOW}Note:${NC} This is simulated isolation. For true isolation, use"
+            echo "Docker's --network=none mode at container creation."
+            echo ""
+            echo -e "Switch modes: ${GREEN}network-mode full${NC} | ${YELLOW}network-mode limited${NC} | ${CYAN}network-mode host-only${NC}"
+            ;;
+        host-only)
+            echo -e "Current mode: ${CYAN}host-only${NC} (simulated via iptables)"
+            echo ""
+            echo "Allowed traffic:"
+            echo "  - Loopback (localhost)"
+            echo "  - Established connections"
+            echo "  - Docker gateway and local subnets (172.16.0.0/12, 10.0.0.0/8, 192.168.0.0/16)"
+            echo ""
+            echo "Internet access is BLOCKED."
+            echo ""
+            echo -e "Switch modes: ${GREEN}network-mode full${NC} | ${YELLOW}network-mode limited${NC} | ${RED}network-mode none${NC}"
+            ;;
+        limited)
+            echo -e "Current mode: ${YELLOW}limited${NC} (whitelist only)"
+            echo ""
+            echo "Allowed traffic:"
+            echo "  - DNS queries (port 53)"
+            echo "  - Loopback (localhost)"
+            echo "  - Established connections"
+            echo "  - Docker gateway"
+            echo "  - Whitelisted domains (see: network-mode list)"
+            echo ""
+            echo -e "Switch modes: ${GREEN}network-mode full${NC} | ${CYAN}network-mode host-only${NC} | ${RED}network-mode none${NC}"
+            ;;
+        full)
+            echo -e "Current mode: ${GREEN}full${NC} (unrestricted)"
+            echo ""
+            echo "All outbound network traffic is allowed."
+            echo ""
+            echo -e "Switch modes: ${YELLOW}network-mode limited${NC} | ${CYAN}network-mode host-only${NC} | ${RED}network-mode none${NC}"
+            ;;
+    esac
+}
+
+# Enable full network mode (remove all restrictions)
+enable_full() {
+    require_root "full"
+    local current=$(get_current_mode)
+
+    if [ "$current" = "none-docker" ]; then
+        echo -e "${RED}Error:${NC} Cannot switch from true Docker 'none' mode at runtime."
+        echo "Restart the container with: sb new ... --network=full"
+        exit 1
+    fi
+
+    if [ "$current" = "full" ]; then
+        echo -e "${GREEN}Already in full mode.${NC}"
+        return
+    fi
+
+    echo "Enabling full network access..."
+
+    # Flush OUTPUT chain and set default policy to ACCEPT
+    iptables -F OUTPUT
+    iptables -P OUTPUT ACCEPT
+
+    # Also for IPv6 if available
+    if command -v ip6tables &>/dev/null; then
+        ip6tables -F OUTPUT 2>/dev/null || true
+        ip6tables -P OUTPUT ACCEPT 2>/dev/null || true
+    fi
+
+    echo -e "${GREEN}Full network access enabled.${NC}"
+    echo "All outbound traffic is now allowed."
+}
+
+# Enable none mode (block all outbound except loopback)
+enable_none() {
+    require_root "none"
+    local current=$(get_current_mode)
+
+    if [ "$current" = "none-docker" ]; then
+        echo -e "${RED}Already in true Docker 'none' mode.${NC}"
+        return
+    fi
+
+    if [ "$current" = "none" ]; then
+        echo -e "${RED}Already in none mode (simulated).${NC}"
+        return
+    fi
+
+    echo "Enabling none mode (blocking all outbound traffic)..."
+
+    # Flush OUTPUT chain
+    iptables -F OUTPUT
+
+    # Allow loopback only
+    iptables -A OUTPUT -o lo -j ACCEPT
+
+    # Drop everything else
+    iptables -A OUTPUT -j DROP
+
+    # Also for IPv6 if available
+    if command -v ip6tables &>/dev/null; then
+        ip6tables -F OUTPUT 2>/dev/null || true
+        ip6tables -A OUTPUT -o lo -j ACCEPT 2>/dev/null || true
+        ip6tables -A OUTPUT -j DROP 2>/dev/null || true
+    fi
+
+    echo -e "${RED}None mode enabled (simulated via iptables).${NC}"
+    echo "All outbound traffic is now blocked except loopback."
+    echo ""
+    echo -e "${YELLOW}Note:${NC} For true network isolation, use Docker's --network=none mode"
+    echo "at container creation time."
+}
+
+# Enable host-only mode (allow only local network)
+enable_host_only() {
+    require_root "host-only"
+    local current=$(get_current_mode)
+
+    if [ "$current" = "none-docker" ]; then
+        echo -e "${RED}Error:${NC} Cannot switch from true Docker 'none' mode at runtime."
+        echo "Restart the container with: sb new ... --network=full"
+        exit 1
+    fi
+
+    if [ "$current" = "host-only" ]; then
+        echo -e "${CYAN}Already in host-only mode.${NC}"
+        return
+    fi
+
+    echo "Enabling host-only mode (local network only)..."
+
+    # Flush OUTPUT chain
+    iptables -F OUTPUT
+
+    # Allow loopback
+    iptables -A OUTPUT -o lo -j ACCEPT
+
+    # Allow established/related connections (for responses)
+    iptables -A OUTPUT -m state --state ESTABLISHED,RELATED -j ACCEPT
+
+    # Get Docker gateway
+    local gateway=$(ip route | grep default | awk '{print $3}')
+    if [ -n "$gateway" ]; then
+        echo "  Allowing Docker gateway: $gateway"
+        iptables -A OUTPUT -d "$gateway" -j ACCEPT
+    fi
+
+    # Allow common Docker/local subnets
+    echo "  Allowing local subnets: 172.16.0.0/12, 10.0.0.0/8, 192.168.0.0/16"
+    iptables -A OUTPUT -d 172.16.0.0/12 -j ACCEPT
+    iptables -A OUTPUT -d 10.0.0.0/8 -j ACCEPT
+    iptables -A OUTPUT -d 192.168.0.0/16 -j ACCEPT
+
+    # Drop everything else
+    iptables -A OUTPUT -j DROP
+
+    # Also for IPv6 if available
+    if command -v ip6tables &>/dev/null; then
+        ip6tables -F OUTPUT 2>/dev/null || true
+        ip6tables -A OUTPUT -o lo -j ACCEPT 2>/dev/null || true
+        ip6tables -A OUTPUT -m state --state ESTABLISHED,RELATED -j ACCEPT 2>/dev/null || true
+        # Allow link-local addresses
+        ip6tables -A OUTPUT -d fe80::/10 -j ACCEPT 2>/dev/null || true
+        ip6tables -A OUTPUT -j DROP 2>/dev/null || true
+    fi
+
+    echo -e "${CYAN}Host-only mode enabled.${NC}"
+    echo "Only local network traffic is allowed. Internet access is blocked."
+}
+
+# Enable limited network mode (apply firewall with whitelist)
+enable_limited() {
+    require_root "limited"
+    local current=$(get_current_mode)
+
+    if [ "$current" = "none-docker" ]; then
+        echo -e "${RED}Error:${NC} Cannot switch from true Docker 'none' mode at runtime."
+        echo "Restart the container with: sb new ... --network=limited"
+        exit 1
+    fi
+
+    if [ "$current" = "limited" ]; then
+        echo -e "${YELLOW}Already in limited mode.${NC}"
+        return
+    fi
+
+    echo "Enabling limited network mode..."
+
+    # Run the firewall script
+    if /home/ubuntu/network-firewall.sh; then
+        echo -e "${YELLOW}Limited network mode enabled.${NC}"
+        echo "Only whitelisted domains are accessible."
+    else
+        echo -e "${RED}Failed to apply firewall rules.${NC}"
+        exit 1
+    fi
+}
+
+# Add a domain to the whitelist (only works in limited mode)
+allow_domain() {
+    require_root "allow"
+    local domain="$1"
+
+    if [ -z "$domain" ]; then
+        echo "Usage: network-mode allow <domain>"
+        exit 1
+    fi
+
+    local current=$(get_current_mode)
+
+    if [ "$current" = "none-docker" ]; then
+        echo -e "${RED}Error:${NC} Cannot add domains in true Docker 'none' mode."
+        exit 1
+    fi
+
+    if [ "$current" != "limited" ]; then
+        echo -e "${YELLOW}Note:${NC} Not in limited mode, but adding domain anyway."
+        echo "The rule will take effect when you switch to limited mode."
+    fi
+
+    echo "Adding domain: $domain"
+
+    # Resolve and add rules
+    local ips=$(dig +short "$domain" A 2>/dev/null | grep -E '^[0-9]+\.' || true)
+
+    if [ -z "$ips" ]; then
+        echo -e "${RED}Warning:${NC} Could not resolve $domain"
+        return 1
+    fi
+
+    for ip in $ips; do
+        # Insert before the DROP rule (which should be last)
+        iptables -I OUTPUT -d "$ip" -j ACCEPT 2>/dev/null && \
+            echo "  Added: $ip ($domain)" || \
+            echo "  Already allowed or failed: $ip"
+    done
+
+    echo -e "${GREEN}Domain $domain added to whitelist.${NC}"
+}
+
+# List current whitelist (approximate, based on iptables)
+list_whitelist() {
+    echo -e "${BLUE}Current Firewall Rules (OUTPUT chain)${NC}"
+    echo "======================================="
+
+    local current=$(get_current_mode)
+
+    case "$current" in
+        none-docker)
+            echo "No network interface available (true Docker isolation)."
+            ;;
+        none)
+            echo "None mode (simulated) - all outbound blocked except loopback."
+            echo ""
+            iptables -L OUTPUT -n -v 2>/dev/null || sudo iptables -L OUTPUT -n -v
+            ;;
+        host-only)
+            echo "Host-only mode - local network only."
+            echo ""
+            iptables -L OUTPUT -n -v 2>/dev/null || sudo iptables -L OUTPUT -n -v
+            ;;
+        full)
+            echo "Full mode - no restrictions applied."
+            echo ""
+            echo "Default whitelist domains (applied in limited mode):"
+            echo "  github.com, api.github.com, raw.githubusercontent.com"
+            echo "  registry.npmjs.org"
+            echo "  pypi.org, files.pythonhosted.org"
+            echo "  proxy.golang.org, sum.golang.org"
+            echo "  api.anthropic.com, api.openai.com"
+            echo "  generativelanguage.googleapis.com"
+            ;;
+        limited)
+            echo "Limited mode - current rules:"
+            echo ""
+            local output
+            output=$(iptables -L OUTPUT -n -v 2>/dev/null || sudo iptables -L OUTPUT -n -v)
+            echo "$output" | head -30
+
+            if [ $(echo "$output" | wc -l) -gt 30 ]; then
+                echo "... (truncated, run 'sudo iptables -L OUTPUT -n' for full list)"
+            fi
+            ;;
+    esac
+}
+
+# Show help
+show_help() {
+    echo "Network Mode Toggle - Runtime Network Switching"
+    echo ""
+    echo "Usage: network-mode [command] [args]"
+    echo ""
+    echo "Commands:"
+    echo "  status          Show current mode with details"
+    echo "  full            Enable full network access (unrestricted)"
+    echo "  limited         Enable limited mode (whitelist only)"
+    echo "  host-only       Enable host-only mode (local network only)"
+    echo "  none            Enable none mode (block all, simulated via iptables)"
+    echo "  allow <domain>  Add domain to whitelist"
+    echo "  list            Show current firewall rules"
+    echo "  help            Show this help"
+    echo ""
+    echo "Mode changes require sudo. Tab completion available."
+    echo ""
+    echo "Modes:"
+    echo "  full       All outbound traffic allowed"
+    echo "  limited    Only whitelisted domains (github, npm, pypi, AI APIs)"
+    echo "  host-only  Local network only (Docker gateway, private subnets)"
+    echo "  none       Block all outbound except loopback (simulated)"
+    echo ""
+    echo "Examples:"
+    echo "  network-mode                         # Check current mode"
+    echo "  sudo network-mode full               # Enable unrestricted access"
+    echo "  sudo network-mode limited            # Restrict to whitelist"
+    echo "  sudo network-mode host-only          # Allow only local network"
+    echo "  sudo network-mode none               # Block all outbound (simulated)"
+    echo "  sudo network-mode allow example.com  # Add domain to whitelist"
+    echo ""
+    echo "Note: True Docker isolation (--network=none) cannot be changed at runtime."
+    echo "For runtime switching, start containers with --network=full or --network=limited."
+}
+
+# Main
+case "${1:-status}" in
+    status|"")
+        show_status
+        ;;
+    full)
+        enable_full
+        ;;
+    limited)
+        enable_limited
+        ;;
+    host-only)
+        enable_host_only
+        ;;
+    none)
+        enable_none
+        ;;
+    allow)
+        allow_domain "$2"
+        ;;
+    list)
+        list_whitelist
+        ;;
+    help|--help|-h)
+        show_help
+        ;;
+    *)
+        echo "Unknown command: $1"
+        echo "Run 'network-mode help' for usage."
+        exit 1
+        ;;
+esac

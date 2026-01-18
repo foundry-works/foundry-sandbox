@@ -1,0 +1,41 @@
+#!/bin/bash
+
+tmux_session_exists() {
+    local session="$1"
+    tmux has-session -t "$session" 2>/dev/null
+}
+
+tmux_create_session() {
+    local session="$1"
+    local worktree_path="$2"
+    local container="$3"
+    tmux new-session -s "$session" -c "$worktree_path" \
+        "docker exec -it ${container}-dev-1 bash; echo 'Container exited. Press enter to close.'; read"
+}
+
+tmux_attach_session() {
+    local session="$1"
+    tmux attach-session -t "$session"
+}
+
+# Create or attach to tmux session for sandbox
+tmux_attach() {
+    local name="$1"
+    local container
+    container=$(container_name "$name")
+    local session
+    session=$(tmux_session_name "$name")
+
+    if tmux_session_exists "$session"; then
+        log_info "Attaching to existing tmux session: $session"
+        tmux_attach_session "$session"
+    else
+        log_info "Creating tmux session: $session"
+        tmux_create_session "$session" "$WORKTREES_DIR/$name" "$container"
+    fi
+}
+
+# Get tmux session name (just use sandbox name directly)
+tmux_session_name() {
+    echo "$1"
+}

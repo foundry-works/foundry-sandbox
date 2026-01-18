@@ -1,0 +1,24 @@
+# Strict allowlist - only these commands are permitted via sudo
+# No PASSWD:ALL fallback - unlisted commands are denied
+
+# Package management (safe)
+ubuntu ALL=(ALL) NOPASSWD: /usr/bin/apt-get update
+ubuntu ALL=(ALL) NOPASSWD: /usr/bin/apt-get install *
+
+# Service management (safe)
+ubuntu ALL=(ALL) NOPASSWD: /usr/sbin/service * start
+ubuntu ALL=(ALL) NOPASSWD: /usr/sbin/service * stop
+ubuntu ALL=(ALL) NOPASSWD: /usr/sbin/service * restart
+ubuntu ALL=(ALL) NOPASSWD: /usr/sbin/service * status
+
+# Network mode switching (iptables)
+ubuntu ALL=(ALL) NOPASSWD: /usr/sbin/iptables *
+ubuntu ALL=(ALL) NOPASSWD: /usr/sbin/ip6tables *
+ubuntu ALL=(ALL) NOPASSWD: /home/ubuntu/network-firewall.sh
+ubuntu ALL=(ALL) NOPASSWD: /usr/local/bin/network-mode *
+
+# Add other safe commands as needed:
+# ubuntu ALL=(ALL) NOPASSWD: /usr/bin/npm *
+# ubuntu ALL=(ALL) NOPASSWD: /usr/bin/pip *
+
+# NO fallback line - everything else is denied

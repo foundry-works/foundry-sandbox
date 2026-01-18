@@ -1,5 +1,21 @@
 #!/bin/bash
 
+# Create home directories (needed because /home/ubuntu is tmpfs with read-only root)
+# These would normally be created by Dockerfile but tmpfs is empty on each start
+mkdir -p "$HOME/.claude" \
+         "$HOME/.config/gh" \
+         "$HOME/.gemini" \
+         "$HOME/.config/opencode" \
+         "$HOME/.cursor" \
+         "$HOME/.codex" \
+         "$HOME/.ssh" \
+         "$HOME/.local/bin" \
+         "$HOME/.cache" \
+         "$HOME/.npm"
+
+# Set up npm prefix for user-local installs
+npm config set prefix "$HOME/.local" 2>/dev/null || true
+
 # Source API keys if available
 if [ -f "$HOME/.api_keys" ]; then
     source "$HOME/.api_keys"
@@ -39,6 +55,22 @@ if [ -f /workspace/.git ] && [ -n "$HOST_USER" ]; then
                 echo "/workspace/.git" > "$GITDIR_FILE"
             fi
         fi
+    fi
+fi
+
+# Apply network mode if not "full" (full = no restrictions)
+if [ "$SANDBOX_NETWORK_MODE" = "limited" ]; then
+    echo "Applying limited network mode..."
+    sudo /home/ubuntu/network-firewall.sh
+elif [ "$SANDBOX_NETWORK_MODE" = "host-only" ]; then
+    echo "Applying host-only network mode..."
+    sudo network-mode host-only
+elif [ "$SANDBOX_NETWORK_MODE" = "none" ]; then
+    # Docker handles true none mode via network_mode: "none"
+    # If we somehow have network, simulate it via iptables
+    if ip link show eth0 &>/dev/null 2>&1; then
+        echo "Applying none network mode (simulated)..."
+        sudo network-mode none
     fi
 fi
 
