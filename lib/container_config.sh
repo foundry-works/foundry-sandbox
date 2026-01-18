@@ -2,12 +2,10 @@
 
 copy_configs_to_container() {
     local container_id="$1"
-    local claude_config_path="$2"
 
     log_info "Copying config files into container..."
 
     run_cmd docker exec "$container_id" mkdir -p \
-        "$CONTAINER_HOME/.claude" \
         "$CONTAINER_HOME/.config/gh" \
         "$CONTAINER_HOME/.config/ccstatusline" \
         "$CONTAINER_HOME/.gemini" \
@@ -17,7 +15,7 @@ copy_configs_to_container() {
         "$CONTAINER_HOME/.codex" \
         "$CONTAINER_HOME/.ssh"
 
-    dir_exists "$claude_config_path" && run_cmd docker cp "$claude_config_path/." "$container_id:$CONTAINER_HOME/.claude/"
+    # Claude plugin is pre-baked into Docker image; auth via CLAUDE_CODE_OAUTH_TOKEN in ~/.api_keys
     dir_exists ~/.config/gh && run_cmd docker cp ~/.config/gh/. "$container_id:$CONTAINER_HOME/.config/gh/"
     dir_exists ~/.config/ccstatusline && run_cmd docker cp ~/.config/ccstatusline/. "$container_id:$CONTAINER_HOME/.config/ccstatusline/"
     dir_exists ~/.gemini && run_cmd docker cp ~/.gemini/. "$container_id:$CONTAINER_HOME/.gemini/"
@@ -37,7 +35,6 @@ copy_configs_to_container() {
     log_info "Fixing ownership..."
     run_cmd docker exec "$container_id" sh -c "
         chown -R $CONTAINER_USER:$CONTAINER_USER \
-            $CONTAINER_HOME/.claude \
             $CONTAINER_HOME/.config \
             $CONTAINER_HOME/.gemini \
             $CONTAINER_HOME/.cursor \
@@ -54,11 +51,8 @@ copy_configs_to_container() {
 
 sync_runtime_credentials() {
     local container_id="$1"
-    local claude_config_path="$2"
 
-    cp "$HOME/.claude/.credentials.json" "$claude_config_path/" 2>/dev/null || true
-    run_cmd docker cp "$claude_config_path/.credentials.json" "$container_id:$CONTAINER_HOME/.claude/.credentials.json" 2>/dev/null || true
-
+    # Sync credentials for various AI tools (Claude uses CLAUDE_CODE_OAUTH_TOKEN from ~/.api_keys)
     dir_exists ~/.codex && run_cmd docker cp ~/.codex/. "$container_id:$CONTAINER_HOME/.codex/" 2>/dev/null
     dir_exists ~/.config/gh && run_cmd docker cp ~/.config/gh/. "$container_id:$CONTAINER_HOME/.config/gh/" 2>/dev/null
     dir_exists ~/.gemini && run_cmd docker cp ~/.gemini/. "$container_id:$CONTAINER_HOME/.gemini/" 2>/dev/null

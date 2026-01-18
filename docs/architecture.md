@@ -40,7 +40,7 @@ This document explains the technical design of Foundry Sandbox: how components f
 ## Sandbox Lifecycle
 
 ```
-sb new repo        sb attach       sb stop         sb destroy
+cast new repo        cast attach       cast stop         cast destroy
     │                  │               │                │
     ▼                  ▼               ▼                ▼
 ┌────────┐       ┌────────┐      ┌────────┐       ┌────────┐
@@ -50,7 +50,7 @@ sb new repo        sb attach       sb stop         sb destroy
                      │               ▲
                      │               │
                      └───────────────┘
-                        sb start
+                        cast start
 ```
 
 **States:**
@@ -149,7 +149,7 @@ Each sandbox has associated state stored on the host:
 
 ### Metadata File
 
-Created by `sb new`, records sandbox configuration:
+Created by `cast new`, records sandbox configuration:
 
 ```json
 {
@@ -208,10 +208,10 @@ foundry-sandbox/
 │   └── ...                 # Other modules
 │
 ├── commands/               # Command implementations
-│   ├── new.sh              # sb new
-│   ├── attach.sh           # sb attach
-│   ├── list.sh             # sb list
-│   ├── destroy.sh          # sb destroy
+│   ├── new.sh              # cast new
+│   ├── attach.sh           # cast attach
+│   ├── list.sh             # cast list
+│   ├── destroy.sh          # cast destroy
 │   └── ...                 # Other commands
 │
 └── safety/                 # Security guardrails
@@ -223,7 +223,7 @@ foundry-sandbox/
 ## Component Interactions
 
 ```
-User runs: sb new owner/repo
+User runs: cast new owner/repo
               │
               ▼
 ┌─────────────────────────────────┐

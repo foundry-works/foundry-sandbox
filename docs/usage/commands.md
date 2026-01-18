@@ -1,15 +1,15 @@
 # Command Reference
 
-Complete reference for all `sb` commands.
+Complete reference for all `cast` commands.
 
-## sb new
+## cast new
 
 Create a new sandbox from a repository.
 
 ### Synopsis
 
 ```
-sb new <repo> [branch] [from-branch] [options]
+cast new <repo> [branch] [from-branch] [options]
 ```
 
 ### Arguments
@@ -32,26 +32,26 @@ sb new <repo> [branch] [from-branch] [options]
 
 ```bash
 # Clone and checkout main (creates auto-named branch)
-sb new owner/repo
+cast new owner/repo
 
 # Checkout existing branch
-sb new owner/repo feature-branch
+cast new owner/repo feature-branch
 
 # Create new branch from main
-sb new owner/repo my-feature main
+cast new owner/repo my-feature main
 
 # With volume mounts
-sb new owner/repo feature --mount /data:/data
-sb new owner/repo feature -v /models:/models:ro
+cast new owner/repo feature --mount /data:/data
+cast new owner/repo feature -v /models:/models:ro
 
 # With file copies (copied once at creation)
-sb new owner/repo feature --copy ~/configs:/configs
-sb new owner/repo feature -c /path/to/data:/data
+cast new owner/repo feature --copy ~/configs:/configs
+cast new owner/repo feature -c /path/to/data:/data
 
 # With network restrictions
-sb new owner/repo feature --network=limited    # whitelist only
-sb new owner/repo feature --network=host-only  # local network only
-sb new owner/repo feature --network=none       # no network
+cast new owner/repo feature --network=limited    # whitelist only
+cast new owner/repo feature --network=host-only  # local network only
+cast new owner/repo feature --network=none       # no network
 ```
 
 ### Behavior
@@ -64,14 +64,14 @@ sb new owner/repo feature --network=none       # no network
 
 ---
 
-## sb list
+## cast list
 
 List all sandboxes.
 
 ### Synopsis
 
 ```
-sb list [--json]
+cast list [--json]
 ```
 
 ### Options
@@ -84,10 +84,10 @@ sb list [--json]
 
 ```bash
 # Human-readable output
-sb list
+cast list
 
 # JSON output
-sb list --json
+cast list --json
 ```
 
 ### Output
@@ -110,14 +110,14 @@ JSON:
 
 ---
 
-## sb attach
+## cast attach
 
 Attach to a running sandbox.
 
 ### Synopsis
 
 ```
-sb attach [name]
+cast attach [name]
 ```
 
 ### Arguments
@@ -136,22 +136,22 @@ sb attach [name]
 
 ```bash
 # Attach by name
-sb attach repo-feature-branch
+cast attach repo-feature-branch
 
 # Use fzf selector (if no name provided)
-sb attach
+cast attach
 ```
 
 ---
 
-## sb start
+## cast start
 
 Start a stopped sandbox.
 
 ### Synopsis
 
 ```
-sb start <name>
+cast start <name>
 ```
 
 ### Arguments
@@ -170,19 +170,19 @@ sb start <name>
 ### Examples
 
 ```bash
-sb start repo-feature-branch
+cast start repo-feature-branch
 ```
 
 ---
 
-## sb stop
+## cast stop
 
 Stop a running sandbox.
 
 ### Synopsis
 
 ```
-sb stop <name>
+cast stop <name>
 ```
 
 ### Arguments
@@ -200,19 +200,19 @@ sb stop <name>
 ### Examples
 
 ```bash
-sb stop repo-feature-branch
+cast stop repo-feature-branch
 ```
 
 ---
 
-## sb destroy
+## cast destroy
 
 Remove a sandbox completely.
 
 ### Synopsis
 
 ```
-sb destroy <name> [options]
+cast destroy <name> [options]
 ```
 
 ### Arguments
@@ -241,26 +241,26 @@ sb destroy <name> [options]
 
 ```bash
 # Interactive confirmation
-sb destroy repo-feature-branch
+cast destroy repo-feature-branch
 
 # Skip confirmation
-sb destroy repo-feature-branch --yes
-sb destroy repo-feature-branch -f
+cast destroy repo-feature-branch --yes
+cast destroy repo-feature-branch -f
 
 # Keep the worktree (just remove container)
-sb destroy repo-feature-branch --keep-worktree
+cast destroy repo-feature-branch --keep-worktree
 ```
 
 ---
 
-## sb status
+## cast status
 
 Show sandbox status.
 
 ### Synopsis
 
 ```
-sb status [name] [--json]
+cast status [name] [--json]
 ```
 
 ### Arguments
@@ -279,14 +279,14 @@ sb status [name] [--json]
 
 ```bash
 # All sandboxes
-sb status
+cast status
 
 # Specific sandbox
-sb status repo-feature-branch
+cast status repo-feature-branch
 
 # JSON output
-sb status --json
-sb status repo-feature-branch --json
+cast status --json
+cast status repo-feature-branch --json
 ```
 
 ### Output
@@ -304,14 +304,14 @@ Sandbox: repo-feature-branch
 
 ---
 
-## sb build
+## cast build
 
 Build or rebuild the Docker image.
 
 ### Synopsis
 
 ```
-sb build
+cast build
 ```
 
 ### Behavior
@@ -322,19 +322,19 @@ sb build
 ### Examples
 
 ```bash
-sb build
+cast build
 ```
 
 ---
 
-## sb config
+## cast config
 
 Show configuration and environment checks.
 
 ### Synopsis
 
 ```
-sb config [--json]
+cast config [--json]
 ```
 
 ### Options
@@ -346,9 +346,9 @@ sb config [--json]
 ### Examples
 
 ```bash
-sb config
+cast config
 
-sb config --json
+cast config --json
 ```
 
 ### Output
@@ -371,14 +371,14 @@ Checks
 
 ---
 
-## sb prune
+## cast prune
 
 Remove orphaned configuration directories.
 
 ### Synopsis
 
 ```
-sb prune [-f] [--json]
+cast prune [-f] [--json]
 ```
 
 ### Options
@@ -396,25 +396,25 @@ Finds Claude config directories that don't have a corresponding worktree (orphan
 
 ```bash
 # Interactive
-sb prune
+cast prune
 
 # Force remove all orphans
-sb prune -f
+cast prune -f
 
 # JSON output
-sb prune --json
+cast prune --json
 ```
 
 ---
 
-## sb info
+## cast info
 
 Show combined config and status.
 
 ### Synopsis
 
 ```
-sb info [--json]
+cast info [--json]
 ```
 
 ### Options
@@ -426,36 +426,36 @@ sb info [--json]
 ### Examples
 
 ```bash
-sb info
+cast info
 
-sb info --json
+cast info --json
 ```
 
 ---
 
-## sb help
+## cast help
 
 Show help message.
 
 ### Synopsis
 
 ```
-sb help
+cast help
 ```
 
 ### Examples
 
 ```bash
-sb help
-sb --help
-sb -h
+cast help
+cast --help
+cast -h
 ```
 
 ---
 
 ## Environment Variables
 
-These environment variables affect `sb` behavior:
+These environment variables affect `cast` behavior:
 
 | Variable | Description | Default |
 |----------|-------------|---------|
@@ -474,8 +474,8 @@ These environment variables affect `sb` behavior:
 
 ```bash
 # Enable debug output
-SANDBOX_DEBUG=1 sb list
+SANDBOX_DEBUG=1 cast list
 
 # Enable verbose output
-SANDBOX_VERBOSE=1 sb start mybox
+SANDBOX_VERBOSE=1 cast start mybox
 ```

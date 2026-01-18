@@ -161,7 +161,7 @@ enable_full() {
 
     if [ "$current" = "none-docker" ]; then
         echo -e "${RED}Error:${NC} Cannot switch from true Docker 'none' mode at runtime."
-        echo "Restart the container with: sb new ... --network=full"
+        echo "Restart the container with: cast new ... --network=full"
         exit 1
     fi
 
@@ -233,7 +233,7 @@ enable_host_only() {
 
     if [ "$current" = "none-docker" ]; then
         echo -e "${RED}Error:${NC} Cannot switch from true Docker 'none' mode at runtime."
-        echo "Restart the container with: sb new ... --network=full"
+        echo "Restart the container with: cast new ... --network=full"
         exit 1
     fi
 
@@ -290,7 +290,7 @@ enable_limited() {
 
     if [ "$current" = "none-docker" ]; then
         echo -e "${RED}Error:${NC} Cannot switch from true Docker 'none' mode at runtime."
-        echo "Restart the container with: sb new ... --network=limited"
+        echo "Restart the container with: cast new ... --network=limited"
         exit 1
     fi
 

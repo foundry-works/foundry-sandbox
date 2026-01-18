@@ -1,0 +1,66 @@
+#!/bin/bash
+#
+# Context Monitor Hook for Claude Code
+#
+# Parses transcript directly (like status line tools) to get context usage.
+# No markers or external CLI needed - receives transcript_path via stdin.
+#
+# Usage: Registered as UserPromptSubmit hook in hooks.json
+#
+# Configuration (environment variables):
+# - CONTEXT_THRESHOLD: Percentage threshold for warning (default: 85)
+
+THRESHOLD="${CONTEXT_THRESHOLD:-85}"
+
+# Find foundry-mcp.toml and read auto_compact setting
+TOML="${CLAUDE_PROJECT_ROOT:-$(pwd)}/foundry-mcp.toml"
+AUTO_COMPACT=$(grep -E '^\s*auto_compact\s*=' "$TOML" 2>/dev/null | sed 's/.*=\s*//' | tr -d ' "')
+
+# Set denominator: 155k if auto_compact enabled (default), 200k if disabled
+if [ "$AUTO_COMPACT" = "false" ]; then
+    MAX_CONTEXT=200000
+else
+    MAX_CONTEXT=155000
+fi
+
+# Require jq
+if ! command -v jq &> /dev/null; then
+    exit 0
+fi
+
+# Read JSON input from stdin (hooks receive context this way)
+INPUT=$(cat)
+TRANSCRIPT=$(echo "$INPUT" | jq -r '.transcript_path // empty')
+
+# Exit silently if no transcript path or file doesn't exist
+[ -z "$TRANSCRIPT" ] && exit 0
+[ ! -f "$TRANSCRIPT" ] && exit 0
+
+# Parse most recent usage entry (skip sidechains and errors)
+# The API returns cumulative tokens, so we just need the last valid entry
+TOKENS=$(tail -200 "$TRANSCRIPT" 2>/dev/null | \
+  grep -v '"isSidechain":true' | \
+  grep -v '"isApiErrorMessage":true' | \
+  grep '"usage"' | \
+  tail -1 | \
+  jq -r '.message.usage | (.input_tokens // 0) + (.cache_read_input_tokens // 0) + (.cache_creation_input_tokens // 0)' 2>/dev/null)
+
+# Exit if no valid token count
+[ -z "$TOKENS" ] || [ "$TOKENS" = "null" ] || [ "$TOKENS" = "0" ] && exit 0
+
+# Calculate percentage
+PERCENTAGE=$((TOKENS * 100 / MAX_CONTEXT))
+
+# Warn if above threshold
+if [ "$PERCENTAGE" -ge "$THRESHOLD" ]; then
+    cat << EOF
+{
+  "hookSpecificOutput": {
+    "hookEventName": "PostToolUse",
+    "additionalContext": "[CONTEXT ${PERCENTAGE}%] Context usage is high. Complete your current task, then recommend /clear followed by /implement."
+  }
+}
+EOF
+fi
+
+exit 0

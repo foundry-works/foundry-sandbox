@@ -1,0 +1,39 @@
+{
+  "permissions": {
+    "allow": [
+      "mcp__plugin_foundry_foundry-mcp__*",
+      "mcp__foundry-mcp__*",
+
+      "Bash(git status:*)",
+      "Bash(git diff:*)",
+      "Bash(git log:*)",
+      "Bash(git rev-parse:*)",
+      "Bash(git branch:*)",
+      "Bash(git show:*)",
+
+      "Bash(pytest:*)",
+      "Bash(python -m pytest:*)",
+
+      "Bash(foundry-mcp:*)",
+      "Bash(foundry-cli:*)",
+
+      "Bash(codex:*)",
+      "Bash(claude:*)",
+      "Bash(gemini:*)",
+      "Bash(cursor-agent:*)",
+      "Bash(opencode:*)",
+
+      "Write(//**/specs/pending/**)",
+      "Write(//**/specs/active/**)",
+      "Write(//**/specs/completed/**)",
+      "Write(//**/specs/archived/**)",
+      "Edit(//**/specs/pending/**)",
+      "Edit(//**/specs/active/**)",
+      "Edit(//**/specs/completed/**)",
+      "Edit(//**/specs/archived/**)"
+    ],
+    "deny": [
+      "Read(//**/specs/**/*.json)"
+    ]
+  }
+}

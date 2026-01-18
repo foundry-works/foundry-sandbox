@@ -19,7 +19,7 @@ The key insight: AI assistants can hallucinate dangerous commands or act without
 ./sandbox.sh build
 
 # Create a sandbox from a GitHub repo
-sb new owner/repo
+cast new owner/repo
 
 # You're now in a tmux session inside the container
 # Run your AI assistant:
@@ -41,12 +41,12 @@ claude
 ## Quick Reference
 
 ```bash
-sb new owner/repo              # Create sandbox from main
-sb new owner/repo branch       # Create from existing branch
-sb new owner/repo new main     # Create new branch from main
-sb list                        # List all sandboxes
-sb attach name                 # Attach to running sandbox
-sb stop name                   # Stop sandbox (preserves worktree)
-sb destroy name                # Remove sandbox completely
-sb help                        # Show all commands
+cast new owner/repo              # Create sandbox from main
+cast new owner/repo branch       # Create from existing branch
+cast new owner/repo new main     # Create new branch from main
+cast list                        # List all sandboxes
+cast attach name                 # Attach to running sandbox
+cast stop name                   # Stop sandbox (preserves worktree)
+cast destroy name                # Remove sandbox completely
+cast help                        # Show all commands
 ```

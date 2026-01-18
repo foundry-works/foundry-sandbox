@@ -1,106 +1,343 @@
 # Foundry Sandbox
 
-Ephemeral worktree-based development environments for AI-assisted coding with Claude Code.
+Safe, ephemeral workspaces for AI-assisted coding—isolate mistakes, not productivity.
 
-## Setup
+## Overview
 
-### 1. Build the Docker image
+AI coding assistants are powerful but imperfect. They can hallucinate destructive commands, misunderstand context, or make changes you didn't intend. Running them directly on your machine means one bad `rm -rf` or `git push --force` away from real damage.
+
+Foundry Sandbox solves this by providing isolated Docker environments with defense-in-depth safety layers. Each sandbox is a disposable git worktree where AI tools can operate freely while multiple safeguards prevent accidents from escaping. You get the productivity of AI assistance with the confidence that mistakes stay contained.
+
+## Key Features
+
+- **Ephemeral Workspaces** - Git worktrees per sandbox; destroy when done with no trace
+- **Defense in Depth** - 5 safety layers from shell overrides to read-only root filesystem
+- **Multiple AI Tools** - Claude Code, Gemini CLI, Codex CLI, OpenCode, and Cursor Agent pre-installed
+- **Fast Creation** - Worktrees share git objects; new sandboxes spin up in seconds
+- **Network Control** - Full, limited (whitelist), host-only, or no network access
+- **Volume Mounts** - Mount host directories read-write or read-only
+- **JSON Output** - All commands support `--json` for scripting and automation
+
+## Prerequisites
+
+| Requirement | Version | Check Command |
+|-------------|---------|---------------|
+| Docker | 20.10+ | `docker --version` |
+| Git | 2.x+ | `git --version` |
+| Bash | 4.x+ | `bash --version` |
+| tmux | 3.x+ | `tmux -V` |
+
+Linux and macOS supported natively. Windows users need WSL2.
+
+## Installation
+
+### Quick Install (Recommended)
 
 ```bash
+curl -fsSL https://raw.githubusercontent.com/foundry-works/foundry-sandbox/main/install.sh | bash
+```
+
+This will:
+- Clone to `~/.foundry-sandbox`
+- Add the `cast` alias to your shell
+- Enable tab completion
+- Build the Docker image
+
+### Manual Install
+
+**1. Clone the repository**
+
+```bash
+git clone https://github.com/foundry-works/foundry-sandbox.git ~/.foundry-sandbox
+```
+
+**2. Add to your shell** (`~/.bashrc` or `~/.zshrc`)
+
+```bash
+alias cast='~/.foundry-sandbox/sandbox.sh'
+source ~/.foundry-sandbox/completion.bash
+```
+
+**3. Reload and build**
+
+```bash
+source ~/.bashrc
+cast build
+```
+
+### Uninstall
+
+```bash
+~/.foundry-sandbox/uninstall.sh
+```
+
+## Quick Start
+
+**1. Create a sandbox**
+
+```bash
+cast new owner/repo
+```
+
+**2. Run an AI assistant**
+
+```bash
+claude              # Claude Code
+gemini              # Gemini CLI
+codex               # Codex CLI
+opencode            # OpenCode
+cursor              # Cursor Agent
+```
+
+**3. Commit and push your changes**
+
+```bash
+git add -A && git commit -m "Add feature"
+git push origin HEAD
+```
+
+**4. Destroy when done**
+
+```bash
+cast destroy sandbox-name --yes
+```
+
+## Usage Examples
+
+### Basic Workflow
+
+```bash
+# Create sandbox from a GitHub repo
+cast new owner/repo
+
+# You're now in a tmux session at /workspace
+# Run your AI tool, make changes, commit, push
+
+# Detach with Ctrl+b, d (keeps sandbox running)
+# Or exit the shell
+```
+
+### Branch Management
+
+```bash
+# Create sandbox from existing branch
+cast new owner/repo feature-branch
+
+# Create new branch from main
+cast new owner/repo my-feature main
+```
+
+### Volume Mounts
+
+```bash
+# Mount a local directory (read-write)
+cast new owner/repo --copy ~/data:/data
+
+# Mount read-only
+cast new owner/repo --copy ~/config:/config:ro
+```
+
+### Network Modes
+
+```bash
+# Full network access (default)
+cast new owner/repo
+
+# Limited to whitelist (GitHub, npm, PyPI, AI APIs)
+cast new owner/repo --network=limited
+
+# Local network only
+cast new owner/repo --network=host-only
+
+# No network
+cast new owner/repo --network=none
+```
+
+## How It Works
+
+```
+┌────────────────────────────────────────────────────────────┐
+│                      HOST SYSTEM                           │
+│                                                            │
+│  cast new owner/repo                                         │
+│       │                                                    │
+│       ▼                                                    │
+│  ┌──────────────────────────────────────────────────────┐  │
+│  │              DOCKER CONTAINER                         │  │
+│  │                                                       │  │
+│  │  ┌─────────────────────────────────────────────────┐  │  │
+│  │  │              SAFETY LAYERS                       │  │  │
+│  │  │  Layer 1: Shell Overrides (UX warnings)         │  │  │
+│  │  │  Layer 2: Operator Approval (human-in-loop)     │  │  │
+│  │  │  Layer 3: Sudoers Allowlist (kernel-enforced)   │  │  │
+│  │  │  Layer 4: Network Isolation (iptables)          │  │  │
+│  │  │  Layer 0: Read-only Root (Docker enforced)      │  │  │
+│  │  └─────────────────────────────────────────────────┘  │  │
+│  │                                                       │  │
+│  │  /workspace ◄── git worktree (your code)              │  │
+│  │  /home/ubuntu ◄── tmpfs (resets on stop)              │  │
+│  │  / (root) ◄── read-only filesystem                    │  │
+│  │                                                       │  │
+│  │  Pre-installed: Claude, Gemini, Codex, OpenCode, Cursor │  │
+│  │                 Node.js, Go, Python, GitHub CLI        │  │
+│  └──────────────────────────────────────────────────────┘  │
+│                                                            │
+│  ~/.sandboxes/                                             │
+│    ├── repos/      (bare git repos, shared across boxes)   │
+│    └── worktrees/  (checked-out code per sandbox)          │
+└────────────────────────────────────────────────────────────┘
+```
+
+**Git worktrees** share objects across sandboxes—no redundant clones, fast creation.
+
+**Read-only root** means even if all other layers fail, filesystem writes are blocked.
+
+**Tmpfs home** resets on container stop—no accumulated state or leaked credentials.
+
+## Command Reference
+
+### Create and Attach
+
+| Command | Description |
+|---------|-------------|
+| `cast new owner/repo` | Create sandbox from GitHub repo |
+| `cast new owner/repo branch` | Create from existing branch |
+| `cast new owner/repo new-branch base` | Create new branch from base |
+| `cast attach name` | Attach to running sandbox |
+| `cast attach` | Interactive selector (requires fzf) |
+
+### Lifecycle Management
+
+| Command | Description |
+|---------|-------------|
+| `cast start name` | Start stopped sandbox |
+| `cast stop name` | Stop running sandbox (preserves worktree) |
+| `cast destroy name` | Remove sandbox and worktree |
+| `cast destroy name --yes` | Skip confirmation prompt |
+
+### Status and Info
+
+| Command | Description |
+|---------|-------------|
+| `cast list` | List all sandboxes |
+| `cast list --json` | JSON output for scripting |
+| `cast status` | Status of all sandboxes |
+| `cast status name` | Status of specific sandbox |
+| `cast info` | Combined system info |
+| `cast config` | Show configuration |
+
+### Maintenance
+
+| Command | Description |
+|---------|-------------|
+| `cast prune` | Remove orphaned configs |
+| `cast build` | Build/rebuild Docker image |
+| `cast help` | Show help message |
+
+## Configuration
+
+### Pre-installed Claude Plugin
+
+The Docker image includes the [claude-foundry](https://github.com/foundry-works/claude-foundry) plugin pre-configured. This provides:
+- **foundry-mcp** MCP server with spec-driven development tools
+- Skills: `/foundry-spec`, `/foundry-implement`, `/foundry-review`, `/foundry-test`, etc.
+
+No host installation required. The plugin is ready to use immediately in new sandboxes.
+
+To update the plugin version, rebuild the Docker image:
+```bash
+# Update docker/.claude/plugins/cache/claude-foundry/foundry/<version>/ with new plugin files
 ./sandbox.sh build
 ```
 
-### 2. Add the alias
+### API Keys
 
-Add to your `~/.bashrc` or `~/.bashrc.d/sandbox.sh`:
+The sandbox automatically copies credential files from your host into containers:
 
-```bash
-alias sb='/path/to/foundry-sandbox/sandbox.sh'
-```
+| Source | Destination | Purpose |
+|--------|-------------|---------|
+| `~/.api_keys` | `/home/ubuntu/.api_keys` | API keys (sourced at startup) |
+| `~/.gitconfig` | `/home/ubuntu/.gitconfig` | Git configuration |
+| `~/.ssh/` | `/home/ubuntu/.ssh/` | SSH keys |
+| `~/.config/gh/` | `/home/ubuntu/.config/gh/` | GitHub CLI (from `gh auth login`) |
+| `~/.local/share/opencode/auth.json` | `/home/ubuntu/.local/share/opencode/auth.json` | OpenCode (from `opencode auth login`) |
 
-Optional shortcut aliases for frequently-used repos:
-
-```bash
-alias sbf='sb new owner/repo-one'
-alias sbc='sb new owner/repo-two'
-```
-
-### 3. Enable bash completion (optional)
-
-Source the completion script in your shell config:
+**Create `~/.api_keys` on your host:**
 
 ```bash
-source /path/to/foundry-sandbox/completion.bash
+cat > ~/.api_keys << 'EOF'
+export CLAUDE_CODE_OAUTH_TOKEN="..."   # Get via: claude setup-token
+export GEMINI_API_KEY="..."
+export OPENAI_API_KEY="sk-..."
+export CURSOR_API_KEY="key-..."
+# Deep research providers (foundry-mcp)
+export TAVILY_API_KEY="..."
+export PERPLEXITY_API_KEY="..."
+export GOOGLE_API_KEY="..."
+export GOOGLE_CSE_ID="..."
+EOF
+chmod 600 ~/.api_keys
 ```
 
-## Usage
+Replace the placeholder values with your actual keys. The file is sourced automatically when containers start.
+
+### Debug Output
 
 ```bash
-# Create a new sandbox for a repo
-sb new owner/repo
-
-# Create with a copy of another local repo
-sb new owner/repo --copy ~/GitHub/other-repo:/other-repo
-
-# List active sandboxes
-sb list
-
-# Attach to a running sandbox
-sb attach sandbox-name
-
-# Stop/start/destroy sandboxes
-sb stop sandbox-name
-sb start sandbox-name
-sb destroy sandbox-name
-sb destroy sandbox-name --yes
-
-# Status for one or all sandboxes
-sb status
-sb status sandbox-name
-sb status --json
-sb list --json
-
-# Config and environment checks
-sb config
-sb config --json
-
-# Combined info
-sb info
-sb info --json
-
-# Prune orphaned configs
-sb prune
-sb prune --json
-
-# Show help
-sb help
+SANDBOX_DEBUG=1 cast list          # Debug logging
+SANDBOX_VERBOSE=1 cast start name  # Verbose output
 ```
 
-## Debugging
+### Network Whitelist
 
-Set these env vars when running `sb` for more output:
+Add custom domains to the limited network whitelist:
 
 ```bash
-SANDBOX_DEBUG=1 sb list
-SANDBOX_VERBOSE=1 sb start sandbox-name
+export SANDBOX_ALLOWED_DOMAINS="api.example.com,internal.corp.com"
+cast new owner/repo --network=limited
 ```
+
+## Safety Layers
+
+Foundry Sandbox uses defense in depth—multiple independent layers that each provide protection:
+
+| Layer | Purpose | Bypass? |
+|-------|---------|---------|
+| **Layer 1: Shell Overrides** | Friendly warnings for `rm -rf /`, `git push --force`, etc. | Yes (intentional, for human override) |
+| **Layer 2: Operator Approval** | Sensitive commands require TTY confirmation | No (AI has no TTY) |
+| **Layer 3: Sudoers Allowlist** | Only whitelisted sudo commands allowed | No (kernel enforced) |
+| **Layer 4: Network Isolation** | Optional network restrictions | No (iptables/Docker enforced) |
+| **Layer 0: Read-only Root** | Filesystem writes blocked at kernel level | No (Docker enforced) |
+
+Layer 1 is designed to be bypassable—it provides UX for non-adversarial AI, not security. The real protection comes from layers 0, 2, 3, and 4, which cannot be bypassed from inside the container.
+
+See [Safety Layers](docs/security/safety-layers.md) for implementation details.
+
+## Limitations
+
+- **Not a security boundary against malicious actors** - Protects against accidental damage from well-intentioned AI, not adversarial attacks
+- **Requires Docker** - No native process isolation; container overhead applies
+- **Linux/macOS focus** - Windows requires WSL2
+- **Shared git history** - All sandboxes share the same bare repo; force-push from one affects others
+- **No GPU passthrough** - Standard Docker networking; GPU workloads need additional configuration
 
 ## Documentation
 
-For detailed documentation, see the [docs/](docs/) directory:
+| Document | Description |
+|----------|-------------|
+| [Getting Started](docs/getting-started.md) | Installation and first sandbox |
+| [Architecture](docs/architecture.md) | Technical design and diagrams |
+| [Threat Model](docs/security/threat-model.md) | What we protect against |
+| [Safety Layers](docs/security/safety-layers.md) | Defense in depth details |
+| [Commands](docs/usage/commands.md) | Full command reference |
+| [Workflows](docs/usage/workflows.md) | Common patterns and recipes |
+| [Contributing](docs/development/contributing.md) | For contributors |
 
-- [Getting Started](docs/getting-started.md) - Installation and first sandbox
-- [Architecture](docs/architecture.md) - Technical design and diagrams
-- [Security: Threat Model](docs/security/threat-model.md) - What we protect against
-- [Security: Safety Layers](docs/security/safety-layers.md) - Defense in depth
-- [Command Reference](docs/usage/commands.md) - All commands explained
-- [Workflows](docs/usage/workflows.md) - Common patterns and recipes
-- [Contributing](docs/development/contributing.md) - For contributors
+## Support
 
-## How it works
+- **Issues**: [GitHub Issues](https://github.com/foundry-works/foundry-sandbox/issues)
+- **Discussions**: [GitHub Discussions](https://github.com/foundry-works/foundry-sandbox/discussions)
 
-- Clones repos as bare git repositories to `~/.sandboxes/repos/`
-- Creates worktrees for each sandbox in `~/.sandboxes/worktrees/`
-- Runs each sandbox in an isolated Docker container
-- Includes security guardrails (shell overrides, sudoers allowlist, read-only root)
-- Pre-installed AI tools: Claude Code, Gemini CLI, OpenCode
+## License
+
+*License information to be added. Consider MIT or Apache 2.0 for open source projects.*

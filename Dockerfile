@@ -97,6 +97,11 @@ RUN echo "alias cdsp='claude --dangerously-skip-permissions'" >> /etc/bash.bashr
     echo "alias cdspr='claude --dangerously-skip-permissions --resume'" >> /etc/bash.bashrc && \
     echo '[ -f "$HOME/.api_keys" ] && source "$HOME/.api_keys"' >> /etc/bash.bashrc
 
+# Pre-configured Claude config with foundry plugin (copied to /home/ubuntu on first run)
+# Includes: foundry-mcp MCP server, skills (foundry-spec, foundry-implement, etc.)
+COPY docker/.claude /etc/skel/.claude
+RUN chmod -R 755 /etc/skel/.claude
+
 # Copy entrypoint to system path (not /home which is tmpfs)
 COPY entrypoint.sh /usr/local/bin/entrypoint.sh
 RUN chmod +x /usr/local/bin/entrypoint.sh

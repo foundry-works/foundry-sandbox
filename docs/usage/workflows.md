@@ -8,7 +8,7 @@ This guide covers common patterns for using Foundry Sandbox effectively.
 
 ```bash
 # Create sandbox with new branch from main
-sb new owner/repo feature-login main
+cast new owner/repo feature-login main
 
 # Inside sandbox, start AI assistant
 claude
@@ -44,7 +44,7 @@ gh pr create --title "Add login feature" --body "..."
 exit
 
 # Destroy when done
-sb destroy repo-feature-login --yes
+cast destroy repo-feature-login --yes
 ```
 
 ---
@@ -57,7 +57,7 @@ Review a pull request in an isolated environment.
 
 ```bash
 # Create sandbox from PR branch
-sb new owner/repo pr-123-feature
+cast new owner/repo pr-123-feature
 ```
 
 ### Inside the Sandbox
@@ -88,7 +88,7 @@ gh pr review 123 --comment --body "LGTM"
 ### Clean Up
 
 ```bash
-sb destroy repo-pr-123-feature --yes
+cast destroy repo-pr-123-feature --yes
 ```
 
 ---
@@ -101,23 +101,23 @@ Work on multiple features simultaneously without branch switching.
 
 ```bash
 # Feature 1
-sb new owner/repo feature-auth main
+cast new owner/repo feature-auth main
 
 # Feature 2 (in another terminal)
-sb new owner/repo feature-ui main
+cast new owner/repo feature-ui main
 
 # Bug fix
-sb new owner/repo fix-login-bug main
+cast new owner/repo fix-login-bug main
 ```
 
 ### List and Switch
 
 ```bash
 # See all sandboxes
-sb list
+cast list
 
 # Attach to specific one
-sb attach repo-feature-auth
+cast attach repo-feature-auth
 ```
 
 ### Each Sandbox is Independent
@@ -137,20 +137,20 @@ Mount additional directories from your host into the sandbox.
 
 ```bash
 # Mount models directory read-only
-sb new owner/repo feature --mount /path/to/models:/models:ro
+cast new owner/repo feature --mount /path/to/models:/models:ro
 ```
 
 ### Shared Data Directory
 
 ```bash
 # Mount writable data directory
-sb new owner/repo feature --mount /data/datasets:/datasets
+cast new owner/repo feature --mount /data/datasets:/datasets
 ```
 
 ### Multiple Mounts
 
 ```bash
-sb new owner/repo feature \
+cast new owner/repo feature \
   --mount /data:/data \
   --mount /models:/models:ro \
   --mount ~/.aws:/home/ubuntu/.aws:ro
@@ -165,13 +165,13 @@ Copy files into the container once at creation time. Useful for configs that sho
 ### Copy Configuration
 
 ```bash
-sb new owner/repo feature --copy ~/configs/app.json:/workspace/config.json
+cast new owner/repo feature --copy ~/configs/app.json:/workspace/config.json
 ```
 
 ### Copy Reference Data
 
 ```bash
-sb new owner/repo feature --copy /path/to/fixtures:/test-data
+cast new owner/repo feature --copy /path/to/fixtures:/test-data
 ```
 
 ### Mounts vs Copies
@@ -226,7 +226,7 @@ export GEMINI_API_KEY="..."
 export OPENAI_API_KEY="sk-..."
 
 # Now create sandbox
-sb new owner/repo feature
+cast new owner/repo feature
 ```
 
 Or create `~/.api_keys` on the host (sourced in sandbox):
@@ -247,12 +247,12 @@ When you need fast feedback loops with AI assistance.
 
 ```bash
 # Quick experiment
-sb new owner/repo experiment-1 main
+cast new owner/repo experiment-1 main
 # ... work ...
-sb destroy repo-experiment-1 --yes
+cast destroy repo-experiment-1 --yes
 
 # Another attempt
-sb new owner/repo experiment-2 main
+cast new owner/repo experiment-2 main
 # ... work ...
 ```
 
@@ -265,7 +265,7 @@ Before destroying, push changes:
 git push origin experiment-branch
 
 # Then destroy
-sb destroy repo-experiment-branch --yes
+cast destroy repo-experiment-branch --yes
 ```
 
 ---
@@ -278,7 +278,7 @@ Safely investigate issues without touching production code.
 
 ```bash
 # Clone the exact production version
-sb new owner/repo debug-issue-123 production
+cast new owner/repo debug-issue-123 production
 ```
 
 ### Add Debug Tooling
@@ -301,7 +301,7 @@ claude
 
 ```bash
 # Don't forget to destroy - this had production config
-sb destroy repo-debug-issue-123 --yes
+cast destroy repo-debug-issue-123 --yes
 ```
 
 ---
@@ -314,14 +314,14 @@ Ensure `GITHUB_TOKEN` is set on your host:
 
 ```bash
 export GITHUB_TOKEN="ghp_..."
-sb new private-org/private-repo feature
+cast new private-org/private-repo feature
 ```
 
 ### SSH Keys (Alternative)
 
 ```bash
 # Mount SSH keys read-only
-sb new owner/repo feature --mount ~/.ssh:/home/ubuntu/.ssh:ro
+cast new owner/repo feature --mount ~/.ssh:/home/ubuntu/.ssh:ro
 ```
 
 ---
@@ -334,7 +334,7 @@ Control network access for sensitive work or offline development.
 
 ```bash
 # Only allow essential services (github, npm, pypi, AI APIs)
-sb new owner/repo sensitive-feature --network=limited
+cast new owner/repo sensitive-feature --network=limited
 
 # Inside sandbox, test that restrictions work
 curl https://github.com  # works
@@ -345,7 +345,7 @@ curl https://random-site.com  # blocked
 
 ```bash
 # No network at all
-sb new owner/repo offline-work --network=none
+cast new owner/repo offline-work --network=none
 
 # Inside sandbox, everything is blocked
 curl https://anything.com  # fails
@@ -355,7 +355,7 @@ curl https://anything.com  # fails
 
 ```bash
 # Start with full network
-sb new owner/repo feature
+cast new owner/repo feature
 
 # Inside container, restrict later
 sudo network-mode limited
@@ -374,7 +374,7 @@ sudo network-mode full
 
 ```bash
 # Allow only local network (for local databases, APIs)
-sb new owner/repo local-dev --network=host-only
+cast new owner/repo local-dev --network=host-only
 
 # Inside sandbox
 curl http://localhost:8080  # works (if service running on host)
@@ -386,7 +386,7 @@ curl https://external.com   # blocked
 ```bash
 # Add extra domains to the limited mode whitelist
 export SANDBOX_ALLOWED_DOMAINS="internal-api.company.com,cache.myorg.net"
-sb new owner/repo feature --network=limited
+cast new owner/repo feature --network=limited
 
 # These domains will be allowed in addition to defaults
 ```
@@ -399,36 +399,36 @@ sb new owner/repo feature --network=limited
 
 ```bash
 # Good - describes the work
-sb new owner/repo add-oauth-google main
-sb new owner/repo fix-memory-leak main
+cast new owner/repo add-oauth-google main
+cast new owner/repo fix-memory-leak main
 
 # Less helpful
-sb new owner/repo test1 main
+cast new owner/repo test1 main
 ```
 
-### Use sb list Often
+### Use cast list Often
 
 ```bash
 # See what you have running
-sb list
+cast list
 ```
 
 ### Clean Up Finished Work
 
 ```bash
 # Don't let sandboxes accumulate
-sb destroy old-sandbox --yes
+cast destroy old-sandbox --yes
 
 # Or prune orphaned configs
-sb prune -f
+cast prune -f
 ```
 
 ### Debugging Issues
 
 ```bash
 # Enable debug output
-SANDBOX_DEBUG=1 sb attach mybox
+SANDBOX_DEBUG=1 cast attach mybox
 
 # Check sandbox status
-sb status mybox
+cast status mybox
 ```

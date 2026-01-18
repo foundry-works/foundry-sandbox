@@ -19,55 +19,46 @@ tmux -V            # tmux 3.x+
 
 ## Installation
 
-### 1. Clone the Repository
+### Quick Install (Recommended)
 
 ```bash
-git clone https://github.com/yourusername/foundry-sandbox.git
-cd foundry-sandbox
+curl -fsSL https://raw.githubusercontent.com/foundry-works/foundry-sandbox/main/install.sh | bash
 ```
 
-### 2. Build the Docker Image
+This installs to `~/.foundry-sandbox` and:
+- Adds the `cast` alias to your shell
+- Enables tab completion
+- Builds the Docker image (Ubuntu 24.04-based with Node.js, Go, Python, Claude Code, Gemini CLI, OpenCode, and safety guardrails)
+
+After installation, reload your shell:
 
 ```bash
-./sandbox.sh build
+source ~/.bashrc  # or ~/.zshrc
 ```
 
-This builds an Ubuntu 24.04-based image with:
-- Node.js 22.x, Go 1.23, Python 3
-- Claude Code, Gemini CLI, OpenCode pre-installed
-- GitHub CLI (`gh`)
-- Development tools (ripgrep, fd, fzf, vim, jq)
-- Safety guardrails (shell overrides, sudoers allowlist)
+### Manual Install
 
-### 3. Add the Alias
-
-Add to your `~/.bashrc` or `~/.zshrc`:
+If you prefer manual installation:
 
 ```bash
-alias sb='/path/to/foundry-sandbox/sandbox.sh'
-```
+# Clone
+git clone https://github.com/foundry-works/foundry-sandbox.git ~/.foundry-sandbox
 
-Then reload your shell:
+# Add to ~/.bashrc or ~/.zshrc
+echo "alias cast='~/.foundry-sandbox/sandbox.sh'" >> ~/.bashrc
+echo "source ~/.foundry-sandbox/completion.bash" >> ~/.bashrc
 
-```bash
+# Reload and build
 source ~/.bashrc
+cast build
 ```
-
-### 4. Enable Bash Completion (Optional)
-
-```bash
-# Add to ~/.bashrc
-source /path/to/foundry-sandbox/completion.bash
-```
-
-This enables tab completion for commands and sandbox names.
 
 ## Creating Your First Sandbox
 
 ### From a GitHub Repository
 
 ```bash
-sb new owner/repo
+cast new owner/repo
 ```
 
 This will:
@@ -79,13 +70,13 @@ This will:
 ### From an Existing Branch
 
 ```bash
-sb new owner/repo feature-branch
+cast new owner/repo feature-branch
 ```
 
 ### Create a New Branch
 
 ```bash
-sb new owner/repo my-new-feature main
+cast new owner/repo my-new-feature main
 ```
 
 Creates `my-new-feature` branch starting from `main`.
@@ -94,10 +85,10 @@ Creates `my-new-feature` branch starting from `main`.
 
 ```bash
 # Limited network (only github, npm, pypi, AI APIs)
-sb new owner/repo feature --network=limited
+cast new owner/repo feature --network=limited
 
 # No network at all
-sb new owner/repo offline-work --network=none
+cast new owner/repo offline-work --network=none
 ```
 
 See [Security > Safety Layers](security/safety-layers.md) for details on network modes.
@@ -150,42 +141,42 @@ exit
 ### List All Sandboxes
 
 ```bash
-sb list
+cast list
 ```
 
 ### Attach to a Running Sandbox
 
 ```bash
-sb attach sandbox-name
+cast attach sandbox-name
 
 # Or use fzf selector (if no name provided)
-sb attach
+cast attach
 ```
 
 ### Stop a Sandbox
 
 ```bash
-sb stop sandbox-name
+cast stop sandbox-name
 ```
 
-Stops the container but preserves the worktree. Restart with `sb start`.
+Stops the container but preserves the worktree. Restart with `cast start`.
 
 ### Destroy a Sandbox
 
 ```bash
-sb destroy sandbox-name
+cast destroy sandbox-name
 ```
 
 Removes the container, worktree, and associated configs. You'll be prompted to confirm.
 
 ```bash
 # Skip confirmation
-sb destroy sandbox-name --yes
+cast destroy sandbox-name --yes
 ```
 
 ## Environment Variables
 
-Set these before running `sb` for API access inside containers:
+Set these before running `cast` for API access inside containers:
 
 ```bash
 export ANTHROPIC_API_KEY="sk-ant-..."

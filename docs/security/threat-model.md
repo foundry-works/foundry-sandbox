@@ -123,16 +123,16 @@ By default, sandboxes have full network access. However, you can restrict networ
 
 ```bash
 # Full network (default)
-sb new owner/repo feature
+cast new owner/repo feature
 
 # Limited to whitelist (github, npm, pypi, AI APIs)
-sb new owner/repo feature --network=limited
+cast new owner/repo feature --network=limited
 
 # Local network only (Docker gateway, private subnets)
-sb new owner/repo feature --network=host-only
+cast new owner/repo feature --network=host-only
 
 # No network at all
-sb new owner/repo feature --network=none
+cast new owner/repo feature --network=none
 ```
 
 With full network access, an AI could:

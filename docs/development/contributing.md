@@ -34,18 +34,18 @@ foundry-sandbox/
 │   └── inspect.sh          # Sandbox inspection
 │
 ├── commands/               # Command implementations
-│   ├── new.sh              # sb new
-│   ├── attach.sh           # sb attach
-│   ├── list.sh             # sb list
-│   ├── start.sh            # sb start
-│   ├── stop.sh             # sb stop
-│   ├── destroy.sh          # sb destroy
-│   ├── build.sh            # sb build
-│   ├── status.sh           # sb status
-│   ├── config.sh           # sb config
-│   ├── prune.sh            # sb prune
-│   ├── info.sh             # sb info
-│   └── help.sh             # sb help
+│   ├── new.sh              # cast new
+│   ├── attach.sh           # cast attach
+│   ├── list.sh             # cast list
+│   ├── start.sh            # cast start
+│   ├── stop.sh             # cast stop
+│   ├── destroy.sh          # cast destroy
+│   ├── build.sh            # cast build
+│   ├── status.sh           # cast status
+│   ├── config.sh           # cast config
+│   ├── prune.sh            # cast prune
+│   ├── info.sh             # cast info
+│   └── help.sh             # cast help
 │
 ├── safety/                 # Security guardrails
 │   ├── shell-overrides.sh  # Layer 1: Shell function overrides
@@ -164,7 +164,7 @@ dangerous_command() {
 export -f dangerous_command
 ```
 
-Rebuild the image after changes: `sb build`
+Rebuild the image after changes: `cast build`
 
 ### Sudoers Allowlist (Layer 3)
 
@@ -175,7 +175,7 @@ Edit `safety/sudoers-allowlist` to permit new sudo commands:
 ubuntu ALL=(ALL) NOPASSWD: /usr/bin/specific-command *
 ```
 
-Rebuild the image after changes: `sb build`
+Rebuild the image after changes: `cast build`
 
 ## Testing Changes
 
@@ -209,7 +209,7 @@ SANDBOX_VERBOSE=1 ./sandbox.sh mycommand arg
 
 ```bash
 # Get a shell in the container
-sb attach mybox
+cast attach mybox
 
 # Test shell overrides
 rm -rf /  # Should be blocked

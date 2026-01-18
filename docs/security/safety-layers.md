@@ -253,7 +253,7 @@ ubuntu ALL=(ALL) NOPASSWD: /usr/bin/npm *
 ubuntu ALL=(ALL) NOPASSWD: /usr/bin/pip *
 ```
 
-Then: `sb build`
+Then: `cast build`
 
 ## Layer 4: Network Isolation
 
@@ -276,16 +276,16 @@ Then: `sb build`
 
 ```bash
 # Full network (default)
-sb new owner/repo feature
+cast new owner/repo feature
 
 # Limited to whitelist
-sb new owner/repo feature --network=limited
+cast new owner/repo feature --network=limited
 
 # Local network only
-sb new owner/repo feature --network=host-only
+cast new owner/repo feature --network=host-only
 
 # No network
-sb new owner/repo feature --network=none
+cast new owner/repo feature --network=none
 ```
 
 ### Runtime Switching
@@ -321,7 +321,7 @@ Additional domains can be whitelisted via `SANDBOX_ALLOWED_DOMAINS` environment 
 
 ```bash
 export SANDBOX_ALLOWED_DOMAINS="custom-api.example.com,internal.mycompany.com"
-sb new owner/repo feature --network=limited
+cast new owner/repo feature --network=limited
 ```
 
 ### Limitations

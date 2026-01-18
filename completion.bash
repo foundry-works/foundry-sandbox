@@ -1,7 +1,7 @@
-# Bash completion for sb (foundry-sandbox)
+# Bash completion for cast (foundry-sandbox)
 # Source this file or add to ~/.bashrc.d/
 
-_sb_completions() {
+_cast_completions() {
     local cur="${COMP_WORDS[COMP_CWORD]}"
     local prev="${COMP_WORDS[COMP_CWORD-1]}"
     local sandbox_home="${SANDBOX_HOME:-$HOME/.sandboxes}"
@@ -51,4 +51,4 @@ _sb_completions() {
             ;;
     esac
 }
-complete -F _sb_completions sb
+complete -F _cast_completions cast

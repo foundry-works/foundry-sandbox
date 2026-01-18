@@ -60,10 +60,7 @@ cmd_new() {
 
     local claude_config_path
     claude_config_path=$(path_claude_config "$name")
-    if [ ! -d "$claude_config_path" ]; then
-        echo "Setting up Claude config for sandbox..."
-        setup_claude_config "$claude_config_path"
-    fi
+    ensure_dir "$claude_config_path"
 
     local override_file
     override_file=$(path_override_file "$name")
@@ -94,7 +91,7 @@ OVERRIDES
     compose_up "$worktree_dir" "$claude_config_path" "$container" "$override_file"
 
     local container_id="${container}-dev-1"
-    copy_configs_to_container "$container_id" "$claude_config_path"
+    copy_configs_to_container "$container_id"
 
     if [ ${#copies[@]} -gt 0 ]; then
         echo "Copying files into container..."

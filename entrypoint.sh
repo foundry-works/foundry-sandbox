@@ -24,20 +24,11 @@ fi
 # CLI tools are pre-installed in the image
 # To update manually: npm update -g @anthropic-ai/claude-code @google/gemini-cli @openai/codex opencode-ai
 
-# Plugins are copied from host by sandbox.sh, no installation needed
-
-# Ensure Claude onboarding is marked complete
-CLAUDE_JSON="$HOME/.claude/.claude.json"
-if [ -f "$CLAUDE_JSON" ]; then
-    if ! grep -q '"hasCompletedOnboarding": true' "$CLAUDE_JSON"; then
-        echo "Setting hasCompletedOnboarding in Claude config..."
-        tmp=$(mktemp)
-        jq '. + {"hasCompletedOnboarding": true}' "$CLAUDE_JSON" > "$tmp" && mv "$tmp" "$CLAUDE_JSON"
-    fi
-else
-    # Create minimal config if it doesn't exist
-    mkdir -p "$HOME/.claude"
-    echo '{"hasCompletedOnboarding": true}' > "$CLAUDE_JSON"
+# Copy pre-configured Claude config from skeleton if not present or missing plugins
+# This provides the foundry plugin out-of-the-box without requiring host installation
+if [ ! -f "$HOME/.claude/plugins/installed_plugins.json" ] && [ -d /etc/skel/.claude ]; then
+    echo "Initializing Claude config with foundry plugin..."
+    cp -rn /etc/skel/.claude/. "$HOME/.claude/"
 fi
 
 # Fix git worktree paths for container environment

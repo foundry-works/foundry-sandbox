@@ -1,0 +1,76 @@
+#!/usr/bin/env bash
+# PreToolUse hook to block reading .json spec files
+# Forces use of sdd-implement skill instead of direct file reading
+
+set -euo pipefail
+
+# Read JSON input from stdin
+input=$(cat)
+
+# Extract file_path from tool_input using jq (or fall back to grep/sed if jq unavailable)
+if command -v jq &> /dev/null; then
+    file_path=$(echo "$input" | jq -r '.tool_input.file_path // empty')
+else
+    # Fallback: simple extraction using grep/sed
+    file_path=$(echo "$input" | grep -o '"file_path"[[:space:]]*:[[:space:]]*"[^"]*"' | sed 's/.*"file_path"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/')
+fi
+
+# If no file_path found, allow (might be a different Read operation)
+if [ -z "$file_path" ]; then
+    exit 0
+fi
+
+# Check if file path matches specs/{active,pending,completed,archived}/**/*.json pattern
+if [[ "$file_path" == *"/specs/active/"*".json" ]] || \
+   [[ "$file_path" == *"/specs/pending/"*".json" ]] || \
+   [[ "$file_path" == *"/specs/completed/"*".json" ]] || \
+   [[ "$file_path" == *"/specs/archived/"*".json" ]]; then
+    # Block the read with helpful error message
+    cat >&2 <<'EOF'
+
+╔════════════════════════════════════════════════════════════════════════╗
+║                    ⛔ JSON SPEC READ BLOCKED                           ║
+╚════════════════════════════════════════════════════════════════════════╝
+
+WHAT: You attempted to read a .json specification file directly.
+
+WHY: JSON specs are often very large (50KB+) and waste context tokens.
+     The SDD toolkit provides optimized tools for working with specs.
+
+HOW TO FIX:
+  Since you're in Claude Code, use Skills or MCP tools instead of reading spec files.
+
+  PRIMARY: Use Skills (recommended)
+  ─────────────────────────────────
+  Skill(sdd-implement) - Get next task with full implementation context
+  Skill(sdd-plan)      - Create specs, apply modifications, validate
+
+  ALTERNATIVE: MCP tools (for granular operations)
+  ────────────────────────────────────────────────
+  mcp__plugin_foundry_foundry-mcp__task action="next" spec_id="<id>"
+  mcp__plugin_foundry_foundry-mcp__task action="query" spec_id="<id>" status="pending"
+  mcp__plugin_foundry_foundry-mcp__task action="info" spec_id="<id>" task_id="<task-id>"
+  mcp__plugin_foundry_foundry-mcp__task action="progress" spec_id="<id>"
+  mcp__plugin_foundry_foundry-mcp__spec action="get-hierarchy" spec_id="<id>"
+  mcp__plugin_foundry_foundry-mcp__task action="complete" spec_id="<id>" task_id="<id>" completion_note="..."
+  mcp__plugin_foundry_foundry-mcp__task action="update-status" spec_id="<id>" task_id="<id>" status="in_progress"
+  mcp__plugin_foundry_foundry-mcp__journal action="list" spec_id="<id>"
+
+EXAMPLES:
+  Reading: Instead of Read(specs/active/my-spec.json)
+    Use: Skill(sdd-implement) OR mcp__plugin_foundry_foundry-mcp__task action="prepare" spec_id="my-spec"
+
+  Status update: Instead of editing JSON directly
+    Use: mcp__plugin_foundry_foundry-mcp__task action="update-status" spec_id="..." task_id="..." status="completed"
+
+⚠️  CRITICAL: Do not use Python, cat, jq, Read(), or any other method to bypass this
+   restriction. ALL spec file access must go through Skills or MCP tools.
+
+This hook enforces proper SDD workflow and prevents token waste.
+
+EOF
+    exit 2
+fi
+
+# Allow the read for non-spec .json files
+exit 0

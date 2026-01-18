@@ -21,17 +21,10 @@ cmd_start() {
 
     check_image_freshness
 
-    if [ ! -d "$claude_config_path" ]; then
-        echo "Setting up Claude config for sandbox..."
-        setup_claude_config "$claude_config_path"
-    fi
-
-    cp "$HOME/.claude/.credentials.json" "$claude_config_path/" 2>/dev/null || true
-
     echo "Starting sandbox: $name..."
     ensure_override_from_metadata "$name" "$override_file"
     compose_up "$worktree_path" "$claude_config_path" "$container" "$override_file"
 
     local container_id="${container}-dev-1"
-    copy_configs_to_container "$container_id" "$claude_config_path"
+    copy_configs_to_container "$container_id"
 }

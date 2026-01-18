@@ -1,0 +1,17 @@
+{
+    "name": "claude-foundry",
+    "owner": {
+        "name": "tylerburleigh",
+        "email": "tylerburleigh@gmail.com"
+    },
+    "autoUpdate": true,
+    "plugins": [
+        {
+            "name": "foundry",
+            "source": {
+                "source": "github",
+                "repo": "foundry-works/claude-foundry"
+            }
+        }
+    ]
+}
