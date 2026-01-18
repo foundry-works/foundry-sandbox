@@ -9,7 +9,7 @@ if [ -z "${SCRIPT_DIR:-}" ]; then
     SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 fi
 
-DOCKER_IMAGE="ai-dev-sandbox:latest"
+DOCKER_IMAGE="foundry-sandbox:latest"
 CONTAINER_USER="ubuntu"
 CONTAINER_HOME="/home/$CONTAINER_USER"
 

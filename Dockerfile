@@ -23,6 +23,7 @@ RUN apt-get update && apt-get install -y \
     python3 \
     python3-pip \
     iptables \
+    iproute2 \
     dnsutils \
     && rm -rf /var/lib/apt/lists/* \
     && ln -s /usr/bin/python3 /usr/bin/python
@@ -63,10 +64,10 @@ RUN mkdir -p /opt/operator/bin
 COPY safety/operator-approve /opt/operator/bin/operator-approve
 RUN chmod 755 /opt/operator/bin/operator-approve
 
-# Layer 4: Network isolation scripts
-COPY safety/network-firewall.sh /home/ubuntu/network-firewall.sh
+# Layer 4: Network isolation scripts (must be in /usr/local/bin, not /home which is tmpfs)
+COPY safety/network-firewall.sh /usr/local/bin/network-firewall.sh
 COPY safety/network-mode /usr/local/bin/network-mode
-RUN chmod +x /home/ubuntu/network-firewall.sh /usr/local/bin/network-mode
+RUN chmod +x /usr/local/bin/network-firewall.sh /usr/local/bin/network-mode
 
 # Remove PEP 668 protection (run as root before switching users)
 # Safe in Docker containers where isolation already exists
@@ -88,8 +89,11 @@ RUN PROVIDERS_DIR=$(python3 -c "import foundry_mcp.core.providers as p; print(p.
     mkdir -p "$PROVIDERS_DIR/node_modules" && \
     ln -sf /usr/local/lib/node_modules/@opencode-ai "$PROVIDERS_DIR/node_modules/@opencode-ai"
 
-# Install Cursor CLI system-wide
-RUN curl https://cursor.com/install -fsS | CURSOR_INSTALL_DIR=/usr/local/bin bash
+# Install Cursor Agent to /opt (survives tmpfs on /home)
+RUN mkdir -p /opt/cursor && \
+    curl https://cursor.com/install -fsS | HOME=/opt/cursor bash && \
+    ln -sf /opt/cursor/.local/bin/agent /usr/local/bin/agent && \
+    ln -sf /opt/cursor/.local/bin/cursor-agent /usr/local/bin/cursor-agent
 
 # Add useful aliases to system bashrc (before switching to non-root user)
 # Home directory is tmpfs at runtime, so user .bashrc won't persist

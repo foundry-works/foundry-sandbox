@@ -13,6 +13,7 @@ cmd_help() {
     echo "  start <name>              Start a stopped sandbox"
     echo "  stop <name>               Stop a sandbox (keeps worktree)"
     echo "  destroy <name> [-f] [-y]  Destroy sandbox and worktree (confirms first)"
+    echo "  destroy-all               Destroy all sandboxes (double confirmation)"
     echo "  build                     Build/rebuild the sandbox image"
     echo "  config [--json]           Show config and checks"
     echo "  prune [-f] [--json]       Remove orphaned configs"

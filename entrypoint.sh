@@ -52,7 +52,7 @@ fi
 # Apply network mode if not "full" (full = no restrictions)
 if [ "$SANDBOX_NETWORK_MODE" = "limited" ]; then
     echo "Applying limited network mode..."
-    sudo /home/ubuntu/network-firewall.sh
+    sudo /usr/local/bin/network-firewall.sh
 elif [ "$SANDBOX_NETWORK_MODE" = "host-only" ]; then
     echo "Applying host-only network mode..."
     sudo network-mode host-only

@@ -205,7 +205,7 @@ cdspr   # alias for: claude --dangerously-skip-permissions --resume
 ### Gemini CLI
 
 ```bash
-# Requires GEMINI_API_KEY
+# Requires: run `gemini auth` on host first
 gemini
 ```
 
@@ -222,8 +222,9 @@ On your host (before creating sandbox):
 
 ```bash
 export ANTHROPIC_API_KEY="sk-ant-..."
-export GEMINI_API_KEY="..."
 export OPENAI_API_KEY="sk-..."
+
+# For Gemini CLI, run: gemini auth
 
 # Now create sandbox
 cast new owner/repo feature
@@ -234,7 +235,8 @@ Or create `~/.api_keys` on the host (sourced in sandbox):
 ```bash
 # ~/.api_keys
 export ANTHROPIC_API_KEY="sk-ant-..."
-export GEMINI_API_KEY="..."
+export OPENAI_API_KEY="sk-..."
+# Note: Gemini uses OAuth via ~/.gemini/ (run `gemini auth` on host)
 ```
 
 ---

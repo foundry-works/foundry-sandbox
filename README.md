@@ -29,6 +29,11 @@ Foundry Sandbox solves this by providing isolated Docker environments with defen
 
 Linux and macOS supported natively. Windows users need WSL2.
 
+macOS notes:
+- Docker Desktop file sharing must include any host paths you plan to mount into the container.
+- Example: if you run `cast new owner/repo --mount ~/GitHub/myrepo:/workspace`, add `/Users/<you>/GitHub` in Docker Desktop → Settings → Resources → File Sharing.
+- macOS ships Bash 3.2; install Bash 4+ (e.g., `brew install bash`) and run `cast` with the newer bash (e.g., `alias cast='bash ~/.foundry-sandbox/sandbox.sh'`).
+
 ## Installation
 
 ### Quick Install (Recommended)
@@ -260,14 +265,15 @@ The sandbox automatically copies credential files from your host into containers
 | `~/.gitconfig` | `/home/ubuntu/.gitconfig` | Git configuration |
 | `~/.ssh/` | `/home/ubuntu/.ssh/` | SSH keys |
 | `~/.config/gh/` | `/home/ubuntu/.config/gh/` | GitHub CLI (from `gh auth login`) |
-| `~/.local/share/opencode/auth.json` | `/home/ubuntu/.local/share/opencode/auth.json` | OpenCode (from `opencode auth login`) |
+| `~/.gemini/` | `/home/ubuntu/.gemini/` | Gemini CLI OAuth (from `gemini auth`) |
+| `~/.config/opencode/` | `/home/ubuntu/.config/opencode/` | OpenCode config (opencode.json) |
+| `~/.local/share/opencode/auth.json` | `/home/ubuntu/.local/share/opencode/auth.json` | OpenCode auth (from `opencode auth login`) |
 
 **Create `~/.api_keys` on your host:**
 
 ```bash
 cat > ~/.api_keys << 'EOF'
 export CLAUDE_CODE_OAUTH_TOKEN="..."   # Get via: claude setup-token
-export GEMINI_API_KEY="..."
 export OPENAI_API_KEY="sk-..."
 export CURSOR_API_KEY="key-..."
 # Deep research providers (foundry-mcp)
@@ -278,6 +284,12 @@ export GOOGLE_CSE_ID="..."
 EOF
 chmod 600 ~/.api_keys
 ```
+
+**For Gemini CLI:** Run `gemini auth` on your host to authenticate. The OAuth credentials in `~/.gemini/` are automatically copied into containers.
+
+**For OpenCode:** Run `opencode auth login` for standard auth. To use subscription-based models:
+- [opencode-openai-codex-auth](https://github.com/numman-ali/opencode-openai-codex-auth) - Use OpenAI/Codex with ChatGPT subscription
+- [opencode-antigravity-auth](https://github.com/NoeFabris/opencode-antigravity-auth) - Use Gemini with Google AI subscription
 
 Replace the placeholder values with your actual keys. The file is sourced automatically when containers start.
 

@@ -11,6 +11,7 @@ source "$SCRIPT_DIR/lib/utils.sh"
 source "$SCRIPT_DIR/lib/fs.sh"
 source "$SCRIPT_DIR/lib/format.sh"
 source "$SCRIPT_DIR/lib/validate.sh"
+source "$SCRIPT_DIR/lib/api_keys.sh"
 source "$SCRIPT_DIR/lib/args.sh"
 source "$SCRIPT_DIR/lib/prompt.sh"
 source "$SCRIPT_DIR/lib/git.sh"
@@ -25,6 +26,7 @@ source "$SCRIPT_DIR/lib/state.sh"
 source "$SCRIPT_DIR/lib/runtime.sh"
 source "$SCRIPT_DIR/lib/json.sh"
 source "$SCRIPT_DIR/lib/inspect.sh"
+source "$SCRIPT_DIR/lib/network.sh"
 source "$SCRIPT_DIR/commands/build.sh"
 
 export_docker_env
@@ -37,6 +39,10 @@ case "$cmd" in
     new|list|attach|start|stop|destroy|build|help|status|config|prune|info)
         source "$SCRIPT_DIR/commands/$cmd.sh"
         "cmd_$cmd" "$@"
+        ;;
+    destroy-all)
+        source "$SCRIPT_DIR/commands/destroy-all.sh"
+        cmd_destroy_all "$@"
         ;;
     --help|-h)
         source "$SCRIPT_DIR/commands/help.sh"

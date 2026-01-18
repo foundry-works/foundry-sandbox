@@ -9,7 +9,7 @@ _cast_completions() {
 
     # First argument: commands
     if [ "$COMP_CWORD" -eq 1 ]; then
-        COMPREPLY=($(compgen -W "new list attach start stop destroy build help status config prune info" -- "$cur"))
+        COMPREPLY=($(compgen -W "new list attach start stop destroy destroy-all build help status config prune info" -- "$cur"))
         return
     fi
 
@@ -28,6 +28,9 @@ _cast_completions() {
             ;;
         destroy)
             COMPREPLY=($(compgen -W "--keep-worktree --force -f --yes -y" -- "$cur"))
+            ;;
+        destroy-all)
+            COMPREPLY=($(compgen -W "--keep-worktree" -- "$cur"))
             ;;
         list|status|config|info)
             COMPREPLY=($(compgen -W "--json" -- "$cur"))

@@ -68,10 +68,10 @@ remove_from_rc "$HOME/.zshrc"
 echo ""
 
 # Ask about Docker image
-echo -n "Remove Docker image (ai-dev-sandbox:latest)? [y/N] "
+echo -n "Remove Docker image (foundry-sandbox:latest)? [y/N] "
 read -r response
 if [[ "$response" =~ ^[Yy] ]]; then
-    if docker image rm ai-dev-sandbox:latest 2>/dev/null; then
+    if docker image rm foundry-sandbox:latest 2>/dev/null; then
         echo -e "  ${GREEN}✓${NC} Removed Docker image"
     else
         echo -e "  ${YELLOW}!${NC} Docker image not found or could not be removed"

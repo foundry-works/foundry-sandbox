@@ -7,6 +7,7 @@ parse_new_args() {
     NEW_MOUNTS=()
     NEW_COPIES=()
     NEW_NETWORK_MODE="${SANDBOX_NETWORK_MODE:-limited}"
+    NEW_SKIP_KEY_CHECK=false
 
     while [ $# -gt 0 ]; do
         case "$1" in
@@ -24,6 +25,9 @@ parse_new_args() {
                     NEW_NETWORK_MODE="$1"
                     validate_network_mode "$NEW_NETWORK_MODE"
                 fi
+                ;;
+            --skip-key-check)
+                NEW_SKIP_KEY_CHECK=true
                 ;;
             *)
                 if [ -z "$NEW_REPO_URL" ]; then
@@ -65,3 +69,4 @@ parse_build_args() {
         shift
     done
 }
+
