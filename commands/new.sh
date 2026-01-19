@@ -129,8 +129,24 @@ OVERRIDES
                 continue
             fi
             echo "  $src -> $dst"
-            run_cmd docker exec "$container_id" mkdir -p "$(dirname "$dst")"
-            run_cmd docker cp "$src" "$container_id:$dst"
+            # Use tar piping instead of docker cp to avoid read-only rootfs issues
+            if [ -d "$src" ]; then
+                run_cmd docker exec "$container_id" mkdir -p "$dst"
+                tar -C "$src" -cf - . | docker exec -i "$container_id" tar -C "$dst" -xf -
+            else
+                local src_dir src_base dst_dir dst_base
+                src_dir="$(dirname "$src")"
+                src_base="$(basename "$src")"
+                dst_dir="$(dirname "$dst")"
+                dst_base="$(basename "$dst")"
+                run_cmd docker exec "$container_id" mkdir -p "$dst_dir"
+                if [ "$src_base" = "$dst_base" ]; then
+                    tar -C "$src_dir" -cf - "$src_base" | docker exec -i "$container_id" tar -C "$dst_dir" -xf -
+                else
+                    # Handle file renaming via tar transform
+                    tar -C "$src_dir" --transform="s|^$src_base\$|$dst_base|" -cf - "$src_base" | docker exec -i "$container_id" tar -C "$dst_dir" -xf -
+                fi
+            fi
         done
     fi
 
