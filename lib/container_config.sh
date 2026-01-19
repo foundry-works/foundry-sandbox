@@ -79,9 +79,10 @@ copy_dir_to_container() {
     while true; do
         run_cmd docker exec "$container_id" mkdir -p "$dst"
         if [ "$SANDBOX_VERBOSE" = "1" ]; then
-            echo "+ tar -C \"$src\" -cf - . | docker exec -i \"$container_id\" tar -C \"$dst\" -xf -"
+            echo "+ COPYFILE_DISABLE=1 tar -C \"$src\" -cf - . | docker exec -i \"$container_id\" tar -C \"$dst\" -xf -"
         fi
-        if tar -C "$src" -cf - . | docker exec -i "$container_id" tar -C "$dst" -xf -; then
+        # COPYFILE_DISABLE=1 prevents macOS tar from including extended attributes
+        if COPYFILE_DISABLE=1 tar -C "$src" -cf - . | docker exec -i "$container_id" tar -C "$dst" -xf -; then
             return 0
         fi
         attempts=$((attempts + 1))
@@ -107,9 +108,10 @@ copy_file_to_container() {
     while true; do
         run_cmd docker exec "$container_id" mkdir -p "$parent_dir"
         if [ "$SANDBOX_VERBOSE" = "1" ]; then
-            echo "+ tar -C \"$src_dir\" -cf - \"$src_base\" | docker exec -i \"$container_id\" tar -C \"$parent_dir\" -xf -"
+            echo "+ COPYFILE_DISABLE=1 tar -C \"$src_dir\" -cf - \"$src_base\" | docker exec -i \"$container_id\" tar -C \"$parent_dir\" -xf -"
         fi
-        if tar -C "$src_dir" -cf - "$src_base" | docker exec -i "$container_id" tar -C "$parent_dir" -xf -; then
+        # COPYFILE_DISABLE=1 prevents macOS tar from including extended attributes
+        if COPYFILE_DISABLE=1 tar -C "$src_dir" -cf - "$src_base" | docker exec -i "$container_id" tar -C "$parent_dir" -xf -; then
             return 0
         fi
         attempts=$((attempts + 1))
