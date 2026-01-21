@@ -296,7 +296,7 @@ The sandbox automatically copies credential files from your host into containers
 | `~/.ssh/` | `/home/ubuntu/.ssh/` | SSH config/keys (when enabled) |
 | `~/.config/gh/` | `/home/ubuntu/.config/gh/` | GitHub CLI (from `gh auth login`) |
 | `~/.gemini/` | `/home/ubuntu/.gemini/` | Gemini CLI OAuth (from `gemini auth`) |
-| `~/.config/opencode/opencode.json` | `/home/ubuntu/.config/opencode/opencode.json` | OpenCode config (template in repo used if missing on host) |
+| `~/.config/opencode/opencode.json` | `/home/ubuntu/.config/opencode/opencode.json` | OpenCode config |
 | `~/.config/opencode/antigravity-accounts.json` | `/home/ubuntu/.config/opencode/antigravity-accounts.json` | OpenCode Antigravity accounts (host file only) |
 | `~/.local/share/opencode/auth.json` | `/home/ubuntu/.local/share/opencode/auth.json` | OpenCode auth (from `opencode auth login`) |
 
