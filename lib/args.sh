@@ -7,6 +7,9 @@ parse_new_args() {
     NEW_MOUNTS=()
     NEW_COPIES=()
     NEW_NETWORK_MODE="${SANDBOX_NETWORK_MODE:-limited}"
+    NEW_SYNC_SSH="${SANDBOX_SYNC_SSH:-0}"
+    NEW_SSH_MODE="${SANDBOX_SSH_MODE:-always}"
+    NEW_SYNC_API_KEYS="${SANDBOX_SYNC_API_KEYS:-1}"
     NEW_SKIP_KEY_CHECK=false
 
     while [ $# -gt 0 ]; do
@@ -26,6 +29,28 @@ parse_new_args() {
                     validate_network_mode "$NEW_NETWORK_MODE"
                 fi
                 ;;
+            --network=*|-n=*)
+                NEW_NETWORK_MODE="${1#*=}"
+                if [ -n "$NEW_NETWORK_MODE" ]; then
+                    validate_network_mode "$NEW_NETWORK_MODE"
+                fi
+                ;;
+            --with-ssh)
+                NEW_SYNC_SSH="1"
+                NEW_SSH_MODE="always"
+                ;;
+            --no-ssh|--without-ssh)
+                die "Flag removed: SSH is disabled by default. Use --with-ssh to enable."
+                ;;
+            --with-ssh-always)
+                die "Flag removed: use --with-ssh."
+                ;;
+            --with-api-keys)
+                NEW_SYNC_API_KEYS="1"
+                ;;
+            --no-api-keys)
+                NEW_SYNC_API_KEYS="0"
+                ;;
             --skip-key-check)
                 NEW_SKIP_KEY_CHECK=true
                 ;;
@@ -41,6 +66,10 @@ parse_new_args() {
         esac
         shift
     done
+
+    if [ "$NEW_SYNC_SSH" = "1" ]; then
+        validate_ssh_mode "$NEW_SSH_MODE"
+    fi
 }
 
 parse_destroy_args() {
@@ -69,4 +98,3 @@ parse_build_args() {
         shift
     done
 }
-

@@ -19,12 +19,16 @@ _cast_completions() {
             COMPREPLY=($(compgen -f -- "$cur"))
             return
             ;;
+        --network|-n)
+            COMPREPLY=($(compgen -W "full limited host-only none" -- "$cur"))
+            return
+            ;;
     esac
 
     # Flag completion by command
     case "$cmd" in
         new)
-            COMPREPLY=($(compgen -W "--mount -v --copy -c" -- "$cur"))
+            COMPREPLY=($(compgen -W "--mount -v --copy -c --network -n --with-ssh --with-api-keys --skip-key-check" -- "$cur"))
             ;;
         destroy)
             COMPREPLY=($(compgen -W "--keep-worktree --force -f --yes -y" -- "$cur"))

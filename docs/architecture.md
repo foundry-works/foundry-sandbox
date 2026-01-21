@@ -17,13 +17,16 @@ This document explains the technical design of Foundry Sandbox: how components f
 │  │  ┌──────────────────────────────────────────────┐   │   │
 │  │  │            SAFETY LAYERS                      │   │   │
 │  │  │                                               │   │   │
-│  │  │  Layer 1: Shell Overrides (UX)               │   │   │
-│  │  │  Layer 2: Operator Approval (human-in-loop)  │   │   │
-│  │  │  Layer 3: Sudoers Allowlist (kernel-enforced)│   │   │
+│  │  │  Layer 1: Shell Overrides (UX warnings)      │   │   │
+│  │  │  Layer 2: Credential Redaction (mask secrets)│   │   │
+│  │  │  Layer 3: Operator Approval (human-in-loop)  │   │   │
+│  │  │  Layer 4: Sudoers Allowlist (kernel-enforced)│   │   │
+│  │  │  Layer 5: Network Isolation (iptables)       │   │   │
+│  │  │  Layer 6: Read-only Root (Docker enforced)   │   │   │
 │  │  └──────────────────────────────────────────────┘   │   │
 │  │                                                      │   │
 │  │  /workspace ◄─── volume mount (git worktree)        │   │
-│  │  /home/ubuntu ◄─ tmpfs (ephemeral, resets on stop)  │   │
+│  │  /home/ubuntu ◄─ tmpfs (ephemeral; ~/.claude persisted)│   │
 │  │  /tmp, /var ◄─── tmpfs (ephemeral)                  │   │
 │  │  / (root) ◄────── read-only filesystem              │   │
 │  │                                                      │   │
@@ -118,7 +121,7 @@ tmpfs:
 ```
 
 **Why tmpfs for /home?**
-- AI tool configs (Claude settings, API tokens) don't persist across restarts
+- Most AI tool configs don't persist across restarts (except `~/.claude`, which is persisted per sandbox)
 - Prevents accumulation of cached data
 - Forces explicit config management via host mounts
 
@@ -139,12 +142,10 @@ Each sandbox has associated state stored on the host:
 ```
 ~/.sandboxes/
 ├── worktrees/<name>/           # Git worktree (the code)
-├── claude-config/<name>/       # Claude Code settings
-│   ├── .claude/
-│   │   ├── .claude.json        # Claude config
-│   │   └── .credentials.json   # OAuth tokens (copied from host)
-│   └── projects/               # Project-specific settings
-└── worktrees/<name>.metadata   # Sandbox metadata (repo, branch, mounts)
+└── claude-config/<name>/       # Sandbox config + overrides
+    ├── claude/                 # Persisted ~/.claude
+    ├── docker-compose.override.yml
+    └── metadata.json           # Sandbox metadata (repo, branch, mounts)
 ```
 
 ### Metadata File
@@ -153,9 +154,13 @@ Created by `cast new`, records sandbox configuration:
 
 ```json
 {
-  "repo": "https://github.com/owner/repo",
+  "repo_url": "https://github.com/owner/repo",
   "branch": "feature-branch",
   "from_branch": "main",
+  "network_mode": "limited",
+  "sync_ssh": 0,
+  "ssh_mode": "disabled",
+  "sync_api_keys": 1,
   "mounts": ["/data:/data"],
   "copies": []
 }
@@ -169,7 +174,7 @@ When a container starts, `entrypoint.sh` runs:
 Container Start
       │
       ▼
-Create /home directories (tmpfs is empty)
+Create /home directories (tmpfs is empty; ~/.claude is mounted)
       │
       ▼
 Set up npm prefix for local installs
@@ -214,10 +219,13 @@ foundry-sandbox/
 │   ├── destroy.sh          # cast destroy
 │   └── ...                 # Other commands
 │
-└── safety/                 # Security guardrails
-    ├── shell-overrides.sh  # Layer 1: Shell functions
-    ├── operator-approve    # Layer 2: Human approval
-    └── sudoers-allowlist   # Layer 3: Sudo restrictions
+└── safety/                     # Security guardrails
+    ├── shell-overrides.sh      # Layer 1: Shell functions
+    ├── credential-redaction.sh # Layer 2: Credential masking
+    ├── operator-approve        # Layer 3: Human approval
+    ├── sudoers-allowlist       # Layer 4: Sudo restrictions
+    ├── network-firewall.sh     # Layer 5: Network isolation
+    └── network-mode            # Layer 5: Mode switcher
 ```
 
 ## Component Interactions

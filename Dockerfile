@@ -2,6 +2,7 @@ FROM ubuntu:24.04
 
 ARG UID=1000
 ARG GID=1000
+ARG USERNAME=ubuntu
 
 # Avoid prompts during package installation
 ENV DEBIAN_FRONTEND=noninteractive
@@ -23,6 +24,7 @@ RUN apt-get update && apt-get install -y \
     python3 \
     python3-pip \
     iptables \
+    ipset \
     iproute2 \
     dnsutils \
     && rm -rf /var/lib/apt/lists/* \
@@ -44,8 +46,16 @@ RUN curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg \
     && apt-get update && apt-get install -y gh \
     && rm -rf /var/lib/apt/lists/*
 
-# Ubuntu 24.04 already has ubuntu user with UID/GID 1000
-# Install safety guardrails (before switching to ubuntu user)
+# Create user (ubuntu exists by default, create custom user if different)
+# Symlink their home to /home/ubuntu for docker-compose tmpfs mount compatibility
+RUN if [ "$USERNAME" != "ubuntu" ]; then \
+        userdel -r ubuntu 2>/dev/null || true; \
+        groupadd -g $GID $USERNAME; \
+        useradd -m -u $UID -g $GID -s /bin/bash -d /home/ubuntu $USERNAME; \
+        ln -sf /home/ubuntu /home/$USERNAME; \
+    fi
+
+# Install safety guardrails
 
 # Layer 1: Shell function overrides (loaded by all bash sessions)
 COPY safety/shell-overrides.sh /etc/profile.d/shell-overrides.sh
@@ -57,7 +67,8 @@ RUN chmod 644 /etc/profile.d/credential-redaction.sh
 
 # Layer 2: Strict sudoers allowlist (no NOPASSWD:ALL fallback)
 COPY safety/sudoers-allowlist /etc/sudoers.d/allowlist
-RUN chmod 440 /etc/sudoers.d/allowlist && visudo -c
+RUN sed -i "s/^ubuntu/$USERNAME/g" /etc/sudoers.d/allowlist && \
+    chmod 440 /etc/sudoers.d/allowlist && visudo -c
 
 # Layer 3: Operator approval wrapper (NOT in AI's PATH)
 RUN mkdir -p /opt/operator/bin
@@ -80,7 +91,7 @@ RUN npm install -g @anthropic-ai/claude-code \
     && npm install -g opencode-ai @opencode-ai/sdk
 
 # Install Python packages globally (to /usr/local/lib/python3)
-RUN pip3 install foundry-mcp pytest-asyncio hypothesis
+RUN pip3 install foundry-mcp pytest-asyncio hypothesis cc-context-stats pyright
 
 # Fix ESM module resolution for OpenCode SDK wrapper
 # ESM imports don't respect NODE_PATH, so we create a symlink from foundry-mcp's
@@ -101,19 +112,20 @@ RUN echo "alias cdsp='claude --dangerously-skip-permissions'" >> /etc/bash.bashr
     echo "alias cdspr='claude --dangerously-skip-permissions --resume'" >> /etc/bash.bashrc && \
     echo '[ -f "$HOME/.api_keys" ] && source "$HOME/.api_keys"' >> /etc/bash.bashrc
 
-# Pre-configured Claude config with foundry plugin (copied to /home/ubuntu on first run)
-# Includes: foundry-mcp MCP server, skills (foundry-spec, foundry-implement, etc.)
-COPY docker/.claude /etc/skel/.claude
-RUN chmod -R 755 /etc/skel/.claude
+# Pre-populate GitHub SSH host keys (prevents "authenticity of host" prompts)
+RUN mkdir -p /etc/skel/.ssh && \
+    ssh-keyscan -t ed25519,rsa github.com >> /etc/skel/.ssh/known_hosts 2>/dev/null && \
+    chmod 700 /etc/skel/.ssh && \
+    chmod 644 /etc/skel/.ssh/known_hosts
 
 # Copy entrypoint to system path (not /home which is tmpfs)
 COPY entrypoint.sh /usr/local/bin/entrypoint.sh
 RUN chmod +x /usr/local/bin/entrypoint.sh
 
-USER ubuntu
+USER $USERNAME
 WORKDIR /workspace
 
-# Set up paths for user
+# Set up paths for user (use /home/ubuntu for compatibility - symlinked if different user)
 ENV PATH="/usr/local/go/bin:/home/ubuntu/go/bin:/home/ubuntu/.local/bin:$PATH"
 ENV GOPATH="/home/ubuntu/go"
 

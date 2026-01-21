@@ -34,7 +34,7 @@ AI assistants execute bash commands. Any command the AI runs could potentially:
 - Overwrite history (`git reset --hard`, `git push --force`)
 - Modify system state (`sudo rm`, package removal)
 
-**Mitigation:** Three-layer defense (shell overrides, operator approval, sudoers allowlist)
+**Mitigation:** Defense in depth (shell overrides, operator approval, sudoers allowlist, network isolation, read-only root)
 
 ### 2. Git Operations
 
@@ -119,14 +119,14 @@ The real security comes from Layers 2 and 3, plus the read-only filesystem.
 
 ### Network Access
 
-By default, sandboxes have full network access. However, you can restrict network access using the `--network` flag:
+By default, sandboxes use limited network access. You can change the mode using the `--network` flag:
 
 ```bash
-# Full network (default)
+# Limited to whitelist (default)
 cast new owner/repo feature
 
-# Limited to whitelist (github, npm, pypi, AI APIs)
-cast new owner/repo feature --network=limited
+# Full network access
+cast new owner/repo feature --network=full
 
 # Local network only (Docker gateway, private subnets)
 cast new owner/repo feature --network=host-only

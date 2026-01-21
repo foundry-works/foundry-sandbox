@@ -10,30 +10,35 @@ AI Command ──► Layer 1 (Shell Override)
                     ├─ Blocked pattern ──► DENIED (friendly message)
                     │
                     ▼
-              Layer 2 (Operator Approval)  ◄── requires TTY
+              Layer 2 (Credential Redaction)
+                    │
+                    └─ Masks secrets in output (defense in depth)
+                    │
+                    ▼
+              Layer 3 (Operator Approval)  ◄── requires TTY
                     │
                     ├─ No TTY (AI) ──► DENIED
                     ├─ TTY + "approve" ──► ALLOWED
                     │
                     ▼
-              Layer 3 (Sudoers)
+              Layer 4 (Sudoers)
                     │
                     ├─ Not in allowlist ──► DENIED
                     └─ In allowlist ──► ALLOWED
                     │
                     ▼
-              Layer 4 (Network Isolation)  ◄── optional
+              Layer 5 (Network Isolation)  ◄── optional
                     │
                     ├─ Not in whitelist ──► DENIED (connection refused)
                     └─ In whitelist ──► ALLOWED
                     │
                     ▼
-              Layer 0 (Read-only Root)
+              Layer 6 (Read-only Root)
                     │
                     └─ Write to / ──► DENIED (filesystem error)
 ```
 
-## Layer 0: Read-Only Root Filesystem
+## Layer 6: Read-Only Root Filesystem
 
 **Purpose:** Last line of defense. Even if all other layers fail, the filesystem blocks writes.
 
@@ -132,7 +137,20 @@ $(which rm) -rf /       # Via command substitution
 
 **This is intentional.** Layer 1 is for UX, not security. It catches accidental use while still allowing humans to override when needed. The read-only filesystem (Layer 0) prevents actual damage.
 
-## Layer 2: Operator Approval Wrapper
+## Layer 2: Credential Redaction
+
+**Purpose:** Defense in depth. Masks secrets and sensitive values in command output to prevent accidental exposure.
+
+**Implementation:** Shell function wrapper that filters output through pattern matching.
+
+**What it masks:**
+- API keys and tokens (patterns like `sk-*`, `key-*`, bearer tokens)
+- Environment variable values containing sensitive keywords
+- Common secret patterns in logs and output
+
+**Bypass:** Can be bypassed by reading files directly or using commands that don't go through the shell wrapper. This is intentional—the layer provides defense in depth, not security.
+
+## Layer 3: Operator Approval Wrapper
 
 **Purpose:** Human-in-the-loop for sensitive operations. Requires interactive confirmation from a TTY.
 
@@ -199,7 +217,7 @@ Use operator approval for commands that:
 2. Cannot be protected by other layers
 3. Benefit from human review
 
-## Layer 3: Sudoers Allowlist
+## Layer 4: Sudoers Allowlist
 
 **Purpose:** Kernel-enforced restriction on sudo commands. Cannot be bypassed from userspace.
 
@@ -255,7 +273,7 @@ ubuntu ALL=(ALL) NOPASSWD: /usr/bin/pip *
 
 Then: `cast build`
 
-## Layer 4: Network Isolation
+## Layer 5: Network Isolation
 
 **Purpose:** Optional network restrictions. Limits outbound connections to whitelisted domains or local network only.
 
@@ -267,19 +285,19 @@ Then: `cast build`
 
 | Mode | Description |
 |------|-------------|
-| `full` | Unrestricted network access (default) |
-| `limited` | Whitelist only (github, npm, pypi, AI APIs) |
+| `full` | Unrestricted network access |
+| `limited` | Whitelist only (github, npm, pypi, AI APIs) **(default)** |
 | `host-only` | Local network only (Docker gateway, private subnets) |
 | `none` | Complete block (loopback only) |
 
 ### Creating with Network Mode
 
 ```bash
-# Full network (default)
+# Limited to whitelist (default)
 cast new owner/repo feature
 
-# Limited to whitelist
-cast new owner/repo feature --network=limited
+# Full network
+cast new owner/repo feature --network=full
 
 # Local network only
 cast new owner/repo feature --network=host-only
@@ -294,7 +312,7 @@ Inside the container, you can switch modes without restarting:
 
 ```bash
 # Check current mode
-network-mode
+sudo network-mode status
 
 # Switch to limited
 sudo network-mode limited
@@ -334,11 +352,12 @@ cast new owner/repo feature --network=limited
 
 | Layer | Purpose | Enforced By | Bypassable? |
 |-------|---------|-------------|-------------|
-| 0 | Block filesystem writes | Docker/kernel | No (from container) |
 | 1 | Friendly UX warnings | Shell functions | Yes (intentionally) |
-| 2 | Human approval | TTY check | No (from non-interactive) |
-| 3 | Sudo restrictions | Kernel | No (from userspace) |
-| 4 | Network isolation | iptables/Docker | No (from container) |
+| 2 | Credential redaction | Shell functions | Yes (defense in depth) |
+| 3 | Human approval | TTY check | No (from non-interactive) |
+| 4 | Sudo restrictions | Kernel | No (from userspace) |
+| 5 | Network isolation | iptables/Docker | No (from container) |
+| 6 | Block filesystem writes | Docker/kernel | No (from container) |
 
 ## Testing the Layers
 
@@ -353,7 +372,7 @@ git reset --hard
 # Output: BLOCKED: git reset --hard requires operator approval
 ```
 
-### Test Layer 2 (Operator Approval)
+### Test Layer 3 (Operator Approval)
 
 ```bash
 # Interactive (will prompt)
@@ -363,7 +382,7 @@ git reset --hard
 echo "test" | /opt/operator/bin/operator-approve echo "test"
 ```
 
-### Test Layer 3 (Sudoers)
+### Test Layer 4 (Sudoers)
 
 ```bash
 # Should work
@@ -374,7 +393,7 @@ sudo rm /tmp/test
 # Output: Sorry, user ubuntu is not allowed to execute '/bin/rm /tmp/test'
 ```
 
-### Test Layer 0 (Read-only Root)
+### Test Layer 6 (Read-only Root)
 
 ```bash
 # Bypass Layer 1 and try to write

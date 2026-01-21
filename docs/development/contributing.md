@@ -47,10 +47,13 @@ foundry-sandbox/
 │   ├── info.sh             # cast info
 │   └── help.sh             # cast help
 │
-├── safety/                 # Security guardrails
-│   ├── shell-overrides.sh  # Layer 1: Shell function overrides
-│   ├── operator-approve    # Layer 2: Human approval wrapper
-│   └── sudoers-allowlist   # Layer 3: Sudo restrictions
+├── safety/                     # Security guardrails
+│   ├── shell-overrides.sh      # Layer 1: Shell function overrides
+│   ├── credential-redaction.sh # Layer 1b: Credential masking
+│   ├── operator-approve        # Layer 2: Human approval wrapper
+│   ├── sudoers-allowlist       # Layer 3: Sudo restrictions
+│   ├── network-firewall.sh     # Layer 4: Network isolation rules
+│   └── network-mode            # Layer 4: Network mode switcher
 │
 ├── tests/                  # Test suite
 │

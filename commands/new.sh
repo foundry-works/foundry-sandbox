@@ -8,7 +8,38 @@ cmd_new() {
     local mounts=("${NEW_MOUNTS[@]}")
     local copies=("${NEW_COPIES[@]}")
     local network_mode="$NEW_NETWORK_MODE"
+    local sync_ssh="$NEW_SYNC_SSH"
+    local ssh_mode="$NEW_SSH_MODE"
+    local sync_api_keys="$NEW_SYNC_API_KEYS"
     local skip_key_check="$NEW_SKIP_KEY_CHECK"
+    local ssh_agent_sock=""
+    local repo_root=""
+    local current_branch=""
+
+    if [ -n "$repo_url" ]; then
+        case "$repo_url" in
+            .|/*|./*|../*|~/*)
+                repo_root=$(git -C "$repo_url" rev-parse --show-toplevel 2>/dev/null || true)
+                if [ -z "$repo_root" ]; then
+                    die "Not a git repository: $repo_url"
+                fi
+                current_branch=$(git -C "$repo_root" rev-parse --abbrev-ref HEAD 2>/dev/null || true)
+                if [ -z "$current_branch" ] || [ "$current_branch" = "HEAD" ]; then
+                    die "Repository is in a detached HEAD state; specify a base branch."
+                fi
+                if [ -z "$branch" ] && [ -z "$from_branch" ]; then
+                    from_branch="$current_branch"
+                fi
+                local origin_url
+                origin_url=$(git -C "$repo_root" remote get-url origin 2>/dev/null || true)
+                if [ -n "$origin_url" ]; then
+                    repo_url="$origin_url"
+                else
+                    repo_url="$repo_root"
+                fi
+                ;;
+        esac
+    fi
 
     if [ -z "$branch" ]; then
         local timestamp
@@ -16,7 +47,7 @@ cmd_new() {
         local repo_name
         repo_name=$(basename "${repo_url%.git}" | sed 's/.*\///')
         branch="sandbox/${repo_name}-${timestamp}"
-        from_branch="main"
+        from_branch="${from_branch:-main}"
     fi
 
     if [ -z "$repo_url" ]; then
@@ -25,12 +56,16 @@ cmd_new() {
         echo "Options:"
         echo "  --mount, -v host:container[:ro]  Mount host path into container"
         echo "  --copy, -c  host:container       Copy host path into container (once at creation)"
-        echo "  --network, -n <mode>             Network isolation mode (default: full)"
+        echo "  --network, -n <mode>             Network isolation mode (default: limited)"
         echo "                                   Modes: full, limited, host-only, none"
+        echo "  --with-ssh                       Enable SSH agent forwarding (opt-in, agent-only)"
+        echo "  --with-api-keys                  Sync ~/.api_keys into the sandbox (default)"
+        echo "  --no-api-keys                    Do not sync ~/.api_keys into the sandbox"
         echo "  --skip-key-check                 Skip API key validation"
         echo ""
         echo "Examples:"
         echo "  $0 new user/repo                     # auto-create sandbox branch from main"
+        echo "  $0 new .                             # use current repo/branch"
         echo "  $0 new user/repo feature-branch      # checkout existing branch"
         echo "  $0 new user/repo new-feature main    # create new branch from main"
         echo "  $0 new user/repo feature --mount /data:/data --mount /models:/models:ro"
@@ -63,12 +98,34 @@ cmd_new() {
         done
     fi
 
-    if [[ "$repo_url" != http* && "$repo_url" != git@* ]]; then
+    if [[ "$repo_url" != http* && "$repo_url" != git@* && "$repo_url" != *"://"* && "$repo_url" != /* && "$repo_url" != ./* && "$repo_url" != ../* && "$repo_url" != ~/* ]]; then
         repo_url="https://github.com/$repo_url"
     fi
 
     validate_git_url "$repo_url"
     check_image_freshness
+
+    SANDBOX_NETWORK_MODE="$network_mode"
+    SANDBOX_SYNC_SSH="$sync_ssh"
+    SANDBOX_SSH_MODE=""
+    if [ "$SANDBOX_SYNC_SSH" = "1" ]; then
+        if [ "$ssh_mode" = "init" ] || [ "$ssh_mode" = "disabled" ]; then
+            log_warn "SSH mode '$ssh_mode' disables forwarding; use --with-ssh to enable."
+            SANDBOX_SYNC_SSH="0"
+        else
+            SANDBOX_SSH_MODE="always"
+        fi
+    fi
+    if [ "$SANDBOX_SYNC_SSH" != "1" ]; then
+        SANDBOX_SSH_MODE="disabled"
+    fi
+    SANDBOX_SYNC_API_KEYS="$sync_api_keys"
+    if [ "$SANDBOX_SYNC_SSH" = "1" ]; then
+        ssh_agent_sock=$(resolve_ssh_agent_sock) || ssh_agent_sock=""
+    fi
+    if [ "$SANDBOX_SYNC_API_KEYS" != "1" ] && file_exists ~/.api_keys; then
+        log_warn "API keys sync disabled; ~/.api_keys will not be copied (use --with-api-keys or set SANDBOX_SYNC_API_KEYS=1)."
+    fi
 
     local bare_path
     bare_path=$(repo_to_path "$repo_url")
@@ -90,6 +147,7 @@ cmd_new() {
 
     local override_file
     override_file=$(path_override_file "$name")
+    local claude_home_path
     if [ ${#mounts[@]} -gt 0 ]; then
         echo "Adding custom mounts..."
         cat > "$override_file" <<OVERRIDES
@@ -111,13 +169,33 @@ OVERRIDES
         add_network_to_override "full" "$override_file"
     fi
 
+    claude_home_path=$(path_claude_home "$name")
+    ensure_dir "$claude_home_path"
+    add_claude_home_to_override "$override_file" "$claude_home_path"
+
+    # Pre-populate Claude plugins on host before container starts (no network needed inside)
+    prepopulate_claude_plugins "$claude_home_path" "0"
+
+    local runtime_enable_ssh="0"
+    if [ "$SANDBOX_SYNC_SSH" = "1" ]; then
+        if [ -n "$ssh_agent_sock" ]; then
+            echo "Enabling SSH agent forwarding..."
+            add_ssh_agent_to_override "$override_file" "$ssh_agent_sock"
+            runtime_enable_ssh="1"
+        else
+            log_warn "SSH agent not detected; SSH forwarding disabled (agent-only mode)."
+            add_ssh_agent_to_override "$override_file" ""
+        fi
+    else
+        add_ssh_agent_to_override "$override_file" ""
+    fi
+
     write_sandbox_metadata "$name" "$repo_url" "$branch" "$from_branch" "${mounts[@]}" -- "${copies[@]}"
 
+    local container_id="${container}-dev-1"
     echo "Starting container: $container..."
     compose_up "$worktree_dir" "$claude_config_path" "$container" "$override_file"
-
-    local container_id="${container}-dev-1"
-    copy_configs_to_container "$container_id"
+    copy_configs_to_container "$container_id" "0" "$runtime_enable_ssh"
 
     if [ ${#copies[@]} -gt 0 ]; then
         echo "Copying files into container..."
@@ -131,24 +209,21 @@ OVERRIDES
             echo "  $src -> $dst"
             # Use tar piping instead of docker cp to avoid read-only rootfs issues
             if [ -d "$src" ]; then
-                run_cmd docker exec "$container_id" mkdir -p "$dst"
-                # COPYFILE_DISABLE=1 prevents macOS tar from including extended attributes
-                COPYFILE_DISABLE=1 tar -C "$src" -cf - . | docker exec -i "$container_id" tar -C "$dst" -xf -
+                copy_dir_to_container "$container_id" "$src" "$dst"
             else
-                local src_dir src_base dst_dir dst_base
-                src_dir="$(dirname "$src")"
-                src_base="$(basename "$src")"
-                dst_dir="$(dirname "$dst")"
-                dst_base="$(basename "$dst")"
-                run_cmd docker exec "$container_id" mkdir -p "$dst_dir"
-                if [ "$src_base" = "$dst_base" ]; then
-                    COPYFILE_DISABLE=1 tar -C "$src_dir" -cf - "$src_base" | docker exec -i "$container_id" tar -C "$dst_dir" -xf -
-                else
-                    # Handle file renaming via tar transform
-                    COPYFILE_DISABLE=1 tar -C "$src_dir" --transform="s|^$src_base\$|$dst_base|" -cf - "$src_base" | docker exec -i "$container_id" tar -C "$dst_dir" -xf -
-                fi
+                copy_file_to_container "$container_id" "$src" "$dst"
             fi
         done
+    fi
+
+    # Apply network restrictions AFTER plugin/MCP registration completes
+    if [ -n "$network_mode" ] && [ "$network_mode" != "full" ]; then
+        echo "Applying network mode: $network_mode"
+        if [ "$network_mode" = "limited" ]; then
+            run_cmd docker exec "$container_id" sudo /usr/local/bin/network-firewall.sh
+        else
+            run_cmd docker exec "$container_id" sudo /usr/local/bin/network-mode "$network_mode"
+        fi
     fi
 
     echo ""

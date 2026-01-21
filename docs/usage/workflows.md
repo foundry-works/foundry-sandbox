@@ -185,6 +185,17 @@ cast new owner/repo feature --copy /path/to/fixtures:/test-data
 
 ---
 
+## Installing SSH-Based Plugins
+
+Use SSH agent forwarding when you need Git-over-SSH (e.g., private repos).
+
+```bash
+# Enable SSH agent forwarding
+cast new owner/repo feature --with-ssh
+```
+
+---
+
 ## Using Different AI Tools
 
 The sandbox comes with multiple AI coding assistants pre-installed.
@@ -209,11 +220,25 @@ cdspr   # alias for: claude --dangerously-skip-permissions --resume
 gemini
 ```
 
+### Codex CLI
+
+```bash
+# Requires OPENAI_API_KEY
+codex
+```
+
 ### OpenCode
 
 ```bash
 # Requires OPENAI_API_KEY
 opencode
+```
+
+### Cursor Agent
+
+```bash
+# Requires CURSOR_API_KEY
+cursor
 ```
 
 ### Setting API Keys
@@ -229,6 +254,8 @@ export OPENAI_API_KEY="sk-..."
 # Now create sandbox
 cast new owner/repo feature
 ```
+
+By default, `~/.api_keys` is synced into the sandbox; use `--no-api-keys` to opt out.
 
 Or create `~/.api_keys` on the host (sourced in sandbox):
 
@@ -319,6 +346,13 @@ export GITHUB_TOKEN="ghp_..."
 cast new private-org/private-repo feature
 ```
 
+### SSH Access
+
+```bash
+# Forward your local SSH agent
+cast new owner/repo feature --with-ssh
+```
+
 ### SSH Keys (Alternative)
 
 ```bash
@@ -357,13 +391,13 @@ curl https://anything.com  # fails
 
 ```bash
 # Start with full network
-cast new owner/repo feature
+cast new owner/repo feature --network=full
 
 # Inside container, restrict later
 sudo network-mode limited
 
 # Check current status
-network-mode
+sudo network-mode status
 
 # Add a custom domain if needed
 sudo network-mode allow custom-api.example.com
@@ -391,6 +425,40 @@ export SANDBOX_ALLOWED_DOMAINS="internal-api.company.com,cache.myorg.net"
 cast new owner/repo feature --network=limited
 
 # These domains will be allowed in addition to defaults
+```
+
+---
+
+## Advanced Plugin Configuration
+
+### OpenCode Foundry
+
+The [opencode-foundry](https://github.com/foundry-works/opencode-foundry) skills are automatically synced on sandbox start. By default, the repo is cloned to `~/.sandboxes/vendor/opencode-foundry`.
+
+```bash
+# Use a local checkout instead
+export SANDBOX_OPENCODE_FOUNDRY_PATH=~/dev/opencode-foundry
+
+# Or override the GitHub source
+export SANDBOX_OPENCODE_FOUNDRY_REPO=https://github.com/your-org/opencode-foundry.git
+export SANDBOX_OPENCODE_FOUNDRY_BRANCH=develop
+```
+
+Skills are synced into `~/.config/opencode/skills` and the OpenCode config is merged from `install/assets/opencode-global.json` without overwriting existing settings.
+
+### OpenCode Plugins
+
+For npm-based OpenCode plugins:
+
+```bash
+# Prefetch npm plugins on sandbox creation (downloads to ~/.cache/opencode)
+export SANDBOX_OPENCODE_PREFETCH_NPM_PLUGINS=1
+
+# Or disable npm plugins entirely (use only local plugins)
+export SANDBOX_OPENCODE_DISABLE_NPM_PLUGINS=1
+
+# Use a local plugin directory
+export SANDBOX_OPENCODE_PLUGIN_DIR=~/dev/opencode-plugins
 ```
 
 ---
@@ -428,9 +496,15 @@ cast prune -f
 ### Debugging Issues
 
 ```bash
-# Enable debug output
-SANDBOX_DEBUG=1 cast attach mybox
+SANDBOX_DEBUG=1 cast list          # Debug logging
+SANDBOX_VERBOSE=1 cast start name  # Verbose output
+```
 
-# Check sandbox status
-cast status mybox
+### Network Whitelist
+
+Add custom domains to the limited network whitelist:
+
+```bash
+export SANDBOX_ALLOWED_DOMAINS="api.example.com,internal.corp.com"
+cast new owner/repo --network=limited
 ```
