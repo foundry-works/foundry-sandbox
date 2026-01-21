@@ -27,10 +27,58 @@ sed_inplace() {
     fi
 }
 
+is_macos() {
+    [[ "$OSTYPE" == "darwin"* ]]
+}
+
+resolve_ssh_agent_sock() {
+    if [ "${SANDBOX_SYNC_SSH:-0}" != "1" ]; then
+        return 1
+    fi
+
+    if [ -n "${SANDBOX_SSH_AUTH_SOCK:-}" ]; then
+        echo "$SANDBOX_SSH_AUTH_SOCK"
+        return 0
+    fi
+
+    if [ -z "${SSH_AUTH_SOCK:-}" ]; then
+        return 1
+    fi
+
+    if [ -S "$SSH_AUTH_SOCK" ]; then
+        echo "$SSH_AUTH_SOCK"
+        return 0
+    fi
+
+    return 1
+}
+
 # Convert repo URL to bare clone path
 # e.g., https://github.com/user/repo -> ~/.sandboxes/repos/github.com/user/repo.git
 repo_to_path() {
     local url="$1"
+    if [ -z "$url" ]; then
+        echo "$REPOS_DIR/unknown.git"
+        return
+    fi
+
+    # Local filesystem path (absolute or relative)
+    case "$url" in
+        ~/*|/*|./*|../*)
+            local expanded="$url"
+            if [[ "$expanded" == "~/"* ]]; then
+                expanded="${expanded/#\~/$HOME}"
+            fi
+            local abs="$expanded"
+            if [ -d "$expanded" ] || [ -f "$expanded" ]; then
+                abs=$(cd "$expanded" 2>/dev/null && pwd) || abs="$expanded"
+            fi
+            abs="${abs#/}"
+            echo "$REPOS_DIR/local/${abs}.git"
+            return
+            ;;
+    esac
+
     local path="${url#https://}"
     path="${path#git@}"
     path="${path/://}"
@@ -56,8 +104,6 @@ container_name() {
 export_docker_env() {
     export DOCKER_UID
     export DOCKER_GID
-    export HOST_USER
     DOCKER_UID=$(id -u)
     DOCKER_GID=$(id -g)
-    HOST_USER=$(whoami)
 }

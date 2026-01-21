@@ -16,7 +16,7 @@ cast new <repo> [branch] [from-branch] [options]
 
 | Argument | Description |
 |----------|-------------|
-| `repo` | GitHub repo (owner/repo) or full URL |
+| `repo` | GitHub repo (owner/repo), full URL, or local path (e.g., `.`) |
 | `branch` | Branch to checkout or create (optional) |
 | `from-branch` | Base branch when creating new branch (optional) |
 
@@ -27,12 +27,19 @@ cast new <repo> [branch] [from-branch] [options]
 | `--mount`, `-v` | Mount host path: `host:container[:ro]` |
 | `--copy`, `-c` | Copy host path once: `host:container` |
 | `--network`, `-n` | Network isolation mode: `full`, `limited`, `host-only`, `none` |
+| `--with-ssh` | Enable SSH agent forwarding (opt-in, agent-only) |
+| `--with-api-keys` | Sync `~/.api_keys` into the sandbox (default) |
+| `--no-api-keys` | Do not sync `~/.api_keys` into the sandbox |
+| `--skip-key-check` | Skip API key validation |
 
 ### Examples
 
 ```bash
 # Clone and checkout main (creates auto-named branch)
 cast new owner/repo
+
+# Use current repo/branch
+cast new .
 
 # Checkout existing branch
 cast new owner/repo feature-branch
@@ -52,7 +59,16 @@ cast new owner/repo feature -c /path/to/data:/data
 cast new owner/repo feature --network=limited    # whitelist only
 cast new owner/repo feature --network=host-only  # local network only
 cast new owner/repo feature --network=none       # no network
+
+# With SSH agent forwarding
+cast new owner/repo feature --with-ssh
+
+# Opt out of syncing ~/.api_keys
+cast new owner/repo feature --no-api-keys
+
 ```
+
+Note: SSH forwarding is disabled by default and agent-only (no key copy); use `--with-ssh` or set `SANDBOX_SYNC_SSH=1` to enable. API keys are synced by default; use `--no-api-keys` or set `SANDBOX_SYNC_API_KEYS=0` to disable.
 
 ### Behavior
 
@@ -61,6 +77,8 @@ cast new owner/repo feature --network=none       # no network
 3. Sets up Claude Code configuration
 4. Starts Docker container
 5. Attaches to tmux session inside container
+
+If `repo` is `.` and no branch is provided, the sandbox branch is created from your current branch.
 
 ---
 
@@ -129,7 +147,7 @@ cast attach [name]
 ### Behavior
 
 - If sandbox is stopped, starts it first
-- Syncs credentials from host to container
+- Syncs credentials from host to container when `SANDBOX_SYNC_ON_ATTACH=1` (default: `0`)
 - Attaches to tmux session
 
 ### Examples
@@ -195,7 +213,7 @@ cast stop <name>
 
 - Kills tmux session
 - Stops container (preserves worktree)
-- Home directory contents are lost (tmpfs)
+- Home directory contents are lost (tmpfs), except `~/.claude` which is persisted per sandbox
 
 ### Examples
 
@@ -465,10 +483,38 @@ These environment variables affect `cast` behavior:
 | `SANDBOX_ASSUME_YES` | Skip confirmations | `0` |
 | `SANDBOX_NETWORK_MODE` | Default network mode | `limited` |
 | `SANDBOX_ALLOWED_DOMAINS` | Extra domains for limited mode (comma-separated) | - |
+| `SANDBOX_SYNC_ON_ATTACH` | Sync runtime credentials on `cast attach` | `0` |
+| `SANDBOX_SYNC_SSH` | Enable SSH agent forwarding (opt-in) | `0` |
+| `SANDBOX_SSH_MODE` | Deprecated; use `always` when `SANDBOX_SYNC_SSH=1` | `always` |
+| `SANDBOX_SSH_AUTH_SOCK` | Override host SSH agent socket path | - |
+| `SANDBOX_SYNC_API_KEYS` | Sync `~/.api_keys` into sandboxes | `1` |
+| `SANDBOX_OPENCODE_DISABLE_NPM_PLUGINS` | Drop non-local OpenCode npm plugins from config | `1` |
+| `SANDBOX_OPENCODE_PLUGIN_DIR` | Host directory of OpenCode plugins to sync on first attach | - |
+| `SANDBOX_OPENCODE_PREFETCH_NPM_PLUGINS` | Prefetch OpenCode npm plugins during sandbox init | `1` |
+| `SANDBOX_HOME_TMPFS_SIZE` | Size of `/home/ubuntu` tmpfs (configs, caches) | `2g` |
+| `CLAUDE_CODE_TMPDIR` | Claude Code temp directory inside the container | `/workspace/.claude-tmp` |
+| `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC` | Disable Claude Code auto-updates, telemetry, bug reports | `1` |
+| `DISABLE_AUTOUPDATER` | Disable Claude Code auto-updates | `1` |
+| `DISABLE_BUG_COMMAND` | Disable Claude Code bug reporting | `1` |
+| `DISABLE_ERROR_REPORTING` | Disable Claude Code error reporting | `1` |
+| `DISABLE_TELEMETRY` | Disable Claude Code telemetry | `1` |
+| `OPENCODE_DISABLE_AUTOUPDATE` | Disable OpenCode auto-updates | `1` |
+| `OPENCODE_DISABLE_MODELS_FETCH` | Disable OpenCode model fetching | `1` |
+| `OPENCODE_DISABLE_LSP_DOWNLOAD` | Disable OpenCode LSP downloads | `1` |
+| `OPENCODE_DISABLE_SHARE` | Disable OpenCode sharing | `1` |
 | `ANTHROPIC_API_KEY` | Passed to containers | - |
 | `GITHUB_TOKEN` | Passed to containers | - |
-| `GEMINI_API_KEY` | Passed to containers | - |
+| `CLAUDE_CODE_OAUTH_TOKEN` | Passed to containers | - |
+| `CURSOR_API_KEY` | Passed to containers | - |
 | `OPENAI_API_KEY` | Passed to containers | - |
+| `TAVILY_API_KEY` | Passed to containers | - |
+| `PERPLEXITY_API_KEY` | Passed to containers | - |
+| `GOOGLE_API_KEY` | Passed to containers | - |
+| `GOOGLE_CSE_ID` | Passed to containers | - |
+
+Gemini CLI uses OAuth credentials stored under `~/.gemini/` (from `gemini auth`). Large Gemini CLI artifacts (e.g. `~/.gemini/antigravity`) are skipped to keep sandboxes lightweight. Sandboxes default to disabling Gemini auto-updates, update nags, telemetry, and usage stats via `~/.gemini/settings.json`, and Codex update checks/analytics via `~/.codex/config.toml` unless you set them on the host.
+
+OpenCode plugin notes: set `SANDBOX_OPENCODE_PLUGIN_DIR` to a host directory containing plugin subfolders (use package names; scoped packages are nested like `@scope/name`). On first attach, the folder is synced into the container and plugin entries are rewritten to local paths. OpenCode npm plugins are prefetched by default during sandbox init; set `SANDBOX_OPENCODE_PREFETCH_NPM_PLUGINS=0` to disable.
 
 ### Debugging
 

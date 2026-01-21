@@ -45,5 +45,16 @@ validate_environment() {
     ensure_dir "$REPOS_DIR"
     ensure_dir "$WORKTREES_DIR"
     ensure_dir "$CLAUDE_CONFIGS_DIR"
-    ensure_dir "$HOME/GitHub/_bikelane"
+}
+
+validate_ssh_mode() {
+    local mode="$1"
+    case "$mode" in
+        init|always|disabled)
+            return 0
+            ;;
+        *)
+            die "Invalid SSH mode: $mode (use: always, disabled)"
+            ;;
+    esac
 }

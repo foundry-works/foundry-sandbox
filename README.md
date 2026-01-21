@@ -11,7 +11,7 @@ Foundry Sandbox solves this by providing isolated Docker environments with defen
 ## Key Features
 
 - **Ephemeral Workspaces** - Git worktrees per sandbox; destroy when done with no trace
-- **Defense in Depth** - 5 safety layers from shell overrides to read-only root filesystem
+- **Defense in Depth** - 6 safety layers from shell overrides to read-only root filesystem
 - **Multiple AI Tools** - Claude Code, Gemini CLI, Codex CLI, OpenCode, and Cursor Agent pre-installed
 - **Fast Creation** - Worktrees share git objects; new sandboxes spin up in seconds
 - **Network Control** - Full, limited (whitelist), host-only, or no network access
@@ -84,6 +84,12 @@ cast build
 cast new owner/repo
 ```
 
+Or from your current repo/branch:
+
+```bash
+cast new .
+```
+
 **2. Run an AI assistant**
 
 ```bash
@@ -136,20 +142,40 @@ cast new owner/repo my-feature main
 
 ```bash
 # Mount a local directory (read-write)
-cast new owner/repo --copy ~/data:/data
+cast new owner/repo --mount ~/data:/data
 
 # Mount read-only
-cast new owner/repo --copy ~/config:/config:ro
+cast new owner/repo --mount ~/config:/config:ro
+
+# Copy once at creation time
+cast new owner/repo --copy ~/models:/models
 ```
+
+### Credential Sync
+
+SSH forwarding and API keys sync are both opt-in (agent-only; `~/.ssh` is not copied).
+
+```bash
+# Enable SSH agent forwarding
+cast new owner/repo --with-ssh
+
+# Enable syncing ~/.api_keys
+cast new owner/repo --with-api-keys
+
+# Enable both
+cast new owner/repo --with-ssh --with-api-keys
+```
+
+Claude plugins and settings persist at `~/.sandboxes/claude-config/<name>/claude` across restarts. SSH is only needed for private Git/marketplace access.
 
 ### Network Modes
 
 ```bash
-# Full network access (default)
+# Limited to whitelist (default)
 cast new owner/repo
 
-# Limited to whitelist (GitHub, npm, PyPI, AI APIs)
-cast new owner/repo --network=limited
+# Full network access
+cast new owner/repo --network=full
 
 # Local network only
 cast new owner/repo --network=host-only
@@ -173,14 +199,15 @@ cast new owner/repo --network=none
 │  │  ┌─────────────────────────────────────────────────┐  │  │
 │  │  │              SAFETY LAYERS                       │  │  │
 │  │  │  Layer 1: Shell Overrides (UX warnings)         │  │  │
-│  │  │  Layer 2: Operator Approval (human-in-loop)     │  │  │
-│  │  │  Layer 3: Sudoers Allowlist (kernel-enforced)   │  │  │
-│  │  │  Layer 4: Network Isolation (iptables)          │  │  │
-│  │  │  Layer 0: Read-only Root (Docker enforced)      │  │  │
+│  │  │  Layer 2: Credential Redaction (masks secrets)  │  │  │
+│  │  │  Layer 3: Operator Approval (human-in-loop)     │  │  │
+│  │  │  Layer 4: Sudoers Allowlist (kernel-enforced)   │  │  │
+│  │  │  Layer 5: Network Isolation (iptables)          │  │  │
+│  │  │  Layer 6: Read-only Root (Docker enforced)      │  │  │
 │  │  └─────────────────────────────────────────────────┘  │  │
 │  │                                                       │  │
 │  │  /workspace ◄── git worktree (your code)              │  │
-│  │  /home/ubuntu ◄── tmpfs (resets on stop)              │  │
+│  │  /home/ubuntu ◄── tmpfs (resets; ~/.claude persists)  │  │
 │  │  / (root) ◄── read-only filesystem                    │  │
 │  │                                                       │  │
 │  │  Pre-installed: Claude, Gemini, Codex, OpenCode, Cursor │  │
@@ -197,7 +224,7 @@ cast new owner/repo --network=none
 
 **Read-only root** means even if all other layers fail, filesystem writes are blocked.
 
-**Tmpfs home** resets on container stop—no accumulated state or leaked credentials.
+**Tmpfs home** resets on container stop, except `~/.claude` which persists per sandbox so plugin installs and settings survive.
 
 ## Command Reference
 
@@ -219,6 +246,8 @@ cast new owner/repo --network=none
 | `cast stop name` | Stop running sandbox (preserves worktree) |
 | `cast destroy name` | Remove sandbox and worktree |
 | `cast destroy name --yes` | Skip confirmation prompt |
+| `cast destroy-all` | Remove all sandboxes |
+| `cast destroy-all --yes` | Skip confirmation prompt |
 
 ### Status and Info
 
@@ -241,19 +270,17 @@ cast new owner/repo --network=none
 
 ## Configuration
 
-### Pre-installed Claude Plugin
+### Claude Plugin
 
-The Docker image includes the [claude-foundry](https://github.com/foundry-works/claude-foundry) plugin pre-configured. This provides:
+The [claude-foundry](https://github.com/foundry-works/claude-foundry) plugin is installed automatically when you create a new sandbox. This provides:
 - **foundry-mcp** MCP server with spec-driven development tools
 - Skills: `/foundry-spec`, `/foundry-implement`, `/foundry-review`, `/foundry-test`, etc.
 
-No host installation required. The plugin is ready to use immediately in new sandboxes.
+No host installation required. The plugin is fetched from GitHub and configured during sandbox creation.
 
-To update the plugin version, rebuild the Docker image:
-```bash
-# Update docker/.claude/plugins/cache/claude-foundry/foundry/<version>/ with new plugin files
-./sandbox.sh build
-```
+Optional statusline: if you use [cc-context-stats](https://github.com/luongnv89/cc-context-stats), place your `statusline.conf` in `~/.claude/statusline.conf` and it will be copied into new sandboxes. The Docker image includes `claude-statusline`, so the statusline works out of the box.
+
+**Claude LSPs:** the `pyright-lsp` plugin is installed from the official Claude marketplace for type checking support.
 
 ### API Keys
 
@@ -262,11 +289,15 @@ The sandbox automatically copies credential files from your host into containers
 | Source | Destination | Purpose |
 |--------|-------------|---------|
 | `~/.api_keys` | `/home/ubuntu/.api_keys` | API keys (sourced at startup) |
+| `~/.claude.json` | `/home/ubuntu/.claude.json` | Claude Code preferences (host file only) |
+| `~/.claude/settings.json` | `/home/ubuntu/.claude/settings.json` | Claude Code settings |
+| `~/.claude/statusline.conf` | `/home/ubuntu/.claude/statusline.conf` | Optional Claude statusline config (cc-context-stats; `claude-statusline` is bundled in the image) |
 | `~/.gitconfig` | `/home/ubuntu/.gitconfig` | Git configuration |
-| `~/.ssh/` | `/home/ubuntu/.ssh/` | SSH keys |
+| `~/.ssh/` | `/home/ubuntu/.ssh/` | SSH config/keys (when enabled) |
 | `~/.config/gh/` | `/home/ubuntu/.config/gh/` | GitHub CLI (from `gh auth login`) |
 | `~/.gemini/` | `/home/ubuntu/.gemini/` | Gemini CLI OAuth (from `gemini auth`) |
-| `~/.config/opencode/` | `/home/ubuntu/.config/opencode/` | OpenCode config (opencode.json) |
+| `~/.config/opencode/opencode.json` | `/home/ubuntu/.config/opencode/opencode.json` | OpenCode config (template in repo used if missing on host) |
+| `~/.config/opencode/antigravity-accounts.json` | `/home/ubuntu/.config/opencode/antigravity-accounts.json` | OpenCode Antigravity accounts (host file only) |
 | `~/.local/share/opencode/auth.json` | `/home/ubuntu/.local/share/opencode/auth.json` | OpenCode auth (from `opencode auth login`) |
 
 **Create `~/.api_keys` on your host:**
@@ -282,29 +313,15 @@ EOF
 chmod 600 ~/.api_keys
 ```
 
-**For Gemini CLI:** Run `gemini auth` on your host to authenticate. The OAuth credentials in `~/.gemini/` are automatically copied into containers.
+**For Gemini CLI:** Run `gemini auth` on your host to authenticate. The OAuth credentials in `~/.gemini/` are automatically copied into containers. Large Gemini CLI artifacts (e.g. `~/.gemini/antigravity`) are skipped to keep sandboxes lightweight. Sandboxes default to disabling auto-updates, update nags, telemetry, and usage stats unless you set them in `~/.gemini/settings.json`.
 
-**For OpenCode:** Run `opencode auth login` for standard auth. To use subscription-based models:
+**For Codex CLI:** Sandboxes default to disabling update checks and analytics via `~/.codex/config.toml` unless you set them on your host.
+
+**For OpenCode:** Run `opencode auth login` for standard auth. For the best experience, install these plugins on your host first:
 - [opencode-openai-codex-auth](https://github.com/numman-ali/opencode-openai-codex-auth) - Use OpenAI/Codex with ChatGPT subscription
-- [opencode-antigravity-auth](https://github.com/NoeFabris/opencode-antigravity-auth) - Use Gemini with Google AI subscription
+- [opencode-gemini-auth](https://github.com/jenslys/opencode-gemini-auth) - Use Gemini CLI subscription
 
-Replace the placeholder values with your actual keys. The file is sourced automatically when containers start.
-
-### Debug Output
-
-```bash
-SANDBOX_DEBUG=1 cast list          # Debug logging
-SANDBOX_VERBOSE=1 cast start name  # Verbose output
-```
-
-### Network Whitelist
-
-Add custom domains to the limited network whitelist:
-
-```bash
-export SANDBOX_ALLOWED_DOMAINS="api.example.com,internal.corp.com"
-cast new owner/repo --network=limited
-```
+Follow the instructions in each repo to set them up on your host before creating sandboxes.
 
 ## Safety Layers
 
@@ -313,12 +330,13 @@ Foundry Sandbox uses defense in depth—multiple independent layers that each pr
 | Layer | Purpose | Bypass? |
 |-------|---------|---------|
 | **Layer 1: Shell Overrides** | Friendly warnings for `rm -rf /`, `git push --force`, etc. | Yes (intentional, for human override) |
-| **Layer 2: Operator Approval** | Sensitive commands require TTY confirmation | No (AI has no TTY) |
-| **Layer 3: Sudoers Allowlist** | Only whitelisted sudo commands allowed | No (kernel enforced) |
-| **Layer 4: Network Isolation** | Optional network restrictions | No (iptables/Docker enforced) |
-| **Layer 0: Read-only Root** | Filesystem writes blocked at kernel level | No (Docker enforced) |
+| **Layer 2: Credential Redaction** | Masks secrets in command output | Yes (defense in depth) |
+| **Layer 3: Operator Approval** | Sensitive commands require TTY confirmation | No (AI has no TTY) |
+| **Layer 4: Sudoers Allowlist** | Only whitelisted sudo commands allowed | No (kernel enforced) |
+| **Layer 5: Network Isolation** | Optional network restrictions | No (iptables/Docker enforced) |
+| **Layer 6: Read-only Root** | Filesystem writes blocked at kernel level | No (Docker enforced) |
 
-Layer 1 is designed to be bypassable—it provides UX for non-adversarial AI, not security. The real protection comes from layers 0, 2, 3, and 4, which cannot be bypassed from inside the container.
+Layers 1 and 2 are designed to be bypassable—they provide UX and defense in depth for non-adversarial AI, not security. The real protection comes from layers 3–6, which cannot be bypassed from inside the container.
 
 See [Safety Layers](docs/security/safety-layers.md) for implementation details.
 
@@ -349,4 +367,4 @@ See [Safety Layers](docs/security/safety-layers.md) for implementation details.
 
 ## License
 
-*License information to be added. Consider MIT or Apache 2.0 for open source projects.*
+MIT License. See [LICENSE](LICENSE) for details.

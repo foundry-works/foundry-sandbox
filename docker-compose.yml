@@ -5,19 +5,20 @@ services:
       args:
         UID: ${DOCKER_UID:-1000}
         GID: ${DOCKER_GID:-1000}
+        USERNAME: ${SANDBOX_USERNAME:-ubuntu}
     image: foundry-sandbox
 
     # Layer 0: Read-only root filesystem (primary security boundary)
     # Prevents rm -rf / even via /bin/rm bypass
     read_only: true
+    cap_drop:
+      - NET_RAW
 
     volumes:
       # Workspace (set by sandbox.sh via WORKSPACE_PATH)
       - ${WORKSPACE_PATH:-.}:/workspace
       # foundry-mcp errors and metrics (shared across all sandboxes)
       - ${HOME}/.foundry-mcp:/home/ubuntu/.foundry-mcp
-      # Bikelane project directory
-      - ${HOME}/GitHub/_bikelane:/home/ubuntu/bikelane
 
     # Writable tmpfs mounts (RAM-backed, cleared on container stop)
     tmpfs:
@@ -28,7 +29,7 @@ services:
       - /var/lib/apt/lists:mode=755,size=128m
       # Home directory - writable for configs, caches, local packages
       # Use a named volume instead if you need persistence across restarts
-      - /home/ubuntu:mode=755,uid=1000,gid=1000,size=1g
+      - /home/ubuntu:mode=755,uid=1000,gid=1000,size=${SANDBOX_HOME_TMPFS_SIZE:-2g}
 
     # Interactive shell
     stdin_open: true
@@ -40,19 +41,25 @@ services:
     restart: unless-stopped
 
     environment:
-      # Host username for path compatibility
-      - HOST_USER=${HOST_USER:-}
       # Claude config directory
       - CLAUDE_CONFIG_DIR=/home/ubuntu/.claude
+      # Claude Code temp dir (workspace-local so it is inspectable/cleanable)
+      - CLAUDE_CODE_TMPDIR=${CLAUDE_CODE_TMPDIR:-/workspace/.claude-tmp}
+      # Disable Claude Code nonessential traffic (auto-updates, telemetry, bug reports)
+      - CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=${CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC:-1}
+      - DISABLE_AUTOUPDATER=${DISABLE_AUTOUPDATER:-1}
+      - DISABLE_BUG_COMMAND=${DISABLE_BUG_COMMAND:-1}
+      - DISABLE_ERROR_REPORTING=${DISABLE_ERROR_REPORTING:-1}
+      - DISABLE_TELEMETRY=${DISABLE_TELEMETRY:-1}
+      # Disable OpenCode nonessential traffic (auto-updates, model fetch, LSP downloads, share)
+      - OPENCODE_DISABLE_AUTOUPDATE=${OPENCODE_DISABLE_AUTOUPDATE:-1}
+      - OPENCODE_DISABLE_MODELS_FETCH=${OPENCODE_DISABLE_MODELS_FETCH:-1}
+      - OPENCODE_DISABLE_LSP_DOWNLOAD=${OPENCODE_DISABLE_LSP_DOWNLOAD:-1}
+      - OPENCODE_DISABLE_SHARE=${OPENCODE_DISABLE_SHARE:-1}
       # Optional API keys if needed (Gemini uses OAuth in ~/.gemini/)
-      - ANTHROPIC_API_KEY
-      - GITHUB_TOKEN
       - CURSOR_API_KEY
-      - OPENAI_API_KEY
       - CLAUDE_CODE_OAUTH_TOKEN
       # Deep research providers (foundry-mcp)
       - TAVILY_API_KEY
       - PERPLEXITY_API_KEY
-      - GOOGLE_API_KEY
-      - GOOGLE_CSE_ID
       - TERM=xterm-256color

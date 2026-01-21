@@ -34,8 +34,23 @@ cmd_attach() {
         echo "Container not running. Starting..."
         cmd_start "$name"
     else
-        sync_runtime_credentials "$container_id" "$claude_config_path"
+        # Load metadata to get network mode and other settings
+        load_sandbox_metadata "$name" || true
+
+        if [ "${SANDBOX_SYNC_ON_ATTACH:-0}" = "1" ]; then
+            sync_runtime_credentials "$container_id"
+        else
+            log_debug "Skipping credential sync on attach (SANDBOX_SYNC_ON_ATTACH=0)"
+        fi
+
+        # Refresh firewall IPs for rotating domains (if limited mode)
+        if [ "${SANDBOX_NETWORK_MODE:-}" = "limited" ]; then
+            log_debug "Refreshing firewall IPs for rotating domains..."
+            docker exec "$container_id" sudo /usr/local/bin/network-firewall.sh refresh 2>/dev/null || true
+        fi
     fi
+
+    sync_opencode_local_plugins_on_first_attach "$name" "$container_id"
 
     tmux_attach "$name"
 }

@@ -8,6 +8,7 @@
 # Or with options:
 #   curl -fsSL ... | bash -s -- --no-build
 #   curl -fsSL ... | bash -s -- --no-cache   # Force rebuild without cache
+#   ./install.sh --repo /path/to/foundry-sandbox   # Install from local path (offline)
 #
 
 set -e
@@ -47,12 +48,31 @@ while [[ $# -gt 0 ]]; do
             BRANCH="$2"
             shift 2
             ;;
+        --repo)
+            REPO_URL="$2"
+            shift 2
+            ;;
+        --repo=*)
+            REPO_URL="${1#*=}"
+            shift
+            ;;
         *)
             echo -e "${RED}Unknown option: $1${NC}"
             exit 1
             ;;
     esac
 done
+
+REPO_LOCAL=false
+if [[ "$REPO_URL" == ~* ]]; then
+    REPO_URL="${REPO_URL/#\~/$HOME}"
+fi
+if [[ "$REPO_URL" == file://* ]]; then
+    REPO_URL="${REPO_URL#file://}"
+fi
+if [ -e "$REPO_URL" ]; then
+    REPO_LOCAL=true
+fi
 
 echo -e "${BLUE}"
 echo "  ___                 _              ___              _ _"
@@ -107,7 +127,7 @@ else
         if [ -f "$HOME/.api_keys" ]; then
             source "$HOME/.api_keys"
             # Check AI provider keys (Gemini uses OAuth via ~/.gemini/, not an API key)
-            for key in CLAUDE_CODE_OAUTH_TOKEN OPENAI_API_KEY CURSOR_API_KEY; do
+            for key in CLAUDE_CODE_OAUTH_TOKEN CURSOR_API_KEY; do
                 if [ -n "${!key:-}" ]; then
                     has_ai_key=true
                     break
@@ -115,8 +135,6 @@ else
             done
             # Check search provider keys
             if [ -n "${TAVILY_API_KEY:-}" ]; then
-                has_search_key=true
-            elif [ -n "${GOOGLE_API_KEY:-}" ] && [ -n "${GOOGLE_CSE_ID:-}" ]; then
                 has_search_key=true
             elif [ -n "${PERPLEXITY_API_KEY:-}" ]; then
                 has_search_key=true
@@ -137,7 +155,6 @@ else
             echo ""
             echo "Expected at least one of:"
             echo "  - TAVILY_API_KEY"
-            echo "  - GOOGLE_API_KEY + GOOGLE_CSE_ID (both required)"
             echo "  - PERPLEXITY_API_KEY"
             echo ""
             return 0
@@ -148,7 +165,6 @@ else
         echo ""
         echo "Expected at least one of:"
         echo "  - CLAUDE_CODE_OAUTH_TOKEN (Claude Code)"
-        echo "  - OPENAI_API_KEY (OpenAI/Codex)"
         echo "  - CURSOR_API_KEY (Cursor)"
         echo "  - ~/.gemini/oauth_creds.json (Gemini CLI via 'gemini auth')"
         echo ""
@@ -214,6 +230,18 @@ detect_shell_rc() {
 
 SHELL_RC=$(detect_shell_rc)
 
+sync_local_repo() {
+    local src="$1"
+    local dst="$2"
+
+    if command -v rsync &>/dev/null; then
+        rsync -a --delete --exclude '.git/' "$src"/ "$dst"/
+    else
+        echo -e "${YELLOW}Warning: rsync not found; using tar to copy (stale files may remain).${NC}"
+        (cd "$src" && tar -cf - --exclude=.git .) | (cd "$dst" && tar -xf -)
+    fi
+}
+
 # Clone or update repository
 if [[ -d "$INSTALL_DIR" ]]; then
     echo -e "${YELLOW}Found existing installation at $INSTALL_DIR${NC}"
@@ -224,15 +252,33 @@ if [[ -d "$INSTALL_DIR" ]]; then
     else
         echo "Updating..."
         cd "$INSTALL_DIR"
-        git fetch origin
-        git checkout "$BRANCH"
-        git pull origin "$BRANCH"
+        if [ "$REPO_LOCAL" = "true" ]; then
+            if git -C "$INSTALL_DIR" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+                if git -C "$INSTALL_DIR" status --porcelain | grep -q .; then
+                    echo -e "${YELLOW}Local changes detected in $INSTALL_DIR; skipping git pull.${NC}"
+                else
+                    git fetch "$REPO_URL"
+                    git checkout "$BRANCH"
+                    git pull "$REPO_URL" "$BRANCH"
+                fi
+            fi
+            echo "Syncing working tree from local repo (including uncommitted changes)..."
+            sync_local_repo "$REPO_URL" "$INSTALL_DIR"
+        else
+            git fetch origin
+            git checkout "$BRANCH"
+            git pull origin "$BRANCH"
+        fi
         echo -e "${GREEN}Updated to latest version.${NC}"
     fi
 else
     echo -e "${BLUE}Installing to $INSTALL_DIR...${NC}"
     git clone --branch "$BRANCH" "$REPO_URL" "$INSTALL_DIR"
     echo -e "${GREEN}Cloned repository.${NC}"
+    if [ "$REPO_LOCAL" = "true" ]; then
+        echo "Syncing working tree from local repo (including uncommitted changes)..."
+        sync_local_repo "$REPO_URL" "$INSTALL_DIR"
+    fi
 fi
 
 echo ""
