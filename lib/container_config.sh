@@ -1178,7 +1178,8 @@ for path in paths:
     if data.get("hasCompletedOnboarding") is not True:
         data["hasCompletedOnboarding"] = True
         changed = True
-    if data.pop("installMethod", None) is not None:
+    if data.get("installMethod") != "native":
+        data["installMethod"] = "native"
         changed = True
     if data.get("githubRepoPaths") != {}:
         data["githubRepoPaths"] = {}
