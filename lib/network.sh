@@ -166,7 +166,7 @@ strip_ssh_agent_config() {
             }
             if (grp) {
                 if ($0 ~ /^[[:space:]]{6}-[[:space:]]*/) {
-                    if ($0 ~ /^[[:space:]]{6}-[[:space:]]*\"?0\"?[[:space:]]*$/) {
+                    if ($0 ~ /^[[:space:]]{6}-[[:space:]]*["]?0["]?[[:space:]]*$/) {
                         next
                     }
                     if (!grp_printed) {
