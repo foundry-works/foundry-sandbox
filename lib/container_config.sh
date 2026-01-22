@@ -1363,6 +1363,42 @@ if changed or not os.path.exists(path):
 PY
 }
 
+ensure_foundry_mcp_workspace_dirs() {
+    local container_id="$1"
+    local quiet="${2:-0}"
+
+    if [ "$quiet" != "1" ]; then
+        log_info "Creating foundry-mcp workspace directories..."
+    fi
+
+    # Create workspace specs directories
+    docker exec "$container_id" mkdir -p \
+        /workspace/specs/active \
+        /workspace/specs/pending \
+        /workspace/specs/completed \
+        /workspace/specs/archived \
+        /workspace/specs/.notes \
+        /workspace/specs/.plans \
+        /workspace/specs/.plan-reviews \
+        /workspace/specs/.fidelity-reviews \
+        /workspace/specs/.research/conversations \
+        /workspace/specs/.research/investigations \
+        /workspace/specs/.research/ideations \
+        /workspace/specs/.research/deep-research
+
+    # Create home foundry-mcp directories
+    docker exec "$container_id" mkdir -p \
+        "$CONTAINER_HOME/.foundry-mcp/cache" \
+        "$CONTAINER_HOME/.foundry-mcp/errors" \
+        "$CONTAINER_HOME/.foundry-mcp/metrics"
+
+    # Fix ownership
+    docker exec "$container_id" sh -c "
+        chown -R $CONTAINER_USER:$CONTAINER_USER /workspace/specs 2>/dev/null || true
+        chown -R $CONTAINER_USER:$CONTAINER_USER $CONTAINER_HOME/.foundry-mcp 2>/dev/null || true
+    "
+}
+
 copy_configs_to_container() {
     local container_id="$1"
     local skip_plugins="${2:-0}"
@@ -1441,6 +1477,7 @@ copy_configs_to_container() {
         docker exec "$container_id" sed -i '/UseKeychain/d; /AddKeysToAgent.*apple/Id' "$CONTAINER_HOME/.ssh/config" 2>/dev/null || true
     fi
     dir_exists ~/.sandboxes/repos && copy_dir_to_container "$container_id" ~/.sandboxes/repos "$CONTAINER_HOME/.sandboxes/repos"
+    file_exists ~/.foundry-mcp.toml && copy_file_to_container "$container_id" ~/.foundry-mcp.toml "$CONTAINER_HOME/.foundry-mcp.toml"
     fix_worktree_paths "$container_id" "$(whoami)"
 
     log_info "Fixing ownership..."
@@ -1451,6 +1488,7 @@ copy_configs_to_container() {
             $CONTAINER_HOME/.gemini \
             $CONTAINER_HOME/.cursor \
             $CONTAINER_HOME/.codex \
+            $CONTAINER_HOME/.foundry-mcp.toml \
             $CONTAINER_HOME/.ssh \
             $CONTAINER_HOME/.sandboxes \
             $CONTAINER_HOME/.local/share/opencode \
@@ -1468,6 +1506,9 @@ copy_configs_to_container() {
     ensure_claude_foundry_mcp "$container_id" "$skip_plugins"
     rewrite_claude_plugin_remotes "$container_id" "$skip_plugins"
     rewrite_claude_marketplaces "$container_id" "$skip_plugins"
+
+    # Create foundry-mcp workspace directories
+    ensure_foundry_mcp_workspace_dirs "$container_id"
 
     # Debug: show what ended up in the container
     log_info "=== Claude Config Debug ==="
@@ -1511,6 +1552,10 @@ sync_runtime_credentials() {
     sync_opencode_foundry "$container_id" "1"
     ensure_gemini_settings "$container_id" "1"
     ensure_codex_config "$container_id" "1"
+    if file_exists ~/.foundry-mcp.toml; then
+        copy_file_to_container_quiet "$container_id" ~/.foundry-mcp.toml "$CONTAINER_HOME/.foundry-mcp.toml"
+        docker exec "$container_id" chown $CONTAINER_USER:$CONTAINER_USER "$CONTAINER_HOME/.foundry-mcp.toml" 2>/dev/null || true
+    fi
 }
 
 copy_dir_to_container() {

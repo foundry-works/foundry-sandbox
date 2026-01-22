@@ -17,14 +17,14 @@ create_worktree() {
     if [ ! -d "$worktree_path" ]; then
         if [ -n "$from_branch" ]; then
             log_info "Creating new branch '$branch' from '$from_branch'..."
-            git -C "$bare_path" fetch origin "$from_branch:$from_branch" 2>/dev/null || true
+            git_with_retry -C "$bare_path" fetch origin "$from_branch:$from_branch" 2>/dev/null || true
             git -C "$bare_path" worktree add -b "$branch" "$worktree_path" "$from_branch"
         else
             log_info "Creating worktree for branch: $branch..."
             if ! git -C "$bare_path" worktree add "$worktree_path" "$branch" 2>/dev/null; then
                 log_info "Branch not found locally, fetching..."
-                git -C "$bare_path" fetch origin "$branch:$branch" 2>/dev/null || \
-                git -C "$bare_path" fetch origin "refs/heads/$branch:refs/heads/$branch"
+                git_with_retry -C "$bare_path" fetch origin "$branch:$branch" 2>/dev/null || \
+                git_with_retry -C "$bare_path" fetch origin "refs/heads/$branch:refs/heads/$branch"
                 git -C "$bare_path" worktree add "$worktree_path" "$branch"
             fi
         fi
@@ -34,7 +34,7 @@ create_worktree() {
         if worktree_has_changes "$worktree_path"; then
             log_warn "Uncommitted changes detected. Skipping pull."
         else
-            git -C "$worktree_path" pull --ff-only || log_warn "Could not fast-forward. You may need to pull manually."
+            git_with_retry -C "$worktree_path" pull --ff-only || log_warn "Could not fast-forward. You may need to pull manually."
         fi
     fi
 }

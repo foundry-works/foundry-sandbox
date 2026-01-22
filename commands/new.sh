@@ -45,7 +45,31 @@ cmd_new() {
         timestamp=$(date +%Y%m%d-%H%M)
         local repo_name
         repo_name=$(basename "${repo_url%.git}" | sed 's/.*\///')
-        branch="sandbox/${repo_name}-${timestamp}"
+        local user_segment="${USER:-}"
+        if [ -z "$user_segment" ]; then
+            user_segment=$(id -un 2>/dev/null || true)
+        fi
+        if [ -z "$user_segment" ]; then
+            user_segment=$(whoami 2>/dev/null || true)
+        fi
+        user_segment=$(sanitize_ref_component "$user_segment")
+        local safe_repo_name
+        safe_repo_name=$(sanitize_ref_component "$repo_name")
+        if [ -z "$user_segment" ]; then
+            user_segment="user"
+        fi
+        if [ -z "$safe_repo_name" ]; then
+            safe_repo_name="repo"
+        fi
+        branch="${user_segment}/${safe_repo_name}-${timestamp}"
+        if ! git check-ref-format --branch "$branch" >/dev/null 2>&1; then
+            local fallback_branch="${safe_repo_name}-${timestamp}"
+            if git check-ref-format --branch "$fallback_branch" >/dev/null 2>&1; then
+                branch="$fallback_branch"
+            else
+                branch="sandbox-${timestamp}"
+            fi
+        fi
         from_branch="${from_branch:-main}"
     fi
 
@@ -125,6 +149,44 @@ cmd_new() {
     name=$(sandbox_name "$bare_path" "$branch")
     local worktree_dir
     worktree_dir=$(path_worktree "$name")
+    local metadata_path
+    local legacy_metadata_path
+    metadata_path=$(path_metadata_file "$name")
+    legacy_metadata_path=$(path_metadata_legacy_file "$name")
+    if [ -f "$metadata_path" ] || [ -f "$legacy_metadata_path" ]; then
+        if ! load_sandbox_metadata "$name"; then
+            die "Sandbox name collision: existing metadata for '$name' cannot be read."
+        fi
+        if [ -n "$SANDBOX_REPO_URL" ]; then
+            local existing_bare
+            existing_bare=$(repo_to_path "$SANDBOX_REPO_URL")
+            if [ "$existing_bare" != "$bare_path" ]; then
+                die "Sandbox name collision: '$name' already used for $SANDBOX_REPO_URL. Pick a different branch name."
+            fi
+        fi
+    fi
+    if dir_exists "$worktree_dir"; then
+        local worktree_git="$worktree_dir/.git"
+        if [ -f "$worktree_git" ]; then
+            local gitdir=""
+            gitdir=$(sed -n 's/^gitdir: //p' "$worktree_git" 2>/dev/null || true)
+            if [ -n "$gitdir" ]; then
+                if [[ "$gitdir" != /* ]]; then
+                    gitdir="$worktree_dir/$gitdir"
+                fi
+                case "$gitdir" in
+                    "$bare_path"/*) ;;
+                    *)
+                        die "Sandbox name collision: '$name' already points to another repo worktree."
+                        ;;
+                esac
+            else
+                die "Sandbox name collision: '$name' already exists but is not a sandbox worktree."
+            fi
+        else
+            die "Sandbox name collision: '$name' already exists at $worktree_dir."
+        fi
+    fi
     local container
     container=$(container_name "$name")
 
@@ -207,6 +269,9 @@ OVERRIDES
             fi
         done
     fi
+
+    # Install foundry permissions into workspace
+    install_workspace_permissions "$container_id"
 
     # Apply network restrictions AFTER plugin/MCP registration completes
     if [ -n "$network_mode" ] && [ "$network_mode" != "full" ]; then

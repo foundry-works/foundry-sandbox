@@ -104,13 +104,14 @@ Once attached, you're in a bash shell inside the container at `/workspace` (your
 claude
 
 # Or with skip-permissions mode (for trusted operations)
-cdsp    # alias for: claude --dangerously-skip-permissions
+claudedsp    # alias for: claude --dangerously-skip-permissions
 
 # Gemini CLI
 gemini
 
 # Codex CLI
 codex
+codexdsp     # alias for: codex --dangerously-bypass-approvals-and-sandbox
 
 # OpenCode
 opencode
