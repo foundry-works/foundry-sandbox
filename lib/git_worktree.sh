@@ -19,12 +19,25 @@ configure_sparse_checkout() {
     git config --file "$gitdir/config.worktree" core.sparseCheckoutCone true
 
     # Write sparse-checkout patterns for cone mode
-    # Cone mode format: just list directory paths, root files are always included
+    # Cone mode requires: /*, !/*/, then for each level: include dir, exclude siblings
     mkdir -p "$gitdir/info"
-    cat > "$gitdir/info/sparse-checkout" << EOF
-.github
-$working_dir
-EOF
+    {
+        echo "/*"
+        echo "!/*/"
+        echo "/.github/"
+        # Add each parent directory with sibling exclusions
+        local path_so_far=""
+        IFS='/' read -ra parts <<< "$working_dir"
+        for part in "${parts[@]}"; do
+            if [ -n "$part" ]; then
+                path_so_far="${path_so_far}/${part}"
+                echo "${path_so_far}/"
+                echo "!${path_so_far}/*/"
+            fi
+        done
+    } > "$gitdir/info/sparse-checkout"
+    # Remove the last sibling exclusion (we want contents of the target dir)
+    sed -i '' '$d' "$gitdir/info/sparse-checkout" 2>/dev/null || sed -i '$d' "$gitdir/info/sparse-checkout"
 
     log_warn "Sparse checkout enabled. Only files in '$working_dir' and root configs are available."
     log_warn "Use 'git sparse-checkout add <path>' inside the container to add more paths."
