@@ -68,10 +68,6 @@ DEFAULT_DOMAINS=(
     "accounts.google.com"
     "oauth2.googleapis.com"
 
-    # Azure OpenAI
-    "openai.azure.com"
-    "cognitiveservices.azure.com"
-
     # AI Provider APIs (alternative)
     "api.groq.com"
     "api.mistral.ai"
