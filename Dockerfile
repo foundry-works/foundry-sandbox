@@ -27,6 +27,7 @@ RUN apt-get update && apt-get install -y \
     ipset \
     iproute2 \
     dnsutils \
+    bash-completion \
     && rm -rf /var/lib/apt/lists/* \
     && ln -s /usr/bin/python3 /usr/bin/python
 
@@ -110,7 +111,12 @@ RUN mkdir -p /opt/cursor && \
 # Home directory is tmpfs at runtime, so user .bashrc won't persist
 # API keys are passed via environment variables (docker-compose), not sourced from files
 RUN echo "alias claudedsp='claude --dangerously-skip-permissions'" >> /etc/bash.bashrc && \
-    echo "alias codexdsp='codex --dangerously-bypass-approvals-and-sandbox'" >> /etc/bash.bashrc
+    echo "alias codexdsp='codex --dangerously-bypass-approvals-and-sandbox'" >> /etc/bash.bashrc && \
+    echo "alias reinstall-foundry='sudo network-mode full && claude plugin marketplace add foundry-works/claude-foundry && claude plugin install foundry@claude-foundry && claude plugin enable foundry@claude-foundry && sudo network-mode limited'" >> /etc/bash.bashrc
+
+# Install bash completions for sandbox aliases
+COPY safety/sandbox-completions.bash /etc/bash_completion.d/sandbox-completions
+RUN chmod 644 /etc/bash_completion.d/sandbox-completions
 
 # Pre-populate GitHub SSH host keys (prevents "authenticity of host" prompts)
 RUN mkdir -p /etc/skel/.ssh && \

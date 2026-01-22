@@ -18,6 +18,49 @@
 
 set -e
 
+# Domains that use load balancer IP rotation (resolve multiple times)
+# NOTE: This array is defined early so it's available for refresh_rotating_ips()
+ROTATING_IP_DOMAINS=(
+    "api2.cursor.sh"
+    "api3.cursor.sh"
+    "api4.cursor.sh"
+    "api5.cursor.sh"
+    "api6.cursor.sh"
+    "api7.cursor.sh"
+    "api8.cursor.sh"
+)
+
+# Function to refresh rotating domain IPs (can be called separately)
+# NOTE: Defined early so we can exit early when called with "refresh"
+refresh_rotating_ips() {
+    echo "Refreshing IPs for rotating domains..."
+    for domain in "${ROTATING_IP_DOMAINS[@]}"; do
+        echo "  Refreshing: $domain"
+        for i in {1..5}; do
+            local ips
+            ips=$(dig +short "$domain" A 2>/dev/null | grep -E '^[0-9]+\.' || true)
+            for ip in $ips; do
+                if command -v ipset &>/dev/null && ipset list sandbox_allow_v4 &>/dev/null; then
+                    ipset add -exist sandbox_allow_v4 "$ip" 2>/dev/null || true
+                else
+                    # Add rule if not already present (iptables will just fail silently on duplicate)
+                    iptables -C OUTPUT -d "$ip" -j ACCEPT 2>/dev/null || \
+                        iptables -I OUTPUT -d "$ip" -j ACCEPT 2>/dev/null || true
+                fi
+            done
+            sleep 0.2
+        done
+    done
+    echo "Refresh complete."
+}
+
+# Handle refresh-only mode (must come before full setup)
+# This avoids resolving rotating domains twice when called from attach.sh
+if [ "${1:-}" = "refresh" ]; then
+    refresh_rotating_ips
+    exit 0
+fi
+
 # Use ipset for efficient allowlists when available.
 IPSET_V4="sandbox_allow_v4"
 IPSET_V6="sandbox_allow_v6"
@@ -240,17 +283,6 @@ else
     iptables -A OUTPUT -p tcp --dport 53 -j ACCEPT
 fi
 
-# Domains that use load balancer IP rotation (resolve multiple times)
-ROTATING_IP_DOMAINS=(
-    "api2.cursor.sh"
-    "api3.cursor.sh"
-    "api4.cursor.sh"
-    "api5.cursor.sh"
-    "api6.cursor.sh"
-    "api7.cursor.sh"
-    "api8.cursor.sh"
-)
-
 # Known IPs for domains that don't resolve via public DNS
 # (e.g., api5.cursor.sh uses hardcoded IPs in the agent binary)
 KNOWN_IPS=(
@@ -427,31 +459,3 @@ fi
 echo "Firewall rules applied successfully."
 echo "Allowed: ${#ALL_DOMAINS[@]} domains + ${#CLOUDFLARE_CIDRS[@]} Cloudflare CIDRs + Docker gateway + DNS (resolvers/gateway) + loopback"
 echo "All other outbound traffic is blocked."
-
-# Function to refresh rotating domain IPs (can be called separately)
-refresh_rotating_ips() {
-    echo "Refreshing IPs for rotating domains..."
-    for domain in "${ROTATING_IP_DOMAINS[@]}"; do
-        echo "  Refreshing: $domain"
-        for i in {1..5}; do
-            local ips
-            ips=$(dig +short "$domain" A 2>/dev/null | grep -E '^[0-9]+\.' || true)
-            for ip in $ips; do
-                if [ "$USE_IPSET" = "true" ]; then
-                    ipset add -exist "$IPSET_V4" "$ip" 2>/dev/null || true
-                else
-                    # Add rule if not already present (iptables will just fail silently on duplicate)
-                    iptables -C OUTPUT -d "$ip" -j ACCEPT 2>/dev/null || \
-                        iptables -I OUTPUT -d "$ip" -j ACCEPT 2>/dev/null || true
-                fi
-            done
-            sleep 0.2
-        done
-    done
-    echo "Refresh complete."
-}
-
-# If called with "refresh" argument, just refresh rotating IPs
-if [ "${1:-}" = "refresh" ]; then
-    refresh_rotating_ips
-fi
