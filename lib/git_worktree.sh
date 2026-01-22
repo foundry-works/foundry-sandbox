@@ -46,6 +46,9 @@ create_worktree() {
     local sparse_checkout="${5:-0}"
     local working_dir="${6:-}"
 
+    # Prune stale worktree registrations (e.g., from destroyed sandboxes)
+    git -C "$bare_path" worktree prune 2>/dev/null || true
+
     if [ ! -d "$worktree_path" ]; then
         if [ -n "$from_branch" ]; then
             git_with_retry -C "$bare_path" fetch origin "$from_branch:$from_branch" 2>/dev/null || true
