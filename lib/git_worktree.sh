@@ -5,25 +5,30 @@ configure_sparse_checkout() {
     local worktree_path="$2"
     local working_dir="$3"
 
-    # Enable per-worktree config (allows different sparse patterns per worktree)
+    # Get the gitdir for this worktree from the .git file
+    # (created by git worktree add, even with --no-checkout)
+    local gitdir
+    gitdir=$(sed 's/gitdir: //' "$worktree_path/.git")
+
+    # Enable per-worktree config at bare repo level
     git -C "$bare_path" config extensions.worktreeConfig true
 
-    # Enable sparse checkout for this worktree
-    git -C "$worktree_path" config core.sparseCheckout true
-    git -C "$worktree_path" config core.sparseCheckoutCone true
+    # Enable sparse checkout in worktree config (write directly to avoid "not a work tree" error)
+    git config --file "$gitdir/config.worktree" core.sparseCheckout true
 
-    # Set sparse patterns: working_dir + essential root files
-    git -C "$worktree_path" sparse-checkout set \
-        "$working_dir" \
-        "/*.json" \
-        "/*.yaml" \
-        "/*.yml" \
-        "/*.toml" \
-        "/*.md" \
-        "/*.lock" \
-        "/.github" \
-        "/.gitignore" \
-        "/.gitattributes"
+    # Write sparse-checkout patterns directly (gitignore-style, non-cone mode)
+    # Pattern explanation:
+    #   /*          - include all files in root
+    #   !/*/        - exclude all directories
+    #   /.github/   - but include .github directory
+    #   /path/      - and include the working directory
+    mkdir -p "$gitdir/info"
+    cat > "$gitdir/info/sparse-checkout" << EOF
+/*
+!/*/
+/.github/
+/$working_dir/
+EOF
 
     log_warn "Sparse checkout enabled. Only files in '$working_dir' and root configs are available."
     log_warn "Use 'git sparse-checkout add <path>' inside the container to add more paths."
