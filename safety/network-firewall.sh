@@ -180,6 +180,10 @@ DNS_LOOPBACK_ONLY=true
 add_dns_server() {
     local ns="$1"
     [ -z "$ns" ] && return
+    # Handle Docker Desktop format: host(192.168.65.7) -> 192.168.65.7
+    if [[ "$ns" =~ ^host\(([^)]+)\)$ ]]; then
+        ns="${BASH_REMATCH[1]}"
+    fi
     if [[ "$ns" == *:* ]]; then
         if [ -z "${DNS_SEEN_V6[$ns]:-}" ]; then
             DNS_SERVERS_V6+=("$ns")
