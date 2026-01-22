@@ -75,7 +75,6 @@ write_sandbox_metadata() {
         printf '"network_mode":"%s",' "$network_escaped"
         printf '"sync_ssh":%s,' "${SANDBOX_SYNC_SSH:-0}"
         printf '"ssh_mode":"%s",' "$ssh_mode_escaped"
-        printf '"sync_api_keys":%s,' "${SANDBOX_SYNC_API_KEYS:-0}"
         printf '"mounts":%s,' "$mounts_json"
         printf '"copies":%s' "$copies_json"
         printf '}\n'
@@ -128,7 +127,6 @@ elif fmt == "legacy":
         "SANDBOX_FROM_BRANCH": "from_branch",
         "SANDBOX_NETWORK_MODE": "network_mode",
         "SANDBOX_SYNC_SSH": "sync_ssh",
-        "SANDBOX_SYNC_API_KEYS": "sync_api_keys",
     }
     with open(path, "r", encoding="utf-8") as fh:
         for raw in fh:
@@ -165,7 +163,6 @@ emit("from_branch", data.get("from_branch", ""))
 emit("network_mode", data.get("network_mode", ""))
 emit("sync_ssh", data.get("sync_ssh", "0"))
 emit("ssh_mode", data.get("ssh_mode", ""))
-emit("sync_api_keys", data.get("sync_api_keys", "0"))
 
 for mount in data.get("mounts", []) or []:
     emit("mount", mount)
@@ -193,7 +190,6 @@ emit("from_branch", data.from_branch || "");
 emit("network_mode", data.network_mode || "");
 emit("sync_ssh", data.sync_ssh ?? "0");
 emit("ssh_mode", data.ssh_mode || "");
-emit("sync_api_keys", data.sync_api_keys ?? "0");
 
 (data.mounts || []).forEach((mount) => emit("mount", mount));
 (data.copies || []).forEach((copy) => emit("copy", copy));
@@ -210,7 +206,6 @@ _metadata_load_from_file() {
     SANDBOX_NETWORK_MODE=""
     SANDBOX_SYNC_SSH="0"
     SANDBOX_SSH_MODE=""
-    SANDBOX_SYNC_API_KEYS="0"
     SANDBOX_MOUNTS=()
     SANDBOX_COPIES=()
 
@@ -234,7 +229,6 @@ _metadata_load_from_file() {
             network_mode) SANDBOX_NETWORK_MODE="$value" ;;
             sync_ssh) SANDBOX_SYNC_SSH="$value" ;;
             ssh_mode) SANDBOX_SSH_MODE="$value" ;;
-            sync_api_keys) SANDBOX_SYNC_API_KEYS="$value" ;;
             mount) SANDBOX_MOUNTS+=("$value") ;;
             copy) SANDBOX_COPIES+=("$value") ;;
         esac

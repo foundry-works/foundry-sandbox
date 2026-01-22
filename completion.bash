@@ -28,7 +28,7 @@ _cast_completions() {
     # Flag completion by command
     case "$cmd" in
         new)
-            COMPREPLY=($(compgen -W "--mount -v --copy -c --network -n --with-ssh --with-api-keys --skip-key-check" -- "$cur"))
+            COMPREPLY=($(compgen -W "--mount -v --copy -c --network -n --with-ssh --skip-key-check" -- "$cur"))
             ;;
         destroy)
             COMPREPLY=($(compgen -W "--keep-worktree --force -f --yes -y" -- "$cur"))

@@ -1433,10 +1433,6 @@ copy_configs_to_container() {
         # Remove macOS-specific SSH config options that don't work on Linux
         docker exec "$container_id" sed -i '/UseKeychain/d; /AddKeysToAgent.*apple/Id' "$CONTAINER_HOME/.ssh/config" 2>/dev/null || true
     fi
-    if [ "${SANDBOX_SYNC_API_KEYS:-0}" = "1" ]; then
-        file_exists ~/.api_keys && copy_file_to_container "$container_id" ~/.api_keys "$CONTAINER_HOME/.api_keys"
-    fi
-
     dir_exists ~/.sandboxes/repos && copy_dir_to_container "$container_id" ~/.sandboxes/repos "$CONTAINER_HOME/.sandboxes/repos"
     fix_worktree_paths "$container_id" "$(whoami)"
 
@@ -1452,7 +1448,7 @@ copy_configs_to_container() {
             $CONTAINER_HOME/.sandboxes \
             $CONTAINER_HOME/.local/share/opencode \
             2>/dev/null
-        chown $CONTAINER_USER:$CONTAINER_USER $CONTAINER_HOME/.gitconfig $CONTAINER_HOME/.api_keys 2>/dev/null
+        chown $CONTAINER_USER:$CONTAINER_USER $CONTAINER_HOME/.gitconfig 2>/dev/null
         chmod 700 $CONTAINER_HOME/.ssh 2>/dev/null
         find $CONTAINER_HOME/.ssh -type d -exec chmod 700 {} + 2>/dev/null || true
         find $CONTAINER_HOME/.ssh -type f -exec chmod 600 {} + 2>/dev/null || true
@@ -1479,7 +1475,8 @@ copy_configs_to_container() {
 sync_runtime_credentials() {
     local container_id="$1"
 
-    # Sync credentials for various AI tools (Claude uses CLAUDE_CODE_OAUTH_TOKEN from ~/.api_keys)
+    # Sync credentials for various AI tools
+    # API keys are passed via environment variables (docker-compose), not copied from files
     dir_exists ~/.codex && copy_dir_to_container_quiet "$container_id" ~/.codex "$CONTAINER_HOME/.codex" "${CODEX_COPY_EXCLUDES[@]}"
     if file_exists ~/.claude.json; then
         copy_file_to_container_quiet "$container_id" ~/.claude.json "$CONTAINER_HOME/.claude.json"
@@ -1507,9 +1504,6 @@ sync_runtime_credentials() {
     sync_opencode_foundry "$container_id" "1"
     ensure_gemini_settings "$container_id" "1"
     ensure_codex_config "$container_id" "1"
-    if [ "${SANDBOX_SYNC_API_KEYS:-0}" = "1" ]; then
-        file_exists ~/.api_keys && copy_file_to_container_quiet "$container_id" ~/.api_keys "$CONTAINER_HOME/.api_keys"
-    fi
 }
 
 copy_dir_to_container() {

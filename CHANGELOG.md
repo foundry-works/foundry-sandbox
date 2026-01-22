@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- `.env.example` template for API key configuration
+
+### Changed
+- API keys are now passed via environment variables instead of file sync
+- Updated documentation for environment variable-based credential management
+
+### Removed
+- `--with-api-keys` and `--no-api-keys` CLI flags
+- `~/.api_keys` file sync functionality
+- `SANDBOX_SYNC_API_KEYS` configuration variable
+
 ## [0.1.0] - 2026-01-21
 
 ### Added
@@ -24,7 +36,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Network modes: full, limited (whitelist), host-only, none
 - Volume mount support (`--mount`, `--copy`)
 - SSH agent forwarding (`--with-ssh`)
-- API key sync (`--with-api-keys`)
 - Pre-installed AI tools: Claude Code, Gemini CLI, Codex CLI, OpenCode, Cursor Agent
 - Pre-installed claude-foundry plugin with MCP server
 - JSON output for all commands (`--json`)

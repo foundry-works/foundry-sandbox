@@ -21,10 +21,7 @@ fi
 # Set up npm prefix for user-local installs
 npm config set prefix "$HOME/.local" 2>/dev/null || true
 
-# Source API keys if available
-if [ -f "$HOME/.api_keys" ]; then
-    source "$HOME/.api_keys"
-fi
+# API keys are expected to be passed via environment variables (docker-compose)
 
 # CLI tools are pre-installed in the image
 # To update manually: npm update -g @anthropic-ai/claude-code @google/gemini-cli @openai/codex opencode-ai

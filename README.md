@@ -153,17 +153,15 @@ cast new owner/repo --copy ~/models:/models
 
 ### Credential Sync
 
-SSH forwarding and API keys sync are both opt-in (agent-only; `~/.ssh` is not copied).
+SSH forwarding is opt-in (agent-only; `~/.ssh` is not copied). API keys are expected to be set in your environment.
 
 ```bash
 # Enable SSH agent forwarding
 cast new owner/repo --with-ssh
 
-# Enable syncing ~/.api_keys
-cast new owner/repo --with-api-keys
-
-# Enable both
-cast new owner/repo --with-ssh --with-api-keys
+# Set API keys in your environment (see .env.example)
+export CLAUDE_CODE_OAUTH_TOKEN="..."
+cast new owner/repo
 ```
 
 Claude plugins and settings persist at `~/.sandboxes/claude-config/<name>/claude` across restarts. SSH is only needed for private Git/marketplace access.
@@ -284,11 +282,26 @@ Optional statusline: if you use [cc-context-stats](https://github.com/luongnv89/
 
 ### API Keys
 
-The sandbox automatically copies credential files from your host into containers:
+API keys are passed to containers via environment variables. Set them in your shell profile or use a `.env` file:
+
+```bash
+# AI Provider Keys (at least one required)
+export CLAUDE_CODE_OAUTH_TOKEN="..."   # Get via: claude setup-token
+export CURSOR_API_KEY="key-..."
+
+# Search Provider Keys (optional - for deep research features)
+export TAVILY_API_KEY="..."
+export PERPLEXITY_API_KEY="..."
+```
+
+See `.env.example` for all supported keys.
+
+### Config Files
+
+The sandbox automatically copies configuration files from your host into containers:
 
 | Source | Destination | Purpose |
 |--------|-------------|---------|
-| `~/.api_keys` | `/home/ubuntu/.api_keys` | API keys (sourced at startup) |
 | `~/.claude.json` | `/home/ubuntu/.claude.json` | Claude Code preferences (host file only) |
 | `~/.claude/settings.json` | `/home/ubuntu/.claude/settings.json` | Claude Code settings |
 | `~/.claude/statusline.conf` | `/home/ubuntu/.claude/statusline.conf` | Optional Claude statusline config (cc-context-stats; `claude-statusline` is bundled in the image) |
@@ -299,19 +312,6 @@ The sandbox automatically copies credential files from your host into containers
 | `~/.config/opencode/opencode.json` | `/home/ubuntu/.config/opencode/opencode.json` | OpenCode config |
 | `~/.config/opencode/antigravity-accounts.json` | `/home/ubuntu/.config/opencode/antigravity-accounts.json` | OpenCode Antigravity accounts (host file only) |
 | `~/.local/share/opencode/auth.json` | `/home/ubuntu/.local/share/opencode/auth.json` | OpenCode auth (from `opencode auth login`) |
-
-**Create `~/.api_keys` on your host:**
-
-```bash
-cat > ~/.api_keys << 'EOF'
-export CLAUDE_CODE_OAUTH_TOKEN="..."   # Get via: claude setup-token
-export CURSOR_API_KEY="key-..."
-# Deep research providers (foundry-mcp)
-export TAVILY_API_KEY="..."
-export PERPLEXITY_API_KEY="..."
-EOF
-chmod 600 ~/.api_keys
-```
 
 **For Gemini CLI:** Run `gemini auth` on your host to authenticate. The OAuth credentials in `~/.gemini/` are automatically copied into containers. Large Gemini CLI artifacts (e.g. `~/.gemini/antigravity`) are skipped to keep sandboxes lightweight. Sandboxes default to disabling auto-updates, update nags, telemetry, and usage stats unless you set them in `~/.gemini/settings.json`.
 

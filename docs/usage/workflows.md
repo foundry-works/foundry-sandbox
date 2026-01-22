@@ -255,16 +255,16 @@ export OPENAI_API_KEY="sk-..."
 cast new owner/repo feature
 ```
 
-By default, `~/.api_keys` is synced into the sandbox; use `--no-api-keys` to opt out.
-
-Or create `~/.api_keys` on the host (sourced in sandbox):
+API keys are passed via environment variables. Set them in your shell profile or `.env` file:
 
 ```bash
-# ~/.api_keys
-export ANTHROPIC_API_KEY="sk-ant-..."
-export OPENAI_API_KEY="sk-..."
+export CLAUDE_CODE_OAUTH_TOKEN="..."   # Get via: claude setup-token
+export CURSOR_API_KEY="key-..."
+export TAVILY_API_KEY="..."
 # Note: Gemini uses OAuth via ~/.gemini/ (run `gemini auth` on host)
 ```
+
+See `.env.example` for all supported keys.
 
 ---
 

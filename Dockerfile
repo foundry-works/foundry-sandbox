@@ -108,9 +108,9 @@ RUN mkdir -p /opt/cursor && \
 
 # Add useful aliases to system bashrc (before switching to non-root user)
 # Home directory is tmpfs at runtime, so user .bashrc won't persist
+# API keys are passed via environment variables (docker-compose), not sourced from files
 RUN echo "alias cdsp='claude --dangerously-skip-permissions'" >> /etc/bash.bashrc && \
-    echo "alias cdspr='claude --dangerously-skip-permissions --resume'" >> /etc/bash.bashrc && \
-    echo '[ -f "$HOME/.api_keys" ] && source "$HOME/.api_keys"' >> /etc/bash.bashrc
+    echo "alias cdspr='claude --dangerously-skip-permissions --resume'" >> /etc/bash.bashrc
 
 # Pre-populate GitHub SSH host keys (prevents "authenticity of host" prompts)
 RUN mkdir -p /etc/skel/.ssh && \
