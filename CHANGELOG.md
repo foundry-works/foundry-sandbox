@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-01-22
+
 ### Added
 - `.env.example` template for API key configuration
 - `lib/permissions.sh` module for installing foundry permissions into workspace `.claude/settings.local.json`
@@ -56,5 +58,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Tab completion for bash
 - macOS and Linux support
 
-[Unreleased]: https://github.com/foundry-works/foundry-sandbox/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/foundry-works/foundry-sandbox/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/foundry-works/foundry-sandbox/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/foundry-works/foundry-sandbox/releases/tag/v0.1.0
