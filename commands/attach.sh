@@ -50,7 +50,10 @@ cmd_attach() {
         fi
     fi
 
+    # Ensure metadata is loaded for working_dir (may not be loaded if container was started above)
+    load_sandbox_metadata "$name" || true
+
     sync_opencode_local_plugins_on_first_attach "$name" "$container_id"
 
-    tmux_attach "$name"
+    tmux_attach "$name" "$SANDBOX_WORKING_DIR"
 }

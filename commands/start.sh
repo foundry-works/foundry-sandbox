@@ -55,7 +55,12 @@ cmd_start() {
     compose_up "$worktree_path" "$claude_config_path" "$container" "$override_file"
 
     local container_id="${container}-dev-1"
-    copy_configs_to_container "$container_id" "0" "$enable_ssh"
+    copy_configs_to_container "$container_id" "0" "$enable_ssh" "$SANDBOX_WORKING_DIR"
+
+    # Log sparse checkout reminder if enabled
+    if [ "${SANDBOX_SPARSE_CHECKOUT:-0}" = "1" ] && [ -n "$SANDBOX_WORKING_DIR" ]; then
+        log_info "Sparse checkout active for: $SANDBOX_WORKING_DIR"
+    fi
 
     # Apply network restrictions AFTER plugin/MCP registration completes
     if [ -n "${SANDBOX_NETWORK_MODE:-}" ] && [ "$SANDBOX_NETWORK_MODE" != "full" ]; then

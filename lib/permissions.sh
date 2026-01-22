@@ -10,8 +10,8 @@ install_workspace_permissions() {
 import json
 import os
 
-SETTINGS_DIR = "/workspace/.claude"
-SETTINGS_FILE = os.path.join(SETTINGS_DIR, "settings.local.json")
+SETTINGS_DIR = os.path.expanduser("~/.claude")
+SETTINGS_FILE = os.path.join(SETTINGS_DIR, "settings.json")
 
 # Foundry permissions based on claude-foundry v2.1.0
 FOUNDRY_ALLOW = [

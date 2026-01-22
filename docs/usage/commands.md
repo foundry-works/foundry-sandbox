@@ -29,6 +29,8 @@ cast new <repo> [branch] [from-branch] [options]
 | `--network`, `-n` | Network isolation mode: `full`, `limited`, `host-only`, `none` |
 | `--with-ssh` | Enable SSH agent forwarding (opt-in, agent-only) |
 | `--skip-key-check` | Skip API key validation |
+| `--wd <path>` | Working directory within repo (relative path) |
+| `--sparse` | Enable sparse checkout (requires `--wd`) |
 
 ### Examples
 
@@ -60,9 +62,17 @@ cast new owner/repo feature --network=none       # no network
 
 # With SSH agent forwarding
 cast new owner/repo feature --with-ssh
+
+# Work in a subdirectory of a monorepo
+cast new owner/monorepo feature --wd packages/backend
+
+# Sparse checkout (only checkout the working directory + root configs)
+cast new owner/monorepo feature --wd packages/backend --sparse
 ```
 
 Note: SSH forwarding is disabled by default and agent-only (no key copy); use `--with-ssh` or set `SANDBOX_SYNC_SSH=1` to enable. API keys are passed via environment variables (see `.env.example`).
+
+> **Monorepo support:** Use `--wd` to set the initial working directory inside the container. Combine with `--sparse` for large monorepos to checkout only the specified directory plus essential root files (`*.json`, `*.yaml`, `*.toml`, `*.md`, `*.lock`, `.github/`). Run `git sparse-checkout add <path>` inside the container to include additional paths.
 
 ### Behavior
 

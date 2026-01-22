@@ -1374,26 +1374,30 @@ PY
 
 ensure_foundry_mcp_workspace_dirs() {
     local container_id="$1"
-    local quiet="${2:-0}"
+    local working_dir="${2:-}"
+    local quiet="${3:-0}"
 
     if [ "$quiet" != "1" ]; then
         log_info "Creating foundry-mcp workspace directories..."
     fi
 
+    # Calculate specs base path (includes working_dir if set)
+    local specs_base="/workspace${working_dir:+/$working_dir}"
+
     # Create workspace specs directories
     docker exec "$container_id" mkdir -p \
-        /workspace/specs/active \
-        /workspace/specs/pending \
-        /workspace/specs/completed \
-        /workspace/specs/archived \
-        /workspace/specs/.notes \
-        /workspace/specs/.plans \
-        /workspace/specs/.plan-reviews \
-        /workspace/specs/.fidelity-reviews \
-        /workspace/specs/.research/conversations \
-        /workspace/specs/.research/investigations \
-        /workspace/specs/.research/ideations \
-        /workspace/specs/.research/deep-research
+        "$specs_base/specs/active" \
+        "$specs_base/specs/pending" \
+        "$specs_base/specs/completed" \
+        "$specs_base/specs/archived" \
+        "$specs_base/specs/.notes" \
+        "$specs_base/specs/.plans" \
+        "$specs_base/specs/.plan-reviews" \
+        "$specs_base/specs/.fidelity-reviews" \
+        "$specs_base/specs/.research/conversations" \
+        "$specs_base/specs/.research/investigations" \
+        "$specs_base/specs/.research/ideations" \
+        "$specs_base/specs/.research/deep-research"
 
     # Create home foundry-mcp directories
     docker exec "$container_id" mkdir -p \
@@ -1403,7 +1407,7 @@ ensure_foundry_mcp_workspace_dirs() {
 
     # Fix ownership
     docker exec "$container_id" sh -c "
-        chown -R $CONTAINER_USER:$CONTAINER_USER /workspace/specs 2>/dev/null || true
+        chown -R $CONTAINER_USER:$CONTAINER_USER $specs_base/specs 2>/dev/null || true
         chown -R $CONTAINER_USER:$CONTAINER_USER $CONTAINER_HOME/.foundry-mcp 2>/dev/null || true
     "
 }
@@ -1412,6 +1416,7 @@ copy_configs_to_container() {
     local container_id="$1"
     local skip_plugins="${2:-0}"
     local enable_ssh="${3:-${SANDBOX_SYNC_SSH:-0}}"
+    local working_dir="${4:-}"
 
     # Create container user if using host user matching
     ensure_container_user "$container_id"
@@ -1486,7 +1491,10 @@ copy_configs_to_container() {
         docker exec "$container_id" sed -i '/UseKeychain/d; /AddKeysToAgent.*apple/Id' "$CONTAINER_HOME/.ssh/config" 2>/dev/null || true
     fi
     dir_exists ~/.sandboxes/repos && copy_dir_to_container "$container_id" ~/.sandboxes/repos "$CONTAINER_HOME/.sandboxes/repos"
-    file_exists ~/.foundry-mcp.toml && copy_file_to_container "$container_id" ~/.foundry-mcp.toml "$CONTAINER_HOME/.foundry-mcp.toml"
+    if file_exists ~/.foundry-mcp.toml; then
+        docker exec "$container_id" mkdir -p "$CONTAINER_HOME/.config/foundry-mcp" 2>/dev/null || true
+        copy_file_to_container "$container_id" ~/.foundry-mcp.toml "$CONTAINER_HOME/.config/foundry-mcp/config.toml"
+    fi
     fix_worktree_paths "$container_id" "$(whoami)"
 
     log_info "Fixing ownership..."
@@ -1497,7 +1505,6 @@ copy_configs_to_container() {
             $CONTAINER_HOME/.gemini \
             $CONTAINER_HOME/.cursor \
             $CONTAINER_HOME/.codex \
-            $CONTAINER_HOME/.foundry-mcp.toml \
             $CONTAINER_HOME/.ssh \
             $CONTAINER_HOME/.sandboxes \
             $CONTAINER_HOME/.local/share/opencode \
@@ -1517,7 +1524,7 @@ copy_configs_to_container() {
     rewrite_claude_marketplaces "$container_id" "$skip_plugins"
 
     # Create foundry-mcp workspace directories
-    ensure_foundry_mcp_workspace_dirs "$container_id"
+    ensure_foundry_mcp_workspace_dirs "$container_id" "$working_dir"
 
     # Debug: show what ended up in the container
     log_info "=== Claude Config Debug ==="
@@ -1562,8 +1569,9 @@ sync_runtime_credentials() {
     ensure_gemini_settings "$container_id" "1"
     ensure_codex_config "$container_id" "1"
     if file_exists ~/.foundry-mcp.toml; then
-        copy_file_to_container_quiet "$container_id" ~/.foundry-mcp.toml "$CONTAINER_HOME/.foundry-mcp.toml"
-        docker exec "$container_id" chown $CONTAINER_USER:$CONTAINER_USER "$CONTAINER_HOME/.foundry-mcp.toml" 2>/dev/null || true
+        docker exec "$container_id" mkdir -p "$CONTAINER_HOME/.config/foundry-mcp" 2>/dev/null || true
+        copy_file_to_container_quiet "$container_id" ~/.foundry-mcp.toml "$CONTAINER_HOME/.config/foundry-mcp/config.toml"
+        docker exec "$container_id" chown -R $CONTAINER_USER:$CONTAINER_USER "$CONTAINER_HOME/.config/foundry-mcp" 2>/dev/null || true
     fi
 }
 
