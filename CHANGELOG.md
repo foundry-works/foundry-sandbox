@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-01-22
+
+### Added
+- Monorepo support with `--wd <path>` flag to set working directory within repo
+- Sparse checkout support with `--sparse` flag (only checkouts working directory + root configs)
+- Container tmux sessions now start in the specified working directory
+
+### Changed
+- Foundry MCP config path changed from `~/.foundry-mcp.toml` to `~/.config/foundry-mcp/config.toml`
+- Foundry MCP specs directories now created relative to working directory when `--wd` is used
+- Permissions module now uses `~/.claude/settings.json` instead of `/workspace/.claude/settings.local.json`
+
+### Fixed
+- Docker daemon timeout check now uses gtimeout/timeout command instead of manual implementation
+
 ## [0.2.0] - 2026-01-22
 
 ### Added
@@ -58,6 +73,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Tab completion for bash
 - macOS and Linux support
 
-[Unreleased]: https://github.com/foundry-works/foundry-sandbox/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/foundry-works/foundry-sandbox/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/foundry-works/foundry-sandbox/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/foundry-works/foundry-sandbox/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/foundry-works/foundry-sandbox/releases/tag/v0.1.0
