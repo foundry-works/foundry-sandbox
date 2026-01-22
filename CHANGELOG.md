@@ -13,6 +13,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 - API keys are now passed via environment variables instead of file sync
 - Updated documentation for environment variable-based credential management
+- Installer no longer creates a git repository in `~/.foundry-sandbox`; files are synced directly, eliminating update conflicts from local modifications
 
 ### Removed
 - `--with-api-keys` and `--no-api-keys` CLI flags

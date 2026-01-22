@@ -241,7 +241,13 @@ sync_local_repo() {
     fi
 }
 
-# Clone or update repository
+# Install or update by syncing files (no .git in install dir)
+install_from_source() {
+    local source_dir="$1"
+    mkdir -p "$INSTALL_DIR"
+    sync_local_repo "$source_dir" "$INSTALL_DIR"
+}
+
 if [[ -d "$INSTALL_DIR" ]]; then
     echo -e "${YELLOW}Found existing installation at $INSTALL_DIR${NC}"
     echo -n "Update to latest version? [Y/n] "
@@ -250,34 +256,33 @@ if [[ -d "$INSTALL_DIR" ]]; then
         echo "Keeping existing installation."
     else
         echo "Updating..."
-        cd "$INSTALL_DIR"
         if [ "$REPO_LOCAL" = "true" ]; then
-            if git -C "$INSTALL_DIR" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
-                if git -C "$INSTALL_DIR" status --porcelain | grep -q .; then
-                    echo -e "${YELLOW}Local changes detected in $INSTALL_DIR; skipping git pull.${NC}"
-                else
-                    git fetch "$REPO_URL"
-                    git checkout "$BRANCH"
-                    git pull "$REPO_URL" "$BRANCH"
-                fi
-            fi
-            echo "Syncing working tree from local repo (including uncommitted changes)..."
-            sync_local_repo "$REPO_URL" "$INSTALL_DIR"
+            echo "Syncing from local repo..."
+            install_from_source "$REPO_URL"
         else
-            git fetch origin
-            git checkout "$BRANCH"
-            git pull origin "$BRANCH"
+            TEMP_DIR=$(mktemp -d)
+            trap "rm -rf '$TEMP_DIR'" EXIT
+            echo "Fetching latest version..."
+            git clone --depth 1 --branch "$BRANCH" "$REPO_URL" "$TEMP_DIR" >/dev/null 2>&1
+            install_from_source "$TEMP_DIR"
+            rm -rf "$TEMP_DIR"
+            trap - EXIT
         fi
         echo -e "${GREEN}Updated to latest version.${NC}"
     fi
 else
     echo -e "${BLUE}Installing to $INSTALL_DIR...${NC}"
-    git clone --branch "$BRANCH" "$REPO_URL" "$INSTALL_DIR"
-    echo -e "${GREEN}Cloned repository.${NC}"
     if [ "$REPO_LOCAL" = "true" ]; then
-        echo "Syncing working tree from local repo (including uncommitted changes)..."
-        sync_local_repo "$REPO_URL" "$INSTALL_DIR"
+        install_from_source "$REPO_URL"
+    else
+        TEMP_DIR=$(mktemp -d)
+        trap "rm -rf '$TEMP_DIR'" EXIT
+        git clone --depth 1 --branch "$BRANCH" "$REPO_URL" "$TEMP_DIR" >/dev/null 2>&1
+        install_from_source "$TEMP_DIR"
+        rm -rf "$TEMP_DIR"
+        trap - EXIT
     fi
+    echo -e "${GREEN}Installed.${NC}"
 fi
 
 echo ""
