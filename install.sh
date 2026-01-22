@@ -100,13 +100,40 @@ check_command git
 check_command docker
 check_command tmux
 
-# Check Docker daemon
-if ! docker info &>/dev/null; then
-    echo -e "${RED}Error: Docker daemon is not running.${NC}"
-    echo "  Start Docker and try again."
+# Check Docker daemon (with timeout to avoid hanging)
+echo -ne "  Checking docker daemon..."
+if ! timeout_docker_check() {
+    # macOS doesn't have timeout command, so implement with background process
+    docker info &>/dev/null &
+    local pid=$!
+    local timeout=15
+    local elapsed=0
+    while kill -0 $pid 2>/dev/null; do
+        if [ $elapsed -ge $timeout ]; then
+            kill $pid 2>/dev/null
+            wait $pid 2>/dev/null
+            return 1
+        fi
+        sleep 1
+        ((elapsed++))
+    done
+    wait $pid
+    return $?
+}; timeout_docker_check; then
+    echo -e "\r  ${RED}✗${NC} docker daemon                    "
+    echo ""
+    echo -e "${RED}Error: Docker daemon is not responding.${NC}"
+    echo ""
+    echo "  Possible causes:"
+    echo "    - Docker Desktop is still starting up (wait for it to fully load)"
+    echo "    - Docker Desktop is not running (start it from Applications)"
+    echo "    - Docker daemon is unresponsive (try restarting Docker Desktop)"
+    echo ""
+    echo "  To verify, run: docker info"
+    echo ""
     exit 1
 fi
-echo -e "  ${GREEN}✓${NC} docker daemon"
+echo -e "\r  ${GREEN}✓${NC} docker daemon                    "
 
 echo ""
 
