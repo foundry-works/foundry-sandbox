@@ -48,15 +48,28 @@ create_worktree() {
 
     if [ ! -d "$worktree_path" ]; then
         if [ -n "$from_branch" ]; then
-            log_info "Creating new branch '$branch' from '$from_branch'..."
             git_with_retry -C "$bare_path" fetch origin "$from_branch:$from_branch" 2>/dev/null || true
-            # For sparse checkout: create worktree without checking out files
-            if [ "$sparse_checkout" = "1" ] && [ -n "$working_dir" ]; then
-                git -C "$bare_path" worktree add --no-checkout -b "$branch" "$worktree_path" "$from_branch"
-                configure_sparse_checkout "$bare_path" "$worktree_path" "$working_dir"
-                git -C "$worktree_path" checkout
+            # Check if branch already exists (e.g., from a previous destroyed sandbox)
+            if git -C "$bare_path" show-ref --verify --quiet "refs/heads/$branch"; then
+                log_info "Using existing branch '$branch'..."
+                # For sparse checkout: create worktree without checking out files
+                if [ "$sparse_checkout" = "1" ] && [ -n "$working_dir" ]; then
+                    git -C "$bare_path" worktree add --no-checkout "$worktree_path" "$branch"
+                    configure_sparse_checkout "$bare_path" "$worktree_path" "$working_dir"
+                    git -C "$worktree_path" checkout
+                else
+                    git -C "$bare_path" worktree add "$worktree_path" "$branch"
+                fi
             else
-                git -C "$bare_path" worktree add -b "$branch" "$worktree_path" "$from_branch"
+                log_info "Creating new branch '$branch' from '$from_branch'..."
+                # For sparse checkout: create worktree without checking out files
+                if [ "$sparse_checkout" = "1" ] && [ -n "$working_dir" ]; then
+                    git -C "$bare_path" worktree add --no-checkout -b "$branch" "$worktree_path" "$from_branch"
+                    configure_sparse_checkout "$bare_path" "$worktree_path" "$working_dir"
+                    git -C "$worktree_path" checkout
+                else
+                    git -C "$bare_path" worktree add -b "$branch" "$worktree_path" "$from_branch"
+                fi
             fi
         else
             log_info "Creating worktree for branch: $branch..."
