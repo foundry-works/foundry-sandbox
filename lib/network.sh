@@ -35,19 +35,22 @@ generate_network_config() {
             ;;
         full)
             # Full mode: still need capabilities for runtime switching
+            # SYS_ADMIN needed for cursor-agent's internal namespace sandbox
             cat >> "$override_file" <<EOF
     cap_add:
       - NET_ADMIN
+      - SYS_ADMIN
     environment:
       - SANDBOX_NETWORK_MODE=full
 EOF
             ;;
         limited|host-only)
             # Limited/host-only: use bridge network + iptables
-            # Add capabilities for iptables
+            # Add capabilities for iptables and cursor-agent's namespace sandbox
             cat >> "$override_file" <<EOF
     cap_add:
       - NET_ADMIN
+      - SYS_ADMIN
     environment:
       - SANDBOX_NETWORK_MODE=${mode}
 EOF
@@ -90,7 +93,7 @@ strip_network_config() {
         {
             if (cap_add) {
                 if ($0 ~ /^[[:space:]]+-[[:space:]]*/ ) {
-                    if ($0 ~ /NET_ADMIN/ || $0 ~ /NET_RAW/) {
+                    if ($0 ~ /NET_ADMIN/ || $0 ~ /NET_RAW/ || $0 ~ /SYS_ADMIN/) {
                         next
                     }
                     if (!cap_add_printed) {

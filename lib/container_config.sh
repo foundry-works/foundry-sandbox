@@ -1178,8 +1178,8 @@ for path in paths:
     if data.get("hasCompletedOnboarding") is not True:
         data["hasCompletedOnboarding"] = True
         changed = True
-    if data.get("installMethod") != "native":
-        data["installMethod"] = "native"
+    if data.get("installMethod") != "npm":
+        data["installMethod"] = "npm"
         changed = True
     if data.get("githubRepoPaths") != {}:
         data["githubRepoPaths"] = {}
@@ -1269,15 +1269,22 @@ if missing_analytics_enabled:
             text = text[:match.start()] + new_line + text[match.end():]
             inline_changed = True
 
+prepend_lines = []
 append_lines = []
+
+# Root-level settings must be prepended to avoid ending up under a section header
 if missing_update:
-    append_lines.append(default_update_line)
+    prepend_lines.append(default_update_line)
+
 if missing_analytics_enabled and not inline_changed:
     append_lines.append("")
     append_lines.extend(default_analytics_lines)
 
-changed = inline_changed or bool(append_lines)
+changed = inline_changed or bool(prepend_lines) or bool(append_lines)
 if changed:
+    if prepend_lines:
+        prepend_text = "\n".join(prepend_lines) + "\n\n"
+        text = prepend_text + text
     if append_lines:
         if text and not text.endswith("\n"):
             text += "\n"
