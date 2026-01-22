@@ -160,7 +160,6 @@ Created by `cast new`, records sandbox configuration:
   "network_mode": "limited",
   "sync_ssh": 0,
   "ssh_mode": "disabled",
-  "sync_api_keys": 1,
   "mounts": ["/data:/data"],
   "copies": []
 }
@@ -180,7 +179,7 @@ Create /home directories (tmpfs is empty; ~/.claude is mounted)
 Set up npm prefix for local installs
       │
       ▼
-Source API keys if ~/.api_keys exists
+API keys from environment (docker-compose)
       │
       ▼
 Fix git worktree paths (host → container)

@@ -5,7 +5,6 @@
 # Note: Gemini uses OAuth via ~/.gemini/oauth_creds.json (from `gemini auth`), not an API key
 AI_PROVIDER_KEYS=(
     "CLAUDE_CODE_OAUTH_TOKEN"
-    "OPENAI_API_KEY"
     "CURSOR_API_KEY"
 )
 
@@ -36,17 +35,6 @@ check_any_search_key() {
     fi
     # Perplexity
     if [ -n "${PERPLEXITY_API_KEY:-}" ]; then
-        return 0
-    fi
-    return 1
-}
-
-# Load API keys from ~/.api_keys if it exists
-# Returns: 0 if file exists and was sourced, 1 if file doesn't exist
-load_api_keys() {
-    if [ -f "$HOME/.api_keys" ]; then
-        # shellcheck source=/dev/null
-        source "$HOME/.api_keys"
         return 0
     fi
     return 1
@@ -91,9 +79,11 @@ show_missing_keys_warning() {
     fi
 
     if [ "$missing_ai" = "true" ] || [ "$missing_search" = "true" ]; then
-        echo "Create ~/.api_keys with your keys:"
+        echo "Set the required environment variables before running:"
         echo "  export CLAUDE_CODE_OAUTH_TOKEN=\"your-token\""
         echo "  export TAVILY_API_KEY=\"your-key\""
+        echo ""
+        echo "See .env.example for all supported keys."
         echo ""
     fi
 }
@@ -119,8 +109,7 @@ check_api_keys_with_prompt() {
     local has_ai_key=false
     local has_search_key=false
 
-    load_api_keys
-
+    # Keys are expected to be set in the environment
     if check_any_ai_key; then
         has_ai_key=true
     fi

@@ -10,7 +10,6 @@ cmd_new() {
     local network_mode="$NEW_NETWORK_MODE"
     local sync_ssh="$NEW_SYNC_SSH"
     local ssh_mode="$NEW_SSH_MODE"
-    local sync_api_keys="$NEW_SYNC_API_KEYS"
     local skip_key_check="$NEW_SKIP_KEY_CHECK"
     local ssh_agent_sock=""
     local repo_root=""
@@ -59,8 +58,6 @@ cmd_new() {
         echo "  --network, -n <mode>             Network isolation mode (default: limited)"
         echo "                                   Modes: full, limited, host-only, none"
         echo "  --with-ssh                       Enable SSH agent forwarding (opt-in, agent-only)"
-        echo "  --with-api-keys                  Sync ~/.api_keys into the sandbox (default)"
-        echo "  --no-api-keys                    Do not sync ~/.api_keys into the sandbox"
         echo "  --skip-key-check                 Skip API key validation"
         echo ""
         echo "Examples:"
@@ -74,9 +71,8 @@ cmd_new() {
         exit 1
     fi
 
-    # Check API keys unless skipped
+    # Check API keys unless skipped (keys are expected in the environment)
     if [ "$skip_key_check" != "true" ]; then
-        load_api_keys
         if ! check_any_ai_key; then
             # No AI key - prompt to continue
             if ! prompt_missing_keys; then
@@ -119,12 +115,8 @@ cmd_new() {
     if [ "$SANDBOX_SYNC_SSH" != "1" ]; then
         SANDBOX_SSH_MODE="disabled"
     fi
-    SANDBOX_SYNC_API_KEYS="$sync_api_keys"
     if [ "$SANDBOX_SYNC_SSH" = "1" ]; then
         ssh_agent_sock=$(resolve_ssh_agent_sock) || ssh_agent_sock=""
-    fi
-    if [ "$SANDBOX_SYNC_API_KEYS" != "1" ] && file_exists ~/.api_keys; then
-        log_warn "API keys sync disabled; ~/.api_keys will not be copied (use --with-api-keys or set SANDBOX_SYNC_API_KEYS=1)."
     fi
 
     local bare_path

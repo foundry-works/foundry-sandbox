@@ -120,25 +120,23 @@ elif [[ -d "$INSTALL_DIR" ]] && [[ -f "$INSTALL_DIR/lib/api_keys.sh" ]]; then
     source "$INSTALL_DIR/lib/api_keys.sh"
 else
     # Inline minimal check for curl-piped install (before repo is cloned)
+    # Keys are expected to be set in the environment
     _check_api_keys_inline() {
         local has_ai_key=false
         local has_search_key=false
 
-        if [ -f "$HOME/.api_keys" ]; then
-            source "$HOME/.api_keys"
-            # Check AI provider keys (Gemini uses OAuth via ~/.gemini/, not an API key)
-            for key in CLAUDE_CODE_OAUTH_TOKEN CURSOR_API_KEY; do
-                if [ -n "${!key:-}" ]; then
-                    has_ai_key=true
-                    break
-                fi
-            done
-            # Check search provider keys
-            if [ -n "${TAVILY_API_KEY:-}" ]; then
-                has_search_key=true
-            elif [ -n "${PERPLEXITY_API_KEY:-}" ]; then
-                has_search_key=true
+        # Check AI provider keys (Gemini uses OAuth via ~/.gemini/, not an API key)
+        for key in CLAUDE_CODE_OAUTH_TOKEN CURSOR_API_KEY; do
+            if [ -n "${!key:-}" ]; then
+                has_ai_key=true
+                break
             fi
+        done
+        # Check search provider keys
+        if [ -n "${TAVILY_API_KEY:-}" ]; then
+            has_search_key=true
+        elif [ -n "${PERPLEXITY_API_KEY:-}" ]; then
+            has_search_key=true
         fi
 
         # All keys present
@@ -174,13 +172,14 @@ else
             echo ""
             echo "Expected at least one of:"
             echo "  - TAVILY_API_KEY"
-            echo "  - GOOGLE_API_KEY + GOOGLE_CSE_ID (both required)"
             echo "  - PERPLEXITY_API_KEY"
             echo ""
         fi
-        echo "Create ~/.api_keys with your keys:"
+        echo "Set the required environment variables before running:"
         echo "  export CLAUDE_CODE_OAUTH_TOKEN=\"your-token\""
         echo "  export TAVILY_API_KEY=\"your-key\""
+        echo ""
+        echo "See .env.example for all supported keys."
         echo ""
         read -p "Continue without API keys? [y/N]: " response
         case "$response" in

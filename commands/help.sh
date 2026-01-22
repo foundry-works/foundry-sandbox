@@ -7,8 +7,7 @@ cmd_help() {
     echo ""
     echo "Commands:"
     echo "  new <repo> [branch] [from] [--mount|-v src:dst] [--copy|-c src:dst] [--network|-n mode]"
-    echo "                            [--with-ssh] [--with-api-keys] [--no-api-keys]"
-    echo "                            Create new sandbox from repo/branch"
+    echo "                            [--with-ssh] Create new sandbox from repo/branch"
     echo "  list [--json]             List all sandboxes"
     echo "  attach <name>             Attach to a sandbox"
     echo "  start <name>              Start a stopped sandbox"
@@ -30,7 +29,6 @@ cmd_help() {
     echo "  $0 new user/repo feat --mount /data:/data  # with extra mount"
     echo "  $0 new user/repo feat --copy ~/models:/models  # copy into container"
     echo "  $0 new user/repo feat --network=full           # full network access"
-    echo "  $0 new user/repo feat --no-api-keys            # skip syncing ~/.api_keys"
     echo "  $0 attach repo-feature-branch"
     echo "  $0 list"
 }

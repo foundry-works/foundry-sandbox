@@ -29,7 +29,7 @@ cmd_config() {
         printf '{"sandbox_home":"%s","repos_dir":"%s","worktrees_dir":"%s",' "$home" "$repos" "$worktrees"
         printf '"claude_configs_dir":"%s","script_dir":"%s","docker_image":"%s",' "$configs" "$script" "$docker_image"
         printf '"docker_uid":"%s","docker_gid":"%s",' "$docker_uid" "$docker_gid"
-        printf '"network_mode":"%s","sync_ssh":%s,"ssh_mode":"%s","sync_api_keys":%s,' "$SANDBOX_NETWORK_MODE" "$SANDBOX_SYNC_SSH" "$ssh_mode" "$SANDBOX_SYNC_API_KEYS"
+        printf '"network_mode":"%s","sync_ssh":%s,"ssh_mode":"%s",' "$SANDBOX_NETWORK_MODE" "$SANDBOX_SYNC_SSH" "$ssh_mode"
         printf '"debug":%s,"verbose":%s,"assume_yes":%s}' "$SANDBOX_DEBUG" "$SANDBOX_VERBOSE" "$SANDBOX_ASSUME_YES"
         return
     fi
@@ -49,7 +49,6 @@ cmd_config() {
     format_kv "SANDBOX_NETWORK_MODE" "$SANDBOX_NETWORK_MODE"
     format_kv "SANDBOX_SYNC_SSH" "$SANDBOX_SYNC_SSH"
     format_kv "SANDBOX_SSH_MODE" "$SANDBOX_SSH_MODE"
-    format_kv "SANDBOX_SYNC_API_KEYS" "$SANDBOX_SYNC_API_KEYS"
 
     format_section_break
     format_header "Checks"

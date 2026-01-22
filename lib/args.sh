@@ -9,7 +9,6 @@ parse_new_args() {
     NEW_NETWORK_MODE="${SANDBOX_NETWORK_MODE:-limited}"
     NEW_SYNC_SSH="${SANDBOX_SYNC_SSH:-0}"
     NEW_SSH_MODE="${SANDBOX_SSH_MODE:-always}"
-    NEW_SYNC_API_KEYS="${SANDBOX_SYNC_API_KEYS:-1}"
     NEW_SKIP_KEY_CHECK=false
 
     while [ $# -gt 0 ]; do
@@ -45,11 +44,8 @@ parse_new_args() {
             --with-ssh-always)
                 die "Flag removed: use --with-ssh."
                 ;;
-            --with-api-keys)
-                NEW_SYNC_API_KEYS="1"
-                ;;
-            --no-api-keys)
-                NEW_SYNC_API_KEYS="0"
+            --with-api-keys|--no-api-keys)
+                die "Flag removed: API keys are now passed via environment variables. See .env.example."
                 ;;
             --skip-key-check)
                 NEW_SKIP_KEY_CHECK=true

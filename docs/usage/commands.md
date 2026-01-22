@@ -28,8 +28,6 @@ cast new <repo> [branch] [from-branch] [options]
 | `--copy`, `-c` | Copy host path once: `host:container` |
 | `--network`, `-n` | Network isolation mode: `full`, `limited`, `host-only`, `none` |
 | `--with-ssh` | Enable SSH agent forwarding (opt-in, agent-only) |
-| `--with-api-keys` | Sync `~/.api_keys` into the sandbox (default) |
-| `--no-api-keys` | Do not sync `~/.api_keys` into the sandbox |
 | `--skip-key-check` | Skip API key validation |
 
 ### Examples
@@ -62,13 +60,9 @@ cast new owner/repo feature --network=none       # no network
 
 # With SSH agent forwarding
 cast new owner/repo feature --with-ssh
-
-# Opt out of syncing ~/.api_keys
-cast new owner/repo feature --no-api-keys
-
 ```
 
-Note: SSH forwarding is disabled by default and agent-only (no key copy); use `--with-ssh` or set `SANDBOX_SYNC_SSH=1` to enable. API keys are synced by default; use `--no-api-keys` or set `SANDBOX_SYNC_API_KEYS=0` to disable.
+Note: SSH forwarding is disabled by default and agent-only (no key copy); use `--with-ssh` or set `SANDBOX_SYNC_SSH=1` to enable. API keys are passed via environment variables (see `.env.example`).
 
 ### Behavior
 
@@ -487,7 +481,6 @@ These environment variables affect `cast` behavior:
 | `SANDBOX_SYNC_SSH` | Enable SSH agent forwarding (opt-in) | `0` |
 | `SANDBOX_SSH_MODE` | Deprecated; use `always` when `SANDBOX_SYNC_SSH=1` | `always` |
 | `SANDBOX_SSH_AUTH_SOCK` | Override host SSH agent socket path | - |
-| `SANDBOX_SYNC_API_KEYS` | Sync `~/.api_keys` into sandboxes | `1` |
 | `SANDBOX_OPENCODE_DISABLE_NPM_PLUGINS` | Drop non-local OpenCode npm plugins from config | `1` |
 | `SANDBOX_OPENCODE_PLUGIN_DIR` | Host directory of OpenCode plugins to sync on first attach | - |
 | `SANDBOX_OPENCODE_PREFETCH_NPM_PLUGINS` | Prefetch OpenCode npm plugins during sandbox init | `1` |
