@@ -49,20 +49,34 @@ create_worktree() {
         if [ -n "$from_branch" ]; then
             log_info "Creating new branch '$branch' from '$from_branch'..."
             git_with_retry -C "$bare_path" fetch origin "$from_branch:$from_branch" 2>/dev/null || true
-            git -C "$bare_path" worktree add -b "$branch" "$worktree_path" "$from_branch"
+            # For sparse checkout: create worktree without checking out files
+            if [ "$sparse_checkout" = "1" ] && [ -n "$working_dir" ]; then
+                git -C "$bare_path" worktree add --no-checkout -b "$branch" "$worktree_path" "$from_branch"
+                configure_sparse_checkout "$bare_path" "$worktree_path" "$working_dir"
+                git -C "$worktree_path" checkout
+            else
+                git -C "$bare_path" worktree add -b "$branch" "$worktree_path" "$from_branch"
+            fi
         else
             log_info "Creating worktree for branch: $branch..."
-            if ! git -C "$bare_path" worktree add "$worktree_path" "$branch" 2>/dev/null; then
-                log_info "Branch not found locally, fetching..."
-                git_with_retry -C "$bare_path" fetch origin "$branch:$branch" 2>/dev/null || \
-                git_with_retry -C "$bare_path" fetch origin "refs/heads/$branch:refs/heads/$branch"
-                git -C "$bare_path" worktree add "$worktree_path" "$branch"
+            # For sparse checkout: create worktree without checking out files
+            if [ "$sparse_checkout" = "1" ] && [ -n "$working_dir" ]; then
+                if ! git -C "$bare_path" worktree add --no-checkout "$worktree_path" "$branch" 2>/dev/null; then
+                    log_info "Branch not found locally, fetching..."
+                    git_with_retry -C "$bare_path" fetch origin "$branch:$branch" 2>/dev/null || \
+                    git_with_retry -C "$bare_path" fetch origin "refs/heads/$branch:refs/heads/$branch"
+                    git -C "$bare_path" worktree add --no-checkout "$worktree_path" "$branch"
+                fi
+                configure_sparse_checkout "$bare_path" "$worktree_path" "$working_dir"
+                git -C "$worktree_path" checkout
+            else
+                if ! git -C "$bare_path" worktree add "$worktree_path" "$branch" 2>/dev/null; then
+                    log_info "Branch not found locally, fetching..."
+                    git_with_retry -C "$bare_path" fetch origin "$branch:$branch" 2>/dev/null || \
+                    git_with_retry -C "$bare_path" fetch origin "refs/heads/$branch:refs/heads/$branch"
+                    git -C "$bare_path" worktree add "$worktree_path" "$branch"
+                fi
             fi
-        fi
-
-        # Configure sparse checkout if requested
-        if [ "$sparse_checkout" = "1" ] && [ -n "$working_dir" ]; then
-            configure_sparse_checkout "$bare_path" "$worktree_path" "$working_dir"
         fi
     else
         log_info "Worktree already exists at $worktree_path"
