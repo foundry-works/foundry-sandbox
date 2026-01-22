@@ -207,10 +207,7 @@ The sandbox comes with multiple AI coding assistants pre-installed.
 claude
 
 # Skip permissions (for trusted repos)
-cdsp    # alias for: claude --dangerously-skip-permissions
-
-# Resume previous session
-cdspr   # alias for: claude --dangerously-skip-permissions --resume
+claudedsp    # alias for: claude --dangerously-skip-permissions
 ```
 
 ### Gemini CLI
@@ -225,6 +222,7 @@ gemini
 ```bash
 # Requires OPENAI_API_KEY
 codex
+codexdsp    # alias for: codex --dangerously-bypass-approvals-and-sandbox
 ```
 
 ### OpenCode

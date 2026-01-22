@@ -86,14 +86,27 @@ repo_to_path() {
     echo "$REPOS_DIR/${path}.git"
 }
 
+# Sanitize a single git ref path component for generated branch names.
+sanitize_ref_component() {
+    local raw="$1"
+    local safe
+
+    safe=$(printf "%s" "$raw" | sed -E 's/[^A-Za-z0-9._-]+/-/g; s/^[._-]+//; s/[._-]+$//')
+    while [[ "$safe" == *..* ]]; do
+        safe="${safe//../-}"
+    done
+    if [[ "$safe" == *.lock ]]; then
+        safe="${safe%.lock}-lock"
+    fi
+    echo "$safe"
+}
+
 # Get sandbox name from repo and branch
 sandbox_name() {
     local repo_path="$1"
     local branch="$2"
-    local repo_name
-    repo_name=$(basename "$repo_path" .git)
     local safe_branch="${branch//\//-}"
-    echo "${repo_name}-${safe_branch}"
+    echo "${safe_branch}"
 }
 
 # Get container name

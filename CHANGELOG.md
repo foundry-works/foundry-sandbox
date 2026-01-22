@@ -9,16 +9,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 - `.env.example` template for API key configuration
+- `lib/permissions.sh` module for installing foundry permissions into workspace `.claude/settings.local.json`
+- `docs/configuration.md` consolidating configuration reference (API keys, plugins, config file mappings)
+- `.foundry-mcp.toml` config file sync from host to container
+- Automatic creation of foundry-mcp workspace directories (`/workspace/specs/*`, `~/.foundry-mcp/*`)
+- Git retry logic with exponential backoff for network resilience
+- Sandbox name collision detection to prevent overwriting existing sandboxes
+- `sanitize_ref_component()` function for generating valid git branch names
+- `codexdsp` alias for `codex --dangerously-bypass-approvals-and-sandbox`
 
 ### Changed
 - API keys are now passed via environment variables instead of file sync
 - Updated documentation for environment variable-based credential management
 - Installer no longer creates a git repository in `~/.foundry-sandbox`; files are synced directly, eliminating update conflicts from local modifications
+- README simplified; detailed usage, config, and architecture content moved to docs
+- Branch naming now uses `{user}/{repo}-{timestamp}` format instead of `sandbox/{repo}-{timestamp}`
+- Sandbox naming simplified to use branch name only (without repo prefix)
+- Renamed `cdsp` alias to `claudedsp` for clarity
 
 ### Removed
 - `--with-api-keys` and `--no-api-keys` CLI flags
 - `~/.api_keys` file sync functionality
 - `SANDBOX_SYNC_API_KEYS` configuration variable
+- `cdspr` alias (use `claudedsp --resume` instead)
 
 ## [0.1.0] - 2026-01-21
 
