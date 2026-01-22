@@ -1,5 +1,34 @@
 #!/bin/bash
 
+configure_sparse_checkout() {
+    local bare_path="$1"
+    local worktree_path="$2"
+    local working_dir="$3"
+
+    # Enable per-worktree config (allows different sparse patterns per worktree)
+    git -C "$bare_path" config extensions.worktreeConfig true
+
+    # Enable sparse checkout for this worktree
+    git -C "$worktree_path" config core.sparseCheckout true
+    git -C "$worktree_path" config core.sparseCheckoutCone true
+
+    # Set sparse patterns: working_dir + essential root files
+    git -C "$worktree_path" sparse-checkout set \
+        "$working_dir" \
+        "/*.json" \
+        "/*.yaml" \
+        "/*.yml" \
+        "/*.toml" \
+        "/*.md" \
+        "/*.lock" \
+        "/.github" \
+        "/.gitignore" \
+        "/.gitattributes"
+
+    log_warn "Sparse checkout enabled. Only files in '$working_dir' and root configs are available."
+    log_warn "Use 'git sparse-checkout add <path>' inside the container to add more paths."
+}
+
 worktree_has_changes() {
     local worktree_path="$1"
     if git -C "$worktree_path" diff --quiet && git -C "$worktree_path" diff --cached --quiet; then
@@ -13,6 +42,8 @@ create_worktree() {
     local worktree_path="$2"
     local branch="$3"
     local from_branch="$4"
+    local sparse_checkout="${5:-0}"
+    local working_dir="${6:-}"
 
     if [ ! -d "$worktree_path" ]; then
         if [ -n "$from_branch" ]; then
@@ -27,6 +58,11 @@ create_worktree() {
                 git_with_retry -C "$bare_path" fetch origin "refs/heads/$branch:refs/heads/$branch"
                 git -C "$bare_path" worktree add "$worktree_path" "$branch"
             fi
+        fi
+
+        # Configure sparse checkout if requested
+        if [ "$sparse_checkout" = "1" ] && [ -n "$working_dir" ]; then
+            configure_sparse_checkout "$bare_path" "$worktree_path" "$working_dir"
         fi
     else
         log_info "Worktree already exists at $worktree_path"

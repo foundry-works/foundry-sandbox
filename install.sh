@@ -102,24 +102,18 @@ check_command tmux
 
 # Check Docker daemon (with timeout to avoid hanging)
 echo -ne "  Checking docker daemon..."
-if ! timeout_docker_check() {
-    # macOS doesn't have timeout command, so implement with background process
-    docker info &>/dev/null &
-    local pid=$!
-    local timeout=15
-    local elapsed=0
-    while kill -0 $pid 2>/dev/null; do
-        if [ $elapsed -ge $timeout ]; then
-            kill $pid 2>/dev/null
-            wait $pid 2>/dev/null
-            return 1
-        fi
-        sleep 1
-        ((elapsed++))
-    done
-    wait $pid
-    return $?
-}; timeout_docker_check; then
+timeout_docker_check() {
+    # Try gtimeout (macOS with coreutils), then timeout (Linux), then fallback
+    if command -v gtimeout &>/dev/null; then
+        gtimeout 15 docker info &>/dev/null
+    elif command -v timeout &>/dev/null; then
+        timeout 15 docker info &>/dev/null
+    else
+        # Fallback: run directly (may hang if daemon is truly stuck)
+        docker info &>/dev/null
+    fi
+}
+if ! timeout_docker_check; then
     echo -e "\r  ${RED}✗${NC} docker daemon                    "
     echo ""
     echo -e "${RED}Error: Docker daemon is not responding.${NC}"

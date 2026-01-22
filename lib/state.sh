@@ -5,7 +5,9 @@ write_sandbox_metadata() {
     local repo_url="$2"
     local branch="$3"
     local from_branch="$4"
-    shift 4
+    local working_dir="$5"
+    local sparse_checkout="$6"
+    shift 6
 
     local mounts=()
     local copies=()
@@ -26,12 +28,13 @@ write_sandbox_metadata() {
     path=$(path_metadata_file "$name")
     mkdir -p "$(dirname "$path")"
 
-    local repo_escaped branch_escaped from_branch_escaped network_escaped ssh_mode_escaped
+    local repo_escaped branch_escaped from_branch_escaped network_escaped ssh_mode_escaped working_dir_escaped
     repo_escaped=$(json_escape "$repo_url")
     branch_escaped=$(json_escape "$branch")
     from_branch_escaped=$(json_escape "$from_branch")
     network_escaped=$(json_escape "${SANDBOX_NETWORK_MODE:-}")
     ssh_mode_escaped=$(json_escape "${SANDBOX_SSH_MODE:-}")
+    working_dir_escaped=$(json_escape "$working_dir")
 
     local mounts_json="[]"
     if [ ${#mounts[@]} -gt 0 ]; then
@@ -75,6 +78,8 @@ write_sandbox_metadata() {
         printf '"network_mode":"%s",' "$network_escaped"
         printf '"sync_ssh":%s,' "${SANDBOX_SYNC_SSH:-0}"
         printf '"ssh_mode":"%s",' "$ssh_mode_escaped"
+        printf '"working_dir":"%s",' "$working_dir_escaped"
+        printf '"sparse_checkout":%s,' "$sparse_checkout"
         printf '"mounts":%s,' "$mounts_json"
         printf '"copies":%s' "$copies_json"
         printf '}\n'
@@ -163,6 +168,8 @@ emit("from_branch", data.get("from_branch", ""))
 emit("network_mode", data.get("network_mode", ""))
 emit("sync_ssh", data.get("sync_ssh", "0"))
 emit("ssh_mode", data.get("ssh_mode", ""))
+emit("working_dir", data.get("working_dir", ""))
+emit("sparse_checkout", "1" if data.get("sparse_checkout") else "0")
 
 for mount in data.get("mounts", []) or []:
     emit("mount", mount)
@@ -190,6 +197,8 @@ emit("from_branch", data.from_branch || "");
 emit("network_mode", data.network_mode || "");
 emit("sync_ssh", data.sync_ssh ?? "0");
 emit("ssh_mode", data.ssh_mode || "");
+emit("working_dir", data.working_dir || "");
+emit("sparse_checkout", data.sparse_checkout ? "1" : "0");
 
 (data.mounts || []).forEach((mount) => emit("mount", mount));
 (data.copies || []).forEach((copy) => emit("copy", copy));
@@ -206,6 +215,8 @@ _metadata_load_from_file() {
     SANDBOX_NETWORK_MODE=""
     SANDBOX_SYNC_SSH="0"
     SANDBOX_SSH_MODE=""
+    SANDBOX_WORKING_DIR=""
+    SANDBOX_SPARSE_CHECKOUT="0"
     SANDBOX_MOUNTS=()
     SANDBOX_COPIES=()
 
@@ -229,6 +240,8 @@ _metadata_load_from_file() {
             network_mode) SANDBOX_NETWORK_MODE="$value" ;;
             sync_ssh) SANDBOX_SYNC_SSH="$value" ;;
             ssh_mode) SANDBOX_SSH_MODE="$value" ;;
+            working_dir) SANDBOX_WORKING_DIR="$value" ;;
+            sparse_checkout) SANDBOX_SPARSE_CHECKOUT="$value" ;;
             mount) SANDBOX_MOUNTS+=("$value") ;;
             copy) SANDBOX_COPIES+=("$value") ;;
         esac
@@ -258,7 +271,7 @@ load_sandbox_metadata() {
     if [ -f "$legacy_path" ]; then
         _metadata_is_secure "$legacy_path" || return 1
         _metadata_load_from_file "$legacy_path" "legacy" || return 1
-        write_sandbox_metadata "$name" "$SANDBOX_REPO_URL" "$SANDBOX_BRANCH" "$SANDBOX_FROM_BRANCH" "${SANDBOX_MOUNTS[@]}" -- "${SANDBOX_COPIES[@]}"
+        write_sandbox_metadata "$name" "$SANDBOX_REPO_URL" "$SANDBOX_BRANCH" "$SANDBOX_FROM_BRANCH" "$SANDBOX_WORKING_DIR" "$SANDBOX_SPARSE_CHECKOUT" "${SANDBOX_MOUNTS[@]}" -- "${SANDBOX_COPIES[@]}"
         rm -f "$legacy_path"
         return 0
     fi

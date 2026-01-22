@@ -10,6 +10,8 @@ parse_new_args() {
     NEW_SYNC_SSH="${SANDBOX_SYNC_SSH:-0}"
     NEW_SSH_MODE="${SANDBOX_SSH_MODE:-always}"
     NEW_SKIP_KEY_CHECK=false
+    NEW_WORKING_DIR=""
+    NEW_SPARSE_CHECKOUT=false
 
     while [ $# -gt 0 ]; do
         case "$1" in
@@ -49,6 +51,16 @@ parse_new_args() {
                 ;;
             --skip-key-check)
                 NEW_SKIP_KEY_CHECK=true
+                ;;
+            --wd)
+                shift
+                [ -n "$1" ] && NEW_WORKING_DIR="$1"
+                ;;
+            --wd=*)
+                NEW_WORKING_DIR="${1#*=}"
+                ;;
+            --sparse)
+                NEW_SPARSE_CHECKOUT=true
                 ;;
             *)
                 if [ -z "$NEW_REPO_URL" ]; then

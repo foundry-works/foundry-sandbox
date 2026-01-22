@@ -9,8 +9,13 @@ tmux_create_session() {
     local session="$1"
     local worktree_path="$2"
     local container="$3"
+    local working_dir="${4:-}"
+    local exec_cmd="bash"
+    if [ -n "$working_dir" ]; then
+        exec_cmd="bash -c 'cd /workspace/$working_dir 2>/dev/null; exec bash'"
+    fi
     tmux new-session -s "$session" -c "$worktree_path" \
-        "docker exec -it ${container}-dev-1 bash; echo 'Container exited. Press enter to close.'; read"
+        "docker exec -it ${container}-dev-1 $exec_cmd; echo 'Container exited. Press enter to close.'; read"
 }
 
 tmux_attach_session() {
@@ -21,6 +26,7 @@ tmux_attach_session() {
 # Create or attach to tmux session for sandbox
 tmux_attach() {
     local name="$1"
+    local working_dir="${2:-}"
     local container
     container=$(container_name "$name")
     local session
@@ -31,7 +37,7 @@ tmux_attach() {
         tmux_attach_session "$session"
     else
         log_info "Creating tmux session: $session"
-        tmux_create_session "$session" "$WORKTREES_DIR/$name" "$container"
+        tmux_create_session "$session" "$WORKTREES_DIR/$name" "$container" "$working_dir"
     fi
 }
 

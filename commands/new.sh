@@ -11,6 +11,8 @@ cmd_new() {
     local sync_ssh="$NEW_SYNC_SSH"
     local ssh_mode="$NEW_SSH_MODE"
     local skip_key_check="$NEW_SKIP_KEY_CHECK"
+    local working_dir="$NEW_WORKING_DIR"
+    local sparse_checkout="$NEW_SPARSE_CHECKOUT"
     local ssh_agent_sock=""
     local repo_root=""
     local current_branch=""
@@ -83,6 +85,8 @@ cmd_new() {
         echo "                                   Modes: full, limited, host-only, none"
         echo "  --with-ssh                       Enable SSH agent forwarding (opt-in, agent-only)"
         echo "  --skip-key-check                 Skip API key validation"
+        echo "  --wd <path>                      Working directory within repo (relative path)"
+        echo "  --sparse                         Enable sparse checkout (requires --wd)"
         echo ""
         echo "Examples:"
         echo "  $0 new user/repo                     # auto-create sandbox branch from main"
@@ -92,6 +96,8 @@ cmd_new() {
         echo "  $0 new user/repo feature --mount /data:/data --mount /models:/models:ro"
         echo "  $0 new user/repo feature --copy /path/to/models:/models"
         echo "  $0 new user/repo feature --network=limited  # restrict network to whitelist"
+        echo "  $0 new user/monorepo feature --wd packages/backend"
+        echo "  $0 new user/monorepo feature --wd packages/backend --sparse"
         exit 1
     fi
 
@@ -116,6 +122,20 @@ cmd_new() {
                 die "Copy source does not exist: $src"
             fi
         done
+    fi
+
+    # Validate --wd path
+    if [ -n "$working_dir" ]; then
+        case "$working_dir" in
+            /*) die "Working directory must be relative, not absolute: $working_dir" ;;
+            ../*|*/../*) die "Working directory cannot contain parent traversal: $working_dir" ;;
+        esac
+        working_dir="${working_dir#./}"  # Strip leading ./
+    fi
+
+    # Validate --sparse requires --wd
+    if [ "$sparse_checkout" = "true" ] && [ -z "$working_dir" ]; then
+        die "--sparse requires --wd to specify which directory to include"
     fi
 
     if [[ "$repo_url" != http* && "$repo_url" != git@* && "$repo_url" != *"://"* && "$repo_url" != /* && "$repo_url" != ./* && "$repo_url" != ../* && "$repo_url" != ~/* ]]; then
@@ -193,7 +213,11 @@ cmd_new() {
     echo "Creating sandbox: $name"
 
     ensure_bare_repo "$repo_url" "$bare_path"
-    create_worktree "$bare_path" "$worktree_dir" "$branch" "$from_branch"
+    local sparse_flag="0"
+    if [ "$sparse_checkout" = "true" ]; then
+        sparse_flag="1"
+    fi
+    create_worktree "$bare_path" "$worktree_dir" "$branch" "$from_branch" "$sparse_flag" "$working_dir"
 
     local claude_config_path
     claude_config_path=$(path_claude_config "$name")
@@ -244,12 +268,12 @@ OVERRIDES
         add_ssh_agent_to_override "$override_file" ""
     fi
 
-    write_sandbox_metadata "$name" "$repo_url" "$branch" "$from_branch" "${mounts[@]}" -- "${copies[@]}"
+    write_sandbox_metadata "$name" "$repo_url" "$branch" "$from_branch" "$working_dir" "$sparse_flag" "${mounts[@]}" -- "${copies[@]}"
 
     local container_id="${container}-dev-1"
     echo "Starting container: $container..."
     compose_up "$worktree_dir" "$claude_config_path" "$container" "$override_file"
-    copy_configs_to_container "$container_id" "0" "$runtime_enable_ssh"
+    copy_configs_to_container "$container_id" "0" "$runtime_enable_ssh" "$working_dir"
 
     if [ ${#copies[@]} -gt 0 ]; then
         echo "Copying files into container..."
@@ -290,5 +314,5 @@ OVERRIDES
     echo "  Destroy: $0 destroy $name"
     echo ""
 
-    tmux_attach "$name"
+    tmux_attach "$name" "$working_dir"
 }
