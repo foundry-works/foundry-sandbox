@@ -90,6 +90,10 @@ prepopulate_claude_plugins() {
         fi
     fi
 
+    # Extract git commit SHA for version pinning
+    local git_commit_sha
+    git_commit_sha=$(git -C "$foundry_cache" rev-parse HEAD 2>/dev/null || echo "unknown")
+
     # Get plugin version from plugin.json
     local plugin_json="$foundry_cache/.claude-plugin/plugin.json"
     if [ ! -f "$plugin_json" ]; then
@@ -114,19 +118,21 @@ prepopulate_claude_plugins() {
     rsync -a --exclude='.git' "$foundry_cache/" "$plugin_dest/" 2>/dev/null || \
         cp -r "$foundry_cache"/* "$plugin_dest/" 2>/dev/null
 
-    # Create marketplace.json if it doesn't exist
+    # Ensure no .git directory in plugin destination
+    rm -rf "$plugin_dest/.git" 2>/dev/null || true
+
+    # Always create/overwrite marketplace.json to ensure autoUpdate is disabled
     local marketplace_json="$plugin_dest/.claude-plugin/marketplace.json"
-    if [ ! -f "$marketplace_json" ]; then
-        mkdir -p "$plugin_dest/.claude-plugin"
-        cat > "$marketplace_json" <<'MARKETPLACE'
+    mkdir -p "$plugin_dest/.claude-plugin"
+    cat > "$marketplace_json" <<'MARKETPLACE'
 {
     "name": "claude-foundry",
     "displayName": "Claude Foundry",
     "description": "Spec-driven development toolkit for Claude Code",
-    "url": "https://github.com/foundry-works/claude-foundry"
+    "url": "https://github.com/foundry-works/claude-foundry",
+    "autoUpdate": false
 }
 MARKETPLACE
-    fi
 
     # Create installed_plugins.json
     local install_date
@@ -140,6 +146,8 @@ MARKETPLACE
         "scope": "user",
         "installPath": "/home/ubuntu/.claude/plugins/cache/claude-foundry/foundry/$version",
         "version": "$version",
+        "gitCommitSha": "$git_commit_sha",
+        "isLocal": true,
         "installedAt": "$install_date",
         "lastUpdated": "$install_date"
       }
@@ -920,6 +928,7 @@ rewrite_claude_marketplaces() {
     fi
 
     $run_fn docker exec -i "$container_id" python3 - <<'PY'
+from datetime import datetime, timezone
 import json
 import pathlib
 import subprocess
@@ -1053,16 +1062,16 @@ else:
     defaults = {
         "claude-foundry": {
             "source": {
-                "source": "git",
-                "url": "https://github.com/foundry-works/claude-foundry.git",
+                "source": "local",
+                "path": "/home/ubuntu/.claude/plugins/marketplaces/claude-foundry",
             },
             "installLocation": "/home/ubuntu/.claude/plugins/marketplaces/claude-foundry",
             "lastUpdated": now,
         },
         "claude-plugins-official": {
             "source": {
-                "source": "git",
-                "url": "https://github.com/anthropics/claude-plugins-official.git",
+                "source": "local",
+                "path": "/home/ubuntu/.claude/plugins/marketplaces/claude-plugins-official",
             },
             "installLocation": "/home/ubuntu/.claude/plugins/marketplaces/claude-plugins-official",
             "lastUpdated": now,
