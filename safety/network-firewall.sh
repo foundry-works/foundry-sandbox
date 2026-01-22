@@ -181,7 +181,8 @@ add_dns_server() {
     local ns="$1"
     [ -z "$ns" ] && return
     # Handle Docker Desktop format: host(192.168.65.7) -> 192.168.65.7
-    if [[ "$ns" =~ ^host\(([^)]+)\)$ ]]; then
+    local docker_dns_pattern='^host\(([^)]+)\)$'
+    if [[ "$ns" =~ $docker_dns_pattern ]]; then
         ns="${BASH_REMATCH[1]}"
     fi
     if [[ "$ns" == *:* ]]; then
