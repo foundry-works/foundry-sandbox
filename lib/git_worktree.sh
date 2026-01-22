@@ -28,6 +28,9 @@ EOF
 
     log_warn "Sparse checkout enabled. Only files in '$working_dir' and root configs are available."
     log_warn "Use 'git sparse-checkout add <path>' inside the container to add more paths."
+
+    # Checkout using explicit git-dir and work-tree (git -C doesn't work for --no-checkout worktrees)
+    git --git-dir="$gitdir" --work-tree="$worktree_path" checkout
 }
 
 worktree_has_changes() {
@@ -59,7 +62,6 @@ create_worktree() {
                 if [ "$sparse_checkout" = "1" ] && [ -n "$working_dir" ]; then
                     git -C "$bare_path" worktree add --no-checkout "$worktree_path" "$branch"
                     configure_sparse_checkout "$bare_path" "$worktree_path" "$working_dir"
-                    git -C "$worktree_path" checkout
                 else
                     git -C "$bare_path" worktree add "$worktree_path" "$branch"
                 fi
@@ -69,7 +71,6 @@ create_worktree() {
                 if [ "$sparse_checkout" = "1" ] && [ -n "$working_dir" ]; then
                     git -C "$bare_path" worktree add --no-checkout -b "$branch" "$worktree_path" "$from_branch"
                     configure_sparse_checkout "$bare_path" "$worktree_path" "$working_dir"
-                    git -C "$worktree_path" checkout
                 else
                     git -C "$bare_path" worktree add -b "$branch" "$worktree_path" "$from_branch"
                 fi
@@ -85,7 +86,6 @@ create_worktree() {
                     git -C "$bare_path" worktree add --no-checkout "$worktree_path" "$branch"
                 fi
                 configure_sparse_checkout "$bare_path" "$worktree_path" "$working_dir"
-                git -C "$worktree_path" checkout
             else
                 if ! git -C "$bare_path" worktree add "$worktree_path" "$branch" 2>/dev/null; then
                     log_info "Branch not found locally, fetching..."
