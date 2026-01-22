@@ -14,20 +14,16 @@ configure_sparse_checkout() {
     git -C "$bare_path" config extensions.worktreeConfig true
 
     # Enable sparse checkout in worktree config (write directly to avoid "not a work tree" error)
+    # Use cone mode which properly handles nested directories and always includes root files
     git config --file "$gitdir/config.worktree" core.sparseCheckout true
+    git config --file "$gitdir/config.worktree" core.sparseCheckoutCone true
 
-    # Write sparse-checkout patterns directly (gitignore-style, non-cone mode)
-    # Pattern explanation:
-    #   /*          - include all files in root
-    #   !/*/        - exclude all directories
-    #   /.github/   - but include .github directory
-    #   /path/      - and include the working directory
+    # Write sparse-checkout patterns for cone mode
+    # Cone mode format: just list directory paths, root files are always included
     mkdir -p "$gitdir/info"
     cat > "$gitdir/info/sparse-checkout" << EOF
-/*
-!/*/
-/.github/
-/$working_dir/
+.github
+$working_dir
 EOF
 
     log_warn "Sparse checkout enabled. Only files in '$working_dir' and root configs are available."
