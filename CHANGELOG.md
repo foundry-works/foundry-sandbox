@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- Foundry plugin installation replaced with direct global install
+  - Skills copied directly to `~/.claude/skills/` (no plugin namespace)
+  - Hooks copied to `~/.claude/hooks/` and registered in `settings.json`
+  - MCP server registered in `~/.claude.json` under `mcpServers`
+  - Eliminates plugin update mechanism that caused issues in sandboxes
+  - Skill commands change from `/foundry:foundry-spec` to `/foundry-spec`
+
+### Removed
+- Plugin system files no longer created: `installed_plugins.json`, `enabledPlugins`, `marketplace.json`, `known_marketplaces.json`
+- `rewrite_claude_plugin_remotes()` and `rewrite_claude_marketplaces()` functions (no longer needed)
+- `claude plugin enable` and `claude mcp add-json` CLI calls (replaced with direct file writes)
+
 ## [0.4.0] - 2026-01-22
 
 ### Added

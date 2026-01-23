@@ -257,8 +257,8 @@ OVERRIDES
     ensure_dir "$claude_home_path"
     add_claude_home_to_override "$override_file" "$claude_home_path"
 
-    # Pre-populate Claude plugins on host before container starts (no network needed inside)
-    prepopulate_claude_plugins "$claude_home_path" "0"
+    # Pre-populate foundry skills and hooks on host before container starts (no network needed inside)
+    prepopulate_foundry_global "$claude_home_path" "0"
 
     local runtime_enable_ssh="0"
     if [ "$SANDBOX_SYNC_SSH" = "1" ]; then
