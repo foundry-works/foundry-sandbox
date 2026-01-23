@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-01-22
+
+### Added
+- GitHub CLI authentication passthrough: `gh auth` credentials now automatically work inside containers
+  - New `export_gh_token()` extracts token from macOS keychain
+  - `GH_TOKEN` environment variable passed to container
+  - `gh auth git-credential` configured as git credential helper
+- Nested git repository detection: warns when sparse checkout contains nested `.git` directories that shadow the worktree
+- Auto-add `specs/.backups` to worktree `.gitignore` for foundry spec backups
+- Additional dangerous command detection: `rsync --delete`, `find -delete`, `find -exec rm`
+
+### Changed
+- Shell safety layer now blocks all `rm` commands (previously only blocked `-rf` patterns)
+  - Any file deletion now requires human operator approval
+
+### Fixed
+- Sparse worktree detection: sets `core.worktree` config for `--no-checkout` sparse worktrees
+
 ## [0.3.0] - 2026-01-22
 
 ### Added
@@ -73,7 +91,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Tab completion for bash
 - macOS and Linux support
 
-[Unreleased]: https://github.com/foundry-works/foundry-sandbox/compare/v0.3.0...HEAD
+[Unreleased]: https://github.com/foundry-works/foundry-sandbox/compare/v0.4.0...HEAD
+[0.4.0]: https://github.com/foundry-works/foundry-sandbox/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/foundry-works/foundry-sandbox/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/foundry-works/foundry-sandbox/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/foundry-works/foundry-sandbox/releases/tag/v0.1.0

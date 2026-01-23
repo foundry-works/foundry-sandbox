@@ -1110,6 +1110,24 @@ ensure_github_https_git() {
         git config --global --add url.\"https://github.com/\".insteadOf git@github.com: 2>/dev/null || true
         git config --global --add url.\"https://github.com/\".insteadOf ssh://git@github.com/ 2>/dev/null || true
     "
+
+    # Configure gh as credential helper after URL rewriting
+    configure_gh_credential_helper "$container_id" "$quiet"
+}
+
+# Configure gh as the git credential helper for HTTPS authentication
+# This leverages existing gh auth credentials from ~/.config/gh
+configure_gh_credential_helper() {
+    local container_id="$1"
+    local quiet="${2:-0}"
+
+    # Only configure if gh config exists in container
+    docker exec -u "$CONTAINER_USER" "$container_id" sh -c "
+        export HOME='$CONTAINER_HOME'
+        if [ -d '$CONTAINER_HOME/.config/gh' ] && command -v gh >/dev/null 2>&1; then
+            git config --global credential.helper '!gh auth git-credential'
+        fi
+    " 2>/dev/null || true
 }
 
 ensure_claude_statusline() {
@@ -1496,6 +1514,7 @@ copy_configs_to_container() {
         copy_file_to_container "$container_id" ~/.foundry-mcp.toml "$CONTAINER_HOME/.config/foundry-mcp/config.toml"
     fi
     fix_worktree_paths "$container_id" "$(whoami)"
+    detect_nested_git_repos "$container_id"
 
     log_info "Fixing ownership..."
     run_cmd docker exec "$container_id" sh -c "
@@ -1573,6 +1592,7 @@ sync_runtime_credentials() {
         copy_file_to_container_quiet "$container_id" ~/.foundry-mcp.toml "$CONTAINER_HOME/.config/foundry-mcp/config.toml"
         docker exec "$container_id" chown -R $CONTAINER_USER:$CONTAINER_USER "$CONTAINER_HOME/.config/foundry-mcp" 2>/dev/null || true
     fi
+    detect_nested_git_repos "$container_id"
 }
 
 copy_dir_to_container() {
@@ -1697,12 +1717,39 @@ fix_worktree_paths() {
                     -e 's|/Users/$host_user|/home/ubuntu|g' \
                     /workspace/.git
 
-                # Fix the bare repo's gitdir reference
+                # Fix the bare repo's gitdir reference and set core.worktree
                 GITDIR_PATH=\$(grep 'gitdir:' /workspace/.git | sed 's/gitdir: //')
                 if [ -d \"\$GITDIR_PATH\" ]; then
                     echo '/workspace/.git' > \"\$GITDIR_PATH/gitdir\"
+
+                    # Set core.worktree to fix worktree detection
+                    # Essential for --no-checkout sparse worktrees
+                    touch \"\$GITDIR_PATH/config.worktree\" 2>/dev/null || true
+                    git config --file \"\$GITDIR_PATH/config.worktree\" core.worktree /workspace
                 fi
             fi
         fi
     "
+}
+
+detect_nested_git_repos() {
+    local container_id="$1"
+
+    docker exec "$container_id" sh -c '
+        nested_gits=$(find /workspace -mindepth 2 -name ".git" -type d 2>/dev/null)
+        if [ -n "$nested_gits" ]; then
+            echo ""
+            echo "⚠️  WARNING: Nested .git directories detected:"
+            echo "$nested_gits" | while read -r git_dir; do
+                parent_dir=$(dirname "$git_dir")
+                branch=$(git -C "$parent_dir" branch --show-current 2>/dev/null || echo "unknown")
+                echo "  - $git_dir (branch: $branch)"
+            done
+            echo ""
+            echo "These shadow the sparse worktree and will cause git commands to use"
+            echo "the wrong repository. Consider removing them with:"
+            echo "  rm -rf <path>"
+            echo ""
+        fi
+    '
 }
