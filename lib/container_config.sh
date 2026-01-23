@@ -220,6 +220,10 @@ merged = {**container_data, **host_data}
 # Restore preserved settings (opus model, haiku subagent, hooks config)
 merged.update(preserved)
 
+# Remove enabledPlugins - we use direct global install, not plugins
+# This prevents "Plugin not found" errors from stale host config
+merged.pop("enabledPlugins", None)
+
 os.makedirs(os.path.dirname(container_path), exist_ok=True)
 with open(container_path, "w") as f:
     json.dump(merged, f, indent=2)
@@ -742,6 +746,10 @@ data = load_json(path)
 data["model"] = "opus"
 data["subagentModel"] = "haiku"
 data["alwaysThinkingEnabled"] = True
+
+# Remove enabledPlugins - we use direct global install, not plugins
+# This prevents "Plugin not found" errors from stale host config
+data.pop("enabledPlugins", None)
 
 os.makedirs(os.path.dirname(path), exist_ok=True)
 with open(path, "w") as f:
