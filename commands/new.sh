@@ -219,6 +219,12 @@ cmd_new() {
     fi
     create_worktree "$bare_path" "$worktree_dir" "$branch" "$from_branch" "$sparse_flag" "$working_dir"
 
+    # Add specs/.backups to worktree gitignore (for foundry spec backups)
+    local gitignore_file="$worktree_dir/.gitignore"
+    if ! grep -qxF 'specs/.backups' "$gitignore_file" 2>/dev/null; then
+        echo 'specs/.backups' >> "$gitignore_file"
+    fi
+
     local claude_config_path
     claude_config_path=$(path_claude_config "$name")
     ensure_dir "$claude_config_path"
@@ -271,6 +277,12 @@ OVERRIDES
     write_sandbox_metadata "$name" "$repo_url" "$branch" "$from_branch" "$working_dir" "$sparse_flag" "${mounts[@]}" -- "${copies[@]}"
 
     local container_id="${container}-dev-1"
+
+    # Export gh token if available (needed for macOS keychain)
+    if export_gh_token; then
+        log_info "GitHub CLI token exported for container"
+    fi
+
     echo "Starting container: $container..."
     compose_up "$worktree_dir" "$claude_config_path" "$container" "$override_file"
     copy_configs_to_container "$container_id" "0" "$runtime_enable_ssh" "$working_dir"

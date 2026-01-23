@@ -139,3 +139,17 @@ check_api_keys_with_prompt() {
     echo -e "${_API_KEYS_YELLOW}Continuing without API keys...${_API_KEYS_NC}"
     return 0
 }
+
+# Extract gh CLI token from system keyring/keychain
+# Sets GH_TOKEN environment variable if gh is authenticated
+# Returns: 0 if token exported, 1 if not available
+export_gh_token() {
+    if command -v gh >/dev/null 2>&1 && gh auth status >/dev/null 2>&1; then
+        GH_TOKEN=$(gh auth token 2>/dev/null)
+        export GH_TOKEN
+        if [ -n "$GH_TOKEN" ]; then
+            return 0
+        fi
+    fi
+    return 1
+}

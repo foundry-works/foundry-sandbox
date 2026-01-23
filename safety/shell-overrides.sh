@@ -48,6 +48,30 @@ _check_dangerous_cmd() {
         echo "dangerous rm pattern (mixed)"
         return 0
     fi
+    # Catch-all: any rm command is potentially destructive
+    if [[ "$cmd" =~ (^|[[:space:]]|[\;\&\|])rm[[:space:]] ]] || [[ "$cmd" =~ (^|[[:space:]]|[\;\&\|])/bin/rm[[:space:]] ]]; then
+        echo "rm (file deletion)"
+        return 0
+    fi
+
+    # --- rsync delete patterns ---
+    # rsync --delete removes files in destination that don't exist in source
+    if [[ "$cmd" =~ rsync[[:space:]].*--delete ]]; then
+        echo "rsync --delete (can remove files)"
+        return 0
+    fi
+
+    # --- find delete patterns ---
+    # find -delete removes matched files
+    if [[ "$cmd" =~ find[[:space:]].*-delete ]]; then
+        echo "find -delete"
+        return 0
+    fi
+    # find -exec rm - indirect deletion
+    if [[ "$cmd" =~ find[[:space:]].*-exec[[:space:]]+(rm|/bin/rm) ]]; then
+        echo "find -exec rm"
+        return 0
+    fi
 
     # --- git patterns ---
     if [[ "$cmd" =~ git[[:space:]].*reset[[:space:]].*--hard ]]; then
@@ -206,51 +230,11 @@ _is_protected_path() {
 # Command-specific overrides
 # =============================================================================
 
-# Block dangerous rm patterns
+# Block all rm operations - file deletion requires operator approval
 rm() {
-    local args="$*"
-    local is_dangerous=0
-
-    # Short flags: -rf, -fr (combined in same argument)
-    if [[ "$args" =~ -[^[:space:]]*r[^[:space:]]*f ]] || \
-       [[ "$args" =~ -[^[:space:]]*f[^[:space:]]*r ]]; then
-        is_dangerous=1
-    fi
-
-    # Short flags: -r ... -f or -f ... -r (separate arguments)
-    if [[ "$args" =~ -[^[:space:]]*r.*[[:space:]]+-[^[:space:]]*f ]] || \
-       [[ "$args" =~ -[^[:space:]]*f.*[[:space:]]+-[^[:space:]]*r ]]; then
-        is_dangerous=1
-    fi
-
-    # Long options: --recursive --force (any order)
-    if [[ "$args" =~ --recursive ]] && [[ "$args" =~ --force ]]; then
-        is_dangerous=1
-    fi
-
-    # Mixed: -r --force, --recursive -f, etc.
-    if [[ "$args" =~ --recursive ]] && [[ "$args" =~ -[^-]*f ]]; then
-        is_dangerous=1
-    fi
-    if [[ "$args" =~ --force ]] && [[ "$args" =~ -[^-]*r ]]; then
-        is_dangerous=1
-    fi
-
-    if [[ $is_dangerous -eq 1 ]]; then
-        for arg in "$@"; do
-            # Skip flags
-            [[ "$arg" == -* ]] && continue
-
-            # Check if this path is protected (handles variable expansion)
-            local protected_path
-            if protected_path=$(_is_protected_path "$arg"); then
-                echo "BLOCKED: rm -rf on protected path: $protected_path"
-                echo "  This operation requires human operator approval."
-                return 1
-            fi
-        done
-    fi
-    command rm "$@"
+    echo "BLOCKED: rm (file deletion)"
+    echo "  This operation requires human operator approval."
+    return 1
 }
 
 # Block dangerous git operations

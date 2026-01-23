@@ -52,6 +52,12 @@ cmd_start() {
     else
         add_ssh_agent_to_override "$override_file" ""
     fi
+
+    # Export gh token if available (needed for macOS keychain)
+    if export_gh_token; then
+        log_info "GitHub CLI token exported for container"
+    fi
+
     compose_up "$worktree_path" "$claude_config_path" "$container" "$override_file"
 
     local container_id="${container}-dev-1"
