@@ -220,9 +220,14 @@ merged = {**container_data, **host_data}
 # Restore preserved settings (opus model, haiku subagent, hooks config)
 merged.update(preserved)
 
-# Remove enabledPlugins - we use direct global install, not plugins
+# Remove foundry plugin from enabledPlugins - we use direct global install for it
 # This prevents "Plugin not found" errors from stale host config
-merged.pop("enabledPlugins", None)
+# But keep other plugins like pyright-lsp that use the normal plugin system
+if "enabledPlugins" in merged:
+    merged["enabledPlugins"].pop("foundry@claude-foundry", None)
+    # Clean up empty dict
+    if not merged["enabledPlugins"]:
+        del merged["enabledPlugins"]
 
 os.makedirs(os.path.dirname(container_path), exist_ok=True)
 with open(container_path, "w") as f:
@@ -718,6 +723,7 @@ sync_opencode_local_plugins_on_first_attach() {
 
 # Ensure Claude model defaults are set in settings.json.
 # The foundry MCP server and hooks are configured by prepopulate_foundry_global().
+# Also installs pyright-lsp plugin (optional, uses normal plugin system).
 ensure_claude_foundry_mcp() {
     local container_id="$1"
     local quiet="${2:-0}"
@@ -747,15 +753,38 @@ data["model"] = "opus"
 data["subagentModel"] = "haiku"
 data["alwaysThinkingEnabled"] = True
 
-# Remove enabledPlugins - we use direct global install, not plugins
+# Remove foundry plugin from enabledPlugins - we use direct global install for it
 # This prevents "Plugin not found" errors from stale host config
-data.pop("enabledPlugins", None)
+# But keep other plugins like pyright-lsp that use the normal plugin system
+if "enabledPlugins" in data:
+    data["enabledPlugins"].pop("foundry@claude-foundry", None)
+    # Clean up empty dict
+    if not data["enabledPlugins"]:
+        del data["enabledPlugins"]
 
 os.makedirs(os.path.dirname(path), exist_ok=True)
 with open(path, "w") as f:
     json.dump(data, f, indent=2)
     f.write("\n")
 PY
+
+    # pyright-lsp is optional - install via normal plugin system
+    if [ "$quiet" != "1" ]; then
+        if docker exec "$container_id" sh -c \
+            "ls $CONTAINER_HOME/.claude/plugins/cache/claude-plugins-official/pyright-lsp/*/\.claude-plugin/plugin.json" \
+            >/dev/null 2>&1; then
+            log_debug "pyright-lsp already cached"
+            docker exec -u "$CONTAINER_USER" "$container_id" \
+                claude plugin enable pyright-lsp@claude-plugins-official 2>/dev/null || true
+        else
+            log_debug "Attempting pyright-lsp install (optional)..."
+            docker exec -u "$CONTAINER_USER" "$container_id" sh -c "
+                claude plugin marketplace add anthropics/claude-plugins-official 2>/dev/null && \
+                claude plugin install pyright-lsp@claude-plugins-official 2>/dev/null && \
+                claude plugin enable pyright-lsp@claude-plugins-official 2>/dev/null
+            " || log_debug "pyright-lsp not installed (optional)"
+        fi
+    fi
 }
 
 ensure_github_https_git() {
