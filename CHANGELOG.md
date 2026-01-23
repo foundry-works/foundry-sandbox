@@ -15,6 +15,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Eliminates plugin update mechanism that caused issues in sandboxes
   - Skill commands change from `/foundry:foundry-spec` to `/foundry-spec`
 
+### Fixed
+- GitHub connectivity in limited network mode: added CIDR range whitelisting to handle DNS-based IP rotation
+  - GitHub publishes IPs at https://api.github.com/meta
+  - Whitelists 4 CIDR blocks covering web, api, git, and pages endpoints
+  - Matches existing approach used for Cloudflare IPs
+
 ### Removed
 - Plugin system files no longer created: `installed_plugins.json`, `enabledPlugins`, `marketplace.json`, `known_marketplaces.json`
 - `rewrite_claude_plugin_remotes()` and `rewrite_claude_marketplaces()` functions (no longer needed)

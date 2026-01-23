@@ -311,6 +311,15 @@ CLOUDFLARE_CIDRS=(
     "131.0.72.0/22"
 )
 
+# GitHub IP ranges (from https://api.github.com/meta)
+# Covers web, api, git, and pages endpoints
+GITHUB_CIDRS=(
+    "140.82.112.0/20"    # Primary GitHub servers
+    "192.30.252.0/22"    # Legacy GitHub
+    "185.199.108.0/22"   # GitHub Pages / raw content
+    "143.55.64.0/20"     # Additional infrastructure
+)
+
 # Track already-added IPs to avoid duplicates
 declare -A ADDED_IPS
 
@@ -422,7 +431,14 @@ echo "  Adding Cloudflare CIDR ranges..."
 for cidr in "${CLOUDFLARE_CIDRS[@]}"; do
     add_cidr_rule "$cidr"
 done
-echo "    Added ${#CLOUDFLARE_CIDRS[@]} CIDR blocks"
+echo "    Added ${#CLOUDFLARE_CIDRS[@]} Cloudflare CIDR blocks"
+
+# Allow GitHub IP ranges
+echo "  Adding GitHub CIDR ranges..."
+for cidr in "${GITHUB_CIDRS[@]}"; do
+    add_cidr_rule "$cidr"
+done
+echo "    Added ${#GITHUB_CIDRS[@]} GitHub CIDR blocks"
 
 # Allow Docker gateway (for host communication)
 # Note: GATEWAY was already resolved earlier for DNS rules
@@ -457,5 +473,5 @@ if command -v ip6tables &>/dev/null; then
 fi
 
 echo "Firewall rules applied successfully."
-echo "Allowed: ${#ALL_DOMAINS[@]} domains + ${#CLOUDFLARE_CIDRS[@]} Cloudflare CIDRs + Docker gateway + DNS (resolvers/gateway) + loopback"
+echo "Allowed: ${#ALL_DOMAINS[@]} domains + ${#CLOUDFLARE_CIDRS[@]} Cloudflare CIDRs + ${#GITHUB_CIDRS[@]} GitHub CIDRs + Docker gateway + DNS (resolvers/gateway) + loopback"
 echo "All other outbound traffic is blocked."
