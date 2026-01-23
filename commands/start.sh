@@ -30,8 +30,8 @@ cmd_start() {
     ensure_dir "$claude_home_path"
     add_claude_home_to_override "$override_file" "$claude_home_path"
 
-    # Pre-populate Claude plugins if not already cached (skip if already populated)
-    prepopulate_claude_plugins "$claude_home_path" "1"
+    # Pre-populate foundry skills and hooks if not already installed (skip if already populated)
+    prepopulate_foundry_global "$claude_home_path" "1"
 
     local enable_ssh="0"
     if [ "${SANDBOX_SYNC_SSH:-0}" = "1" ]; then

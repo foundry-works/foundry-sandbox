@@ -40,123 +40,84 @@ ensure_container_user() {
     fi
 }
 
-# Pre-populate Claude plugins on the HOST before container starts.
-# This ensures plugins are available without network access inside the container.
+# Pre-populate Claude foundry as a global install on the HOST before container starts.
+# This installs skills and hooks directly without using Claude's plugin system.
+# MCP server config is written during container setup (ensure_foundry_mcp_config).
 #
 # Arguments:
 #   $1 - claude_home_path: Host path that will be mounted as ~/.claude in container
-#   $2 - skip_if_populated: If "1", skip if plugins already exist (default: 0)
+#   $2 - skip_if_populated: If "1", skip if already installed (default: 0)
 #
-# Returns 0 on success, 1 on failure (but continues - plugin install is best-effort)
-prepopulate_claude_plugins() {
+# Returns 0 on success, 1 on failure (but continues - install is best-effort)
+prepopulate_foundry_global() {
     local claude_home_path="$1"
     local skip_if_populated="${2:-0}"
 
-    local plugins_dir="$claude_home_path/plugins"
-    local cache_dir="$plugins_dir/cache"
-    local installed_file="$plugins_dir/installed_plugins.json"
+    local skills_dir="$claude_home_path/skills"
+    local hooks_dir="$claude_home_path/hooks"
 
     # Check if already populated
-    if [ "$skip_if_populated" = "1" ] && [ -f "$installed_file" ]; then
-        # Verify the cache actually exists (not just the registry)
-        if [ -d "$cache_dir/claude-foundry/foundry" ]; then
-            log_debug "Claude plugins already populated, skipping"
-            return 0
-        fi
-        log_info "Plugin registry exists but cache is missing, re-populating..."
+    if [ "$skip_if_populated" = "1" ] && [ -d "$skills_dir/foundry-spec" ]; then
+        log_debug "Foundry skills already installed, skipping"
+        return 0
     fi
 
-    log_info "Pre-populating Claude plugins..."
+    log_info "Pre-populating foundry global install..."
 
     # Ensure directories exist
-    mkdir -p "$cache_dir"
+    mkdir -p "$skills_dir"
+    mkdir -p "$hooks_dir"
     mkdir -p "$CLAUDE_PLUGINS_CACHE"
 
     # Clone or update the foundry plugin repo to global cache
     local foundry_cache="$CLAUDE_PLUGINS_CACHE/claude-foundry"
     if [ -d "$foundry_cache/.git" ]; then
-        log_debug "Updating cached foundry plugin..."
+        log_debug "Updating cached foundry repo..."
         if ! git -C "$foundry_cache" pull --ff-only -q 2>/dev/null; then
             log_warn "Failed to update foundry cache, using existing version"
         fi
     else
-        log_info "Cloning foundry plugin to cache..."
+        log_info "Cloning foundry repo to cache..."
         if ! git clone --depth 1 -q \
             "https://github.com/foundry-works/claude-foundry.git" \
             "$foundry_cache" 2>&1; then
-            log_warn "Failed to clone foundry plugin - network may be unavailable"
-            log_warn "Plugin installation will be attempted inside container"
+            log_warn "Failed to clone foundry repo - network may be unavailable"
             return 1
         fi
     fi
 
-    # Extract git commit SHA for version pinning
-    local git_commit_sha
-    git_commit_sha=$(git -C "$foundry_cache" rev-parse HEAD 2>/dev/null || echo "unknown")
-
-    # Get plugin version from plugin.json
+    # Get plugin version from plugin.json (for logging)
     local plugin_json="$foundry_cache/.claude-plugin/plugin.json"
-    if [ ! -f "$plugin_json" ]; then
-        log_warn "Plugin metadata not found at $plugin_json"
-        return 1
+    local version="unknown"
+    if [ -f "$plugin_json" ]; then
+        version=$(python3 -c "import json; print(json.load(open('$plugin_json'))['version'])" 2>/dev/null || echo "unknown")
     fi
 
-    local version
-    version=$(python3 -c "import json; print(json.load(open('$plugin_json'))['version'])" 2>/dev/null)
-    if [ -z "$version" ]; then
-        log_warn "Could not parse plugin version"
-        return 1
+    log_info "Installing foundry v$version as global install..."
+
+    # Copy skills to ~/.claude/skills/
+    if [ -d "$foundry_cache/skills" ]; then
+        rsync -a --delete "$foundry_cache/skills/" "$skills_dir/" 2>/dev/null || \
+            cp -r "$foundry_cache/skills/"* "$skills_dir/" 2>/dev/null
+        log_debug "Copied skills to $skills_dir"
+    else
+        log_warn "No skills directory found in foundry repo"
     fi
 
-    log_info "Installing foundry plugin v$version..."
+    # Copy hooks executables to ~/.claude/hooks/
+    if [ -d "$foundry_cache/hooks" ]; then
+        for hook_file in "$foundry_cache/hooks"/*; do
+            if [ -f "$hook_file" ]; then
+                cp "$hook_file" "$hooks_dir/"
+                chmod +x "$hooks_dir/$(basename "$hook_file")"
+            fi
+        done
+        log_debug "Copied hooks to $hooks_dir"
+    else
+        log_warn "No hooks directory found in foundry repo"
+    fi
 
-    # Copy plugin to sandbox's cache directory
-    local plugin_dest="$cache_dir/claude-foundry/foundry/$version"
-    mkdir -p "$plugin_dest"
-
-    # Copy plugin contents (excluding .git)
-    rsync -a --exclude='.git' "$foundry_cache/" "$plugin_dest/" 2>/dev/null || \
-        cp -r "$foundry_cache"/* "$plugin_dest/" 2>/dev/null
-
-    # Ensure no .git directory in plugin destination
-    rm -rf "$plugin_dest/.git" 2>/dev/null || true
-
-    # Always create/overwrite marketplace.json to ensure autoUpdate is disabled
-    local marketplace_json="$plugin_dest/.claude-plugin/marketplace.json"
-    mkdir -p "$plugin_dest/.claude-plugin"
-    cat > "$marketplace_json" <<'MARKETPLACE'
-{
-    "name": "claude-foundry",
-    "displayName": "Claude Foundry",
-    "description": "Spec-driven development toolkit for Claude Code",
-    "url": "https://github.com/foundry-works/claude-foundry",
-    "autoUpdate": false
-}
-MARKETPLACE
-
-    # Create installed_plugins.json
-    local install_date
-    install_date=$(date -u +"%Y-%m-%dT%H:%M:%S.000Z")
-    cat > "$installed_file" <<INSTALLED
-{
-  "version": 2,
-  "plugins": {
-    "foundry@claude-foundry": [
-      {
-        "scope": "user",
-        "installPath": "/home/ubuntu/.claude/plugins/cache/claude-foundry/foundry/$version",
-        "version": "$version",
-        "gitCommitSha": "$git_commit_sha",
-        "isLocal": true,
-        "installedAt": "$install_date",
-        "lastUpdated": "$install_date"
-      }
-    ]
-  }
-}
-INSTALLED
-
-    # Update or create settings.json with plugin enabled and sandbox defaults
+    # Update settings.json with hooks configuration and sandbox defaults
     local settings_file="$claude_home_path/settings.json"
     python3 - "$settings_file" <<'PY'
 import json
@@ -177,10 +138,24 @@ if "subagentModel" not in data:
     data["subagentModel"] = "haiku"
 data["alwaysThinkingEnabled"] = True
 
-# Ensure enabledPlugins exists and foundry is enabled
-if "enabledPlugins" not in data:
-    data["enabledPlugins"] = {}
-data["enabledPlugins"]["foundry@claude-foundry"] = True
+# Configure hooks with absolute paths (container paths)
+data["hooks"] = {
+    "PreToolUse": [
+        {
+            "matcher": "Read",
+            "hooks": [{"type": "command", "command": "/home/ubuntu/.claude/hooks/block-json-specs"}]
+        },
+        {
+            "matcher": "Bash",
+            "hooks": [{"type": "command", "command": "/home/ubuntu/.claude/hooks/block-spec-bash-access"}]
+        }
+    ],
+    "PostToolUse": [
+        {
+            "hooks": [{"type": "command", "command": "/home/ubuntu/.claude/hooks/context-monitor"}]
+        }
+    ]
+}
 
 os.makedirs(os.path.dirname(path), exist_ok=True)
 with open(path, "w") as f:
@@ -188,12 +163,12 @@ with open(path, "w") as f:
     f.write("\n")
 PY
 
-    log_info "Claude plugins pre-populated successfully"
+    log_info "Foundry global install completed successfully"
     return 0
 }
 
 # Merge host's Claude settings into container's settings without overwriting critical sandbox settings.
-# This preserves the plugin configuration and model defaults set up by prepopulate_claude_plugins
+# This preserves the hooks configuration and model defaults set up by prepopulate_foundry_global
 # while bringing in other user preferences from the host.
 #
 # Arguments:
@@ -228,7 +203,7 @@ try:
 except (FileNotFoundError, json.JSONDecodeError):
     host_data = {}
 
-# Load existing container settings (may have enabledPlugins from prepopulate)
+# Load existing container settings (may have hooks from prepopulate_foundry_global)
 try:
     with open(container_path) as f:
         container_data = json.load(f)
@@ -236,24 +211,14 @@ except (FileNotFoundError, json.JSONDecodeError):
     container_data = {}
 
 # Settings to preserve from container (sandbox defaults)
-preserve_keys = {"model", "subagentModel"}
+preserve_keys = {"model", "subagentModel", "hooks"}
 preserved = {k: container_data[k] for k in preserve_keys if k in container_data}
-
-# Preserve container's enabledPlugins (set by prepopulate_claude_plugins)
-container_enabled_plugins = container_data.get("enabledPlugins", {})
 
 # Merge: host settings take precedence, except for preserved keys
 merged = {**container_data, **host_data}
 
-# Restore preserved settings (opus model, haiku subagent)
+# Restore preserved settings (opus model, haiku subagent, hooks config)
 merged.update(preserved)
-
-# Merge enabledPlugins: container's plugins + host's plugins
-host_enabled_plugins = host_data.get("enabledPlugins", {})
-merged["enabledPlugins"] = {**container_enabled_plugins, **host_enabled_plugins}
-
-# Ensure foundry plugin stays enabled (critical for sandbox functionality)
-merged["enabledPlugins"]["foundry@claude-foundry"] = True
 
 os.makedirs(os.path.dirname(container_path), exist_ok=True)
 with open(container_path, "w") as f:
@@ -747,6 +712,8 @@ sync_opencode_local_plugins_on_first_attach() {
     sync_opencode_foundry "$container_id" "$quiet"
 }
 
+# Ensure Claude model defaults are set in settings.json.
+# The foundry MCP server and hooks are configured by prepopulate_foundry_global().
 ensure_claude_foundry_mcp() {
     local container_id="$1"
     local quiet="${2:-0}"
@@ -755,7 +722,7 @@ ensure_claude_foundry_mcp() {
         run_fn="run_cmd_quiet"
     fi
 
-    # Set model defaults in settings.
+    # Set model defaults in settings (hooks are already configured by prepopulate_foundry_global)
     $run_fn docker exec -i "$container_id" python3 - <<'PY'
 import json
 import os
@@ -776,309 +743,10 @@ data["model"] = "opus"
 data["subagentModel"] = "haiku"
 data["alwaysThinkingEnabled"] = True
 
-# Ensure foundry plugin is enabled
-if "enabledPlugins" not in data:
-    data["enabledPlugins"] = {}
-data["enabledPlugins"]["foundry@claude-foundry"] = True
-
 os.makedirs(os.path.dirname(path), exist_ok=True)
 with open(path, "w") as f:
     json.dump(data, f, indent=2)
     f.write("\n")
-PY
-
-    # Register foundry-mcp directly via CLI
-    if [ "$quiet" != "1" ]; then
-        log_info "Registering foundry-mcp..."
-    fi
-    docker exec -u "$CONTAINER_USER" "$container_id" \
-        claude mcp add-json foundry-mcp '{"command": "python", "args": ["-m", "foundry_mcp.server"]}' 2>/dev/null || \
-        log_debug "foundry-mcp already registered or claude not ready"
-
-    # Check if plugin cache already exists (pre-populated by prepopulate_claude_plugins)
-    local plugin_cache_exists="0"
-    if docker exec "$container_id" sh -c \
-        "ls $CONTAINER_HOME/.claude/plugins/cache/claude-foundry/foundry/*/\.claude-plugin/plugin.json" \
-        >/dev/null 2>&1; then
-        plugin_cache_exists="1"
-    fi
-
-    if [ "$plugin_cache_exists" = "1" ]; then
-        if [ "$quiet" != "1" ]; then
-            log_info "Foundry plugin cache found, enabling..."
-        fi
-        # Just enable the plugin - no network needed
-        docker exec -u "$CONTAINER_USER" "$container_id" \
-            claude plugin enable foundry@claude-foundry 2>/dev/null || true
-    elif [ "$quiet" != "1" ]; then
-        # Fallback: try network install if cache not present
-        log_info "Plugin cache not found, attempting network install..."
-
-        # Try to install with explicit error capture
-        local install_output
-        install_output=$(docker exec -u "$CONTAINER_USER" "$container_id" sh -c "
-            claude plugin marketplace add foundry-works/claude-foundry 2>&1 && \
-            claude plugin install foundry@claude-foundry 2>&1 && \
-            claude plugin enable foundry@claude-foundry 2>&1
-        " 2>&1) || {
-            log_warn "Failed to install foundry plugin via network:"
-            echo "$install_output" | head -5 | while read -r line; do
-                log_warn "  $line"
-            done
-            log_warn "Plugin will not be available until network install succeeds"
-        }
-
-        # Verify the cache was actually created
-        if ! docker exec "$container_id" sh -c \
-            "ls $CONTAINER_HOME/.claude/plugins/cache/claude-foundry/foundry/*/\.claude-plugin/plugin.json" \
-            >/dev/null 2>&1; then
-            log_warn "Plugin install may have failed - cache directory not found"
-        fi
-    fi
-
-    # pyright-lsp is optional - try to install but don't fail
-    if [ "$quiet" != "1" ]; then
-        if docker exec "$container_id" sh -c \
-            "ls $CONTAINER_HOME/.claude/plugins/cache/claude-plugins-official/pyright-lsp/*/\.claude-plugin/plugin.json" \
-            >/dev/null 2>&1; then
-            log_debug "pyright-lsp already cached"
-            docker exec -u "$CONTAINER_USER" "$container_id" \
-                claude plugin enable pyright-lsp@claude-plugins-official 2>/dev/null || true
-        else
-            log_debug "Attempting pyright-lsp install (optional)..."
-            docker exec -u "$CONTAINER_USER" "$container_id" sh -c "
-                claude plugin marketplace add anthropics/claude-plugins-official 2>/dev/null && \
-                claude plugin install pyright-lsp@claude-plugins-official 2>/dev/null && \
-                claude plugin enable pyright-lsp@claude-plugins-official 2>/dev/null
-            " || log_debug "pyright-lsp not installed (optional)"
-        fi
-    fi
-}
-
-rewrite_claude_plugin_remotes() {
-    local container_id="$1"
-    local quiet="${2:-0}"
-    local run_fn="run_cmd"
-    if [ "$quiet" = "1" ]; then
-        run_fn="run_cmd_quiet"
-    fi
-
-    if [ "$quiet" != "1" ]; then
-        log_info "Ensuring Claude plugin remotes use HTTPS..."
-    fi
-
-    $run_fn docker exec -i "$container_id" python3 - <<'PY'
-import json
-import pathlib
-import subprocess
-import sys
-
-path = pathlib.Path("/home/ubuntu/.claude/plugins/installed_plugins.json")
-if not path.exists():
-    sys.exit(0)
-
-try:
-    data = json.load(path.open())
-except Exception:
-    sys.exit(0)
-
-def https_url(url):
-    if url.startswith("git@github.com:"):
-        return "https://github.com/" + url.split(":", 1)[1]
-    if url.startswith("ssh://git@github.com/"):
-        return "https://github.com/" + url.split("ssh://git@github.com/", 1)[1]
-    return ""
-
-for entries in (data.get("plugins") or {}).values():
-    for entry in entries or []:
-        install_path = entry.get("installPath")
-        if not install_path:
-            continue
-        try:
-            url = subprocess.check_output(
-                ["git", "-C", install_path, "remote", "get-url", "origin"],
-                text=True,
-                stderr=subprocess.DEVNULL,
-            ).strip()
-        except Exception:
-            continue
-        new_url = https_url(url)
-        if not new_url or new_url == url:
-            continue
-        try:
-            subprocess.check_call(
-                ["git", "-C", install_path, "remote", "set-url", "origin", new_url],
-                stderr=subprocess.DEVNULL,
-            )
-        except Exception:
-            pass
-PY
-}
-
-rewrite_claude_marketplaces() {
-    local container_id="$1"
-    local quiet="${2:-0}"
-    local run_fn="run_cmd"
-    if [ "$quiet" = "1" ]; then
-        run_fn="run_cmd_quiet"
-    fi
-
-    if [ "$quiet" != "1" ]; then
-        log_info "Ensuring Claude marketplace remotes use HTTPS..."
-    fi
-
-    $run_fn docker exec -i "$container_id" python3 - <<'PY'
-from datetime import datetime, timezone
-import json
-import pathlib
-import subprocess
-import sys
-
-def https_url(url):
-    if url.startswith("git@github.com:"):
-        return "https://github.com/" + url.split(":", 1)[1]
-    if url.startswith("ssh://git@github.com/"):
-        return "https://github.com/" + url.split("ssh://git@github.com/", 1)[1]
-    return ""
-
-root = pathlib.Path("/home/ubuntu/.claude/plugins")
-if not root.exists():
-    sys.exit(0)
-
-marketplaces_dir = root / "marketplaces"
-if marketplaces_dir.exists():
-    for repo in marketplaces_dir.iterdir():
-        if not (repo / ".git").exists():
-            continue
-        try:
-            url = subprocess.check_output(
-                ["git", "-C", str(repo), "remote", "get-url", "origin"],
-                text=True,
-                stderr=subprocess.DEVNULL,
-            ).strip()
-        except Exception:
-            continue
-        new_url = https_url(url)
-        if not new_url or new_url == url:
-            continue
-        try:
-            subprocess.check_call(
-                ["git", "-C", str(repo), "remote", "set-url", "origin", new_url],
-                stderr=subprocess.DEVNULL,
-            )
-        except Exception:
-            pass
-
-def rewrite_json(path):
-    try:
-        data = json.load(path.open())
-    except Exception:
-        return
-
-    changed = False
-
-    def walk(value):
-        nonlocal changed
-        if isinstance(value, str):
-            new_value = https_url(value)
-            if new_value:
-                changed = True
-                return new_value
-            return value
-        if isinstance(value, list):
-            return [walk(item) for item in value]
-        if isinstance(value, dict):
-            return {key: walk(val) for key, val in value.items()}
-        return value
-
-    new_data = walk(data)
-    if changed:
-        path.write_text(json.dumps(new_data, indent=2) + "\n")
-
-def rewrite_known_marketplaces(path):
-    try:
-        data = json.load(path.open())
-    except Exception:
-        return
-
-    changed = False
-    for entry in (data or {}).values():
-        source = entry.get("source") or {}
-        if source.get("source") != "github":
-            continue
-        repo = source.get("repo")
-        if not repo:
-            continue
-        entry["source"] = {
-            "source": "git",
-            "url": f"https://github.com/{repo}.git",
-        }
-        changed = True
-
-    if changed:
-        path.write_text(json.dumps(data, indent=2) + "\n")
-
-def rewrite_settings_marketplaces(path):
-    try:
-        data = json.load(path.open())
-    except Exception:
-        return
-
-    extra = data.get("extraKnownMarketplaces")
-    if not isinstance(extra, dict):
-        return
-
-    changed = False
-    for entry in extra.values():
-        if not isinstance(entry, dict):
-            continue
-        source = entry.get("source") or {}
-        if source.get("source") != "github":
-            continue
-        repo = source.get("repo")
-        if not repo:
-            continue
-        entry["source"] = {
-            "source": "git",
-            "url": f"https://github.com/{repo}.git",
-        }
-        changed = True
-
-    if changed:
-        path.write_text(json.dumps(data, indent=2) + "\n")
-
-for path in root.rglob("*marketplace*.json"):
-    rewrite_json(path)
-
-settings_path = root.parent / "settings.json"
-if settings_path.exists():
-    rewrite_settings_marketplaces(settings_path)
-
-known_path = root / "known_marketplaces.json"
-if known_path.exists():
-    rewrite_known_marketplaces(known_path)
-else:
-    now = datetime.now(timezone.utc).isoformat(timespec="milliseconds").replace("+00:00", "Z")
-    defaults = {
-        "claude-foundry": {
-            "source": {
-                "source": "local",
-                "path": "/home/ubuntu/.claude/plugins/marketplaces/claude-foundry",
-            },
-            "installLocation": "/home/ubuntu/.claude/plugins/marketplaces/claude-foundry",
-            "lastUpdated": now,
-        },
-        "claude-plugins-official": {
-            "source": {
-                "source": "local",
-                "path": "/home/ubuntu/.claude/plugins/marketplaces/claude-plugins-official",
-            },
-            "installLocation": "/home/ubuntu/.claude/plugins/marketplaces/claude-plugins-official",
-            "lastUpdated": now,
-        },
-    }
-    known_path.parent.mkdir(parents=True, exist_ok=True)
-    known_path.write_text(json.dumps(defaults, indent=2) + "\n")
 PY
 }
 
@@ -1224,6 +892,55 @@ for path in paths:
         data["autoCompactEnabled"] = False
         changed = True
     if changed or not os.path.exists(path):
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, "w") as f:
+            json.dump(data, f, indent=2)
+            f.write("\n")
+PY
+}
+
+# Register foundry-mcp server in ~/.claude.json inside the container.
+# This is called after host's ~/.claude.json is copied (if it exists).
+ensure_foundry_mcp_config() {
+    local container_id="$1"
+    local quiet="${2:-0}"
+    local run_fn="run_cmd"
+    if [ "$quiet" = "1" ]; then
+        run_fn="run_cmd_quiet"
+    fi
+
+    $run_fn docker exec -u "$CONTAINER_USER" -i "$container_id" python3 - <<'PY'
+import json
+import os
+
+paths = [
+    "/home/ubuntu/.claude.json",
+    "/home/ubuntu/.claude/.claude.json",
+]
+
+for path in paths:
+    data = {}
+    if os.path.exists(path):
+        try:
+            with open(path, "r") as f:
+                data = json.load(f)
+        except json.JSONDecodeError:
+            data = {}
+
+    if not isinstance(data, dict):
+        data = {}
+
+    # Add MCP server configuration
+    if "mcpServers" not in data:
+        data["mcpServers"] = {}
+
+    # Only add if not already configured
+    if "foundry-mcp" not in data["mcpServers"]:
+        data["mcpServers"]["foundry-mcp"] = {
+            "command": "python",
+            "args": ["-m", "foundry_mcp.server"]
+        }
+
         os.makedirs(os.path.dirname(path), exist_ok=True)
         with open(path, "w") as f:
             json.dump(data, f, indent=2)
@@ -1468,6 +1185,7 @@ copy_configs_to_container() {
         copy_file_to_container "$container_id" ~/.claude.json "$CONTAINER_HOME/.claude/.claude.json"
     fi
     ensure_claude_onboarding "$container_id"
+    ensure_foundry_mcp_config "$container_id"
     if file_exists ~/.claude/settings.json; then
         copy_file_to_container "$container_id" ~/.claude/settings.json "$CONTAINER_HOME/.claude/settings.json"
     fi
@@ -1537,10 +1255,8 @@ copy_configs_to_container() {
     ensure_github_https_git "$container_id" "0" "$enable_ssh"
     ssh_agent_preflight "$container_id" "$enable_ssh" "$skip_plugins"
 
-    # Register MCP and install plugins (after SSH keys are available)
+    # Ensure model defaults (hooks and MCP are configured by prepopulate_foundry_global)
     ensure_claude_foundry_mcp "$container_id" "$skip_plugins"
-    rewrite_claude_plugin_remotes "$container_id" "$skip_plugins"
-    rewrite_claude_marketplaces "$container_id" "$skip_plugins"
 
     # Create foundry-mcp workspace directories
     ensure_foundry_mcp_workspace_dirs "$container_id" "$working_dir"
@@ -1549,9 +1265,13 @@ copy_configs_to_container() {
     log_info "=== Claude Config Debug ==="
     docker exec "$container_id" sh -c "
         echo 'Settings (key fields):'
-        python3 -c \"import json; d=json.load(open('$CONTAINER_HOME/.claude/settings.json')); print('  model:', d.get('model', 'NOT SET')); print('  enabledPlugins:', list(d.get('enabledPlugins', {}).keys()))\" 2>/dev/null || echo '  settings.json missing or invalid'
-        echo 'Installed plugins:'
-        python3 -c \"import json; d=json.load(open('$CONTAINER_HOME/.claude/plugins/installed_plugins.json')); print('  ', list(d.get('plugins', {}).keys()))\" 2>/dev/null || echo '  installed_plugins.json missing or invalid'
+        python3 -c \"import json; d=json.load(open('$CONTAINER_HOME/.claude/settings.json')); print('  model:', d.get('model', 'NOT SET')); print('  hooks:', 'configured' if d.get('hooks') else 'NOT SET')\" 2>/dev/null || echo '  settings.json missing or invalid'
+        echo 'Skills:'
+        ls -1 $CONTAINER_HOME/.claude/skills/ 2>/dev/null | head -5 || echo '  no skills found'
+        echo 'Hooks:'
+        ls -1 $CONTAINER_HOME/.claude/hooks/ 2>/dev/null || echo '  no hooks found'
+        echo 'MCP servers:'
+        python3 -c \"import json; d=json.load(open('$CONTAINER_HOME/.claude.json')); print('  ', list(d.get('mcpServers', {}).keys()))\" 2>/dev/null || echo '  .claude.json missing or invalid'
     " || true
 }
 
@@ -1566,13 +1286,12 @@ sync_runtime_credentials() {
         copy_file_to_container_quiet "$container_id" ~/.claude.json "$CONTAINER_HOME/.claude/.claude.json"
     fi
     ensure_claude_onboarding "$container_id" "1"
+    ensure_foundry_mcp_config "$container_id" "1"
     if file_exists ~/.claude/settings.json; then
         copy_file_to_container_quiet "$container_id" ~/.claude/settings.json "$CONTAINER_HOME/.claude/settings.json"
     fi
     file_exists ~/.claude/statusline.conf && copy_file_to_container_quiet "$container_id" ~/.claude/statusline.conf "$CONTAINER_HOME/.claude/statusline.conf"
     ensure_claude_foundry_mcp "$container_id" "1"
-    rewrite_claude_plugin_remotes "$container_id" "1"
-    rewrite_claude_marketplaces "$container_id" "1"
     ensure_claude_statusline "$container_id" "1"
     dir_exists ~/.config/gh && copy_dir_to_container_quiet "$container_id" ~/.config/gh "$CONTAINER_HOME/.config/gh"
     dir_exists ~/.gemini && copy_dir_to_container_quiet "$container_id" ~/.gemini "$CONTAINER_HOME/.gemini" "antigravity"
