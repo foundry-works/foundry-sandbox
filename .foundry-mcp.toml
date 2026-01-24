@@ -232,7 +232,13 @@ default_provider = "[cli]gemini:pro"
 
 # Providers for CONSENSUS workflow (multi-model consultation)
 # Use the providers you have installed.
-consensus_providers = ["[cli]gemini:pro", "[cli]codex:gpt-5.2-codex"]
+consensus_providers = [
+    "[cli]gemini:pro",
+    "[cli]codex:gpt-5.2-codex",
+    "[cli]opencode:openai/gpt-5.2-codex",
+    "[cli]cursor-agent:gpt-5.2-codex",
+    "[cli]claude:opus"
+]
 
 # State TTL in hours before cleanup
 ttl_hours = 24
@@ -281,9 +287,8 @@ deep_research_audit_artifacts = true
 # - "technical" : Prioritizes official docs, arxiv, Stack Overflow
 deep_research_mode = "technical"
 
-# Search providers - dynamically configured based on API keys
-# semantic_scholar is always available (no key required)
-# tavily/perplexity added at runtime if keys are present
+# Search providers (in priority order)
+# Available: tavily, perplexity, google, semantic_scholar
 deep_research_providers = [
     "semantic_scholar"
 ]
@@ -301,8 +306,14 @@ deep_research_refinement_timeout = 600.0  # Gap identification
 # -----------------------------------------------------------------------------
 # Per-Phase Providers (override default_provider)
 # -----------------------------------------------------------------------------
+# Supports ProviderSpec format for model selection:
+#   "[cli]gemini:pro"
+#   "[cli]claude:opus"
+#   "[cli]opencode:openai/gpt-5.2-codex"
+#   "[cli]codex:gpt-5.2-codex"
+#   "[cli]cursor-agent:gpt-5.2-codex"
 
-deep_research_planning_provider = "[cli]gemini:pro"
+deep_research_planning_provider = "[cli]gemini:flash"
 deep_research_analysis_provider = "[cli]gemini:pro"
 deep_research_synthesis_provider = "[cli]gemini:pro"
 deep_research_refinement_provider = "[cli]gemini:pro"
@@ -310,33 +321,45 @@ deep_research_refinement_provider = "[cli]gemini:pro"
 # -----------------------------------------------------------------------------
 # Per-Phase Fallback Provider Lists (Retry & Resilience)
 # -----------------------------------------------------------------------------
+# Each phase can have an ordered list of fallback providers.
+# On failure/timeout, the workflow retries with backoff, then tries
+# the next provider in the list until success or exhaustion.
+# Empty list = no fallback (use only the primary provider)
 
+# Planning phase: query decomposition (can use faster/cheaper models)
 deep_research_planning_providers = [
-    "[cli]gemini:pro",
-    "[cli]codex:gpt-5.2-codex",
-    "[cli]opencode:openai/gpt-5.2-codex",
-    "[cli]claude:sonnet",
+    "[cli]gemini:flash",
+    "[cli]codex:gpt-5.1-codex-mini",
+    "[cli]opencode:openai/gpt-5.1-codex-mini",
+    "[cli]cursor-agent:gpt-5.1-codex-mini",
+    "[cli]claude:sonnet"
 ]
 
+# Analysis phase: finding extraction
 deep_research_analysis_providers = [
     "[cli]gemini:pro",
-    "[cli]codex:gpt-5.2-codex",
-    "[cli]opencode:openai/gpt-5.2-codex",
-    "[cli]claude:sonnet",
+    "[cli]codex:gpt-4.1",
+    "[cli]opencode:openai/gpt-4.1",
+    "[cli]cursor-agent:gpt-4.1",
+    "[cli]claude:opus"
 ]
 
+# Synthesis phase: report generation (may benefit from stronger models)
 deep_research_synthesis_providers = [
     "[cli]gemini:pro",
     "[cli]codex:gpt-5.2-codex",
     "[cli]opencode:openai/gpt-5.2-codex",
-    "[cli]claude:sonnet",
+    "[cli]cursor-agent:gpt-5.2-codex",
+    "[cli]claude:opus"
 ]
 
+# Refinement phase: gap identification
 deep_research_refinement_providers = [
     "[cli]gemini:pro",
     "[cli]codex:gpt-5.2-codex",
     "[cli]opencode:openai/gpt-5.2-codex",
-    "[cli]claude:sonnet",
+    "[cli]cursor-agent:gpt-5.2-codex",
+    "[cli]claude:opus"
 ]
 
 deep_research_max_retries = 2
@@ -354,5 +377,24 @@ tavily = 60
 perplexity = 60
 semantic_scholar = 100
 
+# =============================================================================
+# Test Runner Configuration
+# =============================================================================
+#
+# Configure which test runner to use and customize runner settings.
+# The foundry-setup command can auto-detect and configure this section.
+#
+# Supported runners (built-in defaults): pytest, go, npm, jest, make
+# Custom runners can be defined in [test.runners.*] sections.
+
 [test]
+# Default runner to use when running tests
+# Valid values: pytest, go, npm, jest, make, or any custom runner name
 default_runner = "pytest"
+
+# Example custom runner:
+# [test.runners.go]
+# command = ["go", "test"]
+# run_args = ["./..."]
+# pattern = "*_test.go"
+# timeout = 300

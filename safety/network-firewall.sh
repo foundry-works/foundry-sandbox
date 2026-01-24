@@ -18,6 +18,11 @@
 
 set -e
 
+# Helper function to log only when SANDBOX_DEBUG=1
+log_verbose() {
+    [ "$SANDBOX_DEBUG" = "1" ] && echo "$@"
+}
+
 # Domains that use load balancer IP rotation (resolve multiple times)
 # NOTE: This array is defined early so it's available for refresh_rotating_ips()
 ROTATING_IP_DOMAINS=(
@@ -33,9 +38,9 @@ ROTATING_IP_DOMAINS=(
 # Function to refresh rotating domain IPs (can be called separately)
 # NOTE: Defined early so we can exit early when called with "refresh"
 refresh_rotating_ips() {
-    echo "Refreshing IPs for rotating domains..."
+    log_verbose "Refreshing IPs for rotating domains..."
     for domain in "${ROTATING_IP_DOMAINS[@]}"; do
-        echo "  Refreshing: $domain"
+        log_verbose "  Refreshing: $domain"
         for i in {1..5}; do
             local ips
             ips=$(dig +short "$domain" A 2>/dev/null | grep -E '^[0-9]+\.' || true)
@@ -51,7 +56,7 @@ refresh_rotating_ips() {
             sleep 0.2
         done
     done
-    echo "Refresh complete."
+    log_verbose "Refresh complete."
 }
 
 # Handle refresh-only mode (must come before full setup)
@@ -174,8 +179,8 @@ fi
 # Combine default and extra domains
 ALL_DOMAINS=("${DEFAULT_DOMAINS[@]}" "${EXTRA_DOMAINS[@]}")
 
-echo "Setting up firewall for limited network mode..."
-echo "Whitelisted domains: ${ALL_DOMAINS[*]}"
+log_verbose "Setting up firewall for limited network mode..."
+log_verbose "Whitelisted domains: ${ALL_DOMAINS[*]}"
 
 # Initialize ipset allowlists if available
 if command -v ipset &>/dev/null; then
@@ -186,16 +191,16 @@ if command -v ipset &>/dev/null; then
         if iptables -I OUTPUT -m set --match-set "$IPSET_V4" dst -j ACCEPT 2>/dev/null; then
             iptables -D OUTPUT -m set --match-set "$IPSET_V4" dst -j ACCEPT 2>/dev/null || true
             USE_IPSET=true
-            echo "Using ipset allowlists."
+            log_verbose "Using ipset allowlists."
         else
-            echo "Warning: ipset kernel match unavailable, falling back to per-IP iptables rules."
+            log_verbose "Warning: ipset kernel match unavailable, falling back to per-IP iptables rules."
             ipset destroy "$IPSET_V4" "$IPSET_V6" 2>/dev/null || true
         fi
     else
-        echo "Warning: ipset unavailable, falling back to per-IP iptables rules."
+        log_verbose "Warning: ipset unavailable, falling back to per-IP iptables rules."
     fi
 else
-    echo "Warning: ipset not installed, falling back to per-IP iptables rules."
+    log_verbose "Warning: ipset not installed, falling back to per-IP iptables rules."
 fi
 
 # Flush existing OUTPUT rules
@@ -262,7 +267,7 @@ if [ "$DNS_LOOPBACK_ONLY" = "true" ] && [ -n "$GATEWAY" ]; then
 fi
 
 if [ ${#DNS_SERVERS_V4[@]} -gt 0 ] || [ ${#DNS_SERVERS_V6[@]} -gt 0 ]; then
-    echo "  Restricting DNS to resolvers: ${DNS_SERVERS_V4[*]} ${DNS_SERVERS_V6[*]}"
+    log_verbose "  Restricting DNS to resolvers: ${DNS_SERVERS_V4[*]} ${DNS_SERVERS_V6[*]}"
     for dns in "${DNS_SERVERS_V4[@]}"; do
         iptables -A OUTPUT -p udp --dport 53 -d "$dns" -j ACCEPT
         iptables -A OUTPUT -p tcp --dport 53 -d "$dns" -j ACCEPT
@@ -271,14 +276,14 @@ if [ ${#DNS_SERVERS_V4[@]} -gt 0 ] || [ ${#DNS_SERVERS_V6[@]} -gt 0 ]; then
     iptables -A OUTPUT -p udp --dport 53 -j DROP
     iptables -A OUTPUT -p tcp --dport 53 -j DROP
 elif [ -n "$GATEWAY" ]; then
-    echo "  Restricting DNS to Docker gateway: $GATEWAY"
+    log_verbose "  Restricting DNS to Docker gateway: $GATEWAY"
     iptables -A OUTPUT -p udp --dport 53 -d "$GATEWAY" -j ACCEPT
     iptables -A OUTPUT -p tcp --dport 53 -d "$GATEWAY" -j ACCEPT
     # Block DNS to all other destinations
     iptables -A OUTPUT -p udp --dport 53 -j DROP
     iptables -A OUTPUT -p tcp --dport 53 -j DROP
 else
-    echo "  Warning: Could not determine resolvers or gateway, allowing all DNS"
+    log_verbose "  Warning: Could not determine resolvers or gateway, allowing all DNS"
     iptables -A OUTPUT -p udp --dport 53 -j ACCEPT
     iptables -A OUTPUT -p tcp --dport 53 -j ACCEPT
 fi
@@ -358,7 +363,7 @@ add_cidr_rule() {
 # Function to resolve domain and add rules
 allow_domain() {
     local domain="$1"
-    echo "  Allowing: $domain"
+    log_verbose "  Allowing: $domain"
 
     # Check if this domain uses rotating IPs
     local is_rotating=false
@@ -371,7 +376,7 @@ allow_domain() {
 
     if [ "$is_rotating" = true ]; then
         # Resolve multiple times to capture more IPs from the rotation pool
-        echo "    (rotating IP domain - resolving multiple times)"
+        log_verbose "    (rotating IP domain - resolving multiple times)"
         local all_ips=""
         for i in {1..5}; do
             local ips
@@ -387,7 +392,7 @@ allow_domain() {
             add_ip_rule "$ip"
             ((ip_count++)) || true
         done
-        echo "    Added $ip_count unique IPs"
+        log_verbose "    Added $ip_count unique IPs"
     else
         # Standard single resolution
         local ips
@@ -398,7 +403,7 @@ allow_domain() {
         ipv6s=$(dig +short "$domain" AAAA 2>/dev/null | grep -E '^[0-9a-f:]+' || true)
 
         if [ -z "$ips" ] && [ -z "$ipv6s" ]; then
-            echo "    Warning: Could not resolve $domain"
+            log_verbose "    Warning: Could not resolve $domain"
             return
         fi
 
@@ -420,30 +425,30 @@ for domain in "${ALL_DOMAINS[@]}"; do
 done
 
 # Add known IPs that don't resolve via public DNS
-echo "  Adding known IPs (non-DNS resolved)..."
+log_verbose "  Adding known IPs (non-DNS resolved)..."
 for ip in "${KNOWN_IPS[@]}"; do
     add_ip_rule "$ip"
-    echo "    Added: $ip"
+    log_verbose "    Added: $ip"
 done
 
 # Allow Cloudflare IP ranges (Cursor uses CF as proxy)
-echo "  Adding Cloudflare CIDR ranges..."
+log_verbose "  Adding Cloudflare CIDR ranges..."
 for cidr in "${CLOUDFLARE_CIDRS[@]}"; do
     add_cidr_rule "$cidr"
 done
-echo "    Added ${#CLOUDFLARE_CIDRS[@]} Cloudflare CIDR blocks"
+log_verbose "    Added ${#CLOUDFLARE_CIDRS[@]} Cloudflare CIDR blocks"
 
 # Allow GitHub IP ranges
-echo "  Adding GitHub CIDR ranges..."
+log_verbose "  Adding GitHub CIDR ranges..."
 for cidr in "${GITHUB_CIDRS[@]}"; do
     add_cidr_rule "$cidr"
 done
-echo "    Added ${#GITHUB_CIDRS[@]} GitHub CIDR blocks"
+log_verbose "    Added ${#GITHUB_CIDRS[@]} GitHub CIDR blocks"
 
 # Allow Docker gateway (for host communication)
 # Note: GATEWAY was already resolved earlier for DNS rules
 if [ -n "$GATEWAY" ]; then
-    echo "  Allowing Docker gateway: $GATEWAY"
+    log_verbose "  Allowing Docker gateway: $GATEWAY"
     iptables -A OUTPUT -d "$GATEWAY" -j ACCEPT
 fi
 
@@ -472,6 +477,6 @@ if command -v ip6tables &>/dev/null; then
     ip6tables -A OUTPUT -j DROP 2>/dev/null || true
 fi
 
-echo "Firewall rules applied successfully."
-echo "Allowed: ${#ALL_DOMAINS[@]} domains + ${#CLOUDFLARE_CIDRS[@]} Cloudflare CIDRs + ${#GITHUB_CIDRS[@]} GitHub CIDRs + Docker gateway + DNS (resolvers/gateway) + loopback"
-echo "All other outbound traffic is blocked."
+log_verbose "Firewall rules applied successfully."
+log_verbose "Allowed: ${#ALL_DOMAINS[@]} domains + ${#CLOUDFLARE_CIDRS[@]} Cloudflare CIDRs + ${#GITHUB_CIDRS[@]} GitHub CIDRs + Docker gateway + DNS (resolvers/gateway) + loopback"
+log_verbose "All other outbound traffic is blocked."
