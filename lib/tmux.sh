@@ -14,8 +14,18 @@ tmux_create_session() {
     if [ -n "$working_dir" ]; then
         exec_cmd="bash -c 'cd /workspace/$working_dir 2>/dev/null; exec bash'"
     fi
-    tmux new-session -s "$session" -c "$worktree_path" \
+    local scrollback="${SANDBOX_TMUX_SCROLLBACK:-200000}"
+    local mouse="${SANDBOX_TMUX_MOUSE:-1}"
+
+    tmux new-session -d -s "$session" -c "$worktree_path" \
         "docker exec -it ${container}-dev-1 $exec_cmd; echo 'Container exited. Press enter to close.'; read"
+    tmux set-option -t "$session" history-limit "$scrollback" 2>/dev/null || true
+    if [ "$mouse" = "1" ]; then
+        tmux set-option -t "$session" mouse on 2>/dev/null || true
+    else
+        tmux set-option -t "$session" mouse off 2>/dev/null || true
+    fi
+    tmux attach-session -t "$session"
 }
 
 tmux_attach_session() {
