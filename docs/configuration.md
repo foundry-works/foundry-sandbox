@@ -70,3 +70,18 @@ Run `opencode auth login` for standard auth. For the best experience, install th
 - [opencode-gemini-auth](https://github.com/jenslys/opencode-gemini-auth) - Use Gemini CLI subscription
 
 Follow the instructions in each repo to set them up on your host before creating sandboxes.
+
+To set a sandbox-wide OpenCode default model (when `~/.config/opencode/opencode.json` has no `model` set), use:
+
+```bash
+export SANDBOX_OPENCODE_DEFAULT_MODEL="openai/gpt-5.2-codex"
+```
+
+### Tmux
+
+Sandbox tmux sessions can be tuned via environment variables:
+
+```bash
+export SANDBOX_TMUX_SCROLLBACK=200000
+export SANDBOX_TMUX_MOUSE=1
+```
