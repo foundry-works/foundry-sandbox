@@ -7,9 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.2] - 2026-01-24
+
 ### Added
+- Timezone synchronization: sandboxes now inherit host timezone
+  - Detects timezone from `/etc/timezone` or `/etc/localtime` symlink
+  - Mounts `/etc/localtime` and `/etc/timezone` read-only into containers
+  - Sets `TZ` environment variable for applications that use it
 - Configurable default OpenCode model inside sandboxes via `SANDBOX_OPENCODE_DEFAULT_MODEL`
 - Configurable tmux scrollback and mouse mode via `SANDBOX_TMUX_SCROLLBACK` and `SANDBOX_TMUX_MOUSE` (mouse default off)
+
+### Changed
+- Codex CLI now defaults to `approval_policy = "on-failure"` and `sandbox_mode = "danger-full-access"` inside containers when host config doesn't set them
 
 ## [0.5.1] - 2026-01-24
 
@@ -130,7 +139,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Tab completion for bash
 - macOS and Linux support
 
-[Unreleased]: https://github.com/foundry-works/foundry-sandbox/compare/v0.5.0...HEAD
+[Unreleased]: https://github.com/foundry-works/foundry-sandbox/compare/v0.5.2...HEAD
+[0.5.2]: https://github.com/foundry-works/foundry-sandbox/compare/v0.5.1...v0.5.2
+[0.5.1]: https://github.com/foundry-works/foundry-sandbox/compare/v0.5.0...v0.5.1
 [0.5.0]: https://github.com/foundry-works/foundry-sandbox/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/foundry-works/foundry-sandbox/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/foundry-works/foundry-sandbox/compare/v0.2.0...v0.3.0
