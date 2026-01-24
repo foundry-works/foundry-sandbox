@@ -20,7 +20,7 @@ set -e
 
 # Helper function to log only when SANDBOX_DEBUG=1
 log_verbose() {
-    [ "$SANDBOX_DEBUG" = "1" ] && echo "$@"
+    [ "$SANDBOX_DEBUG" = "1" ] && echo "$@" || true
 }
 
 # Domains that use load balancer IP rotation (resolve multiple times)
