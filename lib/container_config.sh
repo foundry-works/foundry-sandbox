@@ -527,6 +527,49 @@ PY
     fi
 }
 
+ensure_opencode_default_model() {
+    local container_id="$1"
+    local quiet="${2:-0}"
+    local default_model="${SANDBOX_OPENCODE_DEFAULT_MODEL}"
+    local run_fn="run_cmd"
+    if [ "$quiet" = "1" ]; then
+        run_fn="run_cmd_quiet"
+    fi
+
+    if [ -z "$default_model" ]; then
+        return 0
+    fi
+
+    $run_fn docker exec -u "$CONTAINER_USER" -i "$container_id" python3 - <<'PY'
+import json
+import os
+
+config_path = "/home/ubuntu/.config/opencode/opencode.json"
+default_model = os.environ.get("SANDBOX_OPENCODE_DEFAULT_MODEL", "").strip()
+if not default_model:
+    raise SystemExit(0)
+
+def load_json(path):
+    try:
+        with open(path, "r") as f:
+            return json.load(f)
+    except (FileNotFoundError, json.JSONDecodeError):
+        return {}
+
+data = load_json(config_path)
+if not isinstance(data, dict):
+    data = {}
+
+model = data.get("model")
+if not model:
+    data["model"] = default_model
+    os.makedirs(os.path.dirname(config_path), exist_ok=True)
+    with open(config_path, "w") as f:
+        json.dump(data, f, indent=2)
+        f.write("\n")
+PY
+}
+
 prefetch_opencode_npm_plugins() {
     local container_id="$1"
     local quiet="${2:-0}"
@@ -1244,6 +1287,7 @@ copy_configs_to_container() {
     ensure_gemini_settings "$container_id"
     ensure_codex_config "$container_id"
     sync_opencode_foundry "$container_id"
+    ensure_opencode_default_model "$container_id" "$skip_plugins"
     if [ "$skip_plugins" != "1" ]; then
         prefetch_opencode_npm_plugins "$container_id"
     fi
@@ -1342,6 +1386,7 @@ sync_runtime_credentials() {
     file_exists ~/.local/share/opencode/auth.json && copy_file_to_container_quiet "$container_id" ~/.local/share/opencode/auth.json "$CONTAINER_HOME/.local/share/opencode/auth.json"
     file_exists ~/.cursor/cli-config.json && copy_file_to_container_quiet "$container_id" ~/.cursor/cli-config.json "$CONTAINER_HOME/.cursor/cli-config.json"
     sync_opencode_foundry "$container_id" "1"
+    ensure_opencode_default_model "$container_id" "1"
     ensure_gemini_settings "$container_id" "1"
     ensure_codex_config "$container_id" "1"
     if file_exists ~/.foundry-mcp.toml; then
