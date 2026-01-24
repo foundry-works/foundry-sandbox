@@ -248,6 +248,62 @@ strip_claude_home_config() {
     ' "$override_file" > "$tmp_file" && mv "$tmp_file" "$override_file"
 }
 
+strip_timezone_config() {
+    local override_file="$1"
+
+    if [ ! -f "$override_file" ]; then
+        return 0
+    fi
+
+    local tmp_file
+    tmp_file="$(mktemp)"
+    awk '
+        {
+            if (vol) {
+                if ($0 ~ /^[[:space:]]{6}-[[:space:]]*/) {
+                    if (index($0, ":/etc/localtime") > 0 || index($0, ":/etc/timezone") > 0) {
+                        next
+                    }
+                    if (!vol_printed) {
+                        print vol_header
+                        vol_printed=1
+                    }
+                    print
+                    next
+                }
+                vol=0
+            }
+            if ($0 ~ /^[[:space:]]{4}volumes:[[:space:]]*$/) {
+                vol=1
+                vol_header=$0
+                vol_printed=0
+                next
+            }
+            if (env) {
+                if ($0 ~ /^[[:space:]]{6}-[[:space:]]*/) {
+                    if ($0 ~ /TZ=/) {
+                        next
+                    }
+                    if (!env_printed) {
+                        print env_header
+                        env_printed=1
+                    }
+                    print
+                    next
+                }
+                env=0
+            }
+            if ($0 ~ /^[[:space:]]{4}environment:[[:space:]]*$/) {
+                env=1
+                env_header=$0
+                env_printed=0
+                next
+            }
+            print
+        }
+    ' "$override_file" > "$tmp_file" && mv "$tmp_file" "$override_file"
+}
+
 append_override_list_item() {
     local override_file="$1"
     local key="$2"
@@ -325,6 +381,27 @@ add_ssh_agent_to_override() {
     mount_entry="\"$agent_sock:$SSH_AGENT_CONTAINER_SOCK\""
     append_override_list_item "$override_file" "volumes" "$mount_entry"
     append_override_list_item "$override_file" "environment" "SSH_AUTH_SOCK=$SSH_AGENT_CONTAINER_SOCK"
+}
+
+add_timezone_to_override() {
+    local override_file="$1"
+
+    ensure_override_header "$override_file"
+    strip_timezone_config "$override_file"
+
+    if [ -r /etc/localtime ]; then
+        append_override_list_item "$override_file" "volumes" "\"/etc/localtime:/etc/localtime:ro\""
+    fi
+
+    if [ -r /etc/timezone ]; then
+        append_override_list_item "$override_file" "volumes" "\"/etc/timezone:/etc/timezone:ro\""
+    fi
+
+    local host_tz=""
+    host_tz=$(detect_host_timezone) || host_tz=""
+    if [ -n "$host_tz" ]; then
+        append_override_list_item "$override_file" "environment" "TZ=$host_tz"
+    fi
 }
 
 # Add network configuration to an existing or new override file
