@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.1] - 2026-01-24
+
+### Added
+- Dynamic research provider configuration: `deep_research_providers` is now automatically configured based on available API keys
+  - If `TAVILY_API_KEY` is set, tavily is added to providers
+  - If `PERPLEXITY_API_KEY` is set, perplexity is added to providers
+  - `semantic_scholar` is always included (no API key required)
+- Per-phase fallback provider lists for deep research resilience
+- Retry configuration for deep research (`deep_research_max_retries`, `deep_research_retry_delay`)
+
+### Changed
+- Updated `.foundry-mcp.toml` example config with per-phase fallback providers and retry settings
+- Removed deprecated `storage_backend` and `storage_path` settings from research config
+
 ## [0.5.0] - 2026-01-24
 
 ### Changed

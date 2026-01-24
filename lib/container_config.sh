@@ -1267,6 +1267,7 @@ copy_configs_to_container() {
     if file_exists ~/.foundry-mcp.toml; then
         docker exec "$container_id" mkdir -p "$CONTAINER_HOME/.config/foundry-mcp" 2>/dev/null || true
         copy_file_to_container "$container_id" ~/.foundry-mcp.toml "$CONTAINER_HOME/.config/foundry-mcp/config.toml"
+        configure_foundry_research_providers "$container_id"
     fi
     fix_worktree_paths "$container_id" "$(whoami)"
     detect_nested_git_repos "$container_id"
@@ -1347,8 +1348,47 @@ sync_runtime_credentials() {
         docker exec "$container_id" mkdir -p "$CONTAINER_HOME/.config/foundry-mcp" 2>/dev/null || true
         copy_file_to_container_quiet "$container_id" ~/.foundry-mcp.toml "$CONTAINER_HOME/.config/foundry-mcp/config.toml"
         docker exec "$container_id" chown -R $CONTAINER_USER:$CONTAINER_USER "$CONTAINER_HOME/.config/foundry-mcp" 2>/dev/null || true
+        configure_foundry_research_providers "$container_id"
     fi
     detect_nested_git_repos "$container_id"
+}
+
+# Configure foundry-mcp research providers based on available API keys.
+# Dynamically adds tavily/perplexity to deep_research_providers if keys are set.
+configure_foundry_research_providers() {
+    local container_id="$1"
+    local config_path="$CONTAINER_HOME/.config/foundry-mcp/config.toml"
+
+    # Build provider list based on available API keys
+    # Priority: tavily first (if available), then perplexity, then semantic_scholar
+    docker exec "$container_id" bash -c '
+        CONFIG_PATH="'"$config_path"'"
+        [ ! -f "$CONFIG_PATH" ] && exit 0
+
+        # Build new provider list
+        PROVIDERS=""
+        [ -n "${TAVILY_API_KEY:-}" ] && PROVIDERS="\"tavily\""
+        [ -n "${PERPLEXITY_API_KEY:-}" ] && {
+            [ -n "$PROVIDERS" ] && PROVIDERS="$PROVIDERS, "
+            PROVIDERS="${PROVIDERS}\"perplexity\""
+        }
+        # semantic_scholar always included (no key required)
+        [ -n "$PROVIDERS" ] && PROVIDERS="$PROVIDERS, "
+        PROVIDERS="${PROVIDERS}\"semantic_scholar\""
+
+        # Update the TOML using python (reliable TOML handling)
+        python3 << EOF
+import re
+with open("$CONFIG_PATH", "r") as f:
+    content = f.read()
+# Replace deep_research_providers line
+pattern = r"deep_research_providers\s*=\s*\[[^\]]*\]"
+replacement = f"deep_research_providers = [{PROVIDERS}]"
+content = re.sub(pattern, replacement, content)
+with open("$CONFIG_PATH", "w") as f:
+    f.write(content)
+EOF
+    ' 2>/dev/null || true
 }
 
 copy_dir_to_container() {
