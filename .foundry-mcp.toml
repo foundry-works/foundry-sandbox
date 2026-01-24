@@ -226,10 +226,6 @@ default_review_type = "full"
 # Enable research tools (chat, consensus, thinkdeep, ideate, deep-research)
 enabled = true
 
-# Storage backend and path (default backend: "file")
-storage_backend = "file"
-storage_path = "./specs/.research"
-
 # Default LLM provider for research workflows
 # Supports ProviderSpec format: "[cli]gemini:pro" or simple: "gemini"
 default_provider = "[cli]gemini:pro"
@@ -285,11 +281,10 @@ deep_research_audit_artifacts = true
 # - "technical" : Prioritizes official docs, arxiv, Stack Overflow
 deep_research_mode = "technical"
 
-# Search providers (in priority order)
-# Available: tavily, perplexity, google, semantic_scholar
+# Search providers - dynamically configured based on API keys
+# semantic_scholar is always available (no key required)
+# tavily/perplexity added at runtime if keys are present
 deep_research_providers = [
-    "tavily",
-    #"perplexity",
     "semantic_scholar"
 ]
 
@@ -311,6 +306,41 @@ deep_research_planning_provider = "[cli]gemini:pro"
 deep_research_analysis_provider = "[cli]gemini:pro"
 deep_research_synthesis_provider = "[cli]gemini:pro"
 deep_research_refinement_provider = "[cli]gemini:pro"
+
+# -----------------------------------------------------------------------------
+# Per-Phase Fallback Provider Lists (Retry & Resilience)
+# -----------------------------------------------------------------------------
+
+deep_research_planning_providers = [
+    "[cli]gemini:pro",
+    "[cli]codex:gpt-5.2-codex",
+    "[cli]opencode:openai/gpt-5.2-codex",
+    "[cli]claude:sonnet",
+]
+
+deep_research_analysis_providers = [
+    "[cli]gemini:pro",
+    "[cli]codex:gpt-5.2-codex",
+    "[cli]opencode:openai/gpt-5.2-codex",
+    "[cli]claude:sonnet",
+]
+
+deep_research_synthesis_providers = [
+    "[cli]gemini:pro",
+    "[cli]codex:gpt-5.2-codex",
+    "[cli]opencode:openai/gpt-5.2-codex",
+    "[cli]claude:sonnet",
+]
+
+deep_research_refinement_providers = [
+    "[cli]gemini:pro",
+    "[cli]codex:gpt-5.2-codex",
+    "[cli]opencode:openai/gpt-5.2-codex",
+    "[cli]claude:sonnet",
+]
+
+deep_research_max_retries = 2
+deep_research_retry_delay = 5.0
 
 # -----------------------------------------------------------------------------
 # Search Rate Limiting
