@@ -31,6 +31,34 @@ is_macos() {
     [[ "$OSTYPE" == "darwin"* ]]
 }
 
+detect_host_timezone() {
+    if [ -f /etc/timezone ]; then
+        local tz
+        tz=$(tr -d ' \t\n' < /etc/timezone 2>/dev/null || true)
+        if [ -n "$tz" ]; then
+            echo "$tz"
+            return 0
+        fi
+    fi
+
+    local link=""
+    link=$(readlink /etc/localtime 2>/dev/null || true)
+    if [ -n "$link" ]; then
+        case "$link" in
+            */zoneinfo/*)
+                local tz
+                tz="${link#*zoneinfo/}"
+                if [ -n "$tz" ]; then
+                    echo "$tz"
+                    return 0
+                fi
+                ;;
+        esac
+    fi
+
+    return 1
+}
+
 resolve_ssh_agent_sock() {
     if [ "${SANDBOX_SYNC_SSH:-0}" != "1" ]; then
         return 1

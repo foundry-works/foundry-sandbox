@@ -515,7 +515,7 @@ These environment variables affect `cast` behavior:
 | `GOOGLE_API_KEY` | Passed to containers | - |
 | `GOOGLE_CSE_ID` | Passed to containers | - |
 
-Gemini CLI uses OAuth credentials stored under `~/.gemini/` (from `gemini auth`). Large Gemini CLI artifacts (e.g. `~/.gemini/antigravity`) are skipped to keep sandboxes lightweight. Sandboxes default to disabling Gemini auto-updates, update nags, telemetry, and usage stats via `~/.gemini/settings.json`, and Codex update checks/analytics via `~/.codex/config.toml` unless you set them on the host.
+Gemini CLI uses OAuth credentials stored under `~/.gemini/` (from `gemini auth`). Large Gemini CLI artifacts (e.g. `~/.gemini/antigravity`) are skipped to keep sandboxes lightweight. Sandboxes default to disabling Gemini auto-updates, update nags, telemetry, and usage stats via `~/.gemini/settings.json`, and Codex update checks/analytics via `~/.codex/config.toml`. If your host Codex config does not set them, sandboxes also default to `approval_policy = "on-failure"` and `sandbox_mode = "danger-full-access"` inside the container.
 
 OpenCode plugin notes: set `SANDBOX_OPENCODE_PLUGIN_DIR` to a host directory containing plugin subfolders (use package names; scoped packages are nested like `@scope/name`). On first attach, the folder is synced into the container and plugin entries are rewritten to local paths. OpenCode npm plugins are prefetched by default during sandbox init; set `SANDBOX_OPENCODE_PREFETCH_NPM_PLUGINS=0` to disable.
 

@@ -29,6 +29,7 @@ cmd_start() {
     claude_home_path=$(path_claude_home "$name")
     ensure_dir "$claude_home_path"
     add_claude_home_to_override "$override_file" "$claude_home_path"
+    add_timezone_to_override "$override_file"
 
     # Pre-populate foundry skills and hooks if not already installed (skip if already populated)
     prepopulate_foundry_global "$claude_home_path" "1"

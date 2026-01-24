@@ -61,7 +61,7 @@ Sandboxes default to disabling auto-updates, update nags, telemetry, and usage s
 
 ### Codex CLI
 
-Sandboxes default to disabling update checks and analytics via `~/.codex/config.toml` unless you set them on your host.
+Sandboxes default to disabling update checks and analytics via `~/.codex/config.toml`. If your host config does not set them, sandboxes also default to `approval_policy = "on-failure"` and `sandbox_mode = "danger-full-access"` inside the container.
 
 ### OpenCode
 

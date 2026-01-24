@@ -291,6 +291,7 @@ ensure_override_from_metadata() {
         claude_home=$(path_claude_home "$name")
         ensure_dir "$claude_home"
         add_claude_home_to_override "$override_file" "$claude_home"
+        add_timezone_to_override "$override_file"
         return 0
     fi
 
@@ -314,4 +315,5 @@ OVERRIDES
     claude_home=$(path_claude_home "$name")
     ensure_dir "$claude_home"
     add_claude_home_to_override "$override_file" "$claude_home"
+    add_timezone_to_override "$override_file"
 }

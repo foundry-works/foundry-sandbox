@@ -1052,12 +1052,19 @@ except ModuleNotFoundError:
 path = "/home/ubuntu/.codex/config.toml"
 os.makedirs(os.path.dirname(path), exist_ok=True)
 
+default_approval_policy_line = 'approval_policy = "on-failure"'
+default_sandbox_mode_line = 'sandbox_mode = "danger-full-access"'
 default_update_line = "check_for_update_on_startup = false"
 default_analytics_lines = ["[analytics]", "enabled = false"]
 
 if not os.path.exists(path):
     with open(path, "w") as f:
-        f.write(default_update_line + "\n\n" + "\n".join(default_analytics_lines) + "\n")
+        root_lines = [
+            default_approval_policy_line,
+            default_sandbox_mode_line,
+            default_update_line,
+        ]
+        f.write("\n".join(root_lines) + "\n\n" + "\n".join(default_analytics_lines) + "\n")
     raise SystemExit(0)
 
 with open(path, "r") as f:
@@ -1074,6 +1081,14 @@ missing_update = "check_for_update_on_startup" not in data
 if missing_update:
     if re.search(r"(?m)^\\s*check_for_update_on_startup\\s*=", text):
         missing_update = False
+missing_approval_policy = "approval_policy" not in data
+if missing_approval_policy:
+    if re.search(r"(?m)^\\s*approval_policy\\s*=", text):
+        missing_approval_policy = False
+missing_sandbox_mode = "sandbox_mode" not in data
+if missing_sandbox_mode:
+    if re.search(r"(?m)^\\s*sandbox_mode\\s*=", text):
+        missing_sandbox_mode = False
 analytics = data.get("analytics") if isinstance(data, dict) else None
 missing_analytics_enabled = not (isinstance(analytics, dict) and "enabled" in analytics)
 
@@ -1097,6 +1112,10 @@ prepend_lines = []
 append_lines = []
 
 # Root-level settings must be prepended to avoid ending up under a section header
+if missing_approval_policy:
+    prepend_lines.append(default_approval_policy_line)
+if missing_sandbox_mode:
+    prepend_lines.append(default_sandbox_mode_line)
 if missing_update:
     prepend_lines.append(default_update_line)
 
