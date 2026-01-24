@@ -20,6 +20,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 - Codex CLI now defaults to `approval_policy = "on-failure"` and `sandbox_mode = "danger-full-access"` inside containers when host config doesn't set them
 
+### Fixed
+- Network firewall script silently exiting when debug mode disabled, preventing tmux attach after `cast new`
+
 ## [0.5.1] - 2026-01-24
 
 ### Added
