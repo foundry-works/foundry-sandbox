@@ -9,7 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 - Configurable default OpenCode model inside sandboxes via `SANDBOX_OPENCODE_DEFAULT_MODEL`
-- Configurable tmux scrollback and mouse mode via `SANDBOX_TMUX_SCROLLBACK` and `SANDBOX_TMUX_MOUSE`
+- Configurable tmux scrollback and mouse mode via `SANDBOX_TMUX_SCROLLBACK` and `SANDBOX_TMUX_MOUSE` (mouse default off)
 
 ## [0.5.1] - 2026-01-24
 

@@ -83,5 +83,5 @@ Sandbox tmux sessions can be tuned via environment variables:
 
 ```bash
 export SANDBOX_TMUX_SCROLLBACK=200000
-export SANDBOX_TMUX_MOUSE=1
+export SANDBOX_TMUX_MOUSE=0
 ```
