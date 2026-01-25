@@ -886,15 +886,54 @@ ensure_claude_statusline() {
         run_fn="run_cmd_quiet"
     fi
 
+    local binary_exists=0
     if $run_fn docker exec "$container_id" sh -c "command -v claude-statusline >/dev/null 2>&1 || [ -x $CONTAINER_HOME/.local/bin/claude-statusline ]"; then
-        return 0
+        binary_exists=1
     fi
 
-    if ! $run_fn docker exec "$container_id" sh -c "test -f $CONTAINER_HOME/.claude/settings.json && grep -q '\"statusLine\"' $CONTAINER_HOME/.claude/settings.json"; then
-        return 0
+    local statusline_configured=0
+    if $run_fn docker exec "$container_id" sh -c "test -f $CONTAINER_HOME/.claude/settings.json && grep -q '\"statusLine\"' $CONTAINER_HOME/.claude/settings.json"; then
+        statusline_configured=1
     fi
 
-    $run_fn docker exec -i "$container_id" python3 - <<'PY'
+    if [ "$binary_exists" = "1" ]; then
+        # Binary exists - add config if not already present
+        if [ "$statusline_configured" = "1" ]; then
+            return 0  # Already configured, respect user settings
+        fi
+        # Add the statusLine configuration
+        $run_fn docker exec -i "$container_id" python3 - <<'PY'
+import json
+import os
+
+path = "/home/ubuntu/.claude/settings.json"
+os.makedirs(os.path.dirname(path), exist_ok=True)
+
+if os.path.exists(path):
+    try:
+        with open(path, "r") as f:
+            data = json.load(f)
+    except json.JSONDecodeError:
+        data = {}
+else:
+    data = {}
+
+if "statusLine" not in data:
+    data["statusLine"] = {
+        "type": "command",
+        "command": "claude-statusline",
+        "padding": 0
+    }
+    with open(path, "w") as f:
+        json.dump(data, f, indent=2)
+        f.write("\n")
+PY
+    else
+        # Binary missing - remove config if present
+        if [ "$statusline_configured" = "0" ]; then
+            return 0  # Not configured, nothing to do
+        fi
+        $run_fn docker exec -i "$container_id" python3 - <<'PY'
 import json
 import os
 
@@ -914,9 +953,9 @@ if "statusLine" in data:
         json.dump(data, f, indent=2)
         f.write("\n")
 PY
-
-    if [ "$quiet" != "1" ]; then
-        log_warn "claude-statusline not found; removing statusLine from Claude settings inside sandbox. Install cc-context-stats in the container to enable it."
+        if [ "$quiet" != "1" ]; then
+            log_warn "claude-statusline not found; removing statusLine from Claude settings inside sandbox. Install cc-context-stats in the container to enable it."
+        fi
     fi
 }
 
@@ -952,9 +991,6 @@ for path in paths:
     changed = False
     if data.get("hasCompletedOnboarding") is not True:
         data["hasCompletedOnboarding"] = True
-        changed = True
-    if data.get("installMethod") != "npm":
-        data["installMethod"] = "npm"
         changed = True
     if data.get("githubRepoPaths") != {}:
         data["githubRepoPaths"] = {}
