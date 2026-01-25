@@ -1,3 +1,4 @@
 .opencode/
 /.claude/
 !docker/.claude/
+specs/.backups

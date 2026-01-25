@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.3] - 2026-01-25
+
+### Added
+- `DISABLE_INSTALLATION_CHECKS` environment variable to suppress Claude Code startup checks inside sandboxes
+
+### Changed
+- Refactored `ensure_claude_statusline()` to properly add statusLine config when binary exists (previously only removed config when missing)
+
+### Removed
+- `installMethod` setting from onboarding configuration (Claude Code handles this automatically)
+
 ## [0.5.2] - 2026-01-24
 
 ### Added
