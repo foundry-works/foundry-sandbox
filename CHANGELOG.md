@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- `foundry-upgrade` alias in sandboxes for upgrading foundry-mcp (includes pre-release versions)
+
 ## [0.5.3] - 2026-01-25
 
 ### Added
