@@ -897,11 +897,19 @@ ensure_claude_statusline() {
     fi
 
     if [ "$binary_exists" = "1" ]; then
-        # Binary exists - add config if not already present
+        # Binary exists - ensure config uses the bundled binary
         if [ "$statusline_configured" = "1" ]; then
-            return 0  # Already configured, respect user settings
+            # Check if the current command uses the bundled binary
+            local uses_bundled=0
+            if $run_fn docker exec "$container_id" sh -c "grep -q '\"command\": \"claude-statusline\"' $CONTAINER_HOME/.claude/settings.json 2>/dev/null"; then
+                uses_bundled=1
+            fi
+            if [ "$uses_bundled" = "1" ]; then
+                return 0  # Already using bundled binary
+            fi
+            # Otherwise, replace with bundled binary (network commands like npx won't work in sandbox)
         fi
-        # Add the statusLine configuration
+        # Set the statusLine configuration to use the bundled binary
         $run_fn docker exec -i "$container_id" python3 - <<'PY'
 import json
 import os
@@ -918,15 +926,15 @@ if os.path.exists(path):
 else:
     data = {}
 
-if "statusLine" not in data:
-    data["statusLine"] = {
-        "type": "command",
-        "command": "claude-statusline",
-        "padding": 0
-    }
-    with open(path, "w") as f:
-        json.dump(data, f, indent=2)
-        f.write("\n")
+# Always set to bundled binary (replaces any network-dependent commands like npx)
+data["statusLine"] = {
+    "type": "command",
+    "command": "claude-statusline",
+    "padding": 0
+}
+with open(path, "w") as f:
+    json.dump(data, f, indent=2)
+    f.write("\n")
 PY
     else
         # Binary missing - remove config if present
