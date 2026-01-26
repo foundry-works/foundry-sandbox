@@ -2,9 +2,10 @@
 #
 # Configuration Priority (highest to lowest):
 # 1. Environment variables (runtime overrides)
-# 2. Project config (./foundry-mcp.toml)
+# 2. Project config (./foundry-mcp.toml or ./.foundry-mcp.toml)
 # 3. User config (~/.foundry-mcp.toml)
-# 4. Built-in defaults
+# 4. XDG config (~/.config/foundry-mcp/config.toml)
+# 5. Built-in defaults
 
 # =============================================================================
 # Workspace Configuration
@@ -376,6 +377,135 @@ max_concurrent_searches = 3         # Concurrent search requests
 tavily = 60
 perplexity = 60
 semantic_scholar = 100
+
+# -----------------------------------------------------------------------------
+# Tavily Search Provider Configuration
+# -----------------------------------------------------------------------------
+# Tavily is optimized for AI applications. Get API key at https://tavily.com/
+
+# Search depth: affects result quality and API credit cost
+# - "basic"      : Standard search (default, 1x credits)
+# - "advanced"   : Deeper analysis with more content (2x credits)
+# - "fast"       : Reduced latency
+# - "ultra_fast" : Minimal latency
+tavily_search_depth = "advanced"
+
+# Search topic: "general" or "news"
+tavily_topic = "general"
+
+# Days limit for news search (1-365, only when topic="news")
+# tavily_news_days = 7
+
+# Include image results
+tavily_include_images = false
+
+# ISO 3166-1 alpha-2 country code to boost results (e.g., "US", "GB", "DE")
+tavily_country = "US"
+
+# Chunks per source for advanced search (1-5)
+tavily_chunks_per_source = 3
+
+# Let Tavily auto-configure parameters based on query intent
+tavily_auto_parameters = false
+
+# -----------------------------------------------------------------------------
+# Tavily Extract Provider Configuration
+# -----------------------------------------------------------------------------
+# Extract structured content from URLs for deeper analysis
+
+# Extract depth: "basic" or "advanced"
+tavily_extract_depth = "advanced"
+
+# Include images in extracted content
+tavily_extract_include_images = false
+
+# Enable extract as follow-up step in deep research workflow
+# When true, deep research will extract full content from top search results
+tavily_extract_in_deep_research = true
+
+# Maximum URLs to extract per deep research run
+tavily_extract_max_urls = 5
+
+# -----------------------------------------------------------------------------
+# Token Management Configuration
+# -----------------------------------------------------------------------------
+# Controls token budget management for deep research workflows.
+# When enabled, content is intelligently compressed or archived to fit
+# within model context limits.
+
+# Master switch for token management features
+# When disabled, all token budget calculations are skipped
+token_management_enabled = true
+
+# Safety margin: fraction of budget reserved as buffer (0.0 - 1.0)
+# Higher values provide more headroom but reduce usable context
+# Default: 0.15 (15% buffer)
+token_safety_margin = 0.15
+
+# Runtime overhead: tokens reserved for CLI/IDE runtime context
+# This accounts for system prompts, conversation history, and tool schemas
+# that consume context before your research content.
+#
+# Recommended values by environment:
+#   Claude Code:    60000  (default, ~60K for system + tools + history)
+#   Cursor Agent:   40000  (less overhead than Claude Code)
+#   Codex/OpenCode: 30000  (minimal IDE integration overhead)
+#   Gemini CLI:     20000  (lightweight CLI)
+#   Direct API:     10000  (minimal overhead)
+#
+# Tip: If you see "context exceeded" errors, increase this value.
+# If content is being dropped unnecessarily, decrease it.
+runtime_overhead = 60000
+
+# -----------------------------------------------------------------------------
+# Summarization Configuration
+# -----------------------------------------------------------------------------
+# When content exceeds budget, summarization compresses it to fit.
+# Uses LLM providers to generate condensed versions while preserving
+# key information.
+
+# Primary provider for summarization (uses default_provider if not set)
+summarization_provider = "[cli]gemini:flash"
+
+# Fallback providers for summarization (tried in order if primary fails)
+summarization_providers = [
+    "[cli]gemini:flash",
+    "[cli]claude:haiku",
+    "[cli]codex:gpt-5.1-codex-mini",
+    "[cli]opencode:openai/gpt-5.1-codex-mini",
+    "[cli]cursor-agent:gpt-5.2-codex-fast"
+]
+
+# Timeout per summarization request in seconds
+summarization_timeout = 60.0
+
+# Cache summarization results to avoid redundant API calls
+# Caches by content hash + summarization level + provider
+summarization_cache_enabled = true
+
+# -----------------------------------------------------------------------------
+# Content Dropping & Archive Configuration
+# -----------------------------------------------------------------------------
+# When budget is exhausted and summarization isn't sufficient,
+# low-priority content can be dropped. Optionally archive dropped
+# content to disk for later retrieval.
+
+# Allow dropping low-priority content when budget is exhausted
+# When false: workflow may fail if content exceeds budget
+# When true: drops lowest-priority items to fit budget
+allow_content_dropping = true
+
+# Archive dropped/compressed content to disk
+# Enables potential future restoration and audit trail
+content_archive_enabled = true
+
+# TTL for archived content in hours (default: 168 = 7 days)
+# Older content is automatically cleaned up
+content_archive_ttl_hours = 168
+
+# Directory for content archive storage
+# Default: research_dir/.archive (e.g., specs/.research/.archive)
+# research_archive_dir = "~/.foundry-mcp/research-archive"
 
 # =============================================================================
 # Test Runner Configuration
