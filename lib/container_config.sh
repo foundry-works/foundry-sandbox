@@ -1463,26 +1463,34 @@ sync_runtime_credentials() {
 
 # Configure foundry-mcp research providers based on available API keys.
 # Dynamically adds tavily/perplexity to deep_research_providers if keys are set.
+# If FOUNDRY_SEARCH_PROVIDERS is set, it overrides auto-detection entirely.
 configure_foundry_research_providers() {
     local container_id="$1"
     local config_path="$CONTAINER_HOME/.config/foundry-mcp/config.toml"
 
-    # Build provider list based on available API keys
-    # Priority: tavily first (if available), then perplexity, then semantic_scholar
+    # Build provider list based on explicit override or available API keys
     docker exec "$container_id" bash -c '
         CONFIG_PATH="'"$config_path"'"
         [ ! -f "$CONFIG_PATH" ] && exit 0
 
-        # Build new provider list
-        PROVIDERS=""
-        [ -n "${TAVILY_API_KEY:-}" ] && PROVIDERS="\"tavily\""
-        [ -n "${PERPLEXITY_API_KEY:-}" ] && {
+        # Check for explicit provider override
+        if [ -n "${FOUNDRY_SEARCH_PROVIDERS:-}" ]; then
+            # Parse comma-separated list into TOML array format
+            # e.g., "tavily,perplexity" -> "\"tavily\", \"perplexity\""
+            PROVIDERS=$(echo "$FOUNDRY_SEARCH_PROVIDERS" | sed "s/,/\", \"/g" | sed "s/^/\"/;s/$/\"/")
+        else
+            # Auto-detect based on API keys
+            # Priority: tavily first (if available), then perplexity, then semantic_scholar
+            PROVIDERS=""
+            [ -n "${TAVILY_API_KEY:-}" ] && PROVIDERS="\"tavily\""
+            [ -n "${PERPLEXITY_API_KEY:-}" ] && {
+                [ -n "$PROVIDERS" ] && PROVIDERS="$PROVIDERS, "
+                PROVIDERS="${PROVIDERS}\"perplexity\""
+            }
+            # semantic_scholar always included (no key required)
             [ -n "$PROVIDERS" ] && PROVIDERS="$PROVIDERS, "
-            PROVIDERS="${PROVIDERS}\"perplexity\""
-        }
-        # semantic_scholar always included (no key required)
-        [ -n "$PROVIDERS" ] && PROVIDERS="$PROVIDERS, "
-        PROVIDERS="${PROVIDERS}\"semantic_scholar\""
+            PROVIDERS="${PROVIDERS}\"semantic_scholar\""
+        fi
 
         # Update the TOML using python (reliable TOML handling)
         python3 << EOF
