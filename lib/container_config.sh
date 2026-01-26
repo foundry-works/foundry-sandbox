@@ -169,7 +169,7 @@ PY
 
 # Install CLAUDE.md and AGENTS.md from foundry plugins into workspace.
 # Appends content if files exist in source repos, creates destination if needed.
-# Uses marker comments to avoid duplicate appends on subsequent runs.
+# Uses <foundry-instructions> tags (already in source files) to detect duplicates.
 #
 # Arguments:
 #   $1 - container_id: The container to modify
@@ -183,21 +183,15 @@ install_foundry_workspace_docs() {
 
     local claude_md_src="$foundry_cache/claude-foundry/CLAUDE.md"
     local agents_md_src="$opencode_foundry_path/AGENTS.md"
-    local marker="# --- foundry-sandbox installed content ---"
+    local marker="<foundry-instructions>"
 
     # Install CLAUDE.md from claude-foundry
     if file_exists "$claude_md_src"; then
         # Check if already installed (marker present)
         if ! docker exec "$container_id" grep -qF "$marker" /workspace/CLAUDE.md 2>/dev/null; then
             log_info "Installing CLAUDE.md from claude-foundry..."
-            # Create file if doesn't exist, add marker and content
-            docker exec "$container_id" sh -c "
-                dest='/workspace/CLAUDE.md'
-                [ ! -f \"\$dest\" ] && touch \"\$dest\"
-                echo '' >> \"\$dest\"
-                echo '$marker' >> \"\$dest\"
-            "
-            docker exec -i "$container_id" sh -c "cat >> /workspace/CLAUDE.md" < "$claude_md_src"
+            docker exec "$container_id" sh -c "[ ! -f /workspace/CLAUDE.md ] && touch /workspace/CLAUDE.md"
+            docker exec -i "$container_id" sh -c "echo '' >> /workspace/CLAUDE.md && cat >> /workspace/CLAUDE.md" < "$claude_md_src"
         fi
     fi
 
@@ -206,13 +200,8 @@ install_foundry_workspace_docs() {
         # Check if already installed (marker present)
         if ! docker exec "$container_id" grep -qF "$marker" /workspace/AGENTS.md 2>/dev/null; then
             log_info "Installing AGENTS.md from opencode-foundry..."
-            docker exec "$container_id" sh -c "
-                dest='/workspace/AGENTS.md'
-                [ ! -f \"\$dest\" ] && touch \"\$dest\"
-                echo '' >> \"\$dest\"
-                echo '$marker' >> \"\$dest\"
-            "
-            docker exec -i "$container_id" sh -c "cat >> /workspace/AGENTS.md" < "$agents_md_src"
+            docker exec "$container_id" sh -c "[ ! -f /workspace/AGENTS.md ] && touch /workspace/AGENTS.md"
+            docker exec -i "$container_id" sh -c "echo '' >> /workspace/AGENTS.md && cat >> /workspace/AGENTS.md" < "$agents_md_src"
         fi
     fi
 }
