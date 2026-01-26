@@ -61,7 +61,7 @@ structured = true
 #   research     - Research workflows (chat, consensus, thinkdeep, ideate, deep)
 #
 # Default: disable tools not needed, or only needed during setup
-disabled_tools = ["health", "environment"]
+disabled_tools = ["health", "error"]
 
 # Environment variable alternative: FOUNDRY_MCP_DISABLED_TOOLS (comma-separated)
 # Example: FOUNDRY_MCP_DISABLED_TOOLS=error,research
