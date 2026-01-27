@@ -427,6 +427,62 @@ tavily_extract_in_deep_research = true
 tavily_extract_max_urls = 5
 
 # -----------------------------------------------------------------------------
+# Perplexity Search Provider Configuration
+# -----------------------------------------------------------------------------
+# Perplexity provides AI-powered search with citations.
+# Get API key at https://www.perplexity.ai/settings/api
+
+# Search context size: affects result depth and API cost
+# - "low"    : Minimal context, fastest responses
+# - "medium" : Balanced context (default)
+# - "high"   : Maximum context, most comprehensive
+perplexity_search_context_size = "medium"
+
+# Maximum tokens for response
+perplexity_max_tokens = 50000
+
+# Maximum tokens per page
+perplexity_max_tokens_per_page = 2048
+
+# Time filter for results: "day", "week", "month", "year"
+# perplexity_recency_filter = "week"
+
+# ISO 3166-1 alpha-2 country code to boost results (e.g., "US", "GB", "DE")
+perplexity_country = "US"
+
+# -----------------------------------------------------------------------------
+# Semantic Scholar Search Provider Configuration
+# -----------------------------------------------------------------------------
+# Semantic Scholar provides academic paper search with TLDR summaries.
+# API key is optional but recommended for higher rate limits.
+
+# Filter by publication types (list of types)
+# Valid types: Review, JournalArticle, Conference, CaseReport, ClinicalTrial,
+#              Dataset, Editorial, LettersAndComments, MetaAnalysis, News,
+#              Study, Book, BookSection
+semantic_scholar_publication_types = ["JournalArticle", "Conference", "Review", "MetaAnalysis", "Study"]
+
+# Sort results by field: citationCount, publicationDate, paperId
+semantic_scholar_sort_by = "citationCount"
+
+# Sort direction: asc or desc (default: desc)
+semantic_scholar_sort_order = "desc"
+
+# Include TLDR and extended metadata (default: true)
+# Set to false for faster responses with less metadata
+semantic_scholar_use_extended_fields = true
+
+# -----------------------------------------------------------------------------
+# Search Provider Credentials (optional, prefer env vars)
+# -----------------------------------------------------------------------------
+# API keys can be set here or via environment variables (preferred):
+#   TAVILY_API_KEY, PERPLEXITY_API_KEY, SEMANTIC_SCHOLAR_API_KEY
+#
+# tavily_api_key = "tvly-..."
+# perplexity_api_key = "pplx-..."
+# semantic_scholar_api_key = "..."
+
+# -----------------------------------------------------------------------------
 # Token Management Configuration
 # -----------------------------------------------------------------------------
 # Controls token budget management for deep research workflows.

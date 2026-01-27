@@ -105,9 +105,11 @@ prepopulate_foundry_global() {
     fi
 
     # Copy hooks executables to ~/.claude/hooks/
+    # Note: We skip hooks.json - that's a plugin-specific config format.
+    # Global hooks are configured in settings.json, not via hooks.json.
     if [ -d "$foundry_cache/hooks" ]; then
         for hook_file in "$foundry_cache/hooks"/*; do
-            if [ -f "$hook_file" ]; then
+            if [ -f "$hook_file" ] && [ "$(basename "$hook_file")" != "hooks.json" ]; then
                 cp "$hook_file" "$hooks_dir/"
                 chmod +x "$hooks_dir/$(basename "$hook_file")"
             fi
@@ -803,8 +805,8 @@ sync_opencode_local_plugins_on_first_attach() {
     sync_opencode_foundry "$container_id" "$quiet"
 }
 
-# Ensure Claude model defaults are set in settings.json.
-# The foundry MCP server and hooks are configured by prepopulate_foundry_global().
+# Ensure Claude model defaults and hooks are set in settings.json.
+# This runs AFTER host settings are copied, so it restores the hooks configuration.
 # Also installs pyright-lsp plugin (optional, uses normal plugin system).
 ensure_claude_foundry_mcp() {
     local container_id="$1"
@@ -814,7 +816,8 @@ ensure_claude_foundry_mcp() {
         run_fn="run_cmd_quiet"
     fi
 
-    # Set model defaults in settings (hooks are already configured by prepopulate_foundry_global)
+    # Set model defaults and hooks in settings.json
+    # Note: Host settings are copied first, so we must restore hooks here
     $run_fn docker exec -i "$container_id" python3 - <<'PY'
 import json
 import os
@@ -834,6 +837,92 @@ data = load_json(path)
 data["model"] = "opus"
 data["subagentModel"] = "haiku"
 data["alwaysThinkingEnabled"] = True
+
+# Configure hooks with absolute paths (these get overwritten when host settings are copied)
+data["hooks"] = {
+    "PreToolUse": [
+        {
+            "matcher": "Read",
+            "hooks": [{"type": "command", "command": "/home/ubuntu/.claude/hooks/block-json-specs"}]
+        },
+        {
+            "matcher": "Bash",
+            "hooks": [{"type": "command", "command": "/home/ubuntu/.claude/hooks/block-spec-bash-access"}]
+        }
+    ],
+    "PostToolUse": [
+        {
+            "hooks": [{"type": "command", "command": "/home/ubuntu/.claude/hooks/context-monitor"}]
+        }
+    ]
+}
+
+# Foundry permissions based on claude-foundry v2.1.0
+FOUNDRY_ALLOW = [
+    "Skill(foundry:*)",
+    "mcp__plugin_foundry_foundry-mcp__*",
+    "Bash(git add:*)",
+    "Bash(git branch:*)",
+    "Bash(git checkout:*)",
+    "Bash(git clone:*)",
+    "Bash(git commit:*)",
+    "Bash(git config:*)",
+    "Bash(git diff:*)",
+    "Bash(git fetch:*)",
+    "Bash(git init:*)",
+    "Bash(git log:*)",
+    "Bash(git ls-files:*)",
+    "Bash(git merge:*)",
+    "Bash(git mv:*)",
+    "Bash(git pull:*)",
+    "Bash(git push:*)",
+    "Bash(git remote:*)",
+    "Bash(git restore:*)",
+    "Bash(git rev-parse:*)",
+    "Bash(git revert:*)",
+    "Bash(git show:*)",
+    "Bash(git stash:*)",
+    "Bash(git status:*)",
+    "Bash(git switch:*)",
+    "Bash(git tag:*)",
+    "Bash(gh issue create:*)",
+    "Bash(gh issue list:*)",
+    "Bash(gh issue view:*)",
+    "Bash(gh pr checkout:*)",
+    "Bash(gh pr create:*)",
+    "Bash(gh pr list:*)",
+    "Bash(gh pr status:*)",
+    "Bash(gh pr view:*)",
+    "Bash(gh repo clone:*)",
+    "Bash(gh repo view:*)",
+    "Bash(pytest:*)",
+    "Bash(agent:*)",
+    "Bash(claude:*)",
+    "Bash(claude-agent:*)",
+    "Bash(codex:*)",
+    "Bash(gemini:*)",
+    "Bash(opencode:*)",
+    "Read(/workspace/**)",
+    "Write(/workspace/**)",
+    "Edit(/workspace/**)",
+]
+
+FOUNDRY_DENY = [
+    "Read(/workspace/**/specs/**/*.json)",
+    "Bash(gh api:*)",
+    "Bash(gh repo delete:*)",
+    "Bash(gh release delete:*)",
+    "Bash(gh secret:*)",
+    "Bash(gh variable:*)",
+]
+
+# Merge permissions (preserving existing, adding foundry)
+if "permissions" not in data:
+    data["permissions"] = {}
+existing_allow = set(data["permissions"].get("allow", []))
+existing_deny = set(data["permissions"].get("deny", []))
+data["permissions"]["allow"] = sorted(existing_allow | set(FOUNDRY_ALLOW))
+data["permissions"]["deny"] = sorted(existing_deny | set(FOUNDRY_DENY))
 
 # Remove foundry plugin from enabledPlugins - we use direct global install for it
 # This prevents "Plugin not found" errors from stale host config

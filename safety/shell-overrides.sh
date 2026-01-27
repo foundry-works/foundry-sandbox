@@ -128,6 +128,18 @@ _check_dangerous_cmd() {
         echo "gh release delete"
         return 0
     fi
+    if [[ "$cmd" =~ gh[[:space:]].*api[[:space:]] ]] || [[ "$cmd" =~ gh[[:space:]].*api$ ]]; then
+        echo "gh api (raw API access)"
+        return 0
+    fi
+    if [[ "$cmd" =~ gh[[:space:]].*secret[[:space:]] ]]; then
+        echo "gh secret (secrets access)"
+        return 0
+    fi
+    if [[ "$cmd" =~ gh[[:space:]].*variable[[:space:]] ]]; then
+        echo "gh variable (variables access)"
+        return 0
+    fi
 
     # --- dd patterns ---
     if [[ "$cmd" =~ dd[[:space:]].*of=/dev/ ]]; then
@@ -352,6 +364,18 @@ gh() {
                 echo "  This operation requires human operator approval."
                 return 1
             fi ;;
+        api)
+            echo "BLOCKED: gh api provides raw API access"
+            echo "  This operation requires human operator approval."
+            return 1 ;;
+        secret)
+            echo "BLOCKED: gh secret accesses repository secrets"
+            echo "  This operation requires human operator approval."
+            return 1 ;;
+        variable)
+            echo "BLOCKED: gh variable accesses repository variables"
+            echo "  This operation requires human operator approval."
+            return 1 ;;
     esac
     command gh "$@"
 }
