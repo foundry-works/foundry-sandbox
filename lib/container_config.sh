@@ -167,6 +167,45 @@ PY
     return 0
 }
 
+# Install CLAUDE.md and AGENTS.md from foundry plugins into workspace.
+# Appends content if files exist in source repos, creates destination if needed.
+# Uses <foundry-instructions> tags (already in source files) to detect duplicates.
+#
+# Arguments:
+#   $1 - container_id: The container to modify
+install_foundry_workspace_docs() {
+    local container_id="$1"
+    local foundry_cache="${CLAUDE_PLUGINS_CACHE:-$HOME/.cache/claude-plugins}"
+    local opencode_foundry_path="${SANDBOX_OPENCODE_FOUNDRY_PATH:-$SANDBOX_HOME/vendor/opencode-foundry}"
+
+    # Expand ~ if present
+    [[ "$opencode_foundry_path" == "~/"* ]] && opencode_foundry_path="${opencode_foundry_path/#\~/$HOME}"
+
+    local claude_md_src="$foundry_cache/claude-foundry/CLAUDE.md"
+    local agents_md_src="$opencode_foundry_path/AGENTS.md"
+    local marker="<foundry-instructions>"
+
+    # Install CLAUDE.md from claude-foundry
+    if file_exists "$claude_md_src"; then
+        # Check if already installed (marker present)
+        if ! docker exec "$container_id" grep -qF "$marker" /workspace/CLAUDE.md 2>/dev/null; then
+            log_info "Installing CLAUDE.md from claude-foundry..."
+            docker exec "$container_id" sh -c "[ ! -f /workspace/CLAUDE.md ] && touch /workspace/CLAUDE.md"
+            docker exec -i "$container_id" sh -c "echo '' >> /workspace/CLAUDE.md && cat >> /workspace/CLAUDE.md" < "$claude_md_src"
+        fi
+    fi
+
+    # Install AGENTS.md from opencode-foundry
+    if file_exists "$agents_md_src"; then
+        # Check if already installed (marker present)
+        if ! docker exec "$container_id" grep -qF "$marker" /workspace/AGENTS.md 2>/dev/null; then
+            log_info "Installing AGENTS.md from opencode-foundry..."
+            docker exec "$container_id" sh -c "[ ! -f /workspace/AGENTS.md ] && touch /workspace/AGENTS.md"
+            docker exec -i "$container_id" sh -c "echo '' >> /workspace/AGENTS.md && cat >> /workspace/AGENTS.md" < "$agents_md_src"
+        fi
+    fi
+}
+
 # Merge host's Claude settings into container's settings without overwriting critical sandbox settings.
 # This preserves the hooks configuration and model defaults set up by prepopulate_foundry_global
 # while bringing in other user preferences from the host.
@@ -1405,6 +1444,9 @@ copy_configs_to_container() {
 
     # Create foundry-mcp workspace directories
     ensure_foundry_mcp_workspace_dirs "$container_id" "$working_dir"
+
+    # Install foundry workspace documentation
+    install_foundry_workspace_docs "$container_id"
 
     # Debug: show what ended up in the container
     log_info "=== Claude Config Debug ==="
