@@ -154,6 +154,11 @@ show_before_commit = false
 #   "batch"      - Execute batch_size tasks, then pause
 mode = "autonomous"
 
+# Auto-compact setting (matches Claude Code's autoCompactEnabled)
+# When false, context window is 200k; when true (default), it's 155k
+# Sandboxes disable auto-compact for more predictable context management
+auto_compact = false
+
 # Automatically run validation after task completion
 auto_validate = true
 
