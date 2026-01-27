@@ -1499,9 +1499,16 @@ copy_configs_to_container() {
         docker exec "$container_id" sed -i '/UseKeychain/d; /AddKeysToAgent.*apple/Id' "$CONTAINER_HOME/.ssh/config" 2>/dev/null || true
     fi
     dir_exists ~/.sandboxes/repos && copy_dir_to_container "$container_id" ~/.sandboxes/repos "$CONTAINER_HOME/.sandboxes/repos"
+    # Copy foundry-mcp config: user config takes priority, fall back to sandbox bundled config
+    local foundry_config_source=""
     if file_exists ~/.foundry-mcp.toml; then
+        foundry_config_source="$HOME/.foundry-mcp.toml"
+    elif file_exists "${FOUNDRY_SANDBOX_HOME:-$HOME/.foundry-sandbox}/.foundry-mcp.toml"; then
+        foundry_config_source="${FOUNDRY_SANDBOX_HOME:-$HOME/.foundry-sandbox}/.foundry-mcp.toml"
+    fi
+    if [[ -n "$foundry_config_source" ]]; then
         docker exec "$container_id" mkdir -p "$CONTAINER_HOME/.config/foundry-mcp" 2>/dev/null || true
-        copy_file_to_container "$container_id" ~/.foundry-mcp.toml "$CONTAINER_HOME/.config/foundry-mcp/config.toml"
+        copy_file_to_container "$container_id" "$foundry_config_source" "$CONTAINER_HOME/.config/foundry-mcp/config.toml"
         configure_foundry_research_providers "$container_id"
     fi
     fix_worktree_paths "$container_id" "$(whoami)"
