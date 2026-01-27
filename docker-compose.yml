@@ -63,6 +63,8 @@ services:
       # Deep research providers (foundry-mcp)
       - TAVILY_API_KEY
       - PERPLEXITY_API_KEY
+      # Gemini API key (alternative to OAuth in ~/.gemini/)
+      - GEMINI_API_KEY
       # GitHub CLI token (extracted from keychain on macOS)
       - GH_TOKEN
       - TERM=xterm-256color
