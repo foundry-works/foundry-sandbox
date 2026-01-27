@@ -25,7 +25,7 @@ tmux_create_session() {
     else
         tmux set-option -t "$session" mouse off 2>/dev/null || true
     fi
-    tmux attach-session -t "$session"
+    exec tmux attach-session -t "$session"
 }
 
 tmux_attach_session() {
