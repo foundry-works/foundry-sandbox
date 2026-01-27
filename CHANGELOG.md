@@ -7,6 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.6] - 2026-01-27
+
+### Added
+- Perplexity search provider configuration options in `.foundry-mcp.toml`
+  - `perplexity_search_context_size`, `perplexity_max_tokens`, `perplexity_country`, etc.
+- Semantic Scholar search provider configuration options in `.foundry-mcp.toml`
+  - `semantic_scholar_publication_types`, `semantic_scholar_sort_by`, `semantic_scholar_use_extended_fields`
+- Block dangerous GitHub CLI commands that require operator approval:
+  - `gh api` (raw API access)
+  - `gh secret` (repository secrets access)
+  - `gh variable` (repository variables access)
+- Add `gh issue` and `gh pr` commands to auto-allowed permissions for workflow automation
+
+### Changed
+- Removed risky git commands from auto-allow permissions: `cherry-pick`, `clean`, `rebase`, `reset`, `rm`
+- Broadened workspace permissions from `/workspace/**/specs/**` to `/workspace/**`
+- Hooks configuration now restored after host settings are copied (fixes hooks being overwritten)
+- Skip `hooks.json` when copying hook executables (plugin-specific format)
+- Use `exec` for tmux attach to avoid orphan shell processes
+
 ## [0.5.5] - 2026-01-26
 
 ### Added
@@ -180,7 +200,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Tab completion for bash
 - macOS and Linux support
 
-[Unreleased]: https://github.com/foundry-works/foundry-sandbox/compare/v0.5.5...HEAD
+[Unreleased]: https://github.com/foundry-works/foundry-sandbox/compare/v0.5.6...HEAD
+[0.5.6]: https://github.com/foundry-works/foundry-sandbox/compare/v0.5.5...v0.5.6
 [0.5.5]: https://github.com/foundry-works/foundry-sandbox/compare/v0.5.4...v0.5.5
 [0.5.4]: https://github.com/foundry-works/foundry-sandbox/compare/v0.5.3...v0.5.4
 [0.5.3]: https://github.com/foundry-works/foundry-sandbox/compare/v0.5.2...v0.5.3
