@@ -431,6 +431,68 @@ tavily_extract_in_deep_research = true
 # Maximum URLs to extract per deep research run
 tavily_extract_max_urls = 5
 
+
+
+# -----------------------------------------------------------------------------
+# Document Digest Configuration
+# -----------------------------------------------------------------------------
+# Controls automatic content compression for large research sources.
+# When enabled, lengthy content is summarized into structured digests
+# with key findings and evidence snippets, reducing token usage while
+# preserving essential information.
+
+# Digest policy: controls when digestion is applied
+# - "off"    : Never digest content (preserve raw text)
+# - "auto"   : Digest when content exceeds min_chars threshold (default)
+# - "always" : Always digest eligible sources regardless of size
+deep_research_digest_policy = "auto"
+
+# Minimum character count before digest is applied (auto mode only)
+deep_research_digest_min_chars = 10000
+
+# Maximum sources to digest per batch
+deep_research_digest_max_sources = 8
+
+# Timeout per digest operation in seconds
+deep_research_digest_timeout = 180.0
+
+# Maximum concurrent digest operations
+deep_research_digest_max_concurrent = 3
+
+# Include evidence snippets (direct quotes) in digests
+deep_research_digest_include_evidence = true
+
+# Maximum characters per evidence snippet
+deep_research_digest_evidence_max_chars = 600
+
+# Maximum evidence snippets per digest
+deep_research_digest_max_evidence_snippets = 5
+
+# Fetch and extract PDF content from URLs
+# When true, PDFs are downloaded, text extracted, and digested
+# Requires additional processing time; disabled by default
+deep_research_digest_fetch_pdfs = true
+
+# Archive canonical text for digested sources
+# When true, original full text is saved to disk before digesting
+deep_research_archive_content = true
+
+# Days to retain archived digest content (0 = keep indefinitely)
+deep_research_archive_retention_days = 30
+
+# Primary LLM provider for digest operations
+# Uses analysis provider if not set
+deep_research_digest_provider = "[cli]gemini:flash"
+
+# Fallback providers for digest (tried in order if primary fails)
+deep_research_digest_providers = [
+    "[cli]gemini:flash",
+    "[cli]codex:gpt-5.1-codex-mini",
+    "[cli]opencode:openai/gpt-5.1-codex-mini",
+    "[cli]cursor-agent:gpt-5.2-codex-fast",
+    "[cli]claude:haiku"
+]
+
 # -----------------------------------------------------------------------------
 # Perplexity Search Provider Configuration
 # -----------------------------------------------------------------------------
