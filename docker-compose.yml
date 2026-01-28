@@ -17,8 +17,6 @@ services:
     volumes:
       # Workspace (set by sandbox.sh via WORKSPACE_PATH)
       - ${WORKSPACE_PATH:-.}:/workspace
-      # foundry-mcp errors and metrics (shared across all sandboxes)
-      - ${HOME}/.foundry-mcp:/home/ubuntu/.foundry-mcp
 
     # Writable tmpfs mounts (RAM-backed, cleared on container stop)
     tmpfs:
