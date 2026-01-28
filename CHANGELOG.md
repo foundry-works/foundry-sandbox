@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.7] - 2026-01-28
+
+### Added
+- Pip requirements installation support with `--pip-requirements` / `-r` flag for `cast new`
+  - Specify path: `--pip-requirements requirements.txt` or `-r requirements-dev.txt`
+  - Auto-detect: `--pip-requirements` or `-r` alone detects `/workspace/requirements.txt`
+  - Supports host paths (copied into container), workspace-relative paths, and tilde expansion
+  - Pip requirements automatically re-installed on `cast start`/`cast attach`
+  - Configuration persisted in sandbox metadata for session restoration
+
+### Changed
+- Removed `~/.foundry-mcp` volume mount from docker-compose.yml; directories now created in entrypoint.sh
+  - Creates `~/.foundry-mcp/cache`, `~/.foundry-mcp/errors`, `~/.foundry-mcp/metrics` at container startup
+
 ## [0.5.6] - 2026-01-27
 
 ### Added
@@ -200,7 +214,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Tab completion for bash
 - macOS and Linux support
 
-[Unreleased]: https://github.com/foundry-works/foundry-sandbox/compare/v0.5.6...HEAD
+[Unreleased]: https://github.com/foundry-works/foundry-sandbox/compare/v0.5.7...HEAD
+[0.5.7]: https://github.com/foundry-works/foundry-sandbox/compare/v0.5.6...v0.5.7
 [0.5.6]: https://github.com/foundry-works/foundry-sandbox/compare/v0.5.5...v0.5.6
 [0.5.5]: https://github.com/foundry-works/foundry-sandbox/compare/v0.5.4...v0.5.5
 [0.5.4]: https://github.com/foundry-works/foundry-sandbox/compare/v0.5.3...v0.5.4

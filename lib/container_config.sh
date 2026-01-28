@@ -169,6 +169,69 @@ PY
     return 0
 }
 
+# Install Python packages from requirements.txt into the container.
+# Supports auto-detection, host paths (copied in), and workspace-relative paths.
+#
+# Arguments:
+#   $1 - container_id: The container to install packages in
+#   $2 - requirements_path: Path specification (auto, host path, or workspace-relative)
+#   $3 - quiet: If "1", suppress non-warning output (default: 0)
+#
+# Returns 0 on success or graceful skip, continues on pip failures
+install_pip_requirements() {
+    local container_id="$1"
+    local requirements_path="$2"
+    local quiet="${3:-0}"
+
+    [ -z "$requirements_path" ] && return 0
+
+    local container_req_path=""
+
+    if [ "$requirements_path" = "auto" ]; then
+        if docker exec "$container_id" test -f /workspace/requirements.txt 2>/dev/null; then
+            container_req_path="/workspace/requirements.txt"
+            [ "$quiet" != "1" ] && log_info "Auto-detected requirements.txt"
+        else
+            [ "$quiet" != "1" ] && log_debug "No requirements.txt found (auto-detect)"
+            return 0
+        fi
+    elif [[ "$requirements_path" = /* ]] || [[ "$requirements_path" = ~/* ]]; then
+        # Host path - copy into container
+        local expanded_path="$requirements_path"
+        [[ "$expanded_path" == "~/"* ]] && expanded_path="${expanded_path/#\~/$HOME}"
+
+        if [ ! -f "$expanded_path" ]; then
+            [ "$quiet" != "1" ] && log_warn "Requirements file not found: $expanded_path"
+            return 0
+        fi
+
+        container_req_path="/tmp/sandbox-requirements.txt"
+        copy_file_to_container "$container_id" "$expanded_path" "$container_req_path" || return 0
+    else
+        # Workspace-relative path
+        container_req_path="/workspace/$requirements_path"
+        if ! docker exec "$container_id" test -f "$container_req_path" 2>/dev/null; then
+            [ "$quiet" != "1" ] && log_warn "Requirements file not found: $container_req_path"
+            return 0
+        fi
+    fi
+
+    [ "$quiet" != "1" ] && log_info "Installing Python packages from $container_req_path..."
+
+    if docker exec -u "$CONTAINER_USER" "$container_id" \
+        pip install --no-warn-script-location -r "$container_req_path" 2>&1; then
+        [ "$quiet" != "1" ] && log_info "Python packages installed successfully"
+    else
+        [ "$quiet" != "1" ] && log_warn "Some pip packages failed to install (continuing)"
+    fi
+
+    # Clean up temp file
+    [ "$container_req_path" = "/tmp/sandbox-requirements.txt" ] && \
+        docker exec "$container_id" rm -f "$container_req_path" 2>/dev/null || true
+
+    return 0
+}
+
 # Install CLAUDE.md and AGENTS.md from foundry plugins into workspace.
 # Appends content if files exist in source repos, creates destination if needed.
 # Uses <foundry-instructions> tags (already in source files) to detect duplicates.

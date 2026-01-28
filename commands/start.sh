@@ -69,6 +69,11 @@ cmd_start() {
         log_info "Sparse checkout active for: $SANDBOX_WORKING_DIR"
     fi
 
+    # Re-install Python packages if configured
+    if [ -n "${SANDBOX_PIP_REQUIREMENTS:-}" ]; then
+        install_pip_requirements "$container_id" "$SANDBOX_PIP_REQUIREMENTS"
+    fi
+
     # Apply network restrictions AFTER plugin/MCP registration completes
     if [ -n "${SANDBOX_NETWORK_MODE:-}" ] && [ "$SANDBOX_NETWORK_MODE" != "full" ]; then
         echo "Applying network mode: $SANDBOX_NETWORK_MODE"
