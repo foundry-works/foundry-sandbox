@@ -12,6 +12,7 @@ parse_new_args() {
     NEW_SKIP_KEY_CHECK=false
     NEW_WORKING_DIR=""
     NEW_SPARSE_CHECKOUT=false
+    NEW_PIP_REQUIREMENTS=""
 
     while [ $# -gt 0 ]; do
         case "$1" in
@@ -61,6 +62,19 @@ parse_new_args() {
                 ;;
             --sparse)
                 NEW_SPARSE_CHECKOUT=true
+                ;;
+            --pip-requirements|-r)
+                shift
+                if [ -n "$1" ] && [[ "$1" != -* ]]; then
+                    NEW_PIP_REQUIREMENTS="$1"
+                else
+                    NEW_PIP_REQUIREMENTS="auto"
+                    continue
+                fi
+                ;;
+            --pip-requirements=*|-r=*)
+                NEW_PIP_REQUIREMENTS="${1#*=}"
+                [ -z "$NEW_PIP_REQUIREMENTS" ] && NEW_PIP_REQUIREMENTS="auto"
                 ;;
             *)
                 if [ -z "$NEW_REPO_URL" ]; then

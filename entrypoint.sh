@@ -11,7 +11,10 @@ mkdir -p "$HOME/.claude" \
          "$HOME/.ssh" \
          "$HOME/.local/bin" \
          "$HOME/.cache" \
-         "$HOME/.npm"
+         "$HOME/.npm" \
+         "$HOME/.foundry-mcp/cache" \
+         "$HOME/.foundry-mcp/errors" \
+         "$HOME/.foundry-mcp/metrics"
 
 # Ensure Claude Code temp dir exists (defaulted via docker-compose)
 if [ -n "${CLAUDE_CODE_TMPDIR:-}" ]; then

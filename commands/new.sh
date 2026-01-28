@@ -13,6 +13,7 @@ cmd_new() {
     local skip_key_check="$NEW_SKIP_KEY_CHECK"
     local working_dir="$NEW_WORKING_DIR"
     local sparse_checkout="$NEW_SPARSE_CHECKOUT"
+    local pip_requirements="$NEW_PIP_REQUIREMENTS"
     local ssh_agent_sock=""
     local repo_root=""
     local current_branch=""
@@ -87,6 +88,8 @@ cmd_new() {
         echo "  --skip-key-check                 Skip API key validation"
         echo "  --wd <path>                      Working directory within repo (relative path)"
         echo "  --sparse                         Enable sparse checkout (requires --wd)"
+        echo "  --pip-requirements, -r <path>    Install Python packages from requirements.txt"
+        echo "                                   Use 'auto' to detect /workspace/requirements.txt"
         echo ""
         echo "Examples:"
         echo "  $0 new user/repo                     # auto-create sandbox branch from main"
@@ -275,7 +278,7 @@ OVERRIDES
         add_ssh_agent_to_override "$override_file" ""
     fi
 
-    write_sandbox_metadata "$name" "$repo_url" "$branch" "$from_branch" "$working_dir" "$sparse_flag" "${mounts[@]}" -- "${copies[@]}"
+    write_sandbox_metadata "$name" "$repo_url" "$branch" "$from_branch" "$working_dir" "$sparse_flag" "$pip_requirements" "${mounts[@]}" -- "${copies[@]}"
 
     local container_id="${container}-dev-1"
 
@@ -309,6 +312,11 @@ OVERRIDES
 
     # Install foundry permissions into workspace
     install_workspace_permissions "$container_id"
+
+    # Install Python packages from requirements.txt if specified
+    if [ -n "$pip_requirements" ]; then
+        install_pip_requirements "$container_id" "$pip_requirements"
+    fi
 
     # Apply network restrictions AFTER plugin/MCP registration completes
     if [ -n "$network_mode" ] && [ "$network_mode" != "full" ]; then
