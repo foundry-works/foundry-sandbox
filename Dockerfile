@@ -81,10 +81,6 @@ COPY safety/network-firewall.sh /usr/local/bin/network-firewall.sh
 COPY safety/network-mode /usr/local/bin/network-mode
 RUN chmod +x /usr/local/bin/network-firewall.sh /usr/local/bin/network-mode
 
-# Layer 5: Credential proxy init (for credential isolation mode)
-COPY safety/credential-proxy-init.sh /usr/local/bin/credential-proxy-init.sh
-RUN chmod +x /usr/local/bin/credential-proxy-init.sh
-
 # Remove PEP 668 protection (run as root before switching users)
 # Safe in Docker containers where isolation already exists
 RUN rm -f /usr/lib/python*/EXTERNALLY-MANAGED

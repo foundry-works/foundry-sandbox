@@ -43,6 +43,11 @@ compose_down() {
     export CONTAINER_NAME="$container"
 
     local compose_cmd
+    if [ "$isolate_credentials" != "true" ]; then
+        if docker ps -a --format '{{.Names}}' | grep -q "^${container}-api-proxy-"; then
+            isolate_credentials="true"
+        fi
+    fi
     compose_cmd=$(get_compose_command "$override_file" "$isolate_credentials")
     if [ "$remove_volumes" = "true" ]; then
         run_cmd $compose_cmd -p "$container" down -v

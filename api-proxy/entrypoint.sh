@@ -3,7 +3,7 @@
 # API Proxy Entrypoint
 #
 # Generates CA certificate on first run, copies it to shared volume,
-# and starts mitmproxy in transparent mode with credential injection.
+# and starts mitmproxy with credential injection.
 
 set -euo pipefail
 
@@ -57,11 +57,20 @@ verify_addon() {
     log "Credential injection addon found"
 }
 
-start_mitmproxy() {
-    log "Starting mitmproxy in transparent mode..."
+disable_missing_auth_file() {
+    local var_name="$1"
+    local auth_path="${!var_name:-}"
 
-    local mode="${PROXY_MODE:-transparent}"
+    if [[ -n "${auth_path}" && ! -f "${auth_path}" ]]; then
+        log "Auth file ${auth_path} not found; disabling ${var_name}"
+        unset "${var_name}"
+    fi
+}
+
+start_mitmproxy() {
+    local mode="${PROXY_MODE:-regular}"
     local log_level="${PROXY_LOG_LEVEL:-info}"
+    log "Starting mitmproxy in ${mode} mode..."
 
     local args=(
         --mode "${mode}"
@@ -98,6 +107,9 @@ main() {
     copy_ca_to_shared_volume
 
     verify_addon
+    disable_missing_auth_file CODEX_AUTH_FILE
+    disable_missing_auth_file OPENCODE_AUTH_FILE
+    disable_missing_auth_file GEMINI_OAUTH_FILE
 
     start_mitmproxy
 }

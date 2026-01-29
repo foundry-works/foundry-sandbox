@@ -53,21 +53,21 @@ fi
 # To apply network mode manually: sudo network-mode <limited|host-only|none>
 # The host script will call this after copy_configs_to_container completes.
 
-# Credential proxy init (when CREDENTIAL_ISOLATION=1)
-# Sets up CA trust and iptables rules to route API traffic through the proxy
-if [ "${CREDENTIAL_ISOLATION:-0}" = "1" ]; then
-    echo "Initializing credential isolation proxy..."
-    # Requires sudo for iptables rules and CA installation
-    if sudo credential-proxy-init.sh; then
-        echo "Credential proxy initialization complete"
-        # Re-export CA environment variables to current shell
-        # (init script exports them but they don't persist to exec'd process)
-        export NODE_EXTRA_CA_CERTS="/certs/mitmproxy-ca.pem"
-        export REQUESTS_CA_BUNDLE="/certs/mitmproxy-ca.pem"
-        export SSL_CERT_FILE="/certs/mitmproxy-ca.pem"
-        export CURL_CA_BUNDLE="/certs/mitmproxy-ca.pem"
-    else
-        echo "WARNING: Credential proxy initialization failed" >&2
+# Trust mitmproxy CA when mounted (explicit proxy mode)
+if [ -f "/certs/mitmproxy-ca.pem" ]; then
+    echo "Configuring CA trust for proxy..."
+    export NODE_EXTRA_CA_CERTS="/certs/mitmproxy-ca.pem"
+    export REQUESTS_CA_BUNDLE="/certs/mitmproxy-ca.pem"
+    export SSL_CERT_FILE="/certs/mitmproxy-ca.pem"
+    export CURL_CA_BUNDLE="/certs/mitmproxy-ca.pem"
+    if command -v update-ca-certificates >/dev/null 2>&1; then
+        if command -v sudo >/dev/null 2>&1 && sudo -n true 2>/dev/null; then
+            sudo cp "/certs/mitmproxy-ca.pem" "/usr/local/share/ca-certificates/mitmproxy-ca.crt" 2>/dev/null || true
+            sudo update-ca-certificates >/dev/null 2>&1 || true
+        elif [ -w "/usr/local/share/ca-certificates" ]; then
+            cp "/certs/mitmproxy-ca.pem" "/usr/local/share/ca-certificates/mitmproxy-ca.crt" 2>/dev/null || true
+            update-ca-certificates >/dev/null 2>&1 || true
+        fi
     fi
 fi
 
