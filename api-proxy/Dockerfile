@@ -39,8 +39,8 @@ USER mitmproxy
 EXPOSE 8080 8081
 
 # Health check - verify mitmproxy web interface is responding
-HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
-    CMD curl -sf http://localhost:8081/ || exit 1
+HEALTHCHECK --interval=5s --timeout=5s --start-period=10s --retries=3 \
+    CMD python3 -c "import urllib.request; urllib.request.urlopen('http://localhost:8081/', timeout=3)" || exit 1
 
 # Volume mount points for runtime configuration
 # /etc/proxy/credentials - credential files mounted at runtime
