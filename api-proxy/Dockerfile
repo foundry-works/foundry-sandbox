@@ -13,13 +13,16 @@ LABEL org.opencontainers.image.source="https://github.com/your-org/foundry-sandb
 
 # Install additional Python dependencies for the addon
 USER root
-RUN pip install --no-cache-dir pyyaml
+RUN pip install --no-cache-dir pyyaml httpx
 
 # Create directories for configuration and certificates
 RUN mkdir -p /etc/proxy/credentials /etc/proxy/certs
 
-# Copy the credential injection addon
+# Copy the credential injection addon and OAuth token managers
 COPY inject-credentials.py /opt/proxy/inject-credentials.py
+COPY oauth-token-manager.py /opt/proxy/oauth_token_manager.py
+COPY multi-provider-token-manager.py /opt/proxy/multi_provider_token_manager.py
+COPY gemini-token-manager.py /opt/proxy/gemini_token_manager.py
 
 # Copy the entrypoint script
 COPY entrypoint.sh /opt/proxy/entrypoint.sh
