@@ -15,6 +15,7 @@ Foundry Sandbox solves this by providing isolated Docker environments with defen
 - **Multiple AI Tools** - Claude Code, Gemini CLI, Codex CLI, OpenCode, and Cursor Agent pre-installed
 - **Fast Creation** - Worktrees share git objects; new sandboxes spin up in seconds
 - **Network Control** - Full, limited (whitelist), host-only, or no network access
+- **Credential Isolation** - Optional proxy mode keeps API keys out of sandboxes entirely
 - **Volume Mounts** - Mount host directories read-write or read-only
 - **JSON Output** - All commands support `--json` for scripting and automation
 

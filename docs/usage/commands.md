@@ -28,6 +28,7 @@ cast new <repo> [branch] [from-branch] [options]
 | `--copy`, `-c` | Copy host path once: `host:container` |
 | `--network`, `-n` | Network isolation mode: `full`, `limited`, `host-only`, `none` |
 | `--with-ssh` | Enable SSH agent forwarding (opt-in, agent-only) |
+| `--isolate-credentials`, `--isolate` | Keep API keys in a proxy container (never enter sandbox) |
 | `--skip-key-check` | Skip API key validation |
 | `--wd <path>` | Working directory within repo (relative path) |
 | `--sparse` | Enable sparse checkout (requires `--wd`) |
@@ -62,6 +63,9 @@ cast new owner/repo feature --network=none       # no network
 
 # With SSH agent forwarding
 cast new owner/repo feature --with-ssh
+
+# With credential isolation (API keys never enter sandbox)
+cast new owner/repo feature --isolate-credentials
 
 # Work in a subdirectory of a monorepo
 cast new owner/monorepo feature --wd packages/backend
