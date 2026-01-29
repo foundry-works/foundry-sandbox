@@ -1528,7 +1528,7 @@ copy_configs_to_container() {
     dir_exists ~/.config/gh && copy_dir_to_container "$container_id" ~/.config/gh "$CONTAINER_HOME/.config/gh"
     # Gemini CLI OAuth credentials (created via `gemini auth` on host)
     # Skip large Gemini CLI browser recordings to keep sandboxes lightweight.
-    dir_exists ~/.gemini && copy_dir_to_container "$container_id" ~/.gemini "$CONTAINER_HOME/.gemini" "antigravity"
+    dir_exists ~/.gemini && copy_dir_to_container "$container_id" ~/.gemini "$CONTAINER_HOME/.gemini" "antigravity*"
     if file_exists ~/.config/opencode/opencode.json; then
         copy_file_to_container "$container_id" ~/.config/opencode/opencode.json "$CONTAINER_HOME/.config/opencode/opencode.json"
     elif file_exists "$SCRIPT_DIR/opencode.json"; then
