@@ -39,13 +39,13 @@ from mitmproxy import http, ctx
 
 # Import OAuth token manager (available when CODEX_AUTH_FILE is set)
 try:
-    from oauth_token_manager import OAuthTokenManager
+    from codex_token_manager import OAuthTokenManager
 except ImportError:
     OAuthTokenManager = None  # type: ignore[misc, assignment]
 
 # Import multi-provider OAuth token manager (available when OPENCODE_AUTH_FILE is set)
 try:
-    from multi_provider_token_manager import MultiProviderTokenManager
+    from opencode_token_manager import MultiProviderTokenManager
 except ImportError:
     MultiProviderTokenManager = None  # type: ignore[misc, assignment]
 

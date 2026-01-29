@@ -20,8 +20,8 @@ RUN mkdir -p /etc/proxy/credentials /etc/proxy/certs
 
 # Copy the credential injection addon and OAuth token managers
 COPY inject-credentials.py /opt/proxy/inject-credentials.py
-COPY oauth-token-manager.py /opt/proxy/oauth_token_manager.py
-COPY multi-provider-token-manager.py /opt/proxy/multi_provider_token_manager.py
+COPY codex-token-manager.py /opt/proxy/codex_token_manager.py
+COPY opencode-token-manager.py /opt/proxy/opencode_token_manager.py
 COPY gemini-token-manager.py /opt/proxy/gemini_token_manager.py
 
 # Copy the entrypoint script
