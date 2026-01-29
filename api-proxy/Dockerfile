@@ -38,9 +38,9 @@ USER mitmproxy
 # 8081: mitmproxy web interface (optional, for debugging)
 EXPOSE 8080 8081
 
-# Health check - verify mitmproxy web interface is responding
+# Health check - verify proxy port is listening
 HEALTHCHECK --interval=5s --timeout=5s --start-period=10s --retries=3 \
-    CMD python3 -c "import urllib.request; urllib.request.urlopen('http://localhost:8081/', timeout=3)" || exit 1
+    CMD python3 -c "import socket; s=socket.socket(); s.settimeout(2); s.connect(('localhost', 8080)); s.close()" || exit 1
 
 # Volume mount points for runtime configuration
 # /etc/proxy/credentials - credential files mounted at runtime
