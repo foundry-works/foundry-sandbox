@@ -16,7 +16,9 @@ USER root
 RUN pip install --no-cache-dir pyyaml httpx
 
 # Create directories for configuration and certificates
-RUN mkdir -p /etc/proxy/credentials /etc/proxy/certs
+# Owned by mitmproxy user so the container can write to mounted volumes
+RUN mkdir -p /etc/proxy/credentials /etc/proxy/certs \
+    && chown -R mitmproxy:mitmproxy /etc/proxy
 
 # Copy the credential injection addon and OAuth token managers
 COPY inject-credentials.py /opt/proxy/inject-credentials.py
