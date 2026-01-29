@@ -7,13 +7,16 @@ Credentials are read from environment variables and injected as headers.
 Provider Credential Map:
 - api.anthropic.com: x-api-key from ANTHROPIC_API_KEY
 - api.openai.com: Authorization Bearer from OPENAI_API_KEY
-- generativelanguage.googleapis.com: x-goog-api-key from GOOGLE_API_KEY
+- generativelanguage.googleapis.com: x-goog-api-key from GOOGLE_API_KEY (or GEMINI_API_KEY)
 - api.groq.com: Authorization Bearer from GROQ_API_KEY
 - api.mistral.ai: Authorization Bearer from MISTRAL_API_KEY
 - api.deepseek.com: Authorization Bearer from DEEPSEEK_API_KEY
 - api.together.xyz: Authorization Bearer from TOGETHER_API_KEY
 - openrouter.ai: Authorization Bearer from OPENROUTER_API_KEY
 - api.fireworks.ai: Authorization Bearer from FIREWORKS_API_KEY
+- api.tavily.com: Authorization Bearer from TAVILY_API_KEY
+- api.semanticscholar.org: x-api-key from SEMANTIC_SCHOLAR_API_KEY
+- api.perplexity.ai: Authorization Bearer from PERPLEXITY_API_KEY
 
 OAuth Support (Codex CLI):
 - Detects CREDENTIAL_PROXY_PLACEHOLDER in Authorization header
@@ -93,6 +96,7 @@ PROVIDER_MAP = {
     "generativelanguage.googleapis.com": {
         "header": "x-goog-api-key",
         "env_var": "GOOGLE_API_KEY",
+        "fallback_env_var": "GEMINI_API_KEY",
         "format": "value",
     },
     "api.groq.com": {
@@ -125,6 +129,21 @@ PROVIDER_MAP = {
         "env_var": "FIREWORKS_API_KEY",
         "format": "bearer",
     },
+    "api.tavily.com": {
+        "header": "Authorization",
+        "env_var": "TAVILY_API_KEY",
+        "format": "bearer",
+    },
+    "api.semanticscholar.org": {
+        "header": "x-api-key",
+        "env_var": "SEMANTIC_SCHOLAR_API_KEY",
+        "format": "value",
+    },
+    "api.perplexity.ai": {
+        "header": "Authorization",
+        "env_var": "PERPLEXITY_API_KEY",
+        "format": "bearer",
+    },
 }
 
 
@@ -145,15 +164,22 @@ class CredentialInjector:
         """Load credentials from environment variables into cache."""
         for host, config in PROVIDER_MAP.items():
             env_var = config["env_var"]
+            fallback_env_var = config.get("fallback_env_var")
             value = os.environ.get(env_var)
+            used_env_var = env_var
+            # Try fallback if primary not set
+            if not value and fallback_env_var:
+                value = os.environ.get(fallback_env_var)
+                used_env_var = fallback_env_var
             if value:
                 self.credentials_cache[host] = {
                     "header": config["header"],
                     "value": self._format_value(value, config["format"]),
                 }
-                ctx.log.info(f"Loaded credential for {host} from {env_var}")
+                ctx.log.info(f"Loaded credential for {host} from {used_env_var}")
             else:
-                ctx.log.warn(f"No credential for {host}: {env_var} not set")
+                fallback_msg = f" or {fallback_env_var}" if fallback_env_var else ""
+                ctx.log.warn(f"No credential for {host}: {env_var}{fallback_msg} not set")
 
     def _format_value(self, value: str, fmt: str) -> str:
         """Format credential value based on provider requirements."""
