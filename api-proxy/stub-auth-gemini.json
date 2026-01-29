@@ -1,0 +1,8 @@
+{
+  "access_token": "CREDENTIAL_PROXY_PLACEHOLDER",
+  "expiry_date": 4102444800000,
+  "id_token": "CREDENTIAL_PROXY_PLACEHOLDER",
+  "refresh_token": "CREDENTIAL_PROXY_PLACEHOLDER",
+  "scope": "https://www.googleapis.com/auth/cloud-platform https://www.googleapis.com/auth/generative-language.retriever",
+  "token_type": "Bearer"
+}
