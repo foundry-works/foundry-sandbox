@@ -1486,6 +1486,7 @@ copy_configs_to_container() {
     local skip_plugins="${2:-0}"
     local enable_ssh="${3:-${SANDBOX_SYNC_SSH:-0}}"
     local working_dir="${4:-}"
+    local isolate_credentials="${5:-false}"
 
     # Create container user if using host user matching
     ensure_container_user "$container_id"
@@ -1526,22 +1527,24 @@ copy_configs_to_container() {
     file_exists ~/.claude/statusline.conf && copy_file_to_container "$container_id" ~/.claude/statusline.conf "$CONTAINER_HOME/.claude/statusline.conf"
     ensure_claude_statusline "$container_id"
     dir_exists ~/.config/gh && copy_dir_to_container "$container_id" ~/.config/gh "$CONTAINER_HOME/.config/gh"
-    # Gemini CLI OAuth credentials (created via `gemini auth` on host)
-    # Skip large Gemini CLI browser recordings to keep sandboxes lightweight.
-    # Copy only the OAuth credentials file from Gemini CLI, not the whole directory
-    if file_exists ~/.gemini/oauth_creds.json; then
-        docker exec "$container_id" mkdir -p "$CONTAINER_HOME/.gemini" 2>/dev/null || true
-        copy_file_to_container "$container_id" ~/.gemini/oauth_creds.json "$CONTAINER_HOME/.gemini/oauth_creds.json"
+    # Skip auth file copies when credential isolation is enabled (they're mounted as stubs)
+    if [ "$isolate_credentials" != "true" ]; then
+        # Gemini CLI OAuth credentials (created via `gemini auth` on host)
+        if file_exists ~/.gemini/oauth_creds.json; then
+            docker exec "$container_id" mkdir -p "$CONTAINER_HOME/.gemini" 2>/dev/null || true
+            copy_file_to_container "$container_id" ~/.gemini/oauth_creds.json "$CONTAINER_HOME/.gemini/oauth_creds.json"
+        fi
+        file_exists ~/.local/share/opencode/auth.json && copy_file_to_container "$container_id" ~/.local/share/opencode/auth.json "$CONTAINER_HOME/.local/share/opencode/auth.json"
+        dir_exists ~/.codex && copy_dir_to_container "$container_id" ~/.codex "$CONTAINER_HOME/.codex" "${CODEX_COPY_EXCLUDES[@]}"
     fi
+    # OpenCode config (not credentials)
     if file_exists ~/.config/opencode/opencode.json; then
         copy_file_to_container "$container_id" ~/.config/opencode/opencode.json "$CONTAINER_HOME/.config/opencode/opencode.json"
     elif file_exists "$SCRIPT_DIR/opencode.json"; then
         copy_file_to_container "$container_id" "$SCRIPT_DIR/opencode.json" "$CONTAINER_HOME/.config/opencode/opencode.json"
     fi
     file_exists ~/.config/opencode/antigravity-accounts.json && copy_file_to_container "$container_id" ~/.config/opencode/antigravity-accounts.json "$CONTAINER_HOME/.config/opencode/antigravity-accounts.json"
-    file_exists ~/.local/share/opencode/auth.json && copy_file_to_container "$container_id" ~/.local/share/opencode/auth.json "$CONTAINER_HOME/.local/share/opencode/auth.json"
     file_exists ~/.cursor/cli-config.json && copy_file_to_container "$container_id" ~/.cursor/cli-config.json "$CONTAINER_HOME/.cursor/cli-config.json"
-    dir_exists ~/.codex && copy_dir_to_container "$container_id" ~/.codex "$CONTAINER_HOME/.codex" "${CODEX_COPY_EXCLUDES[@]}"
     ensure_gemini_settings "$container_id"
     ensure_codex_config "$container_id"
     sync_opencode_foundry "$container_id"
