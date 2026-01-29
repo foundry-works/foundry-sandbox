@@ -195,18 +195,18 @@ class CredentialInjector:
             return
 
         if OAuthTokenManager is None:
-            ctx.log.error("OAuth token manager module not available")
+            ctx.log.warn("OAuth token manager module not available")
             return
 
         try:
             self.oauth_manager = OAuthTokenManager(codex_auth_file)
             ctx.log.info(f"OAuth token manager initialized from {codex_auth_file}")
         except FileNotFoundError:
-            ctx.log.error(f"OAuth auth file not found: {codex_auth_file}")
+            ctx.log.warn(f"OAuth auth file not found: {codex_auth_file}")
         except ValueError as e:
-            ctx.log.error(f"Invalid OAuth auth file: {e}")
+            ctx.log.warn(f"Invalid OAuth auth file: {e}")
         except Exception as e:
-            ctx.log.error(f"Failed to initialize OAuth manager: {e}")
+            ctx.log.warn(f"Failed to initialize OAuth manager: {e}")
 
     def _init_opencode_manager(self) -> None:
         """Initialize OpenCode multi-provider token manager if OPENCODE_AUTH_FILE is set."""
@@ -216,7 +216,7 @@ class CredentialInjector:
             return
 
         if MultiProviderTokenManager is None:
-            ctx.log.error("Multi-provider token manager module not available")
+            ctx.log.warn("Multi-provider token manager module not available")
             return
 
         try:
@@ -227,11 +227,11 @@ class CredentialInjector:
                 f"with providers: {', '.join(providers)}"
             )
         except FileNotFoundError:
-            ctx.log.error(f"OpenCode auth file not found: {opencode_auth_file}")
+            ctx.log.warn(f"OpenCode auth file not found: {opencode_auth_file}")
         except ValueError as e:
-            ctx.log.error(f"Invalid OpenCode auth file: {e}")
+            ctx.log.warn(f"Invalid OpenCode auth file: {e}")
         except Exception as e:
-            ctx.log.error(f"Failed to initialize OpenCode manager: {e}")
+            ctx.log.warn(f"Failed to initialize OpenCode manager: {e}")
 
     def _init_gemini_manager(self) -> None:
         """Initialize Gemini OAuth token manager if GEMINI_OAUTH_FILE is set."""
@@ -241,18 +241,18 @@ class CredentialInjector:
             return
 
         if GeminiTokenManager is None:
-            ctx.log.error("Gemini token manager module not available")
+            ctx.log.warn("Gemini token manager module not available")
             return
 
         try:
             self.gemini_manager = GeminiTokenManager(gemini_auth_file)
             ctx.log.info(f"Gemini token manager initialized from {gemini_auth_file}")
         except FileNotFoundError:
-            ctx.log.error(f"Gemini auth file not found: {gemini_auth_file}")
+            ctx.log.warn(f"Gemini auth file not found: {gemini_auth_file}")
         except ValueError as e:
-            ctx.log.error(f"Invalid Gemini auth file: {e}")
+            ctx.log.warn(f"Invalid Gemini auth file: {e}")
         except Exception as e:
-            ctx.log.error(f"Failed to initialize Gemini manager: {e}")
+            ctx.log.warn(f"Failed to initialize Gemini manager: {e}")
 
     def _is_refresh_endpoint(self, flow: http.HTTPFlow) -> bool:
         """Check if request is to an OAuth token refresh endpoint."""
