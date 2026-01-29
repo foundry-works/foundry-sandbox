@@ -1545,8 +1545,11 @@ copy_configs_to_container() {
     fi
     file_exists ~/.config/opencode/antigravity-accounts.json && copy_file_to_container "$container_id" ~/.config/opencode/antigravity-accounts.json "$CONTAINER_HOME/.config/opencode/antigravity-accounts.json"
     file_exists ~/.cursor/cli-config.json && copy_file_to_container "$container_id" ~/.cursor/cli-config.json "$CONTAINER_HOME/.cursor/cli-config.json"
-    ensure_gemini_settings "$container_id"
-    ensure_codex_config "$container_id"
+    # Skip settings writes when credential isolation is enabled (dirs may be read-only)
+    if [ "$isolate_credentials" != "true" ]; then
+        ensure_gemini_settings "$container_id"
+        ensure_codex_config "$container_id"
+    fi
     sync_opencode_foundry "$container_id"
     ensure_opencode_default_model "$container_id" "$skip_plugins"
     if [ "$skip_plugins" != "1" ]; then
