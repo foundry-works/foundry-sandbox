@@ -1528,7 +1528,11 @@ copy_configs_to_container() {
     dir_exists ~/.config/gh && copy_dir_to_container "$container_id" ~/.config/gh "$CONTAINER_HOME/.config/gh"
     # Gemini CLI OAuth credentials (created via `gemini auth` on host)
     # Skip large Gemini CLI browser recordings to keep sandboxes lightweight.
-    dir_exists ~/.gemini && copy_dir_to_container "$container_id" ~/.gemini "$CONTAINER_HOME/.gemini" "antigravity*" "tmp"
+    # Copy only the OAuth credentials file from Gemini CLI, not the whole directory
+    if file_exists ~/.gemini/oauth_creds.json; then
+        docker exec "$container_id" mkdir -p "$CONTAINER_HOME/.gemini" 2>/dev/null || true
+        copy_file_to_container "$container_id" ~/.gemini/oauth_creds.json "$CONTAINER_HOME/.gemini/oauth_creds.json"
+    fi
     if file_exists ~/.config/opencode/opencode.json; then
         copy_file_to_container "$container_id" ~/.config/opencode/opencode.json "$CONTAINER_HOME/.config/opencode/opencode.json"
     elif file_exists "$SCRIPT_DIR/opencode.json"; then
