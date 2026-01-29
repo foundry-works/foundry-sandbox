@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.8] - 2026-01-29
+
+### Changed
+- Credential isolation refactored from transparent to explicit proxy mode
+  - Switch from iptables-based traffic redirection to HTTP_PROXY/HTTPS_PROXY environment variables
+  - Remove NET_ADMIN capability requirement (no longer needed)
+  - Use `regular` proxy mode instead of `transparent`
+  - Make credential-isolation network internal for added security
+
+### Removed
+- `safety/credential-proxy-init.sh` script (iptables setup no longer needed)
+- `CREDENTIAL_ISOLATION` and `CREDENTIAL_PROXY_PORT` environment variables
+
+### Fixed
+- Gracefully handle missing OAuth credential files in proxy entrypoint
+- Auto-detect api-proxy container in `compose_down` for proper cleanup
+
 ## [0.5.7] - 2026-01-28
 
 ### Added
@@ -214,7 +231,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Tab completion for bash
 - macOS and Linux support
 
-[Unreleased]: https://github.com/foundry-works/foundry-sandbox/compare/v0.5.7...HEAD
+[Unreleased]: https://github.com/foundry-works/foundry-sandbox/compare/v0.5.8...HEAD
+[0.5.8]: https://github.com/foundry-works/foundry-sandbox/compare/v0.5.7...v0.5.8
 [0.5.7]: https://github.com/foundry-works/foundry-sandbox/compare/v0.5.6...v0.5.7
 [0.5.6]: https://github.com/foundry-works/foundry-sandbox/compare/v0.5.5...v0.5.6
 [0.5.5]: https://github.com/foundry-works/foundry-sandbox/compare/v0.5.4...v0.5.5

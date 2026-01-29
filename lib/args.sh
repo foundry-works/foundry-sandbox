@@ -13,6 +13,7 @@ parse_new_args() {
     NEW_WORKING_DIR=""
     NEW_SPARSE_CHECKOUT=false
     NEW_PIP_REQUIREMENTS=""
+    NEW_ISOLATE_CREDENTIALS=false
 
     while [ $# -gt 0 ]; do
         case "$1" in
@@ -62,6 +63,9 @@ parse_new_args() {
                 ;;
             --sparse)
                 NEW_SPARSE_CHECKOUT=true
+                ;;
+            --isolate-credentials|--isolate)
+                NEW_ISOLATE_CREDENTIALS=true
                 ;;
             --pip-requirements|-r)
                 shift

@@ -14,6 +14,7 @@ cmd_new() {
     local working_dir="$NEW_WORKING_DIR"
     local sparse_checkout="$NEW_SPARSE_CHECKOUT"
     local pip_requirements="$NEW_PIP_REQUIREMENTS"
+    local isolate_credentials="$NEW_ISOLATE_CREDENTIALS"
     local ssh_agent_sock=""
     local repo_root=""
     local current_branch=""
@@ -90,6 +91,8 @@ cmd_new() {
         echo "  --sparse                         Enable sparse checkout (requires --wd)"
         echo "  --pip-requirements, -r <path>    Install Python packages from requirements.txt"
         echo "                                   Use 'auto' to detect /workspace/requirements.txt"
+        echo "  --isolate-credentials, --isolate Isolate API keys in a proxy container"
+        echo "                                   Keys never enter sandbox; injected by proxy"
         echo ""
         echo "Examples:"
         echo "  $0 new user/repo                     # auto-create sandbox branch from main"
@@ -101,6 +104,7 @@ cmd_new() {
         echo "  $0 new user/repo feature --network=limited  # restrict network to whitelist"
         echo "  $0 new user/monorepo feature --wd packages/backend"
         echo "  $0 new user/monorepo feature --wd packages/backend --sparse"
+        echo "  $0 new user/repo feature --isolate-credentials  # credentials in proxy"
         exit 1
     fi
 
@@ -288,7 +292,10 @@ OVERRIDES
     fi
 
     echo "Starting container: $container..."
-    compose_up "$worktree_dir" "$claude_config_path" "$container" "$override_file"
+    if [ "$isolate_credentials" = "true" ]; then
+        echo "Credential isolation enabled - API keys will be held in proxy container"
+    fi
+    compose_up "$worktree_dir" "$claude_config_path" "$container" "$override_file" "$isolate_credentials"
     copy_configs_to_container "$container_id" "0" "$runtime_enable_ssh" "$working_dir"
 
     if [ ${#copies[@]} -gt 0 ]; then

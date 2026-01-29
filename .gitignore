@@ -2,3 +2,4 @@
 /.claude/
 !docker/.claude/
 specs/.backups
+__pycache__/
