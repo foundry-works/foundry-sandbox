@@ -2,7 +2,12 @@
 
 get_compose_command() {
     local override_file="$1"
+    local isolate_credentials="${2:-false}"
     local compose_cmd="docker compose -f $SCRIPT_DIR/docker-compose.yml"
+    # Add credential isolation compose file if enabled
+    if [ "$isolate_credentials" = "true" ]; then
+        compose_cmd="$compose_cmd -f $SCRIPT_DIR/docker-compose.credential-isolation.yml"
+    fi
     if [ -n "$override_file" ] && [ -f "$override_file" ]; then
         compose_cmd="$compose_cmd -f $override_file"
     fi
@@ -14,13 +19,14 @@ compose_up() {
     local claude_config_path="$2"
     local container="$3"
     local override_file="$4"
+    local isolate_credentials="${5:-false}"
 
     export WORKSPACE_PATH="$worktree_path"
     export CLAUDE_CONFIG_PATH="$claude_config_path"
     export CONTAINER_NAME="$container"
 
     local compose_cmd
-    compose_cmd=$(get_compose_command "$override_file")
+    compose_cmd=$(get_compose_command "$override_file" "$isolate_credentials")
     run_cmd $compose_cmd -p "$container" up -d
 }
 
@@ -30,13 +36,19 @@ compose_down() {
     local container="$3"
     local override_file="$4"
     local remove_volumes="$5"
+    local isolate_credentials="${6:-false}"
 
     export WORKSPACE_PATH="$worktree_path"
     export CLAUDE_CONFIG_PATH="$claude_config_path"
     export CONTAINER_NAME="$container"
 
     local compose_cmd
-    compose_cmd=$(get_compose_command "$override_file")
+    if [ "$isolate_credentials" != "true" ]; then
+        if docker ps -a --format '{{.Names}}' | grep -q "^${container}-api-proxy-"; then
+            isolate_credentials="true"
+        fi
+    fi
+    compose_cmd=$(get_compose_command "$override_file" "$isolate_credentials")
     if [ "$remove_volumes" = "true" ]; then
         run_cmd $compose_cmd -p "$container" down -v
     else
