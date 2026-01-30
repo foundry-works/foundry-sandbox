@@ -319,7 +319,12 @@ class CredentialInjector:
 
     def _handle_oauth_injection(self, flow: http.HTTPFlow) -> bool:
         """
-        Detect OAuth placeholder and inject real token.
+        Detect OAuth placeholder and inject real token (Codex CLI only).
+
+        This handler is specifically for Codex CLI which uses OpenAI OAuth.
+        Only processes requests to OpenAI endpoints to avoid intercepting
+        requests from other tools (like Claude Code) that might also have
+        placeholder tokens in their Authorization headers.
 
         Returns True if OAuth token was injected, False otherwise.
         """
@@ -328,6 +333,12 @@ class CredentialInjector:
 
         auth_header = flow.request.headers.get("Authorization", "")
         if OAUTH_PLACEHOLDER not in auth_header:
+            return False
+
+        # Only handle OpenAI endpoints (Codex CLI)
+        # Don't intercept requests to other APIs like Anthropic
+        host = flow.request.host
+        if host not in ("api.openai.com", "auth0.openai.com"):
             return False
 
         try:
@@ -450,9 +461,12 @@ class CredentialInjector:
         cred = self.credentials_cache[host]
         header_name = cred["header"]
 
-        if header_name in flow.request.headers:
-            ctx.log.info(f"Replacing existing {header_name} header for {host}")
-            del flow.request.headers[header_name]
+        # Remove any existing credential headers (may contain placeholders)
+        # This ensures we don't send placeholder values to the API
+        for header_to_remove in ["x-api-key", "Authorization"]:
+            if header_to_remove in flow.request.headers:
+                ctx.log.info(f"Removing placeholder {header_to_remove} header for {host}")
+                del flow.request.headers[header_to_remove]
 
         flow.request.headers[header_name] = cred["value"]
         ctx.log.info(f"Injected {header_name} for {host}")
