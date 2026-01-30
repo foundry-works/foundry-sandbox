@@ -16,7 +16,9 @@ USER root
 RUN pip install --no-cache-dir pyyaml httpx
 
 # Create directories for configuration and certificates
-RUN mkdir -p /etc/proxy/credentials /etc/proxy/certs
+# Owned by mitmproxy user so the container can write to mounted volumes
+RUN mkdir -p /etc/proxy/credentials /etc/proxy/certs \
+    && chown -R mitmproxy:mitmproxy /etc/proxy
 
 # Copy the credential injection addon and OAuth token managers
 COPY inject-credentials.py /opt/proxy/inject-credentials.py
@@ -36,9 +38,9 @@ USER mitmproxy
 # 8081: mitmproxy web interface (optional, for debugging)
 EXPOSE 8080 8081
 
-# Health check - verify mitmproxy web interface is responding
-HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
-    CMD curl -sf http://localhost:8081/ || exit 1
+# Health check - verify proxy port is listening
+HEALTHCHECK --interval=5s --timeout=5s --start-period=10s --retries=3 \
+    CMD python3 -c "import socket; s=socket.socket(); s.settimeout(2); s.connect(('localhost', 8080)); s.close()" || exit 1
 
 # Volume mount points for runtime configuration
 # /etc/proxy/credentials - credential files mounted at runtime

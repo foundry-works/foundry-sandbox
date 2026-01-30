@@ -1441,6 +1441,57 @@ if changed or not os.path.exists(path):
 PY
 }
 
+# Force Gemini to use API key auth instead of OAuth
+# Called in credential isolation mode where OAuth doesn't work due to keytar/keyring dependencies
+ensure_gemini_apikey_auth() {
+    local container_id="$1"
+    local quiet="${2:-0}"
+    local run_fn="run_cmd"
+    if [ "$quiet" = "1" ]; then
+        run_fn="run_cmd_quiet"
+    fi
+
+    if [ "$quiet" != "1" ]; then
+        log_info "Configuring Gemini for API key auth (credential isolation mode)..."
+    fi
+
+    $run_fn docker exec -u "$CONTAINER_USER" -i "$container_id" python3 - <<'PY'
+import json
+import os
+
+path = "/home/ubuntu/.gemini/settings.json"
+os.makedirs(os.path.dirname(path), exist_ok=True)
+
+data = {}
+if os.path.exists(path):
+    try:
+        with open(path, "r") as f:
+            data = json.load(f)
+    except json.JSONDecodeError:
+        data = {}
+
+if not isinstance(data, dict):
+    data = {}
+
+# Force API key auth - OAuth doesn't work in Docker due to keytar/keyring
+security = data.get("security")
+if not isinstance(security, dict):
+    security = {}
+auth = security.get("auth")
+if not isinstance(auth, dict):
+    auth = {}
+
+# Change from oauth-personal to gemini-api-key
+auth["selectedType"] = "gemini-api-key"
+security["auth"] = auth
+data["security"] = security
+
+with open(path, "w") as f:
+    json.dump(data, f, indent=2)
+    f.write("\n")
+PY
+}
+
 ensure_foundry_mcp_workspace_dirs() {
     local container_id="$1"
     local working_dir="${2:-}"
@@ -1486,6 +1537,7 @@ copy_configs_to_container() {
     local skip_plugins="${2:-0}"
     local enable_ssh="${3:-${SANDBOX_SYNC_SSH:-0}}"
     local working_dir="${4:-}"
+    local isolate_credentials="${5:-false}"
 
     # Create container user if using host user matching
     ensure_container_user "$container_id"
@@ -1526,20 +1578,40 @@ copy_configs_to_container() {
     file_exists ~/.claude/statusline.conf && copy_file_to_container "$container_id" ~/.claude/statusline.conf "$CONTAINER_HOME/.claude/statusline.conf"
     ensure_claude_statusline "$container_id"
     dir_exists ~/.config/gh && copy_dir_to_container "$container_id" ~/.config/gh "$CONTAINER_HOME/.config/gh"
-    # Gemini CLI OAuth credentials (created via `gemini auth` on host)
-    # Skip large Gemini CLI browser recordings to keep sandboxes lightweight.
-    dir_exists ~/.gemini && copy_dir_to_container "$container_id" ~/.gemini "$CONTAINER_HOME/.gemini" "antigravity"
+    # Skip auth file copies when credential isolation is enabled (they're mounted as stubs)
+    if [ "$isolate_credentials" != "true" ]; then
+        # Gemini CLI OAuth credentials (created via `gemini auth` on host)
+        if file_exists ~/.gemini/oauth_creds.json; then
+            docker exec "$container_id" mkdir -p "$CONTAINER_HOME/.gemini" 2>/dev/null || true
+            copy_file_to_container "$container_id" ~/.gemini/oauth_creds.json "$CONTAINER_HOME/.gemini/oauth_creds.json"
+        fi
+        file_exists ~/.local/share/opencode/auth.json && copy_file_to_container "$container_id" ~/.local/share/opencode/auth.json "$CONTAINER_HOME/.local/share/opencode/auth.json"
+        dir_exists ~/.codex && copy_dir_to_container "$container_id" ~/.codex "$CONTAINER_HOME/.codex" "${CODEX_COPY_EXCLUDES[@]}"
+    fi
+    # Gemini CLI settings and account info (not credentials, copy in all modes)
+    if file_exists ~/.gemini/settings.json || file_exists ~/.gemini/google_accounts.json; then
+        # Fix ownership if directory was created by Docker mounts (will be root-owned)
+        docker exec -u root "$container_id" sh -c "mkdir -p '$CONTAINER_HOME/.gemini' && chown $CONTAINER_USER:$CONTAINER_USER '$CONTAINER_HOME/.gemini'" 2>/dev/null || true
+        file_exists ~/.gemini/settings.json && copy_file_to_container "$container_id" ~/.gemini/settings.json "$CONTAINER_HOME/.gemini/settings.json"
+        file_exists ~/.gemini/google_accounts.json && copy_file_to_container "$container_id" ~/.gemini/google_accounts.json "$CONTAINER_HOME/.gemini/google_accounts.json"
+    fi
+    # In credential isolation mode, force API key auth (OAuth doesn't work due to keytar/keyring)
+    if [ "$isolate_credentials" = "true" ]; then
+        ensure_gemini_apikey_auth "$container_id"
+    fi
+    # OpenCode config (not credentials)
     if file_exists ~/.config/opencode/opencode.json; then
         copy_file_to_container "$container_id" ~/.config/opencode/opencode.json "$CONTAINER_HOME/.config/opencode/opencode.json"
     elif file_exists "$SCRIPT_DIR/opencode.json"; then
         copy_file_to_container "$container_id" "$SCRIPT_DIR/opencode.json" "$CONTAINER_HOME/.config/opencode/opencode.json"
     fi
     file_exists ~/.config/opencode/antigravity-accounts.json && copy_file_to_container "$container_id" ~/.config/opencode/antigravity-accounts.json "$CONTAINER_HOME/.config/opencode/antigravity-accounts.json"
-    file_exists ~/.local/share/opencode/auth.json && copy_file_to_container "$container_id" ~/.local/share/opencode/auth.json "$CONTAINER_HOME/.local/share/opencode/auth.json"
     file_exists ~/.cursor/cli-config.json && copy_file_to_container "$container_id" ~/.cursor/cli-config.json "$CONTAINER_HOME/.cursor/cli-config.json"
-    dir_exists ~/.codex && copy_dir_to_container "$container_id" ~/.codex "$CONTAINER_HOME/.codex" "${CODEX_COPY_EXCLUDES[@]}"
-    ensure_gemini_settings "$container_id"
-    ensure_codex_config "$container_id"
+    # Skip settings writes when credential isolation is enabled (dirs may be read-only)
+    if [ "$isolate_credentials" != "true" ]; then
+        ensure_gemini_settings "$container_id"
+        ensure_codex_config "$container_id"
+    fi
     sync_opencode_foundry "$container_id"
     ensure_opencode_default_model "$container_id" "$skip_plugins"
     if [ "$skip_plugins" != "1" ]; then

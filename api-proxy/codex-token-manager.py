@@ -51,9 +51,16 @@ class OAuthTokenManager:
         with open(self.auth_file_path, "r") as f:
             data = json.load(f)
 
-        self._access_token = data.get("access_token")
-        self._refresh_token = data.get("refresh_token")
-        self._expires_at = data.get("expires_at", 0)
+        # Handle both flat and nested token structures
+        # Nested format (Codex CLI): {"tokens": {"access_token": ..., "refresh_token": ...}}
+        # Flat format: {"access_token": ..., "refresh_token": ...}
+        tokens = data.get("tokens", data)
+
+        self._access_token = tokens.get("access_token")
+        self._refresh_token = tokens.get("refresh_token")
+        # Ensure expires_at is numeric (may be stored as string in some formats)
+        expires_at_raw = data.get("expires_at") or data.get("last_refresh", 0)
+        self._expires_at = float(expires_at_raw) if expires_at_raw else 0
 
         if not self._access_token or not self._refresh_token:
             raise ValueError("Invalid auth.json: missing access_token or refresh_token")

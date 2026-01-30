@@ -413,3 +413,33 @@ add_network_to_override() {
     strip_network_config "$override_file"
     generate_network_config "$mode" "$override_file"
 }
+
+# Conditionally add ANTHROPIC_API_KEY placeholder for credential isolation
+# Only sets the placeholder when OAuth is NOT available on the host
+# This prevents the "Detected custom API key" prompt in Claude Code when OAuth is configured
+add_anthropic_credential_to_override() {
+    local override_file="$1"
+
+    # If OAuth token is available, don't set ANTHROPIC_API_KEY
+    # The proxy will inject the OAuth token instead
+    if [ -n "${CLAUDE_CODE_OAUTH_TOKEN:-}" ]; then
+        return 0
+    fi
+
+    # No OAuth - set the placeholder for API key auth
+    ensure_override_header "$override_file"
+    append_override_list_item "$override_file" "environment" "ANTHROPIC_API_KEY=CREDENTIAL_PROXY_PLACEHOLDER"
+}
+
+# Add GEMINI_API_KEY placeholder for credential isolation
+# Always uses API key auth because Gemini CLI's OAuth depends on keytar/libsecret
+# which requires a system keyring that doesn't work reliably in Docker containers.
+# See README.md "Gemini CLI Authentication" section for details.
+add_gemini_credential_to_override() {
+    local override_file="$1"
+
+    # Always set the placeholder for API key auth
+    # OAuth is not supported in credential isolation mode due to keytar dependencies
+    ensure_override_header "$override_file"
+    append_override_list_item "$override_file" "environment" "GEMINI_API_KEY=CREDENTIAL_PROXY_PLACEHOLDER"
+}

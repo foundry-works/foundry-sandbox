@@ -6,6 +6,7 @@ mkdir -p "$HOME/.claude" \
          "$HOME/.config/gh" \
          "$HOME/.gemini" \
          "$HOME/.config/opencode" \
+         "$HOME/.local/share/opencode" \
          "$HOME/.cursor" \
          "$HOME/.codex" \
          "$HOME/.ssh" \
@@ -15,6 +16,15 @@ mkdir -p "$HOME/.claude" \
          "$HOME/.foundry-mcp/cache" \
          "$HOME/.foundry-mcp/errors" \
          "$HOME/.foundry-mcp/metrics"
+
+# Fix ownership of directories that Docker may have created as root
+# (happens when credential-isolation mounts files before entrypoint runs)
+# Include parent directories (.local, .local/share) that Docker creates for nested mounts
+for dir in "$HOME/.codex" "$HOME/.local" "$HOME/.local/share" "$HOME/.local/share/opencode" "$HOME/.gemini"; do
+    if [ -d "$dir" ] && [ "$(stat -c '%U' "$dir" 2>/dev/null)" = "root" ]; then
+        sudo chown "$(id -u):$(id -g)" "$dir" 2>/dev/null || true
+    fi
+done
 
 # Ensure Claude Code temp dir exists (defaulted via docker-compose)
 if [ -n "${CLAUDE_CODE_TMPDIR:-}" ]; then
