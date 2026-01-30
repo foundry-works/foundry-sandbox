@@ -1539,7 +1539,8 @@ copy_configs_to_container() {
     fi
     # Gemini CLI settings (themes, preferences - not credentials, copy in all modes)
     if file_exists ~/.gemini/settings.json; then
-        docker exec "$container_id" mkdir -p "$CONTAINER_HOME/.gemini" 2>/dev/null || true
+        # Fix ownership if directory was created by Docker mounts (will be root-owned)
+        docker exec -u root "$container_id" sh -c "mkdir -p '$CONTAINER_HOME/.gemini' && chown $CONTAINER_USER:$CONTAINER_USER '$CONTAINER_HOME/.gemini'" 2>/dev/null || true
         copy_file_to_container "$container_id" ~/.gemini/settings.json "$CONTAINER_HOME/.gemini/settings.json"
     fi
     # OpenCode config (not credentials)
