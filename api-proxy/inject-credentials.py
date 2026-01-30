@@ -384,13 +384,10 @@ class CredentialInjector:
             ctx.log.info(f"Injected real OAuth token for OpenCode provider {provider} ({host})")
             return True
         except Exception as e:
-            ctx.log.error(f"Failed to get OpenCode OAuth token for {provider}: {e}")
-            flow.response = http.Response.make(
-                500,
-                json.dumps({"error": f"OpenCode OAuth token error: {e}"}).encode(),
-                {"Content-Type": "application/json"},
-            )
-            return True
+            # Log warning and fall through to host-based injection
+            # This allows CLAUDE_CODE_OAUTH_TOKEN to be used as fallback for api.anthropic.com
+            ctx.log.warn(f"OpenCode OAuth failed for {provider}, falling back to host-based injection: {e}")
+            return False
 
     def _handle_gemini_oauth_injection(self, flow: http.HTTPFlow) -> bool:
         """
