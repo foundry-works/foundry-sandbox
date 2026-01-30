@@ -452,6 +452,23 @@ if [ -n "$GATEWAY" ]; then
     iptables -A OUTPUT -d "$GATEWAY" -j ACCEPT
 fi
 
+# Allow credential proxy if configured (for --isolate mode)
+# SANDBOX_CREDENTIAL_PROXY is set to the Docker hostname of the api-proxy container
+if [ -n "$SANDBOX_CREDENTIAL_PROXY" ]; then
+    # Resolve Docker internal hostname to IP
+    PROXY_IP=$(getent hosts "$SANDBOX_CREDENTIAL_PROXY" | awk '{print $1}')
+    if [ -n "$PROXY_IP" ]; then
+        log_verbose "  Allowing credential proxy: $SANDBOX_CREDENTIAL_PROXY -> $PROXY_IP"
+        if [ "$USE_IPSET" = "true" ]; then
+            ipset add -exist "$IPSET_V4" "$PROXY_IP" 2>/dev/null || true
+        else
+            iptables -A OUTPUT -d "$PROXY_IP" -j ACCEPT 2>/dev/null || true
+        fi
+    else
+        log_verbose "  Warning: Could not resolve credential proxy hostname: $SANDBOX_CREDENTIAL_PROXY"
+    fi
+fi
+
 # Allow traffic to ipset allowlists
 if [ "$USE_IPSET" = "true" ]; then
     iptables -A OUTPUT -m set --match-set "$IPSET_V4" dst -j ACCEPT

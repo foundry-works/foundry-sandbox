@@ -323,7 +323,8 @@ enable_limited() {
     echo "Enabling limited network mode..."
 
     # Run the firewall script
-    if SANDBOX_NETWORK_MODE=limited /usr/local/bin/network-firewall.sh; then
+    # Pass through SANDBOX_CREDENTIAL_PROXY for --isolate mode support
+    if SANDBOX_NETWORK_MODE=limited SANDBOX_CREDENTIAL_PROXY="${SANDBOX_CREDENTIAL_PROXY:-}" /usr/local/bin/network-firewall.sh; then
         echo -e "${YELLOW}Limited network mode enabled.${NC}"
         echo "Only whitelisted domains are accessible."
     else
