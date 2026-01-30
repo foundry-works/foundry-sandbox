@@ -23,6 +23,18 @@ OAUTH_TOKEN_URL = "https://auth.openai.com/oauth/token"
 OPENAI_CLIENT_ID = "app_EMoamEEZ73f0CkXaXp7hrann"  # Codex CLI client ID
 TOKEN_EXPIRY_BUFFER_SECONDS = 300  # 5 minutes
 
+# JWT placeholder for Codex OAuth tokens
+# Contains CREDENTIAL_PROXY_PLACEHOLDER in the sub claim for proxy detection
+# Payload decodes to: {"iss": "https://auth.openai.com/", "sub": "CREDENTIAL_PROXY_PLACEHOLDER",
+#                      "aud": "app_EMoamEEZ73f0CkXaXp7hrann", "exp": 4102444800, "iat": 1700000000}
+CODEX_PLACEHOLDER_JWT = (
+    "eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9."
+    "eyJpc3MiOiJodHRwczovL2F1dGgub3BlbmFpLmNvbS8iLCJzdWIiOiJDUkVERU5USUFMX1BST1hZX1BMQUNFSE9MREVSIiwiYXVkIjoiYXBwX0VNb2FtRUVaNzNmMENrWGFYcDdocmFubiIsImV4cCI6NDEwMjQ0NDgwMCwiaWF0IjoxNzAwMDAwMDAwfQ"
+    ""
+    "."
+    "CREDENTIAL_PROXY_PLACEHOLDER_SIGNATURE"
+)
+
 
 class OAuthTokenManager:
     """Manages OAuth token lifecycle for Codex CLI authentication."""
@@ -142,11 +154,14 @@ class OAuthTokenManager:
         Generate a placeholder token response for intercepted refresh requests.
 
         Returns:
-            Dict mimicking OAuth token response with placeholder values
+            Dict mimicking Auth0 OAuth token response with placeholder values.
+            Uses JWT-formatted tokens to satisfy Codex CLI validation.
         """
         return {
-            "access_token": "CREDENTIAL_PROXY_PLACEHOLDER",
+            "access_token": CODEX_PLACEHOLDER_JWT,
+            "id_token": CODEX_PLACEHOLDER_JWT,
             "refresh_token": "CREDENTIAL_PROXY_PLACEHOLDER",
             "expires_in": 86400,
             "token_type": "Bearer",
+            "scope": "openid profile email offline_access",
         }
