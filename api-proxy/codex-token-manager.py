@@ -58,7 +58,9 @@ class OAuthTokenManager:
 
         self._access_token = tokens.get("access_token")
         self._refresh_token = tokens.get("refresh_token")
-        self._expires_at = data.get("expires_at") or data.get("last_refresh", 0)
+        # Ensure expires_at is numeric (may be stored as string in some formats)
+        expires_at_raw = data.get("expires_at") or data.get("last_refresh", 0)
+        self._expires_at = float(expires_at_raw) if expires_at_raw else 0
 
         if not self._access_token or not self._refresh_token:
             raise ValueError("Invalid auth.json: missing access_token or refresh_token")
