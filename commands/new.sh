@@ -304,11 +304,6 @@ OVERRIDES
     compose_up "$worktree_dir" "$claude_config_path" "$container" "$override_file" "$isolate_credentials"
     copy_configs_to_container "$container_id" "0" "$runtime_enable_ssh" "$working_dir" "$isolate_credentials"
 
-    # Copy sanitized Gemini settings.json to container for auth preference detection
-    if [ "$isolate_credentials" = "true" ]; then
-        copy_gemini_settings_to_container "$container_id"
-    fi
-
     if [ ${#copies[@]} -gt 0 ]; then
         echo "Copying files into container..."
         for copy_spec in "${copies[@]}"; do
