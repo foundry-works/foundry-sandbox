@@ -7,6 +7,7 @@ Credentials are read from environment variables and injected as headers.
 Provider Credential Map:
 - api.anthropic.com: Authorization Bearer from CLAUDE_CODE_OAUTH_TOKEN,
                      or x-api-key from ANTHROPIC_API_KEY
+- api2.cursor.sh: Authorization Bearer from CURSOR_API_KEY
 - api.openai.com: Authorization Bearer from OPENAI_API_KEY
 - generativelanguage.googleapis.com: x-goog-api-key from GOOGLE_API_KEY (or GEMINI_API_KEY)
 - api.groq.com: Authorization Bearer from GROQ_API_KEY
@@ -92,6 +93,11 @@ PROVIDER_MAP = {
         "alt_env_var": "CLAUDE_CODE_OAUTH_TOKEN",
         "alt_header": "Authorization",
         "alt_format": "bearer",
+    },
+    "api2.cursor.sh": {
+        "header": "Authorization",
+        "env_var": "CURSOR_API_KEY",
+        "format": "bearer",
     },
     "api.openai.com": {
         "header": "Authorization",
