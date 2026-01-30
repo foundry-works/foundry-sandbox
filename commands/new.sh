@@ -340,7 +340,7 @@ OVERRIDES
     if [ -n "$network_mode" ] && [ "$network_mode" != "full" ]; then
         echo "Applying network mode: $network_mode"
         if [ "$network_mode" = "limited" ]; then
-            run_cmd docker exec "$container_id" sudo /usr/local/bin/network-firewall.sh
+            run_cmd docker exec "$container_id" sudo /usr/local/bin/network-mode limited
         else
             run_cmd docker exec "$container_id" sudo /usr/local/bin/network-mode "$network_mode"
         fi

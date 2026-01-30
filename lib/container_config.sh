@@ -1534,6 +1534,11 @@ copy_configs_to_container() {
             docker exec "$container_id" mkdir -p "$CONTAINER_HOME/.gemini" 2>/dev/null || true
             copy_file_to_container "$container_id" ~/.gemini/oauth_creds.json "$CONTAINER_HOME/.gemini/oauth_creds.json"
         fi
+        # Gemini CLI settings (themes, preferences, etc.)
+        if file_exists ~/.gemini/settings.json; then
+            docker exec "$container_id" mkdir -p "$CONTAINER_HOME/.gemini" 2>/dev/null || true
+            copy_file_to_container "$container_id" ~/.gemini/settings.json "$CONTAINER_HOME/.gemini/settings.json"
+        fi
         file_exists ~/.local/share/opencode/auth.json && copy_file_to_container "$container_id" ~/.local/share/opencode/auth.json "$CONTAINER_HOME/.local/share/opencode/auth.json"
         dir_exists ~/.codex && copy_dir_to_container "$container_id" ~/.codex "$CONTAINER_HOME/.codex" "${CODEX_COPY_EXCLUDES[@]}"
     fi

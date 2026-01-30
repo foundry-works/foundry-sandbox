@@ -78,7 +78,7 @@ cmd_start() {
     if [ -n "${SANDBOX_NETWORK_MODE:-}" ] && [ "$SANDBOX_NETWORK_MODE" != "full" ]; then
         echo "Applying network mode: $SANDBOX_NETWORK_MODE"
         if [ "$SANDBOX_NETWORK_MODE" = "limited" ]; then
-            run_cmd docker exec "$container_id" sudo /usr/local/bin/network-firewall.sh
+            run_cmd docker exec "$container_id" sudo /usr/local/bin/network-mode limited
         else
             run_cmd docker exec "$container_id" sudo /usr/local/bin/network-mode "$SANDBOX_NETWORK_MODE"
         fi
