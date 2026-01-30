@@ -5,7 +5,8 @@ Injects API credentials into outbound requests based on destination host.
 Credentials are read from environment variables and injected as headers.
 
 Provider Credential Map:
-- api.anthropic.com: x-api-key from ANTHROPIC_API_KEY
+- api.anthropic.com: Authorization Bearer from CLAUDE_CODE_OAUTH_TOKEN,
+                     or x-api-key from ANTHROPIC_API_KEY
 - api.openai.com: Authorization Bearer from OPENAI_API_KEY
 - generativelanguage.googleapis.com: x-goog-api-key from GOOGLE_API_KEY (or GEMINI_API_KEY)
 - api.groq.com: Authorization Bearer from GROQ_API_KEY
@@ -87,6 +88,10 @@ PROVIDER_MAP = {
         "header": "x-api-key",
         "env_var": "ANTHROPIC_API_KEY",
         "format": "value",
+        # Alternative credential with different header (OAuth token)
+        "alt_env_var": "CLAUDE_CODE_OAUTH_TOKEN",
+        "alt_header": "Authorization",
+        "alt_format": "bearer",
     },
     "api.openai.com": {
         "header": "Authorization",
@@ -165,21 +170,46 @@ class CredentialInjector:
         for host, config in PROVIDER_MAP.items():
             env_var = config["env_var"]
             fallback_env_var = config.get("fallback_env_var")
-            value = os.environ.get(env_var)
-            used_env_var = env_var
-            # Try fallback if primary not set
+            alt_env_var = config.get("alt_env_var")
+
+            value = None
+            header = config["header"]
+            fmt = config["format"]
+            used_env_var = None
+
+            # Priority 1: Alternative credential (e.g., CLAUDE_CODE_OAUTH_TOKEN)
+            # Uses different header format than primary credential
+            if alt_env_var:
+                value = os.environ.get(alt_env_var)
+                if value:
+                    header = config["alt_header"]
+                    fmt = config["alt_format"]
+                    used_env_var = alt_env_var
+
+            # Priority 2: Primary credential
+            if not value:
+                value = os.environ.get(env_var)
+                used_env_var = env_var
+
+            # Priority 3: Fallback credential (same header as primary)
             if not value and fallback_env_var:
                 value = os.environ.get(fallback_env_var)
                 used_env_var = fallback_env_var
+
             if value:
                 self.credentials_cache[host] = {
-                    "header": config["header"],
-                    "value": self._format_value(value, config["format"]),
+                    "header": header,
+                    "value": self._format_value(value, fmt),
                 }
                 ctx.log.info(f"Loaded credential for {host} from {used_env_var}")
             else:
-                fallback_msg = f" or {fallback_env_var}" if fallback_env_var else ""
-                ctx.log.warn(f"No credential for {host}: {env_var}{fallback_msg} not set")
+                # Build list of all possible env vars for warning message
+                env_vars = [env_var]
+                if fallback_env_var:
+                    env_vars.append(fallback_env_var)
+                if alt_env_var:
+                    env_vars.append(alt_env_var)
+                ctx.log.warn(f"No credential for {host}: {' or '.join(env_vars)} not set")
 
     def _format_value(self, value: str, fmt: str) -> str:
         """Format credential value based on provider requirements."""
