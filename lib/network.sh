@@ -413,3 +413,50 @@ add_network_to_override() {
     strip_network_config "$override_file"
     generate_network_config "$mode" "$override_file"
 }
+
+# Conditionally add ANTHROPIC_API_KEY placeholder for credential isolation
+# Only sets the placeholder when OAuth is NOT available on the host
+# This prevents the "Detected custom API key" prompt in Claude Code when OAuth is configured
+add_anthropic_credential_to_override() {
+    local override_file="$1"
+
+    # If OAuth token is available, don't set ANTHROPIC_API_KEY
+    # The proxy will inject the OAuth token instead
+    if [ -n "${CLAUDE_CODE_OAUTH_TOKEN:-}" ]; then
+        return 0
+    fi
+
+    # No OAuth - set the placeholder for API key auth
+    ensure_override_header "$override_file"
+    append_override_list_item "$override_file" "environment" "ANTHROPIC_API_KEY=CREDENTIAL_PROXY_PLACEHOLDER"
+}
+
+# Check if Gemini OAuth is configured on the host
+# Returns 0 (success) if OAuth is configured, 1 if not
+is_gemini_oauth_configured() {
+    local settings_file="${HOME}/.gemini/settings.json"
+    local oauth_file="${HOME}/.gemini/oauth_creds.json"
+
+    # Both files must exist
+    [ -f "$settings_file" ] && [ -f "$oauth_file" ] || return 1
+
+    # Check if selectedType is oauth-personal
+    grep -q '"selectedType"[[:space:]]*:[[:space:]]*"oauth-personal"' "$settings_file" 2>/dev/null
+}
+
+# Conditionally add GEMINI_API_KEY placeholder for credential isolation
+# Only sets the placeholder when OAuth is NOT configured on the host
+# This prevents auth conflicts when the user has oauth-personal selected
+add_gemini_credential_to_override() {
+    local override_file="$1"
+
+    # If OAuth is configured, don't set GEMINI_API_KEY
+    # The proxy will inject OAuth tokens instead
+    if is_gemini_oauth_configured; then
+        return 0
+    fi
+
+    # No OAuth - set the placeholder for API key auth
+    ensure_override_header "$override_file"
+    append_override_list_item "$override_file" "environment" "GEMINI_API_KEY=CREDENTIAL_PROXY_PLACEHOLDER"
+}

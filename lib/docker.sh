@@ -73,3 +73,38 @@ copy_to_container() {
     local dst="$3"
     run_cmd docker cp "$src" "$container_id:$dst"
 }
+
+# Copy and sanitize Gemini settings.json to container
+# Removes tools section to start fresh in sandbox, preserving auth preferences
+copy_gemini_settings_to_container() {
+    local container_id="$1"
+    local settings_file="${HOME}/.gemini/settings.json"
+    local dest_path="/home/ubuntu/.gemini/settings.json"
+
+    # Skip if settings.json doesn't exist on host
+    if [ ! -f "$settings_file" ]; then
+        return 0
+    fi
+
+    # Check if jq is available
+    if ! command -v jq &>/dev/null; then
+        log_warn "jq not available; skipping Gemini settings.json sanitization"
+        return 0
+    fi
+
+    # Read, sanitize (remove tools section), and copy
+    local sanitized
+    sanitized=$(jq 'del(.tools)' "$settings_file" 2>/dev/null) || return 0
+
+    # Write to temp file and copy to container
+    local tmp_file
+    tmp_file=$(mktemp)
+    echo "$sanitized" > "$tmp_file"
+
+    # Ensure .gemini directory exists and copy file
+    docker exec "$container_id" mkdir -p "$(dirname "$dest_path")" 2>/dev/null || true
+    docker cp "$tmp_file" "$container_id:$dest_path" 2>/dev/null || true
+    docker exec "$container_id" chown ubuntu:ubuntu "$dest_path" 2>/dev/null || true
+
+    rm -f "$tmp_file"
+}
