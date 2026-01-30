@@ -68,6 +68,13 @@ REFRESH_ENDPOINTS = [
     ("auth0.openai.com", "/oauth/token"),
 ]
 
+# Google OAuth validation endpoints (for placeholder token validation)
+GOOGLE_VALIDATION_ENDPOINTS = [
+    ("www.googleapis.com", "/oauth2/v1/tokeninfo"),
+    ("www.googleapis.com", "/oauth2/v3/tokeninfo"),
+    ("oauth2.googleapis.com", "/tokeninfo"),
+]
+
 # OpenCode host-to-provider mapping
 OPENCODE_PROVIDER_HOSTS = {
     "api.anthropic.com": "anthropic",
@@ -296,6 +303,12 @@ class CredentialInjector:
         path = flow.request.path
         return any(host == h and path.startswith(p) for h, p in REFRESH_ENDPOINTS)
 
+    def _is_gemini_refresh_endpoint(self, flow: http.HTTPFlow) -> bool:
+        """Check if request is to Google OAuth token refresh endpoint."""
+        host = flow.request.host
+        path = flow.request.path
+        return host == "oauth2.googleapis.com" and path.startswith("/token")
+
     def _handle_refresh_intercept(self, flow: http.HTTPFlow) -> bool:
         """
         Intercept OAuth refresh requests and return placeholder tokens.
@@ -313,6 +326,97 @@ class CredentialInjector:
         flow.response = http.Response.make(
             200,
             json.dumps(placeholder_response).encode(),
+            {"Content-Type": "application/json"},
+        )
+        return True
+
+    def _handle_gemini_refresh_intercept(self, flow: http.HTTPFlow) -> bool:
+        """
+        Intercept Google OAuth refresh requests for Gemini CLI.
+
+        Returns True if request was intercepted, False otherwise.
+        """
+        if not self._is_gemini_refresh_endpoint(flow):
+            return False
+
+        if not self.gemini_manager:
+            return False
+
+        # Verify it's a refresh_token grant
+        try:
+            content_type = flow.request.headers.get("Content-Type", "")
+            body_text = flow.request.get_text()
+
+            if "application/x-www-form-urlencoded" in content_type:
+                from urllib.parse import parse_qs
+                params = parse_qs(body_text)
+                grant_type = params.get("grant_type", [""])[0]
+            elif "application/json" in content_type:
+                params = json.loads(body_text)
+                grant_type = params.get("grant_type", "")
+            else:
+                return False
+
+            if grant_type != "refresh_token":
+                return False
+        except Exception:
+            return False
+
+        ctx.log.info("Intercepting Google OAuth refresh request for Gemini")
+
+        # Google OAuth returns expires_in (seconds), not expiry_date (ms)
+        response_data = {
+            "access_token": "CREDENTIAL_PROXY_PLACEHOLDER",
+            "expires_in": 3600,
+            "scope": self.gemini_manager._scope or "https://www.googleapis.com/auth/cloud-platform https://www.googleapis.com/auth/generative-language.retriever",
+            "token_type": "Bearer",
+            "id_token": "CREDENTIAL_PROXY_PLACEHOLDER",
+        }
+
+        flow.response = http.Response.make(
+            200,
+            json.dumps(response_data).encode(),
+            {"Content-Type": "application/json"},
+        )
+        return True
+
+    def _handle_google_tokeninfo_intercept(self, flow: http.HTTPFlow) -> bool:
+        """
+        Intercept Google tokeninfo requests to validate placeholder tokens.
+
+        Returns True if request was intercepted, False otherwise.
+        """
+        host = flow.request.host
+        path = flow.request.path
+
+        is_tokeninfo = any(
+            host == h and path.startswith(p)
+            for h, p in GOOGLE_VALIDATION_ENDPOINTS
+        )
+
+        if not is_tokeninfo or not self.gemini_manager:
+            return False
+
+        # Check for placeholder token in request
+        request_content = flow.request.get_text() + flow.request.url
+        if "CREDENTIAL_PROXY_PLACEHOLDER" not in request_content:
+            return False
+
+        ctx.log.info("Intercepting Google tokeninfo for placeholder validation")
+
+        import time
+        response_data = {
+            "azp": "gemini-cli",
+            "aud": "gemini-cli",
+            "scope": self.gemini_manager._scope or "https://www.googleapis.com/auth/cloud-platform",
+            "exp": str(int(time.time()) + 3600),
+            "expires_in": "3600",
+            "access_type": "offline",
+        }
+
+        flow.response = http.Response.make(
+            200,
+            json.dumps(response_data).encode(),
             {"Content-Type": "application/json"},
         )
         return True
@@ -424,23 +528,31 @@ class CredentialInjector:
 
     def request(self, flow: http.HTTPFlow) -> None:
         """Process outbound request and inject credentials if applicable."""
-        # 1. Intercept OAuth refresh endpoints (return placeholder tokens)
+        # 1. Intercept Google tokeninfo (validation) requests
+        if self._handle_google_tokeninfo_intercept(flow):
+            return
+
+        # 2. Intercept Gemini OAuth refresh requests
+        if self._handle_gemini_refresh_intercept(flow):
+            return
+
+        # 3. Intercept Codex OAuth refresh endpoints (return placeholder tokens)
         if self._handle_refresh_intercept(flow):
             return
 
-        # 2. Handle OAuth placeholder injection (Codex CLI)
+        # 4. Handle OAuth placeholder injection (Codex CLI)
         if self._handle_oauth_injection(flow):
             return
 
-        # 3. Handle OpenCode OAuth placeholder injection
+        # 5. Handle OpenCode OAuth placeholder injection
         if self._handle_opencode_oauth_injection(flow):
             return
 
-        # 4. Handle Gemini OAuth placeholder injection
+        # 6. Handle Gemini OAuth placeholder injection
         if self._handle_gemini_oauth_injection(flow):
             return
 
-        # 5. Host-based API key injection (existing behavior)
+        # 7. Host-based API key injection (existing behavior)
         host = flow.request.host
 
         if host not in PROVIDER_MAP:
