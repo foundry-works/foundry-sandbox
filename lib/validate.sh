@@ -1,5 +1,53 @@
 #!/bin/bash
 
+# Array of dangerous paths that should be validated during credential isolation
+DANGEROUS_PATHS=(
+    "$HOME/.ssh"
+    "$HOME/.aws"
+    "$HOME/.config/gcloud"
+    "$HOME/.config/gh"
+    "$HOME/.azure"
+    "$HOME/.netrc"
+    "$HOME/.kube"
+    "$HOME/.gnupg"
+    "$HOME/.docker"
+    "$HOME/.npmrc"
+    "$HOME/.pypirc"
+    "/var/run/docker.sock"
+    "/run/docker.sock"
+)
+
+validate_mount_path() {
+    local mount_path="$1"
+    local canonical_path
+    canonical_path=$(realpath -m "$mount_path" 2>/dev/null) || canonical_path="$mount_path"
+
+    for dangerous in "${DANGEROUS_PATHS[@]}"; do
+        local dangerous_canonical
+        dangerous_canonical=$(realpath -m "$dangerous" 2>/dev/null) || dangerous_canonical="$dangerous"
+
+        # Check exact match
+        if [[ "$canonical_path" == "$dangerous_canonical" ]]; then
+            echo "Error: Mount path '$mount_path' is a dangerous credential path: $dangerous"
+            return 1
+        fi
+
+        # Check if mount is parent of dangerous (would expose credentials)
+        if [[ "$dangerous_canonical" == "$canonical_path"/* ]]; then
+            echo "Error: Mount path '$mount_path' would expose credential directory: $dangerous"
+            return 1
+        fi
+
+        # Check if mount is child of dangerous (inside credentials)
+        if [[ "$canonical_path" == "$dangerous_canonical"/* ]]; then
+            echo "Error: Mount path '$mount_path' is inside credential directory: $dangerous"
+            return 1
+        fi
+    done
+
+    return 0
+}
+
 die() {
     log_error "$@"
     exit 1
