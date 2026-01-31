@@ -19,7 +19,7 @@ from typing import Optional
 import httpx
 
 # OAuth configuration
-OAUTH_TOKEN_URL = "https://auth.openai.com/oauth/token"
+OAUTH_TOKEN_URL = "https://auth.openai.com/oauth/token"  # New OpenAI auth (not Auth0)
 OPENAI_CLIENT_ID = "app_EMoamEEZ73f0CkXaXp7hrann"  # Codex CLI client ID
 TOKEN_EXPIRY_BUFFER_SECONDS = 300  # 5 minutes
 

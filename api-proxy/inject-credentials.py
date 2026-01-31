@@ -75,7 +75,8 @@ OAUTH_PLACEHOLDER_JWT = "eyJhbGciOiAiUlMyNTYiLCAidHlwIjogIkpXVCJ9.eyJpc3MiOiAiaH
 
 # OAuth token refresh endpoints to intercept
 REFRESH_ENDPOINTS = [
-    ("auth.openai.com", "/oauth/token"),
+    ("auth.openai.com", "/oauth/token"),   # Legacy Auth0
+    ("auth.openai.com", "/oauth/token"),    # New OpenAI auth
 ]
 
 # Google OAuth validation endpoints (for placeholder token validation)
@@ -503,7 +504,7 @@ class CredentialInjector:
         # Only handle OpenAI endpoints (Codex CLI)
         # Don't intercept requests to other APIs like Anthropic
         host = flow.request.host
-        if host not in ("api.openai.com", "auth.openai.com"):
+        if host not in ("api.openai.com", "auth.openai.com", "auth.openai.com"):
             return False
 
         try:
