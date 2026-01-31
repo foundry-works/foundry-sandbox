@@ -1,0 +1,272 @@
+#!/bin/bash
+# Gateway session management functions for credential isolation
+
+# Gateway socket path (mounted from gateway-socket volume)
+GATEWAY_SOCKET_PATH="${GATEWAY_SOCKET_PATH:-/var/run/gateway/gateway.sock}"
+
+# Create a gateway session for a container
+# Args:
+#   $1 - container_id: The container ID
+#   $2 - container_ip: The container's IP address
+#   $3 - repos: Optional comma-separated list of repos (owner/repo format)
+# Returns:
+#   0 on success, 1 on failure
+#   Sets GATEWAY_TOKEN and GATEWAY_SECRET on success
+create_gateway_session() {
+    local container_id="$1"
+    local container_ip="$2"
+    local repos="${3:-}"
+
+    if [ -z "$container_id" ] || [ -z "$container_ip" ]; then
+        log_error "create_gateway_session: container_id and container_ip required"
+        return 1
+    fi
+
+    # Build JSON request body
+    local json_body
+    if [ -n "$repos" ]; then
+        # Convert comma-separated repos to JSON array
+        local repos_array
+        repos_array=$(echo "$repos" | tr ',' '\n' | sed 's/^/"/;s/$/"/' | tr '\n' ',' | sed 's/,$//')
+        json_body="{\"container_id\":\"$container_id\",\"container_ip\":\"$container_ip\",\"repos\":[$repos_array]}"
+    else
+        json_body="{\"container_id\":\"$container_id\",\"container_ip\":\"$container_ip\"}"
+    fi
+
+    # Call gateway API via Unix socket
+    local response
+    response=$(curl -s --unix-socket "$GATEWAY_SOCKET_PATH" \
+        -X POST \
+        -H "Content-Type: application/json" \
+        -d "$json_body" \
+        "http://localhost/session/create" 2>&1)
+
+    local curl_exit=$?
+    if [ $curl_exit -ne 0 ]; then
+        log_error "Gateway session creation failed: curl error $curl_exit"
+        return 1
+    fi
+
+    # Parse response - extract token and secret
+    GATEWAY_TOKEN=$(echo "$response" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('token',''))" 2>/dev/null)
+    GATEWAY_SECRET=$(echo "$response" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('secret',''))" 2>/dev/null)
+
+    if [ -z "$GATEWAY_TOKEN" ] || [ -z "$GATEWAY_SECRET" ]; then
+        local error
+        error=$(echo "$response" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('error','Unknown error'))" 2>/dev/null)
+        log_error "Gateway session creation failed: $error"
+        log_error "Remediation steps:"
+        log_error "  1. Check gateway logs: docker logs <gateway-container>"
+        log_error "  2. Verify GitHub token is configured for gateway"
+        log_error "  3. Check if repo access is authorized in gateway config"
+        return 1
+    fi
+
+    return 0
+}
+
+# Destroy a gateway session
+# Args:
+#   $1 - token: The session token to destroy
+# Returns:
+#   0 on success, 1 on failure
+destroy_gateway_session() {
+    local token="$1"
+
+    if [ -z "$token" ]; then
+        log_error "destroy_gateway_session: token required"
+        return 1
+    fi
+
+    local response
+    response=$(curl -s --unix-socket "$GATEWAY_SOCKET_PATH" \
+        -X DELETE \
+        "http://localhost/session/$token" 2>&1)
+
+    local curl_exit=$?
+    if [ $curl_exit -ne 0 ]; then
+        log_warn "Gateway session destruction failed: curl error $curl_exit"
+        return 1
+    fi
+
+    return 0
+}
+
+# Wait for gateway health check
+# Args:
+#   $1 - timeout_seconds: Max time to wait (default: 30)
+# Returns:
+#   0 if healthy, 1 if timeout
+wait_for_gateway_health() {
+    local timeout="${1:-30}"
+    local elapsed=0
+
+    while [ $elapsed -lt "$timeout" ]; do
+        if curl -s --unix-socket "$GATEWAY_SOCKET_PATH" "http://localhost/health" | grep -q '"status".*"healthy"'; then
+            return 0
+        fi
+        sleep 1
+        elapsed=$((elapsed + 1))
+    done
+
+    log_error "Gateway health check timed out after ${timeout}s"
+    log_error "Remediation steps:"
+    log_error "  1. Check if gateway container is running: docker ps | grep gateway"
+    log_error "  2. View gateway logs: docker logs <gateway-container>"
+    log_error "  3. Restart gateway: docker-compose -f docker-compose.credential-isolation.yml restart gateway"
+    return 1
+}
+
+# Write gateway token to container's /run/secrets/gateway_token
+# Args:
+#   $1 - container_id: Docker container ID
+#   $2 - token: Session token
+#   $3 - secret: Session secret
+# Returns:
+#   0 on success, 1 on failure
+write_gateway_token_to_container() {
+    local container_id="$1"
+    local token="$2"
+    local secret="$3"
+
+    if [ -z "$container_id" ] || [ -z "$token" ] || [ -z "$secret" ]; then
+        log_error "write_gateway_token_to_container: container_id, token, and secret required"
+        return 1
+    fi
+
+    # Combined token:secret format for credential helper
+    local combined="${token}:${secret}"
+
+    # Create /run/secrets directory and write token with secure permissions
+    docker exec "$container_id" sh -c "
+        mkdir -p /run/secrets && \
+        echo '$combined' > /run/secrets/gateway_token && \
+        chmod 0400 /run/secrets/gateway_token
+    " 2>/dev/null
+
+    if [ $? -ne 0 ]; then
+        log_error "Failed to write gateway token to container"
+        log_error "Remediation steps:"
+        log_error "  1. Check container is running: docker ps"
+        log_error "  2. Verify /run/secrets is writable in container"
+        return 1
+    fi
+
+    return 0
+}
+
+# Get container IP address
+# Args:
+#   $1 - container_id: Docker container ID
+#   $2 - network: Network name (optional, default: credential-isolation)
+# Returns:
+#   Prints IP address to stdout
+get_container_ip() {
+    local container_id="$1"
+    local network="${2:-credential-isolation}"
+
+    docker inspect -f "{{.NetworkSettings.Networks.${network}.IPAddress}}" "$container_id" 2>/dev/null
+}
+
+# Setup gateway session for a container
+# This is the main entry point for new.sh integration
+# Args:
+#   $1 - container_id: Docker container ID
+#   $2 - repos: Optional comma-separated list of repos
+# Returns:
+#   0 on success, 1 on failure
+setup_gateway_session() {
+    local container_id="$1"
+    local repos="${2:-}"
+
+    log_info "Setting up gateway session for container $container_id..."
+
+    # Wait for gateway to be healthy
+    if ! wait_for_gateway_health 30; then
+        return 1
+    fi
+
+    # Get container IP on credential-isolation network
+    local container_ip
+    container_ip=$(get_container_ip "$container_id" "credential-isolation")
+
+    if [ -z "$container_ip" ]; then
+        # Try default network name pattern
+        container_ip=$(get_container_ip "$container_id" "${container_id%-dev-1}_credential-isolation")
+    fi
+
+    if [ -z "$container_ip" ]; then
+        log_error "Could not determine container IP address on credential-isolation network"
+        log_error "Remediation steps:"
+        log_error "  1. Verify container is connected to credential-isolation network"
+        log_error "  2. Check docker-compose.credential-isolation.yml network configuration"
+        log_error "  3. Try: docker network inspect credential-isolation"
+        return 1
+    fi
+
+    log_debug "Container IP: $container_ip"
+
+    # Create session via gateway API
+    if ! create_gateway_session "$container_id" "$container_ip" "$repos"; then
+        return 1
+    fi
+
+    # Write token to container
+    if ! write_gateway_token_to_container "$container_id" "$GATEWAY_TOKEN" "$GATEWAY_SECRET"; then
+        # Clean up session on failure
+        destroy_gateway_session "$GATEWAY_TOKEN"
+        return 1
+    fi
+
+    log_info "Gateway session created successfully"
+    return 0
+}
+
+# Cleanup gateway session for a container being destroyed
+# Reads the token from the container and destroys the session
+# Gracefully handles missing tokens or failed destruction
+# Args:
+#   $1 - container_id: Docker container ID
+# Returns:
+#   0 always (cleanup should not block destroy)
+cleanup_gateway_session() {
+    local container_id="$1"
+
+    if [ -z "$container_id" ]; then
+        return 0
+    fi
+
+    # Check if gateway socket exists (credential isolation enabled)
+    if [ ! -S "$GATEWAY_SOCKET_PATH" ]; then
+        log_debug "Gateway socket not found - skipping session cleanup"
+        return 0
+    fi
+
+    # Try to read token from container
+    local token_data
+    token_data=$(docker exec "$container_id" cat /run/secrets/gateway_token 2>/dev/null || true)
+
+    if [ -z "$token_data" ]; then
+        log_debug "No gateway token found in container - skipping session cleanup"
+        return 0
+    fi
+
+    # Token format is "token:secret" - extract just the token part
+    local token="${token_data%%:*}"
+
+    if [ -z "$token" ]; then
+        log_debug "Invalid gateway token format - skipping session cleanup"
+        return 0
+    fi
+
+    log_info "Cleaning up gateway session..."
+
+    # Destroy session - ignore failures (session may already be expired)
+    if destroy_gateway_session "$token"; then
+        log_debug "Gateway session destroyed"
+    else
+        log_debug "Gateway session destruction returned error (may be already expired)"
+    fi
+
+    return 0
+}

@@ -452,6 +452,47 @@ if [ -n "$GATEWAY" ]; then
     iptables -A OUTPUT -d "$GATEWAY" -j ACCEPT
 fi
 
+# ============================================================================
+# Sandbox Isolation Rules (defense-in-depth)
+# ============================================================================
+# These rules complement ICC=false on the credential-isolation network.
+# They explicitly allow sandbox -> gateway and sandbox -> api-proxy
+# while ensuring sandbox -> sandbox is blocked.
+#
+# Container names are resolved via Docker DNS when running inside the network.
+# ============================================================================
+
+# Allow traffic to credential-isolation gateway (for git operations)
+# The gateway holds GitHub credentials and proxies git requests
+if [ -n "${GATEWAY_HOST:-}" ]; then
+    GATEWAY_IP=$(getent hosts "$GATEWAY_HOST" 2>/dev/null | awk '{print $1}' || true)
+    if [ -n "$GATEWAY_IP" ]; then
+        log_verbose "  Allowing credential gateway: $GATEWAY_HOST ($GATEWAY_IP)"
+        iptables -A OUTPUT -d "$GATEWAY_IP" -j ACCEPT
+    fi
+elif getent hosts gateway &>/dev/null; then
+    GATEWAY_IP=$(getent hosts gateway | awk '{print $1}')
+    log_verbose "  Allowing credential gateway: gateway ($GATEWAY_IP)"
+    iptables -A OUTPUT -d "$GATEWAY_IP" -j ACCEPT
+fi
+
+# Allow traffic to api-proxy (for HTTPS API requests)
+# The api-proxy holds API credentials and injects them into requests
+if [ -n "${API_PROXY_HOST:-}" ]; then
+    API_PROXY_IP=$(getent hosts "$API_PROXY_HOST" 2>/dev/null | awk '{print $1}' || true)
+    if [ -n "$API_PROXY_IP" ]; then
+        log_verbose "  Allowing API proxy: $API_PROXY_HOST ($API_PROXY_IP)"
+        iptables -A OUTPUT -d "$API_PROXY_IP" -j ACCEPT
+    fi
+elif getent hosts api-proxy &>/dev/null; then
+    API_PROXY_IP=$(getent hosts api-proxy | awk '{print $1}')
+    log_verbose "  Allowing API proxy: api-proxy ($API_PROXY_IP)"
+    iptables -A OUTPUT -d "$API_PROXY_IP" -j ACCEPT
+fi
+
+# Note: Sandbox-to-sandbox blocking is handled by ICC=false on the
+# credential-isolation network. These iptables rules are defense-in-depth.
+
 # Allow traffic to ipset allowlists
 if [ "$USE_IPSET" = "true" ]; then
     iptables -A OUTPUT -m set --match-set "$IPSET_V4" dst -j ACCEPT
@@ -475,6 +516,94 @@ if command -v ip6tables &>/dev/null; then
         ip6tables -A OUTPUT -m set --match-set "$IPSET_V6" dst -j ACCEPT 2>/dev/null || true
     fi
     ip6tables -A OUTPUT -j DROP 2>/dev/null || true
+fi
+
+# ============================================================================
+# DOCKER-USER Chain Rules (host-level defense-in-depth)
+# ============================================================================
+# The DOCKER-USER chain is processed BEFORE Docker's own rules for FORWARD
+# traffic. These rules provide host-level enforcement that cannot be bypassed
+# by container configuration.
+#
+# Use case: Run on the Docker host to enforce network isolation even if
+# container networking is misconfigured.
+# ============================================================================
+
+setup_docker_user_rules() {
+    log_verbose "Setting up DOCKER-USER chain rules..."
+
+    # Get the credential-isolation network subnet (if available)
+    local SANDBOX_SUBNET=""
+    if command -v docker &>/dev/null; then
+        SANDBOX_SUBNET=$(docker network inspect credential-isolation --format '{{range .IPAM.Config}}{{.Subnet}}{{end}}' 2>/dev/null || true)
+    fi
+
+    # Get gateway container IP
+    local GATEWAY_CONTAINER_IP=""
+    if command -v docker &>/dev/null; then
+        GATEWAY_CONTAINER_IP=$(docker inspect gateway --format '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' 2>/dev/null | head -1 || true)
+    fi
+
+    # Get api-proxy container IP
+    local API_PROXY_CONTAINER_IP=""
+    if command -v docker &>/dev/null; then
+        API_PROXY_CONTAINER_IP=$(docker inspect api-proxy --format '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' 2>/dev/null | head -1 || true)
+    fi
+
+    if [ -z "$SANDBOX_SUBNET" ]; then
+        log_verbose "  Warning: Could not determine sandbox subnet, skipping DOCKER-USER rules"
+        return
+    fi
+
+    log_verbose "  Sandbox subnet: $SANDBOX_SUBNET"
+    log_verbose "  Gateway IP: ${GATEWAY_CONTAINER_IP:-unknown}"
+    log_verbose "  API Proxy IP: ${API_PROXY_CONTAINER_IP:-unknown}"
+
+    # Flush existing DOCKER-USER rules (but keep the default RETURN)
+    iptables -F DOCKER-USER 2>/dev/null || true
+
+    # Allow established connections
+    iptables -I DOCKER-USER -m state --state ESTABLISHED,RELATED -j RETURN
+
+    # Allow sandbox -> gateway (for git operations)
+    if [ -n "$GATEWAY_CONTAINER_IP" ]; then
+        iptables -I DOCKER-USER -s "$SANDBOX_SUBNET" -d "$GATEWAY_CONTAINER_IP" -j RETURN
+        log_verbose "  Allowing sandbox -> gateway ($GATEWAY_CONTAINER_IP)"
+    fi
+
+    # Allow sandbox -> api-proxy (for HTTPS API requests)
+    if [ -n "$API_PROXY_CONTAINER_IP" ]; then
+        iptables -I DOCKER-USER -s "$SANDBOX_SUBNET" -d "$API_PROXY_CONTAINER_IP" -j RETURN
+        log_verbose "  Allowing sandbox -> api-proxy ($API_PROXY_CONTAINER_IP)"
+    fi
+
+    # Allow DNS (port 53) only to gateway (for dnsmasq)
+    if [ -n "$GATEWAY_CONTAINER_IP" ]; then
+        iptables -I DOCKER-USER -s "$SANDBOX_SUBNET" -d "$GATEWAY_CONTAINER_IP" -p udp --dport 53 -j RETURN
+        iptables -I DOCKER-USER -s "$SANDBOX_SUBNET" -d "$GATEWAY_CONTAINER_IP" -p tcp --dport 53 -j RETURN
+        log_verbose "  Allowing DNS to gateway only"
+    fi
+
+    # Block all other DNS from sandbox (prevent DNS bypass)
+    iptables -A DOCKER-USER -s "$SANDBOX_SUBNET" -p udp --dport 53 -j DROP
+    iptables -A DOCKER-USER -s "$SANDBOX_SUBNET" -p tcp --dport 53 -j DROP
+    log_verbose "  Blocking DNS to non-gateway destinations"
+
+    # Block direct egress from sandbox to external networks
+    # (traffic should go through gateway or api-proxy)
+    iptables -A DOCKER-USER -s "$SANDBOX_SUBNET" ! -d 172.16.0.0/12 -j DROP
+    log_verbose "  Blocking direct external egress from sandbox"
+
+    # Final RETURN for other traffic (Docker's default behavior)
+    iptables -A DOCKER-USER -j RETURN
+
+    log_verbose "  DOCKER-USER rules applied"
+}
+
+# Only run DOCKER-USER setup if we're on the host (have docker access)
+# and explicitly requested via SETUP_DOCKER_USER=1
+if [ "${SETUP_DOCKER_USER:-}" = "1" ] && command -v docker &>/dev/null; then
+    setup_docker_user_rules
 fi
 
 log_verbose "Firewall rules applied successfully."

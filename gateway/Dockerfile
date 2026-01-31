@@ -17,7 +17,6 @@ RUN pip install --no-cache-dir -r requirements.txt
 # Copy gateway application and configuration files
 COPY gateway.py .
 COPY allowlist.conf .
-COPY tinyproxy.conf .
 COPY build-configs.sh .
 
 # Generate configuration files at build time

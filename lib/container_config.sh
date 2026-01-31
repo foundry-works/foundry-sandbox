@@ -1056,9 +1056,19 @@ ensure_github_https_git() {
 
 # Configure gh as the git credential helper for HTTPS authentication
 # This leverages existing gh auth credentials from ~/.config/gh
+# When SANDBOX_GATEWAY_ENABLED=true, skip this - credentials are injected by the gateway
 configure_gh_credential_helper() {
     local container_id="$1"
     local quiet="${2:-0}"
+
+    # Skip when credential isolation gateway is enabled
+    # The gateway injects credentials; no token material should be in the container
+    if [ "${SANDBOX_GATEWAY_ENABLED:-}" = "true" ]; then
+        if [ "$quiet" != "1" ]; then
+            log_debug "Skipping gh credential helper (gateway enabled)"
+        fi
+        return 0
+    fi
 
     # Only configure if gh config exists in container
     docker exec -u "$CONTAINER_USER" "$container_id" sh -c "

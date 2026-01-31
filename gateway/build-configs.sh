@@ -2,7 +2,7 @@
 #
 # Build script for credential isolation gateway configuration generation
 #
-# Generates dnsmasq.conf and tinyproxy.conf from allowlist.conf (single source of truth)
+# Generates dnsmasq.conf from allowlist.conf (single source of truth)
 # Also generates firewall allowlist artifacts for safety/network-firewall.sh
 #
 # Usage: ./build-configs.sh [--dry-run]
@@ -13,7 +13,6 @@ set -e
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ALLOWLIST_FILE="$SCRIPT_DIR/allowlist.conf"
 DNSMASQ_CONF="$SCRIPT_DIR/dnsmasq.conf"
-TINYPROXY_CONF="$SCRIPT_DIR/tinyproxy.conf"
 FIREWALL_ALLOWLIST="$SCRIPT_DIR/firewall-allowlist.generated"
 
 DRY_RUN=false
@@ -160,74 +159,6 @@ generate_dnsmasq() {
     fi
 }
 
-# Function to generate tinyproxy.conf
-generate_tinyproxy() {
-    local output_file="$1"
-    local content=""
-
-    content+="#\n"
-    content+="# Tinyproxy configuration for credential isolation gateway\n"
-    content+="# Automatically generated from allowlist.conf\n"
-    content+="# DO NOT EDIT MANUALLY - use build-configs.sh to regenerate\n"
-    content+="# Generated: $(date)\n"
-    content+="#\n\n"
-
-    content+="# Port to listen on\n"
-    content+="Listen 8080\n\n"
-
-    content+="# Bind to all interfaces\n"
-    content+="Bind 0.0.0.0\n\n"
-
-    content+="# Timeout for inactive connections (seconds)\n"
-    content+="ConnectTimeout 60\n\n"
-
-    content+="# Upstream gateway - connects to Flask gateway\n"
-    content+="Upstream http 127.0.0.1:8081\n\n"
-
-    content+="# Logging configuration\n"
-    content+="LogFile \"/var/log/tinyproxy/tinyproxy.log\"\n"
-    content+="LogLevel Info\n\n"
-
-    content+="# Access log format\n"
-    content+="AccessLog On\n"
-    content+="AccessLogFile \"/var/log/tinyproxy/access.log\"\n\n"
-
-    content+="# Security: Set ACL to allow only local connections\n"
-    content+="Allow 127.0.0.1\n"
-    content+="Allow 0.0.0.0/0\n\n"
-
-    content+="# Maximum number of clients\n"
-    content+="MaxClients 256\n\n"
-
-    content+="# Timeout for connecting to upstream\n"
-    content+="ConnectTimeout 60\n\n"
-
-    content+="# Keep-alive timeout\n"
-    content+="TimeoutConnect 60\n\n"
-
-    content+="# CONNECT method timeout (for HTTPS tunneling)\n"
-    content+="TimeoutRead 60\n\n"
-
-    content+="# Whitelisted domains (${#ALL_DOMAINS[@]} total)\n"
-    content+="#\n"
-
-    # Group domains by type for documentation
-    for type in "${!DOMAINS_BY_TYPE[@]}"; do
-        content+="# Type: $type\n"
-        for domain in ${DOMAINS_BY_TYPE[$type]}; do
-            content+="#   - $domain\n"
-        done
-    done
-
-    if [ "$DRY_RUN" = true ]; then
-        echo -e "$content" | head -60
-        log_info "[DRY-RUN] Would write tinyproxy.conf (${#content} bytes)"
-    else
-        echo -e "$content" > "$output_file"
-        log_info "Generated tinyproxy.conf (${#content} bytes)"
-    fi
-}
-
 # Function to generate firewall allowlist
 generate_firewall_allowlist() {
     local output_file="$1"
@@ -308,7 +239,6 @@ log_info "Generating configuration files..."
 log_info "==========================================="
 
 generate_dnsmasq "$DNSMASQ_CONF"
-generate_tinyproxy "$TINYPROXY_CONF"
 generate_firewall_allowlist "$FIREWALL_ALLOWLIST"
 
 if [ "$DRY_RUN" = true ]; then
@@ -320,7 +250,7 @@ fi
 log_info "==========================================="
 log_info "Verifying generated files..."
 
-for file in "$DNSMASQ_CONF" "$TINYPROXY_CONF" "$FIREWALL_ALLOWLIST"; do
+for file in "$DNSMASQ_CONF" "$FIREWALL_ALLOWLIST"; do
     if [ -f "$file" ]; then
         size=$(wc -c < "$file")
         lines=$(wc -l < "$file")
@@ -336,7 +266,6 @@ log_info "Success! Configuration files generated."
 log_info ""
 log_info "Generated files:"
 log_info "  - $DNSMASQ_CONF (DNS configuration)"
-log_info "  - $TINYPROXY_CONF (Proxy configuration)"
 log_info "  - $FIREWALL_ALLOWLIST (Firewall allowlist - source by network-firewall.sh)"
 log_info ""
 log_info "Next steps:"

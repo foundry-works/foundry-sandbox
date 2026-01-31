@@ -124,6 +124,23 @@ RUN mkdir -p /etc/skel/.ssh && \
     chmod 700 /etc/skel/.ssh && \
     chmod 644 /etc/skel/.ssh/known_hosts
 
+# Git URL rewriting for credential isolation gateway
+# When SANDBOX_GATEWAY_ENABLED=true, all GitHub URLs route through the gateway
+# This ensures credentials never reach the sandbox - the gateway injects them
+# The credential helper reads token from /run/secrets/gateway_token
+RUN echo '[url "http://gateway:8080/git/"]' > /etc/gitconfig && \
+    echo '    insteadOf = https://github.com/' >> /etc/gitconfig && \
+    echo '    insteadOf = git@github.com:' >> /etc/gitconfig && \
+    echo '' >> /etc/gitconfig && \
+    echo '[credential "http://gateway:8080"]' >> /etc/gitconfig && \
+    echo '    helper = /usr/local/bin/gateway-credential-helper' >> /etc/gitconfig && \
+    chmod 644 /etc/gitconfig
+
+# Gateway credential helper - reads token from /run/secrets/gateway_token
+# Outputs via git credential protocol; never logs/echoes the token
+COPY safety/gateway-credential-helper /usr/local/bin/gateway-credential-helper
+RUN chmod 755 /usr/local/bin/gateway-credential-helper
+
 # Copy entrypoint to system path (not /home which is tmpfs)
 COPY entrypoint.sh /usr/local/bin/entrypoint.sh
 RUN chmod +x /usr/local/bin/entrypoint.sh
