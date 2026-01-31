@@ -15,6 +15,7 @@ cmd_new() {
     local sparse_checkout="$NEW_SPARSE_CHECKOUT"
     local pip_requirements="$NEW_PIP_REQUIREMENTS"
     local isolate_credentials="$NEW_ISOLATE_CREDENTIALS"
+    local allow_dangerous_mount="$NEW_ALLOW_DANGEROUS_MOUNT"
     local ssh_agent_sock=""
     local repo_root=""
     local current_branch=""
@@ -93,6 +94,8 @@ cmd_new() {
         echo "                                   Use 'auto' to detect /workspace/requirements.txt"
         echo "  --isolate-credentials, --isolate Isolate API keys in a proxy container"
         echo "                                   Keys never enter sandbox; injected by proxy"
+        echo "  --allow-dangerous-mount          Bypass credential directory protection blocklist"
+        echo "                                   (dangerous - use only with caution)"
         echo ""
         echo "Examples:"
         echo "  $0 new user/repo                     # auto-create sandbox branch from main"
@@ -239,8 +242,24 @@ cmd_new() {
     local override_file
     override_file=$(path_override_file "$name")
     local claude_home_path
+
+    # Validate mount paths against dangerous path blocklist
+    if [ "$allow_dangerous_mount" != "true" ] && [ ${#mounts[@]} -gt 0 ]; then
+        for mount in "${mounts[@]}"; do
+            # Extract source path (before first colon)
+            local source_path="${mount%%:*}"
+            if ! validate_mount_path "$source_path"; then
+                echo "Use --allow-dangerous-mount to bypass this check (not recommended)"
+                exit 1
+            fi
+        done
+    fi
+
     if [ ${#mounts[@]} -gt 0 ]; then
         echo "Adding custom mounts..."
+        if [ "$allow_dangerous_mount" = "true" ]; then
+            echo "WARNING: --allow-dangerous-mount bypasses credential directory protection. Use with caution."
+        fi
         cat > "$override_file" <<OVERRIDES
 services:
   dev:

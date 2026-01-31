@@ -14,6 +14,7 @@ parse_new_args() {
     NEW_SPARSE_CHECKOUT=false
     NEW_PIP_REQUIREMENTS=""
     NEW_ISOLATE_CREDENTIALS=false
+    NEW_ALLOW_DANGEROUS_MOUNT=false
 
     while [ $# -gt 0 ]; do
         case "$1" in
@@ -66,6 +67,9 @@ parse_new_args() {
                 ;;
             --isolate-credentials|--isolate)
                 NEW_ISOLATE_CREDENTIALS=true
+                ;;
+            --allow-dangerous-mount)
+                NEW_ALLOW_DANGEROUS_MOUNT=true
                 ;;
             --pip-requirements|-r)
                 shift
