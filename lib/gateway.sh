@@ -22,15 +22,22 @@ create_gateway_session() {
         return 1
     fi
 
-    # Build JSON request body
+    # Build JSON request body using jq for safe escaping
     local json_body
     if [ -n "$repos" ]; then
-        # Convert comma-separated repos to JSON array
-        local repos_array
-        repos_array=$(echo "$repos" | tr ',' '\n' | sed 's/^/"/;s/$/"/' | tr '\n' ',' | sed 's/,$//')
-        json_body="{\"container_id\":\"$container_id\",\"container_ip\":\"$container_ip\",\"repos\":[$repos_array]}"
+        # Convert comma-separated repos to JSON array using jq for proper escaping
+        local repos_json
+        repos_json=$(echo "$repos" | tr ',' '\n' | jq -R . | jq -s .)
+        json_body=$(jq -n \
+            --arg cid "$container_id" \
+            --arg cip "$container_ip" \
+            --argjson repos "$repos_json" \
+            '{container_id: $cid, container_ip: $cip, repos: $repos}')
     else
-        json_body="{\"container_id\":\"$container_id\",\"container_ip\":\"$container_ip\"}"
+        json_body=$(jq -n \
+            --arg cid "$container_id" \
+            --arg cip "$container_ip" \
+            '{container_id: $cid, container_ip: $cip}')
     fi
 
     # Call gateway API via Unix socket

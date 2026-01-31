@@ -30,11 +30,18 @@ app = Flask(__name__)
 GATEWAY_PORT = int(os.environ.get('GATEWAY_PORT', 8080))
 GATEWAY_HOST = os.environ.get('GATEWAY_HOST', '0.0.0.0')
 
+# Upstream request timeouts (in seconds)
+UPSTREAM_CONNECT_TIMEOUT = int(os.environ.get('GATEWAY_CONNECT_TIMEOUT', 30))
+UPSTREAM_READ_TIMEOUT = int(os.environ.get('GATEWAY_READ_TIMEOUT', 600))
+
 # Session management
 SESSIONS = {}  # {token: {'secret': secret, 'container_id': id, 'container_ip': ip, 'repos': [], 'created': datetime, 'last_accessed': datetime, 'expires_at': datetime}}
 SESSION_TTL_INACTIVITY = timedelta(hours=24)  # 24 hour inactivity timeout
 SESSION_TTL_ABSOLUTE = timedelta(days=7)  # 7 day absolute timeout
 SESSION_GC_INTERVAL = timedelta(minutes=5)  # Run garbage collection every 5 minutes
+
+# Session limit (memory bound / sanity check)
+MAX_SESSIONS = int(os.environ.get('GATEWAY_MAX_SESSIONS', 100))
 
 # Garbage collection state
 _gc_timer = None
@@ -121,7 +128,14 @@ def create_session(container_ip, container_id=None, repos=None):
 
     Returns:
         dict: {'token': token, 'secret': secret}
+
+    Raises:
+        ValueError: If session limit is exceeded
     """
+    # Check global session limit (memory bound / sanity check)
+    if len(SESSIONS) >= MAX_SESSIONS:
+        raise ValueError(f'Maximum session limit ({MAX_SESSIONS}) exceeded')
+
     token = generate_session_token()
     secret = generate_session_secret()
     now = datetime.utcnow()
@@ -442,7 +456,7 @@ def health():
 def session_create_endpoint():
     """
     Create a new session with token and secret binding to container IP.
-    Unix socket only.
+    Unix socket only (trusted orchestrator).
     """
     # Check if request comes from Unix socket (local)
     if request.remote_addr not in ('127.0.0.1', 'localhost'):
@@ -459,7 +473,7 @@ def session_create_endpoint():
             audit_log('session_create_denied', extra_data={'reason': 'missing_container_ip'})
             return {'error': 'container_ip is required'}, 400
 
-        # Create session with container_id and repos
+        # Create session (may raise ValueError if limit exceeded)
         session_data = create_session(container_ip, container_id=container_id, repos=repos)
 
         audit_log('session_create', container_id=container_id, extra_data={'container_ip': container_ip})
@@ -470,6 +484,12 @@ def session_create_endpoint():
             'ttl_inactivity_hours': 24,
             'ttl_absolute_days': 7
         }, 201
+
+    except ValueError as e:
+        # Session limit exceeded
+        logger.warning(f'Session creation denied: {e}')
+        audit_log('session_create_denied', extra_data={'reason': 'limit_exceeded', 'error': str(e)})
+        return {'error': str(e)}, 503
 
     except Exception as e:
         logger.error(f'Session creation error: {e}')
@@ -728,7 +748,7 @@ def git_proxy(owner, repo, git_path):
             # Use streaming to avoid loading entire request into memory
             request_body = request.stream
 
-        # Make streaming request with proper timeouts: (30s connect, 600s transfer)
+        # Make streaming request with configurable timeouts
         proxied_request = requests.request(
             method=request.method,
             url=upstream_url,
@@ -736,7 +756,7 @@ def git_proxy(owner, repo, git_path):
             data=request_body,
             params=request.args,
             allow_redirects=False,  # Disable redirects per spec
-            timeout=(30, 600),  # Connect timeout, read timeout
+            timeout=(UPSTREAM_CONNECT_TIMEOUT, UPSTREAM_READ_TIMEOUT),
             stream=True  # Enable streaming response
         )
 
@@ -784,6 +804,12 @@ def git_proxy(owner, repo, git_path):
             'error': 'timeout',
             'error_details': str(e)
         })
+        # Close the response if it was partially created
+        if 'proxied_request' in dir() and proxied_request is not None:
+            try:
+                proxied_request.close()
+            except Exception:
+                pass
         return Response('Gateway timeout', status=504)
 
     except Exception as e:
@@ -794,6 +820,12 @@ def git_proxy(owner, repo, git_path):
             'path': git_path,
             'error': str(e)
         })
+        # Close the response if it was partially created to prevent connection leaks
+        if 'proxied_request' in dir() and proxied_request is not None:
+            try:
+                proxied_request.close()
+            except Exception:
+                pass
         return Response('Gateway error', status=502)
 
 @app.route('/')

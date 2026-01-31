@@ -108,7 +108,7 @@ validate_ssh_mode() {
 }
 
 # Detect embedded credentials in git remote URLs
-# Pattern matches: ://user:password@ format (credentials in URL)
+# Pattern matches: ://user:password@host format (credentials in URL)
 # Returns: 0 if no embedded credentials, 1 if found
 validate_git_remotes() {
     local git_dir="${1:-.git}"
@@ -119,11 +119,16 @@ validate_git_remotes() {
         return 0
     fi
 
-    # Pattern: ://[^:]+:[^@]+@ matches "://user:password@" in URLs
-    # This catches embedded credentials in remote URLs like:
-    #   https://user:token@github.com/...
-    #   git://user:pass@host/...
-    local credential_pattern='://[^:]+:[^@]+@'
+    # Pattern: ://[^/:@]+:[^/:@]+@[^/]+ matches "://user:password@host" in URLs
+    # More specific pattern that requires:
+    #   - :// protocol prefix
+    #   - username (no :, /, or @)
+    #   - : separator
+    #   - password (no :, /, or @)
+    #   - @ separator
+    #   - hostname (at least one char before /)
+    # This avoids false positives like http://host:port/path@something
+    local credential_pattern='://[^/:@]+:[^/:@]+@[^/]+'
 
     # Search for embedded credentials in remote URLs
     if grep -qE "$credential_pattern" "$config_file" 2>/dev/null; then
