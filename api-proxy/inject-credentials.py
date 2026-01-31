@@ -503,8 +503,9 @@ class CredentialInjector:
 
         # Only handle OpenAI endpoints (Codex CLI)
         # Don't intercept requests to other APIs like Anthropic
+        # Codex CLI uses chatgpt.com/backend-api for API calls
         host = flow.request.host
-        if host not in ("api.openai.com", "auth.openai.com", "auth.openai.com"):
+        if host not in ("api.openai.com", "auth.openai.com", "auth.openai.com", "chatgpt.com"):
             return False
 
         try:
