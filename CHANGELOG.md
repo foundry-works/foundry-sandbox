@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.9] - 2026-01-31
+
+### Added
+- Gemini CLI OAuth support in credential isolation mode
+  - Automatic token refresh using Gemini CLI's embedded OAuth credentials
+  - Token validation interception for placeholder tokens (tokeninfo, userinfo)
+  - Support for `cloudcode-pa.googleapis.com` initialization endpoint
+
+### Fixed
+- Clear `GOOGLE_API_KEY` and `GEMINI_API_KEY` env vars when OAuth is configured to prevent API key auth override
+- Fixed tokeninfo validation to check Authorization header (google-auth-library sends token there)
+- Reordered OAuth handlers so Gemini has priority over OpenCode for Google APIs
+
 ## [0.5.8] - 2026-01-29
 
 ### Changed

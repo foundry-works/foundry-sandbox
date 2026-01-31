@@ -436,15 +436,21 @@ add_anthropic_credential_to_override() {
 add_gemini_credential_to_override() {
     local override_file="$1"
 
+    ensure_override_header "$override_file"
+
     # Check if OAuth credentials exist - prefer OAuth over API key
     if [ -f "$HOME/.gemini/oauth_creds.json" ]; then
         log_info "Using Gemini OAuth credentials (oauth_creds.json found)"
-        # Don't add GEMINI_API_KEY - OAuth will be used via proxy
+        # Clear both GOOGLE_API_KEY and GEMINI_API_KEY to force OAuth mode
+        # Gemini CLI checks these env vars first and uses API key auth if set
+        # Setting to empty string overrides the base docker-compose values
+        append_override_list_item "$override_file" "environment" "GOOGLE_API_KEY="
+        append_override_list_item "$override_file" "environment" "GEMINI_API_KEY="
         return 0
     fi
 
     # Fallback to API key if no OAuth credentials
     log_info "Using Gemini API key (no oauth_creds.json found)"
-    ensure_override_header "$override_file"
+    append_override_list_item "$override_file" "environment" "GOOGLE_API_KEY=CREDENTIAL_PROXY_PLACEHOLDER"
     append_override_list_item "$override_file" "environment" "GEMINI_API_KEY=CREDENTIAL_PROXY_PLACEHOLDER"
 }

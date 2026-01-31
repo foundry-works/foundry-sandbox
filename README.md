@@ -84,19 +84,18 @@ cast destroy sandbox-name --yes
 - **Linux/macOS focus** - Windows requires WSL2
 - **Shared git history** - All sandboxes share the same bare repo; force-push from one affects others
 - **No GPU passthrough** - Standard Docker networking; GPU workloads need additional configuration
-- **Gemini CLI requires API key auth** - OAuth is not supported in Docker (see below)
+- **Gemini CLI OAuth requires credential isolation** - OAuth works in `--isolate-credentials` mode; otherwise use API key
 
 ### Gemini CLI Authentication
 
-Gemini CLI uses `keytar` for credential storage, which requires a system keyring (gnome-keyring/libsecret on Linux). In Docker containers, this dependency doesn't work reliably even with gnome-keyring installed, because:
+Gemini CLI supports two authentication methods:
 
-1. Keytar validates credentials locally before making network requests
-2. The system keyring requires D-Bus and a running keyring daemon
-3. Environment variable persistence between entrypoint and interactive shells is complex
+1. **OAuth (credential isolation mode)** - Run `gemini auth login` on your host, then use `--isolate-credentials`. The proxy automatically refreshes and injects OAuth tokens.
 
-**Solution**: Use `GEMINI_API_KEY` environment variable instead of OAuth. In credential isolation mode, this is handled automatically—the proxy injects your API key into requests. For standard mode, set `GEMINI_API_KEY` in your environment or `.env` file.
+2. **API Key** - Set `GEMINI_API_KEY` in your environment. Works in both standard and credential isolation modes.
 
 If you've previously used `gemini auth` on your host and have OAuth configured, you'll need to either:
+- Use `--isolate-credentials` flag (recommended), or
 - Set `GEMINI_API_KEY` (takes precedence over OAuth), or
 - Use standard mode where your host's OAuth credentials are passed directly
 

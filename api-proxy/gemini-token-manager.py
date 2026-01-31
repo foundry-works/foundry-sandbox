@@ -6,13 +6,9 @@ Manages OAuth token lifecycle for Gemini CLI authentication:
 - Parses expiry_date as Unix milliseconds (divide by 1000)
 - Token expiry check with 300-second buffer
 - Thread-safe with single lock (like Codex, not per-provider)
+- Automatic token refresh using embedded Gemini CLI OAuth credentials
 
 Uses httpx with proxy=None to bypass mitmproxy for token operations.
-
-Note: Token refresh requires client_id and client_secret from Gemini CLI.
-For this implementation, automatic refresh is skipped - tokens from
-`gemini login` are long-lived and manual re-authentication is required
-when they expire.
 """
 
 import json
@@ -21,8 +17,16 @@ import time
 import threading
 from typing import Optional
 
+import httpx
+
 # Token expiry buffer - consider token expired if within this window
 TOKEN_EXPIRY_BUFFER_SECONDS = 300  # 5 minutes
+
+# Gemini CLI OAuth credentials (embedded in CLI source, safe to use)
+# https://github.com/google-gemini/gemini-cli/blob/main/packages/core/src/code_assist/oauth2.ts
+GEMINI_CLIENT_ID = "681255809395-oo8ft2oprdrnp9e3aqf6av3hmdib135j.apps.googleusercontent.com"
+GEMINI_CLIENT_SECRET = "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"
+GOOGLE_TOKEN_URL = "https://oauth2.googleapis.com/token"
 
 
 class GeminiTokenManager:
@@ -77,31 +81,62 @@ class GeminiTokenManager:
         """
         Refresh the access token using the refresh token.
 
-        Note: Google OAuth refresh requires client_id and client_secret.
-        Since we don't have access to Gemini CLI's OAuth credentials,
-        this method raises an error indicating manual re-authentication
-        is required.
+        Uses Gemini CLI's embedded OAuth credentials to refresh the token.
         """
-        # Token refresh requires client credentials we don't have
-        # The user needs to run `gemini login` again outside the sandbox
-        raise RuntimeError(
-            "Gemini OAuth token expired. Please run 'gemini login' "
-            "outside the sandbox to refresh your credentials."
-        )
+        if not self._refresh_token:
+            raise RuntimeError(
+                "Gemini OAuth token expired and no refresh token available. "
+                "Please run 'gemini login' outside the sandbox."
+            )
+
+        # Use httpx with proxy=None to bypass mitmproxy
+        try:
+            response = httpx.post(
+                GOOGLE_TOKEN_URL,
+                data={
+                    "client_id": GEMINI_CLIENT_ID,
+                    "client_secret": GEMINI_CLIENT_SECRET,
+                    "refresh_token": self._refresh_token,
+                    "grant_type": "refresh_token",
+                },
+                proxy=None,  # Bypass mitmproxy
+                timeout=30.0,
+            )
+            response.raise_for_status()
+            data = response.json()
+
+            # Update tokens
+            self._access_token = data.get("access_token")
+            self._id_token = data.get("id_token")
+
+            # Calculate expiry from expires_in (seconds)
+            expires_in = data.get("expires_in", 3600)
+            self._expires_at = time.time() + expires_in
+
+            # Update scope if provided
+            if "scope" in data:
+                self._scope = data["scope"]
+
+        except httpx.HTTPStatusError as e:
+            raise RuntimeError(
+                f"Failed to refresh Gemini OAuth token: {e.response.status_code} - "
+                f"{e.response.text}"
+            )
+        except Exception as e:
+            raise RuntimeError(f"Failed to refresh Gemini OAuth token: {e}")
 
     def get_valid_token(self) -> str:
         """
-        Get a valid access token.
+        Get a valid access token, refreshing if necessary.
 
-        For Gemini, we don't support automatic refresh since it requires
-        client credentials. If the token is expired, an error is raised
-        prompting the user to re-authenticate.
+        Automatically refreshes the token using Gemini CLI's embedded
+        OAuth credentials if the current token is expired.
 
         Returns:
             Valid OAuth access token
 
         Raises:
-            RuntimeError: If token is expired and needs manual refresh
+            RuntimeError: If token refresh fails
             ValueError: If no valid token available
         """
         with self._lock:

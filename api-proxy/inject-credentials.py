@@ -105,6 +105,7 @@ OPENCODE_PROVIDER_HOSTS = {
 GEMINI_API_HOSTS = [
     "generativelanguage.googleapis.com",
     "aiplatform.googleapis.com",
+    "cloudcode-pa.googleapis.com",  # Gemini CLI initialization endpoint
 ]
 
 
@@ -415,9 +416,11 @@ class CredentialInjector:
         if not is_tokeninfo or not self.gemini_manager:
             return False
 
-        # Check for placeholder token in request
-        request_content = flow.request.get_text() + flow.request.url
-        if "CREDENTIAL_PROXY_PLACEHOLDER" not in request_content:
+        # Check for placeholder token in request (URL, body, or Authorization header)
+        # google-auth-library sends token in Authorization header: Bearer <token>
+        auth_header = flow.request.headers.get("Authorization", "")
+        request_content = flow.request.get_text() + flow.request.url + auth_header
+        if OAUTH_PLACEHOLDER not in request_content:
             return False
 
         ctx.log.info("Intercepting Google tokeninfo for placeholder validation")
@@ -611,12 +614,12 @@ class CredentialInjector:
         if self._handle_oauth_injection(flow):
             return
 
-        # 6. Handle OpenCode OAuth placeholder injection
-        if self._handle_opencode_oauth_injection(flow):
+        # 6. Handle Gemini OAuth placeholder injection (before OpenCode to prioritize Gemini for its API hosts)
+        if self._handle_gemini_oauth_injection(flow):
             return
 
-        # 7. Handle Gemini OAuth placeholder injection
-        if self._handle_gemini_oauth_injection(flow):
+        # 7. Handle OpenCode OAuth placeholder injection
+        if self._handle_opencode_oauth_injection(flow):
             return
 
         # 8. Host-based API key injection (existing behavior)
