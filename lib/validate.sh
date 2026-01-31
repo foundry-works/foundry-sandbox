@@ -106,3 +106,43 @@ validate_ssh_mode() {
             ;;
     esac
 }
+
+# Detect embedded credentials in git remote URLs
+# Pattern matches: ://user:password@ format (credentials in URL)
+# Returns: 0 if no embedded credentials, 1 if found
+validate_git_remotes() {
+    local git_dir="${1:-.git}"
+    local config_file="$git_dir/config"
+
+    if [ ! -f "$config_file" ]; then
+        # No git config - nothing to validate
+        return 0
+    fi
+
+    # Pattern: ://[^:]+:[^@]+@ matches "://user:password@" in URLs
+    # This catches embedded credentials in remote URLs like:
+    #   https://user:token@github.com/...
+    #   git://user:pass@host/...
+    local credential_pattern='://[^:]+:[^@]+@'
+
+    # Search for embedded credentials in remote URLs
+    if grep -qE "$credential_pattern" "$config_file" 2>/dev/null; then
+        # Find the offending line(s) for clearer error message
+        local offending_lines
+        offending_lines=$(grep -E "$credential_pattern" "$config_file" 2>/dev/null | head -3)
+
+        log_error "Embedded credentials detected in git config: $config_file"
+        log_error "Remote URLs must not contain credentials (user:pass@)"
+        log_error "Offending lines:"
+        echo "$offending_lines" | while read -r line; do
+            # Redact the actual password from the error message
+            local redacted
+            redacted=$(echo "$line" | sed -E 's#(://[^:]+:)[^@]+(@)#\1***\2#g')
+            log_error "  $redacted"
+        done
+        log_error "Remove credentials from git remote URLs before enabling credential isolation"
+        return 1
+    fi
+
+    return 0
+}

@@ -45,6 +45,14 @@ REPO_REGEX = r'^[a-zA-Z0-9._-]+$'
 # Allowed git endpoints
 ALLOWED_GIT_PATHS = {'info/refs', 'git-upload-pack', 'git-receive-pack'}
 
+# LFS endpoint patterns (not supported)
+LFS_PATTERNS = [
+    r'^objects/batch$',           # LFS batch API
+    r'^lfs/',                     # LFS namespace
+    r'^\.git/lfs/',               # .git/lfs paths
+    r'^info/lfs/',                # LFS info endpoints
+]
+
 # Upstream configuration
 UPSTREAM_HOST = 'github.com'
 UPSTREAM_PROTOCOL = 'https'
@@ -288,6 +296,25 @@ def validate_git_path(path):
         return False
     return path in ALLOWED_GIT_PATHS
 
+
+def is_lfs_endpoint(path):
+    """
+    Check if the given path is a Git LFS endpoint.
+    LFS is not supported by this gateway.
+
+    Args:
+        path: Git endpoint path
+
+    Returns:
+        bool: True if path is an LFS endpoint, False otherwise
+    """
+    if not path:
+        return False
+    for pattern in LFS_PATTERNS:
+        if re.match(pattern, path):
+            return True
+    return False
+
 def is_ip_literal(host):
     """
     Check if the given host is an IP address literal.
@@ -500,6 +527,21 @@ def git_proxy(owner, repo, git_path):
             'path': git_path
         })
         return Response('Invalid repo format', status=400)
+
+    # Check for LFS endpoints (not supported)
+    if is_lfs_endpoint(git_path):
+        audit_log('git_denied', extra_data={
+            'reason': 'lfs_not_supported',
+            'owner': owner,
+            'repo': repo,
+            'path': git_path
+        })
+        error_response = {
+            'error': 'Git LFS is not supported',
+            'message': 'This gateway does not support Git Large File Storage (LFS). Please use standard Git operations only.',
+            'path': git_path
+        }
+        return Response(json.dumps(error_response), status=501, mimetype='application/json')
 
     # Validate git endpoint path
     if not validate_git_path(git_path):

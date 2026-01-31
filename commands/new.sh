@@ -313,8 +313,31 @@ OVERRIDES
     echo "Starting container: $container..."
     if [ "$isolate_credentials" = "true" ]; then
         echo "Credential isolation enabled - API keys will be held in proxy container"
+        # Validate git remotes don't contain embedded credentials
+        # This is critical for credential isolation - credentials must go through the gateway
+        if ! validate_git_remotes "$worktree_dir/.git"; then
+            die "Cannot enable credential isolation with embedded git credentials"
+        fi
     fi
     compose_up "$worktree_dir" "$claude_config_path" "$container" "$override_file" "$isolate_credentials"
+
+    # Setup gateway session for credential isolation
+    if [ "$isolate_credentials" = "true" ]; then
+        # Extract repo owner/name from repo_url for session authorization
+        local repo_spec
+        repo_spec=$(echo "$repo_url" | sed -E 's#^(https?://)?github\.com/##; s#^git@github\.com:##; s#\.git$##')
+        if ! setup_gateway_session "$container_id" "$repo_spec"; then
+            log_error "Failed to create gateway session - destroying sandbox"
+            docker compose -f "$(get_compose_file)" -f "$override_file" --project-name "$container" down -v 2>/dev/null || true
+            echo ""
+            echo "Gateway session creation failed. See error messages above for remediation."
+            echo "To create sandbox without credential isolation, omit --isolate-credentials flag."
+            exit 1
+        fi
+        # Export gateway enabled flag for container_config.sh
+        export SANDBOX_GATEWAY_ENABLED=true
+    fi
+
     copy_configs_to_container "$container_id" "0" "$runtime_enable_ssh" "$working_dir" "$isolate_credentials"
 
     if [ ${#copies[@]} -gt 0 ]; then

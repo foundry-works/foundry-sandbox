@@ -36,6 +36,12 @@ cmd_destroy() {
 
     tmux kill-session -t "$session" 2>/dev/null || true
 
+    # Cleanup gateway session before destroying container (if credential isolation was enabled)
+    local container_id="${container}-dev-1"
+    if docker ps -q -f "name=${container_id}" 2>/dev/null | grep -q .; then
+        cleanup_gateway_session "$container_id"
+    fi
+
     compose_down "$worktree_path" "$claude_config_path" "$container" "$override_file" "true" 2>/dev/null || true
 
     if [ "$keep_worktree" = false ] && [ -d "$claude_config_path" ]; then

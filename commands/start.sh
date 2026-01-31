@@ -62,6 +62,22 @@ cmd_start() {
     compose_up "$worktree_path" "$claude_config_path" "$container" "$override_file"
 
     local container_id="${container}-dev-1"
+
+    # Refresh gateway session on restart (if credential isolation enabled)
+    # Destroys old token and creates a new one for security
+    if [ -S "$GATEWAY_SOCKET_PATH" ]; then
+        # Clean up old session first
+        cleanup_gateway_session "$container_id"
+        # Create new session with fresh token
+        local repo_spec="${SANDBOX_REPO_URL:-}"
+        repo_spec=$(echo "$repo_spec" | sed -E 's#^(https?://)?github\.com/##; s#^git@github\.com:##; s#\.git$##')
+        if setup_gateway_session "$container_id" "$repo_spec"; then
+            export SANDBOX_GATEWAY_ENABLED=true
+        else
+            log_warn "Gateway session refresh failed - git operations may not work"
+        fi
+    fi
+
     copy_configs_to_container "$container_id" "0" "$enable_ssh" "$SANDBOX_WORKING_DIR"
 
     # Log sparse checkout reminder if enabled
