@@ -1,29 +1,19 @@
 {
-  "anthropic": {
-    "access": "CREDENTIAL_PROXY_PLACEHOLDER",
-    "expires": "2099-12-31T23:59:59Z",
-    "refresh": "CREDENTIAL_PROXY_PLACEHOLDER",
-    "type": "oauth"
+  "zai-coding-plan": {
+    "type": "api",
+    "key": "CREDENTIAL_PROXY_PLACEHOLDER"
   },
   "openai": {
+    "type": "oauth",
     "access": "CREDENTIAL_PROXY_PLACEHOLDER",
-    "accountId": "placeholder",
-    "expires": "2099-12-31T23:59:59Z",
     "refresh": "CREDENTIAL_PROXY_PLACEHOLDER",
-    "type": "oauth"
+    "expires": 4102444800000,
+    "accountId": "placeholder"
   },
   "google": {
+    "type": "oauth",
     "access": "CREDENTIAL_PROXY_PLACEHOLDER",
-    "email": "placeholder@example.com",
-    "expires": "2099-12-31T23:59:59Z",
-    "projectId": "placeholder",
     "refresh": "CREDENTIAL_PROXY_PLACEHOLDER",
-    "type": "oauth"
-  },
-  "copilot": {
-    "access": "CREDENTIAL_PROXY_PLACEHOLDER",
-    "expires": "2099-12-31T23:59:59Z",
-    "refresh": "CREDENTIAL_PROXY_PLACEHOLDER",
-    "type": "oauth"
+    "expires": 4102444800000
   }
 }

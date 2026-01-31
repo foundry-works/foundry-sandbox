@@ -29,18 +29,29 @@ PROVIDER_REFRESH_CONFIG = {
     "anthropic": {
         "token_url": "https://auth.anthropic.com/oauth/token",
         "client_id": None,  # Anthropic uses different auth flow
+        "client_secret": None,
     },
     "openai": {
         "token_url": "https://auth.openai.com/oauth/token",
         "client_id": "app_EMoamEEZ73f0CkXaXp7hrann",
+        "client_secret": None,
     },
     "google": {
         "token_url": "https://oauth2.googleapis.com/token",
-        "client_id": None,  # Requires client_id from auth file or env
+        # Gemini CLI OAuth credentials (public, safe to commit)
+        # Source: https://github.com/google-gemini/gemini-cli
+        "client_id": "681255809395-oo8ft2oprdrnp9e3aqf6av3hmdib135j.apps.googleusercontent.com",
+        "client_secret": "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",
     },
     "copilot": {
         "token_url": "https://github.com/login/oauth/access_token",
         "client_id": None,  # GitHub Copilot uses device flow
+        "client_secret": None,
+    },
+    "zai-coding-plan": {
+        "token_url": None,  # API key, no refresh needed
+        "client_id": None,
+        "client_secret": None,
     },
 }
 
@@ -95,38 +106,56 @@ class MultiProviderTokenManager:
                 "projectId": creds.get("projectId"),
             }
 
-    def _parse_expiry(self, expires: Optional[str]) -> float:
+    def _parse_expiry(self, expires: Optional[str | int | float]) -> float:
         """
-        Parse ISO8601 expiry timestamp to Unix timestamp.
+        Parse expiry to Unix timestamp (seconds). Handles milliseconds and ISO8601.
 
         Args:
-            expires: ISO8601 formatted datetime string or None
+            expires: Unix timestamp (ms or seconds), ISO8601 string, or None
 
         Returns:
-            Unix timestamp as float, or 0 if parsing fails
+            Unix timestamp as float (seconds), or 0 if parsing fails
         """
-        if not expires:
+        if expires is None:
             return 0
 
-        try:
-            # Parse ISO8601 format (e.g., "2099-12-31T23:59:59Z")
-            dt = datetime.fromisoformat(expires.replace("Z", "+00:00"))
-            return dt.timestamp()
-        except (ValueError, AttributeError):
-            return 0
+        # Handle numeric values (milliseconds or seconds)
+        if isinstance(expires, (int, float)):
+            if expires > 10_000_000_000:  # Likely milliseconds
+                return expires / 1000.0
+            return float(expires)
 
-    def _format_expiry(self, timestamp: float) -> str:
+        # Handle string values
+        if isinstance(expires, str):
+            # Try parsing as numeric first
+            try:
+                num_val = float(expires)
+                if num_val > 10_000_000_000:  # Likely milliseconds
+                    return num_val / 1000.0
+                return num_val
+            except ValueError:
+                pass
+
+            # Parse ISO8601
+            try:
+                dt = datetime.fromisoformat(expires.replace("Z", "+00:00"))
+                return dt.timestamp()
+            except (ValueError, AttributeError):
+                pass
+
+        return 0
+
+    def _format_expiry(self, timestamp: float) -> int:
         """
-        Format Unix timestamp as ISO8601 string.
+        Format Unix timestamp as milliseconds for auth.json compatibility.
 
         Args:
-            timestamp: Unix timestamp
+            timestamp: Unix timestamp (seconds)
 
         Returns:
-            ISO8601 formatted datetime string
+            Unix timestamp in milliseconds
         """
-        dt = datetime.fromtimestamp(timestamp, tz=timezone.utc)
-        return dt.strftime("%Y-%m-%dT%H:%M:%SZ")
+        return int(timestamp * 1000)
 
     def _is_token_expired(self, provider: str) -> bool:
         """Check if provider's token is expired or will expire within buffer period."""
@@ -171,9 +200,11 @@ class MultiProviderTokenManager:
                 "refresh_token": refresh_token,
             }
 
-            # Add client_id if configured
+            # Add client_id and client_secret if configured
             if config.get("client_id"):
                 payload["client_id"] = config["client_id"]
+            if config.get("client_secret"):
+                payload["client_secret"] = config["client_secret"]
 
             headers = {"Content-Type": "application/json"}
 

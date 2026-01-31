@@ -93,6 +93,7 @@ OPENCODE_PROVIDER_HOSTS = {
     "generativelanguage.googleapis.com": "google",
     "api.githubcopilot.com": "copilot",
     "copilot-proxy.githubusercontent.com": "copilot",
+    "api.z.ai": "zai-coding-plan",  # Z.AI / Zhipu GLM provider
 }
 
 # Gemini API hosts (for OAuth token injection)
