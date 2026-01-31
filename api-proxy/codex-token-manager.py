@@ -70,12 +70,48 @@ class OAuthTokenManager:
 
         self._access_token = tokens.get("access_token")
         self._refresh_token = tokens.get("refresh_token")
-        # Ensure expires_at is numeric (may be stored as string in some formats)
+        # Parse expires_at - may be numeric timestamp or ISO date string
         expires_at_raw = data.get("expires_at") or data.get("last_refresh", 0)
-        self._expires_at = float(expires_at_raw) if expires_at_raw else 0
+        self._expires_at = self._parse_expiry(expires_at_raw)
 
         if not self._access_token or not self._refresh_token:
             raise ValueError("Invalid auth.json: missing access_token or refresh_token")
+
+    def _parse_expiry(self, value) -> float:
+        """Parse expiry value - handles numeric timestamps and ISO date strings."""
+        if not value:
+            return 0
+        # Already a number
+        if isinstance(value, (int, float)):
+            return float(value)
+        # Try parsing as float string (e.g., "1700000000")
+        try:
+            return float(value)
+        except (ValueError, TypeError):
+            pass
+        # Try parsing as ISO timestamp (e.g., "2026-01-26T00:33:39.106494452Z")
+        try:
+            from datetime import datetime
+            # Handle various ISO formats
+            dt_str = str(value).replace("Z", "+00:00")
+            # Python's fromisoformat can't handle nanoseconds, truncate to microseconds
+            if "." in dt_str:
+                base, frac_tz = dt_str.split(".", 1)
+                # Split fraction from timezone
+                if "+" in frac_tz:
+                    frac, tz = frac_tz.split("+", 1)
+                    frac = frac[:6]  # Truncate to microseconds
+                    dt_str = f"{base}.{frac}+{tz}"
+                elif "-" in frac_tz:
+                    frac, tz = frac_tz.split("-", 1)
+                    frac = frac[:6]
+                    dt_str = f"{base}.{frac}-{tz}"
+                else:
+                    dt_str = f"{base}.{frac_tz[:6]}"
+            dt = datetime.fromisoformat(dt_str)
+            return dt.timestamp()
+        except (ValueError, TypeError):
+            return 0
 
     def _is_token_expired(self) -> bool:
         """Check if token is expired or will expire within buffer period."""
