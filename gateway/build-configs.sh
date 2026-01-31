@@ -124,6 +124,11 @@ generate_dnsmasq() {
     content+="# Default upstream DNS servers (uses /etc/resolv.conf)\n"
     content+="# port=53 is the default\n\n"
 
+    # Privilege dropping - dnsmasq binds port 53 as root, then drops to appuser
+    content+="# Privilege dropping: run as appuser after binding port 53\n"
+    content+="user=appuser\n"
+    content+="group=appuser\n\n"
+
     # Add address records for whitelisted domains
     content+="# Whitelisted domains - allow resolution\n"
 

@@ -3,7 +3,7 @@
 # Firewall allowlist configuration (auto-generated)
 # Generated from: /workspace/gateway/allowlist.conf
 # DO NOT EDIT MANUALLY - use build-configs.sh to regenerate
-# Generated: Sat Jan 31 12:30:30 EST 2026
+# Generated: Sat Jan 31 18:29:21 EST 2026
 #
 # This file is sourced by safety/network-firewall.sh
 # Provides domain, rotating domain, and CIDR allowlists

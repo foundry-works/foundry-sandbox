@@ -345,6 +345,53 @@ curl -H "Authorization: Bearer <sandbox-a-token>" http://gateway:8080/git/...  #
 
 ---
 
+## Known Limitations
+
+### Basic Auth Does Not Validate Session Secret
+
+**Behavior:** When using Basic auth (git credential helper flow), only the session token is validated, not the session secret. The secret is not transmitted in Basic auth.
+
+**Why This Exists:** Git credential helpers use Basic authentication (RFC 7617) which provides a single password field. Our credential helper stores the session token in the password field. The two-factor token:secret model was designed for Bearer auth API calls.
+
+**Security Implications:**
+- An attacker who obtains only the session token (without the secret) could use it from the same IP address
+- The attacker must still pass IP binding validation (session bound to container IP)
+- Docker ICC=false prevents other containers from accessing the sandbox's IP
+- Tokens are stored with 0400 permissions in `/run/secrets/gateway_token`
+
+**Mitigating Factors:**
+- IP binding provides strong protection within isolated Docker networks
+- Session tokens are cryptographically random (secrets.token_urlsafe(32))
+- Network isolation prevents external access to sandbox network segment
+- Short TTLs limit exposure window
+
+**Alternative Considered:** Encode token:secret in Base64 as the password field. Rejected because:
+- Adds complexity to credential helper
+- May exceed git's maximum credential length on some platforms
+- IP binding already provides sufficient security for threat model
+
+### Session Store Is In-Memory Only
+
+**Behavior:** Sessions are stored in a Python dictionary in the gateway process. If the gateway container restarts, all sessions are lost.
+
+**Operational Impact:**
+- Sandboxes must re-authenticate after gateway restart
+- Re-authentication requires orchestrator intervention (session creation is localhost-only)
+- No automatic session recovery mechanism
+
+**Why Not Persistent Storage:**
+- Sessions are short-lived (24h inactivity, 7d absolute)
+- Adding persistent storage (Redis, filesystem) increases attack surface
+- Gateway restarts should be rare in normal operation
+- Sandboxes are typically short-lived and can be recreated
+
+**Workarounds:**
+- Orchestrator can detect failed git operations and recreate sessions
+- For long-running sandboxes, schedule gateway restarts during maintenance windows
+- Monitor gateway uptime as part of operational health checks
+
+---
+
 ## Related Documentation
 
 - [Network Isolation Model](network-isolation.md) - Detailed network architecture

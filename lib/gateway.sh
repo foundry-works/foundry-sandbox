@@ -145,11 +145,14 @@ write_gateway_token_to_container() {
     local combined="${token}:${secret}"
 
     # Create /run/secrets directory and write token with secure permissions
-    docker exec "$container_id" sh -c "
+    # Security: Use pipe instead of embedding variable in shell string to prevent injection
+    # Even though tokens are generated securely via secrets.token_urlsafe(32), this pattern
+    # is safer as defense-in-depth against any future changes to token generation
+    echo "$combined" | docker exec -i "$container_id" sh -c '
         mkdir -p /run/secrets && \
-        echo '$combined' > /run/secrets/gateway_token && \
+        cat > /run/secrets/gateway_token && \
         chmod 0400 /run/secrets/gateway_token
-    " 2>/dev/null
+    ' 2>/dev/null
 
     if [ $? -ne 0 ]; then
         log_error "Failed to write gateway token to container"
