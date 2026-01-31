@@ -431,15 +431,20 @@ add_anthropic_credential_to_override() {
     append_override_list_item "$override_file" "environment" "ANTHROPIC_API_KEY=CREDENTIAL_PROXY_PLACEHOLDER"
 }
 
-# Add GEMINI_API_KEY placeholder for credential isolation
-# Always uses API key auth because Gemini CLI's OAuth depends on keytar/libsecret
-# which requires a system keyring that doesn't work reliably in Docker containers.
-# See README.md "Gemini CLI Authentication" section for details.
+# Add Gemini credential placeholder for credential isolation
+# Prefers OAuth if ~/.gemini/oauth_creds.json exists, otherwise falls back to API key
 add_gemini_credential_to_override() {
     local override_file="$1"
 
-    # Always set the placeholder for API key auth
-    # OAuth is not supported in credential isolation mode due to keytar dependencies
+    # Check if OAuth credentials exist - prefer OAuth over API key
+    if [ -f "$HOME/.gemini/oauth_creds.json" ]; then
+        log_info "Using Gemini OAuth credentials (oauth_creds.json found)"
+        # Don't add GEMINI_API_KEY - OAuth will be used via proxy
+        return 0
+    fi
+
+    # Fallback to API key if no OAuth credentials
+    log_info "Using Gemini API key (no oauth_creds.json found)"
     ensure_override_header "$override_file"
     append_override_list_item "$override_file" "environment" "GEMINI_API_KEY=CREDENTIAL_PROXY_PLACEHOLDER"
 }

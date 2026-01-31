@@ -1442,7 +1442,7 @@ PY
 }
 
 # Force Gemini to use API key auth instead of OAuth
-# Called in credential isolation mode where OAuth doesn't work due to keytar/keyring dependencies
+# Called in credential isolation mode when OAuth credentials are not available
 ensure_gemini_apikey_auth() {
     local container_id="$1"
     local quiet="${2:-0}"
@@ -1483,6 +1483,57 @@ if not isinstance(auth, dict):
 
 # Change from oauth-personal to gemini-api-key
 auth["selectedType"] = "gemini-api-key"
+security["auth"] = auth
+data["security"] = security
+
+with open(path, "w") as f:
+    json.dump(data, f, indent=2)
+    f.write("\n")
+PY
+}
+
+# Configure Gemini to use OAuth auth in credential isolation mode
+# Called when OAuth credentials exist on the host
+ensure_gemini_oauth_auth() {
+    local container_id="$1"
+    local quiet="${2:-0}"
+    local run_fn="run_cmd"
+    if [ "$quiet" = "1" ]; then
+        run_fn="run_cmd_quiet"
+    fi
+
+    if [ "$quiet" != "1" ]; then
+        log_info "Configuring Gemini for OAuth auth (credential isolation mode)..."
+    fi
+
+    $run_fn docker exec -u "$CONTAINER_USER" -i "$container_id" python3 - <<'PY'
+import json
+import os
+
+path = "/home/ubuntu/.gemini/settings.json"
+os.makedirs(os.path.dirname(path), exist_ok=True)
+
+data = {}
+if os.path.exists(path):
+    try:
+        with open(path, "r") as f:
+            data = json.load(f)
+    except json.JSONDecodeError:
+        data = {}
+
+if not isinstance(data, dict):
+    data = {}
+
+# Set OAuth personal auth mode
+security = data.get("security")
+if not isinstance(security, dict):
+    security = {}
+auth = security.get("auth")
+if not isinstance(auth, dict):
+    auth = {}
+
+# Use oauth-personal for OAuth authentication
+auth["selectedType"] = "oauth-personal"
 security["auth"] = auth
 data["security"] = security
 
@@ -1595,9 +1646,15 @@ copy_configs_to_container() {
         file_exists ~/.gemini/settings.json && copy_file_to_container "$container_id" ~/.gemini/settings.json "$CONTAINER_HOME/.gemini/settings.json"
         file_exists ~/.gemini/google_accounts.json && copy_file_to_container "$container_id" ~/.gemini/google_accounts.json "$CONTAINER_HOME/.gemini/google_accounts.json"
     fi
-    # In credential isolation mode, force API key auth (OAuth doesn't work due to keytar/keyring)
+    # In credential isolation mode, configure Gemini auth based on available credentials
     if [ "$isolate_credentials" = "true" ]; then
-        ensure_gemini_apikey_auth "$container_id"
+        if [ -f "$HOME/.gemini/oauth_creds.json" ]; then
+            # OAuth credentials available - use OAuth mode
+            ensure_gemini_oauth_auth "$container_id"
+        else
+            # No OAuth - fallback to API key auth
+            ensure_gemini_apikey_auth "$container_id"
+        fi
     fi
     # OpenCode config (not credentials)
     if file_exists ~/.config/opencode/opencode.json; then

@@ -36,6 +36,9 @@ fi
 if [ -f "/stub-auth/opencode-auth.json" ]; then
     cp /stub-auth/opencode-auth.json "$HOME/.local/share/opencode/auth.json"
 fi
+if [ -f "/stub-auth/gemini-oauth_creds.json" ]; then
+    cp /stub-auth/gemini-oauth_creds.json "$HOME/.gemini/oauth_creds.json"
+fi
 
 # Ensure Claude Code temp dir exists (defaulted via docker-compose)
 if [ -n "${CLAUDE_CODE_TMPDIR:-}" ]; then
