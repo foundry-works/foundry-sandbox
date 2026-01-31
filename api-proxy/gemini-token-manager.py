@@ -22,8 +22,49 @@ import httpx
 # Token expiry buffer - consider token expired if within this window
 TOKEN_EXPIRY_BUFFER_SECONDS = 300  # 5 minutes
 
-# Gemini CLI OAuth credentials (embedded in CLI source, safe to use)
+# =============================================================================
+# Gemini CLI OAuth Credentials - PUBLIC AND SAFE TO COMMIT
+# =============================================================================
+#
+# These OAuth client credentials are NOT secrets. They are intentionally public
+# and safe to commit to version control.
+#
+# WHY THESE ARE SAFE:
+# ------------------
+# Google's OAuth 2.0 has two application types with different security models:
+#
+# 1. "Web applications" - Client secret MUST be kept confidential because the
+#    server can protect it.
+#
+# 2. "Installed applications" (desktop/CLI/mobile) - Client secret is PUBLIC
+#    because the app runs on user devices where secrets cannot be protected.
+#    Security relies on the redirect URI and user consent, not the secret.
+#
+# Gemini CLI is an "installed application". Per Google's documentation:
+# "The client_id and client_secret obtained during registration are embedded
+# in the source code of your application. In this context, the client_secret
+# is not treated as a secret."
+#
+# SOURCE:
+# -------
+# These credentials are copied from the official Gemini CLI source code:
 # https://github.com/google-gemini/gemini-cli/blob/main/packages/core/src/code_assist/oauth2.ts
+#
+# The Gemini CLI source includes this comment:
+# "it's ok to save this in git because this is an installed application"
+#
+# DOCUMENTATION:
+# --------------
+# - Google OAuth for Installed Apps: https://developers.google.com/identity/protocols/oauth2/native-app
+# - "Installed apps are distributed to individual devices, and it is assumed
+#    that these apps cannot keep secrets." - Google OAuth2 Documentation
+#
+# VERIFICATION:
+# -------------
+# To verify these are unchanged from the official source, compare against:
+# curl -s https://raw.githubusercontent.com/google-gemini/gemini-cli/main/packages/core/src/code_assist/oauth2.ts | grep -E "(CLIENT_ID|CLIENT_SECRET)"
+#
+# =============================================================================
 GEMINI_CLIENT_ID = "681255809395-oo8ft2oprdrnp9e3aqf6av3hmdib135j.apps.googleusercontent.com"
 GEMINI_CLIENT_SECRET = "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"
 GOOGLE_TOKEN_URL = "https://oauth2.googleapis.com/token"

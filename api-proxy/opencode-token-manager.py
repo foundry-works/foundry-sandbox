@@ -23,6 +23,8 @@ import httpx
 TOKEN_EXPIRY_BUFFER_SECONDS = 300  # 5 minutes
 
 # Provider-specific refresh configurations
+# Note: OpenAI client_id is public (installed app OAuth pattern)
+# Source: https://github.com/openai/codex/blob/main/codex-rs/core/src/auth.rs
 PROVIDER_REFRESH_CONFIG = {
     "anthropic": {
         "token_url": "https://auth.anthropic.com/oauth/token",

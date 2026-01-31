@@ -19,9 +19,35 @@ from typing import Optional
 import httpx
 
 # OAuth configuration
-OAUTH_TOKEN_URL = "https://auth.openai.com/oauth/token"  # New OpenAI auth (not Auth0)
-OPENAI_CLIENT_ID = "app_EMoamEEZ73f0CkXaXp7hrann"  # Codex CLI client ID
+OAUTH_TOKEN_URL = "https://auth.openai.com/oauth/token"
 TOKEN_EXPIRY_BUFFER_SECONDS = 300  # 5 minutes
+
+# =============================================================================
+# OpenAI Codex CLI OAuth Client ID - PUBLIC AND SAFE TO COMMIT
+# =============================================================================
+#
+# This OAuth client ID is NOT a secret. It is intentionally public and safe
+# to commit to version control.
+#
+# WHY THIS IS SAFE:
+# -----------------
+# OAuth 2.0 "installed applications" (desktop/CLI/mobile apps) have public
+# client IDs because the app runs on user devices where secrets cannot be
+# protected. Security relies on the redirect URI and user consent, not the
+# client ID.
+#
+# SOURCE:
+# -------
+# This client ID is from the official OpenAI Codex CLI source code:
+# https://github.com/openai/codex/blob/main/codex-rs/core/src/auth.rs
+#
+# VERIFICATION:
+# -------------
+# To verify this is unchanged from the official source:
+# curl -s https://raw.githubusercontent.com/openai/codex/main/codex-rs/core/src/auth.rs | grep CLIENT_ID
+#
+# =============================================================================
+OPENAI_CLIENT_ID = "app_EMoamEEZ73f0CkXaXp7hrann"
 
 # JWT placeholder for Codex OAuth tokens
 # Contains CREDENTIAL_PROXY_PLACEHOLDER in the sub claim for proxy detection
@@ -29,9 +55,7 @@ TOKEN_EXPIRY_BUFFER_SECONDS = 300  # 5 minutes
 #                      "aud": "app_EMoamEEZ73f0CkXaXp7hrann", "exp": 4102444800, "iat": 1700000000}
 CODEX_PLACEHOLDER_JWT = (
     "eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9."
-    "eyJpc3MiOiJodHRwczovL2F1dGgub3BlbmFpLmNvbS8iLCJzdWIiOiJDUkVERU5USUFMX1BST1hZX1BMQUNFSE9MREVSIiwiYXVkIjoiYXBwX0VNb2FtRUVaNzNmMENrWGFYcDdocmFubiIsImV4cCI6NDEwMjQ0NDgwMCwiaWF0IjoxNzAwMDAwMDAwfQ"
-    ""
-    "."
+    "eyJpc3MiOiJodHRwczovL2F1dGgub3BlbmFpLmNvbS8iLCJzdWIiOiJDUkVERU5USUFMX1BST1hZX1BMQUNFSE9MREVSIiwiYXVkIjoiYXBwX0VNb2FtRUVaNzNmMENrWGFYcDdocmFubiIsImV4cCI6NDEwMjQ0NDgwMCwiaWF0IjoxNzAwMDAwMDAwfQ."
     "CREDENTIAL_PROXY_PLACEHOLDER_SIGNATURE"
 )
 
