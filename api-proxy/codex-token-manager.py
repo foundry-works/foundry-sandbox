@@ -70,12 +70,17 @@ class OAuthTokenManager:
 
         self._access_token = tokens.get("access_token")
         self._refresh_token = tokens.get("refresh_token")
-        # Parse expires_at - may be numeric timestamp or ISO date string
-        expires_at_raw = data.get("expires_at") or data.get("last_refresh", 0)
-        self._expires_at = self._parse_expiry(expires_at_raw)
 
         if not self._access_token or not self._refresh_token:
             raise ValueError("Invalid auth.json: missing access_token or refresh_token")
+
+        # Determine expiry: prefer explicit expires_at, otherwise extract from JWT
+        expires_at_raw = data.get("expires_at")
+        if expires_at_raw:
+            self._expires_at = self._parse_expiry(expires_at_raw)
+        else:
+            # Extract exp from JWT access_token (last_refresh is not the expiry time)
+            self._expires_at = self._extract_jwt_expiry(self._access_token)
 
     def _parse_expiry(self, value) -> float:
         """Parse expiry value - handles numeric timestamps and ISO date strings."""
@@ -111,6 +116,22 @@ class OAuthTokenManager:
             dt = datetime.fromisoformat(dt_str)
             return dt.timestamp()
         except (ValueError, TypeError):
+            return 0
+
+    def _extract_jwt_expiry(self, token: str) -> float:
+        """Extract expiry timestamp from JWT access token."""
+        import base64
+        try:
+            # JWT format: header.payload.signature
+            parts = token.split(".")
+            if len(parts) != 3:
+                return 0
+            # Decode payload (add padding for base64)
+            payload_b64 = parts[1]
+            payload_b64 += "=" * (4 - len(payload_b64) % 4)
+            payload = json.loads(base64.urlsafe_b64decode(payload_b64))
+            return float(payload.get("exp", 0))
+        except (ValueError, TypeError, json.JSONDecodeError, IndexError):
             return 0
 
     def _is_token_expired(self) -> bool:
