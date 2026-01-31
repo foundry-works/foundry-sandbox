@@ -63,6 +63,21 @@ fi
 # To apply network mode manually: sudo network-mode <limited|host-only|none>
 # The host script will call this after copy_configs_to_container completes.
 
+# Apply gateway gitconfig conditionally
+# When SANDBOX_GATEWAY_ENABLED=true, route GitHub URLs through the gateway
+# Otherwise, use direct GitHub access
+if [ "$SANDBOX_GATEWAY_ENABLED" = "true" ] && [ -f "/etc/gitconfig.gateway" ]; then
+    echo "Gateway mode enabled - configuring git URL rewriting..."
+    sudo cp /etc/gitconfig.gateway /etc/gitconfig 2>/dev/null || \
+        cp /etc/gitconfig.gateway /etc/gitconfig 2>/dev/null || true
+else
+    # Remove any gateway gitconfig to allow direct GitHub access
+    if [ -f "/etc/gitconfig" ] && grep -q "gateway:8080" /etc/gitconfig 2>/dev/null; then
+        echo "Gateway mode disabled - removing git URL rewriting..."
+        sudo rm -f /etc/gitconfig 2>/dev/null || rm -f /etc/gitconfig 2>/dev/null || true
+    fi
+fi
+
 # Trust mitmproxy CA when mounted (explicit proxy mode)
 if [ -f "/certs/mitmproxy-ca.pem" ]; then
     echo "Configuring CA trust for proxy..."

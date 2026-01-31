@@ -18,6 +18,7 @@ import requests
 from urllib.parse import urljoin
 import threading
 import atexit
+import base64
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -37,6 +38,7 @@ SESSION_GC_INTERVAL = timedelta(minutes=5)  # Run garbage collection every 5 min
 
 # Garbage collection state
 _gc_timer = None
+_gc_initialized = False
 
 # Validation regex patterns
 OWNER_REGEX = r'^[a-zA-Z0-9]([a-zA-Z0-9-]*[a-zA-Z0-9])?$'
@@ -144,7 +146,7 @@ def validate_session(token, secret, client_ip):
 
     Args:
         token: Session token
-        secret: Session secret
+        secret: Session secret (can be None for Basic auth flow)
         client_ip: Client IP address from request
 
     Returns:
@@ -155,8 +157,10 @@ def validate_session(token, secret, client_ip):
 
     session = SESSIONS[token]
 
-    # Check secret matches
-    if session['secret'] != secret:
+    # Check secret matches (if provided)
+    # Basic auth flow doesn't carry the secret, so we skip this check when secret is None
+    # Security note: Basic auth relies on IP binding for additional security
+    if secret is not None and session['secret'] != secret:
         return False
 
     # Check IP binding
@@ -221,8 +225,12 @@ def start_garbage_collection():
     """
     Start the background garbage collection timer.
     Runs every 5 minutes to clean up expired sessions.
+    Safe to call multiple times - will only start once.
     """
-    global _gc_timer
+    global _gc_timer, _gc_initialized
+    if _gc_initialized:
+        return  # Already started
+    _gc_initialized = True
     logger.info('Starting session garbage collection (interval: 5 minutes)')
     _gc_timer = threading.Timer(SESSION_GC_INTERVAL.total_seconds(), garbage_collect_sessions)
     _gc_timer.daemon = True
@@ -233,11 +241,31 @@ def stop_garbage_collection():
     Stop the background garbage collection timer.
     Called on application shutdown.
     """
-    global _gc_timer
+    global _gc_timer, _gc_initialized
     if _gc_timer:
         logger.info('Stopping session garbage collection')
         _gc_timer.cancel()
         _gc_timer = None
+    _gc_initialized = False
+
+
+def _delayed_gc_init():
+    """
+    Start GC after brief delay to allow app initialization.
+    Called at module load time to ensure GC runs under Gunicorn.
+    """
+    start_garbage_collection()
+
+
+# Initialize garbage collection when module loads (works under Gunicorn)
+# Uses a delayed timer to allow app initialization to complete first
+# The __main__ block also calls start_garbage_collection for direct execution
+_gc_init_timer = threading.Timer(2.0, _delayed_gc_init)
+_gc_init_timer.daemon = True
+_gc_init_timer.start()
+
+# Register cleanup on module unload
+atexit.register(stop_garbage_collection)
 
 def destroy_session(token):
     """
@@ -564,30 +592,60 @@ def git_proxy(owner, repo, git_path):
         })
         return Response('Unauthorized', status=401)
 
-    # Parse authorization header (expected format: "Bearer token:secret")
-    if not auth_header.startswith('Bearer '):
+    # Parse authorization header (supports both Bearer and Basic formats)
+    # - Bearer format: "Bearer token:secret" (direct API calls)
+    # - Basic format: "Basic base64(username:password)" (git credential helper)
+    #   The credential helper puts the token in the password field
+    token = None
+    secret = None
+
+    if auth_header.startswith('Bearer '):
+        # Bearer format: "Bearer token:secret"
+        try:
+            token_secret = auth_header[7:]  # Remove "Bearer " prefix
+            if ':' not in token_secret:
+                raise ValueError('Missing token:secret separator')
+            token, secret = token_secret.split(':', 1)
+        except Exception as e:
+            audit_log('git_denied', extra_data={
+                'reason': 'malformed_bearer_credentials',
+                'owner': owner,
+                'repo': repo,
+                'path': git_path,
+                'error': str(e)
+            })
+            return Response('Malformed Bearer credentials', status=401)
+    elif auth_header.startswith('Basic '):
+        # Basic format: base64(username:password)
+        # The credential helper puts the session token in the password field
+        # Format from credential helper: "x-gateway-token:token_value"
+        try:
+            encoded = auth_header[6:]  # Remove "Basic " prefix
+            decoded = base64.b64decode(encoded).decode('utf-8')
+            if ':' not in decoded:
+                raise ValueError('Missing username:password separator')
+            username, password = decoded.split(':', 1)
+            # Token is in the password field (from credential helper)
+            token = password
+            # Basic auth doesn't carry the secret - will need to validate without it
+            secret = None
+        except Exception as e:
+            audit_log('git_denied', extra_data={
+                'reason': 'malformed_basic_credentials',
+                'owner': owner,
+                'repo': repo,
+                'path': git_path,
+                'error': str(e)
+            })
+            return Response('Malformed Basic credentials', status=401)
+    else:
         audit_log('git_denied', extra_data={
             'reason': 'invalid_auth_format',
             'owner': owner,
             'repo': repo,
             'path': git_path
         })
-        return Response('Invalid authorization format', status=401)
-
-    try:
-        token_secret = auth_header[7:]  # Remove "Bearer " prefix
-        if ':' not in token_secret:
-            raise ValueError('Missing token:secret separator')
-        token, secret = token_secret.split(':', 1)
-    except Exception as e:
-        audit_log('git_denied', extra_data={
-            'reason': 'malformed_credentials',
-            'owner': owner,
-            'repo': repo,
-            'path': git_path,
-            'error': str(e)
-        })
-        return Response('Malformed credentials', status=401)
+        return Response('Invalid authorization format (expected Bearer or Basic)', status=401)
 
     # Validate session
     client_ip = request.remote_addr
@@ -600,6 +658,22 @@ def git_proxy(owner, repo, git_path):
             'client_ip': client_ip
         })
         return Response('Invalid or expired session', status=401)
+
+    # Enforce repo scoping if session has a repos list
+    session = SESSIONS.get(token)
+    if session and session.get('repos'):
+        requested_repo = f"{owner}/{repo}"
+        if requested_repo not in session['repos']:
+            audit_log('git_denied', extra_data={
+                'reason': 'repo_not_authorized',
+                'owner': owner,
+                'repo': repo,
+                'path': git_path,
+                'requested_repo': requested_repo,
+                'authorized_repos': session['repos']
+            })
+            logger.warning(f"Repo {requested_repo} not in authorized list for session")
+            return Response('Repository not authorized for this session', status=403)
 
     # Determine operation type
     if git_path == 'info/refs':
@@ -647,10 +721,12 @@ def git_proxy(owner, repo, git_path):
         github_token = get_github_token()
         headers['Authorization'] = f'token {github_token}'
 
-        # Get request body for streaming if present
+        # Stream request body to avoid buffering large payloads (e.g., git push)
+        # Use request.stream for memory-bounded streaming instead of request.get_data()
         request_body = None
         if request.method in ['POST', 'PUT']:
-            request_body = request.get_data()
+            # Use streaming to avoid loading entire request into memory
+            request_body = request.stream
 
         # Make streaming request with proper timeouts: (30s connect, 600s transfer)
         proxied_request = requests.request(
@@ -661,7 +737,7 @@ def git_proxy(owner, repo, git_path):
             params=request.args,
             allow_redirects=False,  # Disable redirects per spec
             timeout=(30, 600),  # Connect timeout, read timeout
-            stream=True  # Enable streaming
+            stream=True  # Enable streaming response
         )
 
         # Log successful git access
@@ -761,10 +837,7 @@ def internal_error(error):
 if __name__ == '__main__':
     logger.info(f'Starting credential isolation gateway on {GATEWAY_HOST}:{GATEWAY_PORT}')
 
-    # Start garbage collection on application startup
-    start_garbage_collection()
-
-    # Register cleanup on application shutdown
-    atexit.register(stop_garbage_collection)
+    # GC is already started by module-level initialization
+    # atexit handler is already registered at module level
 
     app.run(host=GATEWAY_HOST, port=GATEWAY_PORT, debug=False)

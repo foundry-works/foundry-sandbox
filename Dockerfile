@@ -124,17 +124,13 @@ RUN mkdir -p /etc/skel/.ssh && \
     chmod 700 /etc/skel/.ssh && \
     chmod 644 /etc/skel/.ssh/known_hosts
 
-# Git URL rewriting for credential isolation gateway
-# When SANDBOX_GATEWAY_ENABLED=true, all GitHub URLs route through the gateway
+# Git URL rewriting for credential isolation gateway (conditional)
+# The gitconfig is created at runtime by entrypoint.sh when SANDBOX_GATEWAY_ENABLED=true
 # This ensures credentials never reach the sandbox - the gateway injects them
-# The credential helper reads token from /run/secrets/gateway_token
-RUN echo '[url "http://gateway:8080/git/"]' > /etc/gitconfig && \
-    echo '    insteadOf = https://github.com/' >> /etc/gitconfig && \
-    echo '    insteadOf = git@github.com:' >> /etc/gitconfig && \
-    echo '' >> /etc/gitconfig && \
-    echo '[credential "http://gateway:8080"]' >> /etc/gitconfig && \
-    echo '    helper = /usr/local/bin/gateway-credential-helper' >> /etc/gitconfig && \
-    chmod 644 /etc/gitconfig
+# When gateway is disabled, direct GitHub access is used
+# Create the gateway gitconfig template (will be applied conditionally at runtime)
+COPY safety/gateway-gitconfig /etc/gitconfig.gateway
+RUN chmod 644 /etc/gitconfig.gateway
 
 # Gateway credential helper - reads token from /run/secrets/gateway_token
 # Outputs via git credential protocol; never logs/echoes the token
