@@ -1,0 +1,137 @@
+#!/bin/bash
+#
+# Firewall allowlist configuration (auto-generated)
+# Generated from: /workspace/gateway/allowlist.conf
+# DO NOT EDIT MANUALLY - use build-configs.sh to regenerate
+# Generated: Sat Jan 31 12:30:30 EST 2026
+#
+# This file is sourced by safety/network-firewall.sh
+# Provides domain, rotating domain, and CIDR allowlists
+#
+
+# Standard domains (resolved once at firewall setup)
+declare -a ALLOWLIST_DOMAINS=(
+    "github.com"
+    "api.github.com"
+    "raw.githubusercontent.com"
+    "objects.githubusercontent.com"
+    "codeload.github.com"
+    "gist.github.com"
+    "gist.api.github.com"
+    "gist.githubusercontent.com"
+    "registry.npmjs.org"
+    "pypi.org"
+    "files.pythonhosted.org"
+    "proxy.golang.org"
+    "sum.golang.org"
+    "crates.io"
+    "static.crates.io"
+    "production.cloudflare.docker.com"
+    "api.anthropic.com"
+    "console.anthropic.com"
+    "claude.ai"
+    "api.openai.com"
+    "auth.openai.com"
+    "auth0.openai.com"
+    "platform.openai.com"
+    "chatgpt.com"
+    "generativelanguage.googleapis.com"
+    "accounts.google.com"
+    "oauth2.googleapis.com"
+    "api.groq.com"
+    "api.mistral.ai"
+    "api.deepseek.com"
+    "api.together.xyz"
+    "api.cohere.com"
+    "api.fireworks.ai"
+    "openrouter.ai"
+    "api.z.ai"
+    "open.bigmodel.cn"
+    "cursor.com"
+    "www.cursor.com"
+    "api.cursor.com"
+    "marketplace.cursorapi.com"
+    "cursor-cdn.com"
+    "downloads.cursor.com"
+    "download.todesktop.com"
+    "opencode.ai"
+    "opncd.ai"
+    "models.dev"
+    "api2.cursor.sh"
+    "api3.cursor.sh"
+    "api4.cursor.sh"
+    "api5.cursor.sh"
+    "api6.cursor.sh"
+    "api7.cursor.sh"
+    "api8.cursor.sh"
+    "agent.api5.cursor.sh"
+    "www2.cursor.sh"
+    "authenticate.cursor.sh"
+    "authenticator.cursor.sh"
+    "prod.authentication.cursor.sh"
+    "us-asia.gcpp.cursor.sh"
+    "us-eu.gcpp.cursor.sh"
+    "us-only.gcpp.cursor.sh"
+    "repo42.cursor.sh"
+    "api.githubcopilot.com"
+    "api.tavily.com"
+    "api.perplexity.ai"
+    "api.semanticscholar.org"
+    "www.googleapis.com"
+    "registry-1.docker.io"
+    "auth.docker.io"
+)
+
+# Rotating IP domains (resolved multiple times to capture IP pool)
+declare -a ROTATING_IP_DOMAINS=(
+    "api2.cursor.sh"
+    "api3.cursor.sh"
+    "api4.cursor.sh"
+    "api5.cursor.sh"
+    "api6.cursor.sh"
+    "api7.cursor.sh"
+    "api8.cursor.sh"
+    "agent.api5.cursor.sh"
+)
+
+# CIDR blocks (from allowlist.conf comments)
+declare -a CIDR_BLOCKS=(
+    "140.82.112.0/20"
+    "192.30.252.0/22"
+    "185.199.108.0/22"
+    "143.55.64.0/20"
+    "173.245.48.0/20"
+    "103.21.244.0/22"
+    "103.22.200.0/22"
+    "103.31.4.0/22"
+    "141.101.64.0/18"
+    "108.162.192.0/18"
+    "190.93.240.0/20"
+    "188.114.96.0/20"
+    "197.234.240.0/22"
+    "198.41.128.0/17"
+    "162.158.0.0/15"
+    "104.16.0.0/13"
+    "104.24.0.0/14"
+    "172.64.0.0/13"
+    "131.0.72.0/22"
+)
+
+# Known IPs that don't resolve via public DNS
+declare -a KNOWN_IPS=(
+    "44.197.141.31"   # api5.cursor.sh
+    "184.73.249.78"   # api2.cursor.sh
+)
+
+# Wildcard domains (for pattern matching)
+declare -a WILDCARD_DOMAINS=(
+    "*.cloudfront.net"
+    "*.fastly.net"
+)
+
+# Statistics
+# Total domains: 71
+# Rotating IP domains: 8
+# Wildcard domains: 2
+# CIDR blocks: 19
+
