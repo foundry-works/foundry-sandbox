@@ -10,12 +10,6 @@ Provider Credential Map:
 - api2.cursor.sh: Authorization Bearer from CURSOR_API_KEY
 - api.openai.com: Authorization Bearer from OPENAI_API_KEY
 - generativelanguage.googleapis.com: x-goog-api-key from GOOGLE_API_KEY (or GEMINI_API_KEY)
-- api.groq.com: Authorization Bearer from GROQ_API_KEY
-- api.mistral.ai: Authorization Bearer from MISTRAL_API_KEY
-- api.deepseek.com: Authorization Bearer from DEEPSEEK_API_KEY
-- api.together.xyz: Authorization Bearer from TOGETHER_API_KEY
-- openrouter.ai: Authorization Bearer from OPENROUTER_API_KEY
-- api.fireworks.ai: Authorization Bearer from FIREWORKS_API_KEY
 - api.tavily.com: Authorization Bearer from TAVILY_API_KEY
 - api.semanticscholar.org: x-api-key from SEMANTIC_SCHOLAR_API_KEY
 - api.perplexity.ai: Authorization Bearer from PERPLEXITY_API_KEY
@@ -134,36 +128,6 @@ PROVIDER_MAP = {
         "env_var": "GOOGLE_API_KEY",
         "fallback_env_var": "GEMINI_API_KEY",
         "format": "value",
-    },
-    "api.groq.com": {
-        "header": "Authorization",
-        "env_var": "GROQ_API_KEY",
-        "format": "bearer",
-    },
-    "api.mistral.ai": {
-        "header": "Authorization",
-        "env_var": "MISTRAL_API_KEY",
-        "format": "bearer",
-    },
-    "api.deepseek.com": {
-        "header": "Authorization",
-        "env_var": "DEEPSEEK_API_KEY",
-        "format": "bearer",
-    },
-    "api.together.xyz": {
-        "header": "Authorization",
-        "env_var": "TOGETHER_API_KEY",
-        "format": "bearer",
-    },
-    "openrouter.ai": {
-        "header": "Authorization",
-        "env_var": "OPENROUTER_API_KEY",
-        "format": "bearer",
-    },
-    "api.fireworks.ai": {
-        "header": "Authorization",
-        "env_var": "FIREWORKS_API_KEY",
-        "format": "bearer",
     },
     "api.tavily.com": {
         "header": "Authorization",
