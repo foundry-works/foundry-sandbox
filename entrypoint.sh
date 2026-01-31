@@ -26,6 +26,17 @@ for dir in "$HOME/.codex" "$HOME/.local" "$HOME/.local/share" "$HOME/.local/shar
     fi
 done
 
+# Copy stub auth files from staging location to writable home directories
+# (credential isolation mode mounts read-only stubs to /stub-auth/)
+# This allows CLI tools to "write" to auth.json without errors, but writes are
+# discarded when container stops since home is tmpfs
+if [ -f "/stub-auth/codex-auth.json" ]; then
+    cp /stub-auth/codex-auth.json "$HOME/.codex/auth.json"
+fi
+if [ -f "/stub-auth/opencode-auth.json" ]; then
+    cp /stub-auth/opencode-auth.json "$HOME/.local/share/opencode/auth.json"
+fi
+
 # Ensure Claude Code temp dir exists (defaulted via docker-compose)
 if [ -n "${CLAUDE_CODE_TMPDIR:-}" ]; then
     mkdir -p "$CLAUDE_CODE_TMPDIR" 2>/dev/null || true
