@@ -35,6 +35,10 @@ UPSTREAM_CONNECT_TIMEOUT = int(os.environ.get('GATEWAY_CONNECT_TIMEOUT', 30))
 UPSTREAM_READ_TIMEOUT = int(os.environ.get('GATEWAY_READ_TIMEOUT', 600))
 
 # Session management
+# NOTE: In-memory session store requires single Gunicorn worker (--workers 1)
+# to maintain consistency. Each worker has its own SESSIONS dict, so multi-worker
+# deployments would fail session validation. For horizontal scaling, replace
+# this dict with a Redis-backed session store.
 SESSIONS = {}  # {token: {'secret': secret, 'container_id': id, 'container_ip': ip, 'repos': [], 'created': datetime, 'last_accessed': datetime, 'expires_at': datetime}}
 SESSION_TTL_INACTIVITY = timedelta(hours=24)  # 24 hour inactivity timeout
 SESSION_TTL_ABSOLUTE = timedelta(days=7)  # 7 day absolute timeout
@@ -805,7 +809,7 @@ def git_proxy(owner, repo, git_path):
             'error_details': str(e)
         })
         # Close the response if it was partially created
-        if 'proxied_request' in dir() and proxied_request is not None:
+        if 'proxied_request' in locals() and proxied_request is not None:
             try:
                 proxied_request.close()
             except Exception:
@@ -821,7 +825,7 @@ def git_proxy(owner, repo, git_path):
             'error': str(e)
         })
         # Close the response if it was partially created to prevent connection leaks
-        if 'proxied_request' in dir() and proxied_request is not None:
+        if 'proxied_request' in locals() and proxied_request is not None:
             try:
                 proxied_request.close()
             except Exception:
