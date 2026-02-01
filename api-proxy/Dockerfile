@@ -4,7 +4,7 @@
 # This container holds API credentials and injects them into outbound requests,
 # keeping credentials isolated from the sandbox environment.
 
-FROM mitmproxy/mitmproxy:latest
+FROM mitmproxy/mitmproxy:11.1.0
 
 # Labels for container identification
 LABEL org.opencontainers.image.title="API Credential Proxy"

@@ -148,14 +148,22 @@ write_gateway_token_to_container() {
     # Security: Use pipe instead of embedding variable in shell string to prevent injection
     # Even though tokens are generated securely via secrets.token_urlsafe(32), this pattern
     # is safer as defense-in-depth against any future changes to token generation
-    echo "$combined" | docker exec -i "$container_id" sh -c '
-        mkdir -p /run/secrets && \
-        cat > /run/secrets/gateway_token && \
+    local write_output
+    write_output=$(echo "$combined" | docker exec -i "$container_id" sh -c '
+        set -e
+        mkdir -p /run/secrets
+        cat > /run/secrets/gateway_token
         chmod 0400 /run/secrets/gateway_token
-    ' 2>/dev/null
+        # Verify permissions were applied correctly
+        perms=$(stat -c "%a" /run/secrets/gateway_token 2>/dev/null || stat -f "%Lp" /run/secrets/gateway_token 2>/dev/null)
+        if [ "$perms" != "400" ]; then
+            echo "ERROR: Failed to set permissions (got $perms, expected 400)" >&2
+            exit 1
+        fi
+    ' 2>&1)
 
     if [ $? -ne 0 ]; then
-        log_error "Failed to write gateway token to container"
+        log_error "Failed to write gateway token to container: $write_output"
         log_error "Remediation steps:"
         log_error "  1. Check container is running: docker ps"
         log_error "  2. Verify /run/secrets is writable in container"

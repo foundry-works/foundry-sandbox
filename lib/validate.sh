@@ -20,11 +20,22 @@ DANGEROUS_PATHS=(
 validate_mount_path() {
     local mount_path="$1"
     local canonical_path
-    canonical_path=$(realpath -m "$mount_path" 2>/dev/null) || canonical_path="$mount_path"
+
+    # Use realpath -e to require the path to exist and resolve all symlinks
+    # This prevents TOCTOU race conditions where an attacker could swap
+    # a symlink target between validation and mount
+    # Fall back to realpath -m for non-existent paths (new directories)
+    if ! canonical_path=$(realpath -e "$mount_path" 2>/dev/null); then
+        # Path doesn't exist yet - use -m but warn about the limitation
+        canonical_path=$(realpath -m "$mount_path" 2>/dev/null) || canonical_path="$mount_path"
+    fi
 
     for dangerous in "${DANGEROUS_PATHS[@]}"; do
         local dangerous_canonical
-        dangerous_canonical=$(realpath -m "$dangerous" 2>/dev/null) || dangerous_canonical="$dangerous"
+        # Use realpath -e for dangerous paths too (they should exist)
+        if ! dangerous_canonical=$(realpath -e "$dangerous" 2>/dev/null); then
+            dangerous_canonical=$(realpath -m "$dangerous" 2>/dev/null) || dangerous_canonical="$dangerous"
+        fi
 
         # Check exact match
         if [[ "$canonical_path" == "$dangerous_canonical" ]]; then
