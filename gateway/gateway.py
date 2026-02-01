@@ -93,8 +93,17 @@ def get_github_token():
 
 def default_policy_hook(owner, repo, operation):
     """
-    Default policy hook that allows all operations.
-    Can be overridden via environment or configuration.
+    Default policy hook that denies all operations (defense-in-depth).
+
+    SECURITY NOTE: This default denies all access to enforce the principle
+    that repository access should be explicitly authorized via session
+    repo scoping. Sessions without a repos list will be denied by default.
+
+    This implements THREAT_MODEL.md Priority 2: "Gateway validates all
+    repository access against session scope."
+
+    To allow unrestricted access for specific use cases, override this
+    hook via environment or configuration.
 
     Args:
         owner: Repository owner
@@ -104,7 +113,10 @@ def default_policy_hook(owner, repo, operation):
     Returns:
         bool: True if operation is allowed, False otherwise
     """
-    return True
+    # Deny by default - sessions must have explicit repo authorization
+    # Repo scoping at lines 755-768 handles sessions with repos lists.
+    # This hook catches sessions without repos lists (legacy/misconfigured).
+    return False
 
 POLICY_HOOK = default_policy_hook
 
@@ -174,9 +186,10 @@ def validate_session(token, secret, client_ip):
         client_ip: Client IP address from request
 
     Returns:
-        dict: The validated session object if valid, None otherwise.
-              Returning the session object prevents race conditions where
-              GC could delete the session between validation and usage.
+        dict: A copy of the validated session if valid, None otherwise.
+              Returning a copy ensures consistent data for authorization
+              decisions, even if GC deletes the original session after
+              this function returns.
     """
     with SESSIONS_LOCK:
         if token not in SESSIONS:
@@ -191,8 +204,8 @@ def validate_session(token, secret, client_ip):
         if secret is not None and not hmac.compare_digest(session['secret'], secret):
             return None
 
-        # Check IP binding
-        if session['container_ip'] != client_ip:
+        # Check IP binding (use constant-time comparison for consistency)
+        if not hmac.compare_digest(session['container_ip'], client_ip):
             return None
 
         now = datetime.utcnow()
@@ -431,6 +444,48 @@ def check_ip_literal_request():
         return True, Response(json.dumps(error_response), status=403, mimetype='application/json')
     return False, None
 
+def scrub_credentials(value):
+    """
+    Scrub potential credentials from a string value.
+
+    Removes or masks patterns that could contain sensitive data:
+    - Bearer tokens
+    - Basic auth credentials
+    - API keys in URLs
+    - OAuth tokens
+
+    Args:
+        value: String value to scrub
+
+    Returns:
+        str: Scrubbed string with credentials removed/masked
+    """
+    if not isinstance(value, str):
+        return value
+
+    # Patterns to scrub (order matters - more specific patterns first)
+    patterns = [
+        # Bearer tokens: "Bearer xxx" -> "Bearer [REDACTED]"
+        (r'Bearer\s+[A-Za-z0-9_\-\.=]+', 'Bearer [REDACTED]'),
+        # Basic auth: "Basic xxx" -> "Basic [REDACTED]"
+        (r'Basic\s+[A-Za-z0-9+/=]+', 'Basic [REDACTED]'),
+        # URL credentials: "://user:pass@" -> "://[REDACTED]@"
+        (r'://[^@\s]+@', '://[REDACTED]@'),
+        # GitHub tokens: ghp_, gho_, ghu_, ghs_, ghr_ prefixed (before generic patterns)
+        (r'\bgh[pousr]_[A-Za-z0-9_]+\b', '[GITHUB_TOKEN_REDACTED]'),
+        # Session tokens (our format): 43-char base64url (before generic patterns)
+        (r'\b[A-Za-z0-9_-]{43}\b', '[TOKEN_REDACTED]'),
+        # Generic API keys: key=xxx, api_key=xxx, apikey=xxx (last to not override specific patterns)
+        (r'(?i)(api[_-]?key|secret|password|auth)[=:]\s*[^\s&]+', r'\1=[REDACTED]'),
+    ]
+
+    result = value
+    for pattern, replacement in patterns:
+        result = re.sub(pattern, replacement, result)
+
+    return result
+
+
 def audit_log(event_type, container_id=None, ip=None, **extra_data):
     """
     Log structured audit events as JSON to stderr.
@@ -460,9 +515,12 @@ def audit_log(event_type, container_id=None, ip=None, **extra_data):
 
     # Add any extra data, but ensure no sensitive data is included
     for key, value in extra_data.items():
-        # Skip sensitive fields
+        # Skip sensitive fields entirely
         if key.lower() in ('token', 'authorization', 'password', 'secret', 'auth'):
             continue
+        # Scrub credential patterns from string values (e.g., error messages)
+        if isinstance(value, str):
+            value = scrub_credentials(value)
         audit_entry[key] = value
 
     # Write to stderr as JSON with error handling
@@ -481,17 +539,38 @@ def health():
     logger.info('Health check requested')
     return {'status': 'healthy'}, 200
 
+def is_localhost(addr):
+    """
+    Check if an address is a localhost address (IPv4 or IPv6).
+
+    Args:
+        addr: IP address string
+
+    Returns:
+        bool: True if localhost, False otherwise
+    """
+    if not addr:
+        return False
+    # IPv4 localhost
+    if addr == '127.0.0.1':
+        return True
+    # IPv6 localhost variants
+    if addr in ('::1', '0:0:0:0:0:0:0:1', '::ffff:127.0.0.1'):
+        return True
+    return False
+
+
 @app.route('/session/create', methods=['POST'])
 def session_create_endpoint():
     """
     Create a new session with token and secret binding to container IP.
     Unix socket only (trusted orchestrator).
     """
-    # Check if request comes from Unix socket (local)
-    # Note: 'localhost' would be resolved to '127.0.0.1' by the time it reaches here
-    if request.remote_addr != '127.0.0.1':
-        audit_log('session_create_denied', extra_data={'reason': 'not_unix_socket'})
-        return {'error': 'Session creation only allowed from Unix socket'}, 403
+    # Check if request comes from localhost (Unix socket or local TCP)
+    # Supports both IPv4 (127.0.0.1) and IPv6 (::1) localhost addresses
+    if not is_localhost(request.remote_addr):
+        audit_log('session_create_denied', extra_data={'reason': 'not_localhost', 'remote_addr': request.remote_addr})
+        return {'error': 'Session creation only allowed from localhost'}, 403
 
     try:
         data = request.json if request.json else {}
@@ -559,11 +638,11 @@ def session_destroy_endpoint(session_token):
     Destroy a session by token.
     Unix socket only.
     """
-    # Check if request comes from Unix socket (local)
-    # Note: 'localhost' would be resolved to '127.0.0.1' by the time it reaches here
-    if request.remote_addr != '127.0.0.1':
-        audit_log('session_destroy_denied', extra_data={'reason': 'not_unix_socket', 'token': session_token})
-        return {'error': 'Session destruction only allowed from Unix socket'}, 403
+    # Check if request comes from localhost (Unix socket or local TCP)
+    # Supports both IPv4 (127.0.0.1) and IPv6 (::1) localhost addresses
+    if not is_localhost(request.remote_addr):
+        audit_log('session_destroy_denied', extra_data={'reason': 'not_localhost', 'remote_addr': request.remote_addr, 'token': session_token})
+        return {'error': 'Session destruction only allowed from localhost'}, 403
 
     if destroy_session(session_token):
         audit_log('session_destroy', extra_data={'token': session_token})
@@ -739,7 +818,10 @@ def git_proxy(owner, repo, git_path):
         return Response('Invalid or expired session', status=401)
 
     # Enforce repo scoping if session has a repos list
+    # Track whether repo scoping was enforced for policy hook decision
+    repo_scoping_enforced = False
     if session.get('repos'):
+        repo_scoping_enforced = True
         requested_repo = f"{owner}/{repo}"
         if requested_repo not in session['repos']:
             audit_log('git_denied', extra_data={
@@ -764,8 +846,10 @@ def git_proxy(owner, repo, git_path):
     else:
         operation = 'unknown'
 
-    # Apply policy hook
-    if not POLICY_HOOK(owner, repo, operation):
+    # Apply policy hook (only when repo scoping was NOT enforced)
+    # When session has repos list, repo scoping already validated access.
+    # Policy hook is for sessions without repos list (legacy/misconfigured).
+    if not repo_scoping_enforced and not POLICY_HOOK(owner, repo, operation):
         audit_log('git_denied', extra_data={
             'reason': 'policy_denied',
             'owner': owner,

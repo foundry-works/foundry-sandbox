@@ -15,6 +15,23 @@
 #
 # Add custom domains via: SANDBOX_ALLOWED_DOMAINS="domain1.com,domain2.com"
 #
+# DNS Resolution Behavior:
+# ========================
+# Domains are resolved to IP addresses ONCE at startup. If external services
+# change their IPs (e.g., load balancer rotation, DNS failover), connections
+# will fail until the firewall rules are refreshed.
+#
+# For domains known to use rotating IPs (Cursor API endpoints), multiple
+# DNS lookups are performed to capture more IPs from the rotation pool.
+# However, this is still a snapshot in time.
+#
+# To refresh IPs without full restart, use:
+#   ./network-firewall.sh refresh
+#
+# For long-running sandboxes or if you notice connectivity issues:
+# - Restart the sandbox to re-resolve all domains
+# - Or run the refresh command to update rotating domain IPs
+#
 
 set -e
 
@@ -546,8 +563,20 @@ fi
 # Drop all other outbound traffic
 iptables -A OUTPUT -j DROP
 
-# Also set up IPv6 rules if available
+# ============================================================================
+# IPv6 Firewall Rules
+# ============================================================================
+# SECURITY: IPv6 must be properly firewalled or disabled. Without ip6tables,
+# sandboxes could bypass all network isolation via IPv6 connections.
+#
+# Strategy:
+# 1. If ip6tables is available, apply matching IPv6 rules
+# 2. If ip6tables is unavailable, check if IPv6 is disabled at kernel level
+# 3. If IPv6 is enabled but ip6tables unavailable, FAIL FAST to prevent bypass
+# ============================================================================
+
 if command -v ip6tables &>/dev/null; then
+    # ip6tables available - apply matching IPv6 firewall rules
     ip6tables -F OUTPUT 2>/dev/null || true
     ip6tables -A OUTPUT -o lo -j ACCEPT 2>/dev/null || true
     ip6tables -A OUTPUT -m state --state ESTABLISHED,RELATED -j ACCEPT 2>/dev/null || true
@@ -597,6 +626,39 @@ if command -v ip6tables &>/dev/null; then
         ip6tables -A OUTPUT -m set --match-set "$IPSET_V6" dst -j ACCEPT 2>/dev/null || true
     fi
     ip6tables -A OUTPUT -j DROP 2>/dev/null || true
+    log_verbose "IPv6 firewall rules applied successfully."
+else
+    # ip6tables not available - check if IPv6 is disabled at kernel level
+    # This is safe because disabled IPv6 means no IPv6 bypass is possible
+    IPV6_DISABLED=false
+
+    # Check multiple indicators that IPv6 is disabled
+    if [ -f /proc/sys/net/ipv6/conf/all/disable_ipv6 ]; then
+        if [ "$(cat /proc/sys/net/ipv6/conf/all/disable_ipv6 2>/dev/null)" = "1" ]; then
+            IPV6_DISABLED=true
+        fi
+    fi
+
+    # Also check if there are any IPv6 addresses on interfaces (excluding loopback)
+    if [ "$IPV6_DISABLED" = "false" ]; then
+        # If no non-loopback IPv6 addresses exist, treat as effectively disabled
+        if ! ip -6 addr show 2>/dev/null | grep -v '::1' | grep -q 'inet6'; then
+            IPV6_DISABLED=true
+        fi
+    fi
+
+    if [ "$IPV6_DISABLED" = "true" ]; then
+        log_verbose "Warning: ip6tables unavailable, but IPv6 is disabled at kernel level - safe to continue."
+    else
+        # SECURITY CRITICAL: IPv6 is enabled but we cannot firewall it
+        # This is a bypass risk - fail fast to prevent unfiltered IPv6 egress
+        echo "FATAL: ip6tables is unavailable but IPv6 is enabled." >&2
+        echo "       Sandboxes could bypass network isolation via IPv6." >&2
+        echo "       Either install ip6tables or disable IPv6:" >&2
+        echo "         sysctl -w net.ipv6.conf.all.disable_ipv6=1" >&2
+        echo "         sysctl -w net.ipv6.conf.default.disable_ipv6=1" >&2
+        exit 1
+    fi
 fi
 
 # ============================================================================
