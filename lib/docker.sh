@@ -25,6 +25,15 @@ compose_up() {
     export CLAUDE_CONFIG_PATH="$claude_config_path"
     export CONTAINER_NAME="$container"
 
+    # Set up gateway socket directory for credential isolation
+    if [ "$isolate_credentials" = "true" ]; then
+        export GATEWAY_SOCKET_DIR="/tmp/foundry-gateway-${container}"
+        mkdir -p "$GATEWAY_SOCKET_DIR"
+        chmod 700 "$GATEWAY_SOCKET_DIR"
+        # Export for gateway.sh to use
+        export GATEWAY_SOCKET_PATH="${GATEWAY_SOCKET_DIR}/gateway.sock"
+    fi
+
     local compose_cmd
     compose_cmd=$(get_compose_command "$override_file" "$isolate_credentials")
     run_cmd $compose_cmd -p "$container" up -d
@@ -48,9 +57,20 @@ compose_down() {
             isolate_credentials="true"
         fi
     fi
+
+    # Set gateway socket path for credential isolation
+    if [ "$isolate_credentials" = "true" ]; then
+        export GATEWAY_SOCKET_DIR="/tmp/foundry-gateway-${container}"
+        export GATEWAY_SOCKET_PATH="${GATEWAY_SOCKET_DIR}/gateway.sock"
+    fi
+
     compose_cmd=$(get_compose_command "$override_file" "$isolate_credentials")
     if [ "$remove_volumes" = "true" ]; then
         run_cmd $compose_cmd -p "$container" down -v
+        # Clean up gateway socket directory
+        if [ -d "/tmp/foundry-gateway-${container}" ]; then
+            rm -rf "/tmp/foundry-gateway-${container}" 2>/dev/null || true
+        fi
     else
         run_cmd $compose_cmd -p "$container" down
     fi

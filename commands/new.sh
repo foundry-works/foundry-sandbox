@@ -328,7 +328,7 @@ OVERRIDES
         repo_spec=$(echo "$repo_url" | sed -E 's#^(https?://)?github\.com/##; s#^git@github\.com:##; s#\.git$##')
         if ! setup_gateway_session "$container_id" "$repo_spec"; then
             log_error "Failed to create gateway session - destroying sandbox"
-            docker compose -f "$(get_compose_file)" -f "$override_file" --project-name "$container" down -v 2>/dev/null || true
+            compose_down "$worktree_dir" "$claude_config_path" "$container" "$override_file" "true" "$isolate_credentials"
             echo ""
             echo "Gateway session creation failed. See error messages above for remediation."
             echo "To create sandbox without credential isolation, omit --isolate-credentials flag."
