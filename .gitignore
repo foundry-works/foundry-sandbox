@@ -2,4 +2,11 @@
 /.claude/
 !docker/.claude/
 specs/.backups
+specs/.fidelity-reviews
+specs/.plan-reviews
+specs/.plans
+specs/.notes
+specs/.research
 __pycache__/
+.claude-tmp/
+*.coverage
