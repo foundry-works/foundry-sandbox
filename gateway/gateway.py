@@ -25,6 +25,81 @@ import hmac
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+# Wildcard domain allowlist (loaded from config at startup)
+WILDCARD_DOMAINS = []
+
+def load_wildcard_config():
+    """
+    Load wildcard domain patterns from firewall-allowlist.generated.
+
+    Parses the WILDCARD_DOMAINS array from the generated config file.
+    Called at module initialization to populate the allowlist.
+    """
+    global WILDCARD_DOMAINS
+    config_path = os.path.join(os.path.dirname(__file__), 'firewall-allowlist.generated')
+
+    if not os.path.exists(config_path):
+        logger.warning(f'Wildcard config not found: {config_path}')
+        return
+
+    try:
+        with open(config_path, 'r') as f:
+            content = f.read()
+
+        # Parse WILDCARD_DOMAINS array from bash syntax
+        # Looking for: "*.domain.com" entries
+        import re
+        pattern = r'"(\*\.[^"]+)"'
+        matches = re.findall(pattern, content)
+        WILDCARD_DOMAINS = matches
+        logger.info(f'Loaded {len(WILDCARD_DOMAINS)} wildcard domain patterns')
+    except Exception as e:
+        logger.error(f'Failed to load wildcard config: {e}')
+
+def matches_domain_allowlist(hostname: str, wildcards: list = None) -> bool:
+    """
+    Check if hostname matches any wildcard pattern in the allowlist.
+
+    Supports suffix wildcards: *.example.com matches:
+    - foo.example.com
+    - bar.baz.example.com
+    - example.com (the base domain itself)
+
+    Does NOT match:
+    - notexample.com (different domain)
+    - exampleXcom (no dot separator)
+
+    Args:
+        hostname: The hostname to check (e.g., "api.example.com")
+        wildcards: Optional list of wildcard patterns. Uses WILDCARD_DOMAINS if None.
+
+    Returns:
+        bool: True if hostname matches any wildcard pattern, False otherwise
+    """
+    if wildcards is None:
+        wildcards = WILDCARD_DOMAINS
+
+    if not wildcards:
+        return True  # No wildcards configured = allow all (legacy behavior)
+
+    hostname = hostname.lower().rstrip('.')
+
+    for pattern in wildcards:
+        pattern = pattern.lower().rstrip('.')
+        if pattern.startswith('*.'):
+            # Wildcard pattern: *.example.com
+            suffix = pattern[2:]  # "example.com"
+            if hostname == suffix or hostname.endswith('.' + suffix):
+                return True
+        elif hostname == pattern:
+            # Exact match
+            return True
+
+    return False
+
+# Load wildcard config at module initialization
+load_wildcard_config()
+
 app = Flask(__name__)
 
 # Configuration
@@ -989,22 +1064,65 @@ def index():
     """Root endpoint."""
     return {'service': 'credential-isolation-gateway', 'version': '1.0.0'}, 200
 
+def check_hostname_allowlist(hostname: str) -> tuple:
+    """
+    Check if hostname is allowed by the wildcard domain allowlist.
+
+    Args:
+        hostname: The target hostname to validate
+
+    Returns:
+        tuple: (is_allowed, response) where response is a Flask Response if denied, None if allowed
+    """
+    if not WILDCARD_DOMAINS:
+        # No wildcards configured - allow (legacy behavior, exact domains handled elsewhere)
+        return True, None
+
+    if not matches_domain_allowlist(hostname):
+        logger.warning(f'Rejecting request to non-allowlisted hostname: {hostname} from {request.remote_addr}')
+        audit_log('proxy_deny', extra_data={
+            'reason': 'hostname_not_allowlisted',
+            'target_host': hostname,
+            'method': request.method,
+            'path': request.path
+        })
+        error_response = {
+            'error': 'Hostname not in allowlist',
+            'message': 'The requested hostname does not match any allowed domain pattern',
+            'target': hostname
+        }
+        return False, Response(json.dumps(error_response), status=403, mimetype='application/json')
+
+    return True, None
+
+
 @app.route('/proxy/<path:path>', methods=['GET', 'POST', 'PUT', 'DELETE'])
 def proxy(path):
     """
     General proxy endpoint.
     Logs allow/deny decisions for audit purposes.
     Rejects IP literal requests.
+    Validates hostname against wildcard domain allowlist.
     """
     # Check for IP literal requests and reject if found
     is_ip, error_response = check_ip_literal_request()
     if is_ip:
         return error_response
 
+    # Validate hostname against wildcard allowlist
+    target_host = request.headers.get('Host', request.host)
+    # Strip port if present
+    if ':' in target_host and not target_host.startswith('['):
+        target_host = target_host.split(':')[0]
+
+    is_allowed, error_response = check_hostname_allowlist(target_host)
+    if not is_allowed:
+        return error_response
+
     # Check if request is allowed (placeholder logic)
     auth_header = request.headers.get('Authorization')
     if auth_header:
-        audit_log('proxy_allow', extra_data={'path': path, 'method': request.method})
+        audit_log('proxy_allow', extra_data={'path': path, 'method': request.method, 'target_host': target_host})
         # Placeholder for proxy logic
         return Response('Not implemented', status=501)
     else:

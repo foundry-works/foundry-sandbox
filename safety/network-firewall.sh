@@ -198,6 +198,39 @@ fi
 # Combine default and extra domains
 ALL_DOMAINS=("${DEFAULT_DOMAINS[@]}" "${EXTRA_DOMAINS[@]}")
 
+# ============================================================================
+# Wildcard Domain Support
+# ============================================================================
+# When wildcard domains (*.example.com) are configured, we cannot pre-resolve
+# IPs at firewall setup time. Instead, we:
+# 1. Open egress on ports 80/443 (HTTP/HTTPS)
+# 2. Rely on DNS filtering (dnsmasq) to restrict domain resolution
+# 3. Rely on gateway hostname validation to enforce allowlist
+#
+# Source the generated allowlist to get WILDCARD_DOMAINS
+# ============================================================================
+WILDCARD_DOMAINS=()
+FIREWALL_ALLOWLIST_FILE="${SCRIPT_DIR:-/workspace/gateway}/firewall-allowlist.generated"
+if [ -z "${SCRIPT_DIR:-}" ]; then
+    # Try relative path from this script's location
+    SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+    FIREWALL_ALLOWLIST_FILE="$SCRIPT_DIR/../gateway/firewall-allowlist.generated"
+fi
+
+if [ -f "$FIREWALL_ALLOWLIST_FILE" ]; then
+    # Source the file to get WILDCARD_DOMAINS array
+    # shellcheck source=/dev/null
+    source "$FIREWALL_ALLOWLIST_FILE"
+    log_verbose "Loaded firewall allowlist: ${#WILDCARD_DOMAINS[@]} wildcard domains"
+fi
+
+# Check if wildcard mode should be enabled
+WILDCARD_MODE=false
+if [ ${#WILDCARD_DOMAINS[@]} -gt 0 ]; then
+    WILDCARD_MODE=true
+    log_verbose "Wildcard mode enabled - will open egress ports 80/443"
+fi
+
 log_verbose "Setting up firewall for limited network mode..."
 log_verbose "Whitelisted domains: ${ALL_DOMAINS[*]}"
 
@@ -560,6 +593,23 @@ if [ "$USE_IPSET" = "true" ]; then
     iptables -A OUTPUT -m set --match-set "$IPSET_V4" dst -j ACCEPT
 fi
 
+# ============================================================================
+# Wildcard Mode: Open HTTP/HTTPS egress
+# ============================================================================
+# When wildcard domains are configured, we cannot pre-resolve IPs.
+# Security is enforced at:
+# 1. DNS layer: dnsmasq only resolves allowlisted domains
+# 2. Gateway layer: validates hostname matches wildcard patterns
+# 3. IP literals are still blocked (requests must use DNS)
+# ============================================================================
+if [ "$WILDCARD_MODE" = "true" ]; then
+    log_verbose "Wildcard mode: allowing egress on ports 80/443"
+    log_verbose "  Wildcards: ${WILDCARD_DOMAINS[*]}"
+    # Allow HTTP/HTTPS to any destination (DNS and gateway enforce security)
+    iptables -A OUTPUT -p tcp --dport 80 -j ACCEPT
+    iptables -A OUTPUT -p tcp --dport 443 -j ACCEPT
+fi
+
 # Drop all other outbound traffic
 iptables -A OUTPUT -j DROP
 
@@ -625,6 +675,14 @@ if command -v ip6tables &>/dev/null; then
     if [ "$USE_IPSET" = "true" ]; then
         ip6tables -A OUTPUT -m set --match-set "$IPSET_V6" dst -j ACCEPT 2>/dev/null || true
     fi
+
+    # Wildcard mode: allow IPv6 HTTP/HTTPS egress (mirrors IPv4)
+    if [ "$WILDCARD_MODE" = "true" ]; then
+        log_verbose "Wildcard mode (IPv6): allowing egress on ports 80/443"
+        ip6tables -A OUTPUT -p tcp --dport 80 -j ACCEPT 2>/dev/null || true
+        ip6tables -A OUTPUT -p tcp --dport 443 -j ACCEPT 2>/dev/null || true
+    fi
+
     ip6tables -A OUTPUT -j DROP 2>/dev/null || true
     log_verbose "IPv6 firewall rules applied successfully."
 else

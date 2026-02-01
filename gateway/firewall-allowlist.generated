@@ -3,7 +3,7 @@
 # Firewall allowlist configuration (auto-generated)
 # Generated from: /workspace/gateway/allowlist.conf
 # DO NOT EDIT MANUALLY - use build-configs.sh to regenerate
-# Generated: Sat Jan 31 18:29:21 EST 2026
+# Generated: Sun Feb  1 06:45:06 EST 2026
 #
 # This file is sourced by safety/network-firewall.sh
 # Provides domain, rotating domain, and CIDR allowlists
@@ -47,32 +47,12 @@ declare -a ALLOWLIST_DOMAINS=(
     "openrouter.ai"
     "api.z.ai"
     "open.bigmodel.cn"
-    "cursor.com"
-    "www.cursor.com"
-    "api.cursor.com"
     "marketplace.cursorapi.com"
     "cursor-cdn.com"
-    "downloads.cursor.com"
     "download.todesktop.com"
     "opencode.ai"
     "opncd.ai"
     "models.dev"
-    "api2.cursor.sh"
-    "api3.cursor.sh"
-    "api4.cursor.sh"
-    "api5.cursor.sh"
-    "api6.cursor.sh"
-    "api7.cursor.sh"
-    "api8.cursor.sh"
-    "agent.api5.cursor.sh"
-    "www2.cursor.sh"
-    "authenticate.cursor.sh"
-    "authenticator.cursor.sh"
-    "prod.authentication.cursor.sh"
-    "us-asia.gcpp.cursor.sh"
-    "us-eu.gcpp.cursor.sh"
-    "us-only.gcpp.cursor.sh"
-    "repo42.cursor.sh"
     "api.githubcopilot.com"
     "api.tavily.com"
     "api.perplexity.ai"
@@ -84,14 +64,6 @@ declare -a ALLOWLIST_DOMAINS=(
 
 # Rotating IP domains (resolved multiple times to capture IP pool)
 declare -a ROTATING_IP_DOMAINS=(
-    "api2.cursor.sh"
-    "api3.cursor.sh"
-    "api4.cursor.sh"
-    "api5.cursor.sh"
-    "api6.cursor.sh"
-    "api7.cursor.sh"
-    "api8.cursor.sh"
-    "agent.api5.cursor.sh"
 )
 
 # CIDR blocks (from allowlist.conf comments)
@@ -127,11 +99,13 @@ declare -a KNOWN_IPS=(
 declare -a WILDCARD_DOMAINS=(
     "*.cloudfront.net"
     "*.fastly.net"
+    "*.cursor.com"
+    "*.cursor.sh"
 )
 
 # Statistics
-# Total domains: 71
-# Rotating IP domains: 8
-# Wildcard domains: 2
+# Total domains: 53
+# Rotating IP domains: 0
+# Wildcard domains: 4
 # CIDR blocks: 19
 
