@@ -519,26 +519,24 @@ class TestRepoScoping:
         assert response.status_code == 403
         assert b'not authorized' in response.data
 
-    def test_repo_scoping_empty_list_allows_all(self, client):
-        """Empty repos list allows access to any repo."""
+    def test_repo_scoping_empty_list_denied_by_default(self, client):
+        """Empty repos list is denied by default policy (defense-in-depth).
+
+        SECURITY: Sessions without explicit repo authorization are denied.
+        This prevents legacy/misconfigured sessions from having unrestricted access.
+        """
         session = gateway.create_session('10.0.0.1', repos=[])
         token = session['token']
         secret = session['secret']
 
-        with patch.object(gateway, 'get_github_token', return_value='fake-token'):
-            with patch('gateway.requests.request') as mock_request:
-                mock_response = MagicMock()
-                mock_response.status_code = 200
-                mock_response.headers = {}
-                mock_response.iter_content = MagicMock(return_value=[])
-                mock_request.return_value = mock_response
-
-                response = client.get(
-                    '/git/any/repo.git/info/refs',
-                    headers={'Authorization': f'Bearer {token}:{secret}'},
-                    environ_base={'REMOTE_ADDR': '10.0.0.1'}
-                )
-                assert response.status_code == 200
+        response = client.get(
+            '/git/any/repo.git/info/refs',
+            headers={'Authorization': f'Bearer {token}:{secret}'},
+            environ_base={'REMOTE_ADDR': '10.0.0.1'}
+        )
+        # Should be denied by default policy hook
+        assert response.status_code == 403
+        assert b'policy' in response.data.lower()
 
 
 # =============================================================================
@@ -622,6 +620,27 @@ class TestSessionCreateEndpoint:
         data = json.loads(response.data)
         assert 'token' in data
         assert 'secret' in data
+
+    def test_session_create_from_ipv6_localhost(self, client):
+        """Session creation from IPv6 localhost (::1) succeeds."""
+        response = client.post(
+            '/session/create',
+            json={'container_ip': '10.0.0.5', 'container_id': 'test-ipv6'},
+            environ_base={'REMOTE_ADDR': '::1'}
+        )
+        assert response.status_code == 201
+        data = json.loads(response.data)
+        assert 'token' in data
+        assert 'secret' in data
+
+    def test_session_create_from_ipv4_mapped_ipv6(self, client):
+        """Session creation from IPv4-mapped IPv6 (::ffff:127.0.0.1) succeeds."""
+        response = client.post(
+            '/session/create',
+            json={'container_ip': '10.0.0.5', 'container_id': 'test-mapped'},
+            environ_base={'REMOTE_ADDR': '::ffff:127.0.0.1'}
+        )
+        assert response.status_code == 201
 
     def test_session_create_from_external_denied(self, client):
         """Session creation from external IP is denied."""
@@ -770,6 +789,78 @@ class TestAuditLog:
         log_entry = json.loads(captured.err.strip())
         assert 'timestamp' in log_entry
         assert log_entry['timestamp'].endswith('Z')
+
+    def test_audit_log_scrubs_credentials_in_error_messages(self, capsys):
+        """Audit log scrubs credential patterns from error message strings."""
+        # Test various credential patterns that might appear in error messages
+        gateway.audit_log(
+            'test_event',
+            container_id='test',
+            ip='10.0.0.1',
+            error='Failed with Bearer abc123token',
+            details='URL was https://user:pass@github.com/repo',
+        )
+        captured = capsys.readouterr()
+        log_entry = json.loads(captured.err.strip())
+        # Bearer token should be redacted
+        assert 'abc123token' not in log_entry['error']
+        assert '[REDACTED]' in log_entry['error']
+        # URL credentials should be redacted
+        assert 'user:pass' not in log_entry['details']
+        assert '[REDACTED]' in log_entry['details']
+
+
+class TestCredentialScrubbing:
+    """Tests for the scrub_credentials function."""
+
+    def test_scrub_bearer_token(self):
+        """Bearer tokens are scrubbed."""
+        result = gateway.scrub_credentials('Error: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9 failed')
+        assert 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9' not in result
+        assert 'Bearer [REDACTED]' in result
+
+    def test_scrub_basic_auth(self):
+        """Basic auth tokens are scrubbed."""
+        result = gateway.scrub_credentials('Auth header: Basic dXNlcjpwYXNz')
+        assert 'dXNlcjpwYXNz' not in result
+        assert 'Basic [REDACTED]' in result
+
+    def test_scrub_url_credentials(self):
+        """URL-embedded credentials are scrubbed."""
+        result = gateway.scrub_credentials('URL: https://user:password123@github.com/repo')
+        assert 'user:password123' not in result
+        assert '://[REDACTED]@' in result
+
+    def test_scrub_github_token(self):
+        """GitHub tokens (ghp_, gho_, etc.) are scrubbed."""
+        result = gateway.scrub_credentials('Found token ghp_1234567890abcdefghij in response')
+        assert 'ghp_1234567890abcdefghij' not in result
+        assert '[GITHUB_TOKEN_REDACTED]' in result
+
+    def test_scrub_api_key_pattern(self):
+        """API key patterns are scrubbed."""
+        result = gateway.scrub_credentials('Config: api_key=supersecret123')
+        assert 'supersecret123' not in result
+        assert 'api_key=[REDACTED]' in result
+
+    def test_scrub_session_token_pattern(self):
+        """Session tokens (43-char base64url) are scrubbed."""
+        # Our tokens are 43-char base64url strings (secrets.token_urlsafe(32))
+        token_43_chars = 'abcdefghijklmnopqrstuvwxyz0123456789ABCDEFG'  # exactly 43 chars
+        result = gateway.scrub_credentials(f'Session {token_43_chars} expired')
+        assert token_43_chars not in result
+        assert '[TOKEN_REDACTED]' in result
+
+    def test_scrub_non_string_passthrough(self):
+        """Non-string values pass through unchanged."""
+        assert gateway.scrub_credentials(123) == 123
+        assert gateway.scrub_credentials(None) is None
+        assert gateway.scrub_credentials(['a', 'b']) == ['a', 'b']
+
+    def test_scrub_safe_content_unchanged(self):
+        """Safe content without credentials is unchanged."""
+        safe = 'Normal error message without secrets'
+        assert gateway.scrub_credentials(safe) == safe
 
 
 # =============================================================================

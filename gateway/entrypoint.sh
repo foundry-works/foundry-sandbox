@@ -19,9 +19,9 @@ echo "Creating socket directory: ${SOCKET_DIR}"
 if [ "$(id -u)" -eq 0 ]; then
     install -d -m 755 -o "${RUN_USER}" -g "${RUN_USER}" "${SOCKET_DIR}"
 else
-    # Non-root: create with umask and hope for the best
-    mkdir -p "${SOCKET_DIR}"
-    chmod 755 "${SOCKET_DIR}"
+    # Non-root: use subshell with umask to ensure correct permissions atomically
+    # This prevents TOCTOU race between mkdir and chmod
+    (umask 022 && mkdir -p "${SOCKET_DIR}")
 fi
 
 # Start dnsmasq for DNS routing (if configured)
@@ -97,11 +97,28 @@ apply_startup_firewall() {
         return 0
     fi
 
-    # Apply minimal firewall rules for the gateway container itself:
-    # - Allow loopback
-    # - Allow established connections
-    # - Allow outbound to GitHub (for proxying git requests)
-    # The sandbox firewall (network-firewall.sh) provides the main isolation
+    # ===========================================================================
+    # IMPORTANT: Gateway Container Firewall (Supplementary)
+    # ===========================================================================
+    # These rules provide basic egress filtering for the GATEWAY CONTAINER ONLY.
+    # They are NOT the primary sandbox isolation mechanism.
+    #
+    # For sandbox isolation, network-firewall.sh MUST be run on sandbox
+    # containers. That script:
+    # - Sets DROP policy for OUTPUT chain
+    # - Whitelists specific domains (GitHub, AI APIs, package registries)
+    # - Blocks all other egress traffic
+    #
+    # This startup firewall only ensures:
+    # - Loopback traffic works (for Unix socket communication)
+    # - Established connections continue (for in-flight requests during restart)
+    # - GitHub egress is allowed (for git proxy functionality)
+    #
+    # We intentionally do NOT set a DROP policy here because:
+    # 1. The gateway needs outbound access to GitHub for proxying
+    # 2. Sandbox isolation is enforced by network-firewall.sh on sandboxes
+    # 3. DOCKER-USER chain rules (setup_docker_user_rules) block sandbox egress
+    # ===========================================================================
 
     # Only apply if OUTPUT chain is empty (avoid double application)
     local rule_count
@@ -115,7 +132,7 @@ apply_startup_firewall() {
     iptables -A OUTPUT -o lo -j ACCEPT 2>/dev/null || true
     iptables -A OUTPUT -m state --state ESTABLISHED,RELATED -j ACCEPT 2>/dev/null || true
 
-    echo "Firewall rules applied successfully"
+    echo "Gateway firewall rules applied (note: sandbox isolation requires network-firewall.sh)"
     return 0
 }
 
