@@ -19,6 +19,7 @@ from urllib.parse import urljoin
 import threading
 import atexit
 import base64
+import hmac
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -40,6 +41,7 @@ UPSTREAM_READ_TIMEOUT = int(os.environ.get('GATEWAY_READ_TIMEOUT', 600))
 # deployments would fail session validation. For horizontal scaling, replace
 # this dict with a Redis-backed session store.
 SESSIONS = {}  # {token: {'secret': secret, 'container_id': id, 'container_ip': ip, 'repos': [], 'created': datetime, 'last_accessed': datetime, 'expires_at': datetime}}
+SESSIONS_LOCK = threading.Lock()  # Protects SESSIONS dict from concurrent access by GC thread
 SESSION_TTL_INACTIVITY = timedelta(hours=24)  # 24 hour inactivity timeout
 SESSION_TTL_ABSOLUTE = timedelta(days=7)  # 7 day absolute timeout
 SESSION_GC_INTERVAL = timedelta(minutes=5)  # Run garbage collection every 5 minutes
@@ -139,24 +141,25 @@ def create_session(container_ip, container_id=None, repos=None):
     Raises:
         ValueError: If session limit is exceeded
     """
-    # Check global session limit (memory bound / sanity check)
-    if len(SESSIONS) >= MAX_SESSIONS:
-        raise ValueError(f'Maximum session limit ({MAX_SESSIONS}) exceeded')
-
     token = generate_session_token()
     secret = generate_session_secret()
     now = datetime.utcnow()
     expires_at = now + SESSION_TTL_ABSOLUTE
 
-    SESSIONS[token] = {
-        'secret': secret,
-        'container_id': container_id,
-        'container_ip': container_ip,
-        'repos': repos if repos else [],
-        'created': now,
-        'last_accessed': now,
-        'expires_at': expires_at
-    }
+    with SESSIONS_LOCK:
+        # Check global session limit (memory bound / sanity check)
+        if len(SESSIONS) >= MAX_SESSIONS:
+            raise ValueError(f'Maximum session limit ({MAX_SESSIONS}) exceeded')
+
+        SESSIONS[token] = {
+            'secret': secret,
+            'container_id': container_id,
+            'container_ip': container_ip,
+            'repos': repos if repos else [],
+            'created': now,
+            'last_accessed': now,
+            'expires_at': expires_at
+        }
 
     return {'token': token, 'secret': secret}
 
@@ -171,41 +174,46 @@ def validate_session(token, secret, client_ip):
         client_ip: Client IP address from request
 
     Returns:
-        bool: True if session is valid, False otherwise
+        dict: The validated session object if valid, None otherwise.
+              Returning the session object prevents race conditions where
+              GC could delete the session between validation and usage.
     """
-    if token not in SESSIONS:
-        return False
+    with SESSIONS_LOCK:
+        if token not in SESSIONS:
+            return None
 
-    session = SESSIONS[token]
+        session = SESSIONS[token]
 
-    # Check secret matches (if provided)
-    # Basic auth flow doesn't carry the secret, so we skip this check when secret is None
-    # Security note: Basic auth relies on IP binding for additional security
-    if secret is not None and session['secret'] != secret:
-        return False
+        # Check secret matches (if provided)
+        # Basic auth flow doesn't carry the secret, so we skip this check when secret is None
+        # Security note: Basic auth relies on IP binding for additional security
+        # Use constant-time comparison to prevent timing attacks
+        if secret is not None and not hmac.compare_digest(session['secret'], secret):
+            return None
 
-    # Check IP binding
-    if session['container_ip'] != client_ip:
-        return False
+        # Check IP binding
+        if session['container_ip'] != client_ip:
+            return None
 
-    now = datetime.utcnow()
+        now = datetime.utcnow()
 
-    # Check inactivity timeout (24 hours)
-    if now - session['last_accessed'] > SESSION_TTL_INACTIVITY:
-        logger.info(f'Session {token} expired due to inactivity')
-        del SESSIONS[token]
-        return False
+        # Check inactivity timeout (24 hours)
+        if now - session['last_accessed'] > SESSION_TTL_INACTIVITY:
+            logger.info(f'Session {token} expired due to inactivity')
+            del SESSIONS[token]
+            return None
 
-    # Check absolute expiry (7 days from creation)
-    if now > session['expires_at']:
-        logger.info(f'Session {token} expired due to absolute TTL')
-        del SESSIONS[token]
-        return False
+        # Check absolute expiry (7 days from creation)
+        if now > session['expires_at']:
+            logger.info(f'Session {token} expired due to absolute TTL')
+            del SESSIONS[token]
+            return None
 
-    # Update last accessed time
-    session['last_accessed'] = now
+        # Update last accessed time
+        session['last_accessed'] = now
 
-    return True
+        # Return a copy of the session to prevent modifications outside the lock
+        return dict(session)
 
 def garbage_collect_sessions():
     """
@@ -217,22 +225,23 @@ def garbage_collect_sessions():
     now = datetime.utcnow()
     expired_tokens = []
 
-    for token, session in list(SESSIONS.items()):
-        # Check inactivity timeout
-        if now - session['last_accessed'] > SESSION_TTL_INACTIVITY:
-            logger.info(f'GC: Removing session {token} (inactivity timeout)')
-            expired_tokens.append(token)
-            continue
+    with SESSIONS_LOCK:
+        for token, session in list(SESSIONS.items()):
+            # Check inactivity timeout
+            if now - session['last_accessed'] > SESSION_TTL_INACTIVITY:
+                logger.info(f'GC: Removing session {token} (inactivity timeout)')
+                expired_tokens.append(token)
+                continue
 
-        # Check absolute expiry
-        if now > session['expires_at']:
-            logger.info(f'GC: Removing session {token} (absolute expiry)')
-            expired_tokens.append(token)
-            continue
+            # Check absolute expiry
+            if now > session['expires_at']:
+                logger.info(f'GC: Removing session {token} (absolute expiry)')
+                expired_tokens.append(token)
+                continue
 
-    # Remove expired sessions
-    for token in expired_tokens:
-        del SESSIONS[token]
+        # Remove expired sessions
+        for token in expired_tokens:
+            del SESSIONS[token]
 
     if expired_tokens:
         logger.info(f'Garbage collection completed: removed {len(expired_tokens)} expired sessions')
@@ -298,10 +307,11 @@ def destroy_session(token):
     Returns:
         bool: True if session was destroyed, False if not found
     """
-    if token in SESSIONS:
-        del SESSIONS[token]
-        return True
-    return False
+    with SESSIONS_LOCK:
+        if token in SESSIONS:
+            del SESSIONS[token]
+            return True
+        return False
 
 def validate_owner(owner):
     """
@@ -455,10 +465,15 @@ def audit_log(event_type, container_id=None, ip=None, **extra_data):
             continue
         audit_entry[key] = value
 
-    # Write to stderr as JSON
-    json.dump(audit_entry, sys.stderr)
-    sys.stderr.write('\n')
-    sys.stderr.flush()
+    # Write to stderr as JSON with error handling
+    # If disk is full or stderr is unavailable, log to logger and continue
+    try:
+        json.dump(audit_entry, sys.stderr)
+        sys.stderr.write('\n')
+        sys.stderr.flush()
+    except (IOError, OSError) as e:
+        # Fallback to logger if stderr write fails (e.g., disk full)
+        logger.error(f'Audit log write failed ({e}): {event_type} - {audit_entry}')
 
 @app.route('/health')
 def health():
@@ -487,6 +502,33 @@ def session_create_endpoint():
         if not container_ip:
             audit_log('session_create_denied', extra_data={'reason': 'missing_container_ip'})
             return {'error': 'container_ip is required'}, 400
+
+        # Validate container_ip is a valid IP address
+        try:
+            ipaddress.ip_address(container_ip)
+        except ValueError:
+            audit_log('session_create_denied', extra_data={'reason': 'invalid_container_ip', 'container_ip': container_ip})
+            return {'error': 'container_ip must be a valid IP address'}, 400
+
+        # Validate container_id format if provided (Docker container IDs are 64 hex chars, short form is 12)
+        if container_id is not None:
+            if not isinstance(container_id, str) or not re.match(r'^[a-zA-Z0-9][a-zA-Z0-9_.-]*$', container_id):
+                audit_log('session_create_denied', extra_data={'reason': 'invalid_container_id'})
+                return {'error': 'container_id must be alphanumeric with optional _.- separators'}, 400
+
+        # Validate repos list format (must be list of owner/repo strings)
+        if repos:
+            if not isinstance(repos, list):
+                audit_log('session_create_denied', extra_data={'reason': 'repos_not_list'})
+                return {'error': 'repos must be a list'}, 400
+            for repo_entry in repos:
+                if not isinstance(repo_entry, str) or '/' not in repo_entry:
+                    audit_log('session_create_denied', extra_data={'reason': 'invalid_repo_format', 'repo': repo_entry})
+                    return {'error': 'Each repo must be in owner/repo format'}, 400
+                parts = repo_entry.split('/', 1)
+                if not validate_owner(parts[0]) or not validate_repo(parts[1]):
+                    audit_log('session_create_denied', extra_data={'reason': 'invalid_repo_format', 'repo': repo_entry})
+                    return {'error': f'Invalid repo format: {repo_entry}'}, 400
 
         # Create session (may raise ValueError if limit exceeded)
         session_data = create_session(container_ip, container_id=container_id, repos=repos)
@@ -683,9 +725,10 @@ def git_proxy(owner, repo, git_path):
         })
         return Response('Invalid authorization format (expected Bearer or Basic)', status=401)
 
-    # Validate session
+    # Validate session - returns the validated session object to prevent race conditions
     client_ip = request.remote_addr
-    if not validate_session(token, secret, client_ip):
+    session = validate_session(token, secret, client_ip)
+    if session is None:
         audit_log('git_denied', extra_data={
             'reason': 'invalid_session',
             'owner': owner,
@@ -696,8 +739,7 @@ def git_proxy(owner, repo, git_path):
         return Response('Invalid or expired session', status=401)
 
     # Enforce repo scoping if session has a repos list
-    session = SESSIONS.get(token)
-    if session and session.get('repos'):
+    if session.get('repos'):
         requested_repo = f"{owner}/{repo}"
         if requested_repo not in session['repos']:
             audit_log('git_denied', extra_data={
@@ -746,6 +788,8 @@ def git_proxy(owner, repo, git_path):
         return Response('Gateway configuration error: GitHub token not available', status=503)
 
     # Proxy to GitHub with streaming support
+    # Initialize proxied_request before try block for reliable cleanup
+    proxied_request = None
     try:
         # Construct upstream URL
         upstream_url = f'{UPSTREAM_PROTOCOL}://{UPSTREAM_HOST}/{owner}/{repo}.git/{git_path}'
@@ -833,7 +877,7 @@ def git_proxy(owner, repo, git_path):
             'error_details': str(e)
         })
         # Close the response if it was partially created
-        if 'proxied_request' in locals() and proxied_request is not None:
+        if proxied_request is not None:
             try:
                 proxied_request.close()
             except Exception:
@@ -849,7 +893,7 @@ def git_proxy(owner, repo, git_path):
             'error': str(e)
         })
         # Close the response if it was partially created to prevent connection leaks
-        if 'proxied_request' in locals() and proxied_request is not None:
+        if proxied_request is not None:
             try:
                 proxied_request.close()
             except Exception:
