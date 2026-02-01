@@ -141,12 +141,15 @@ generate_dnsmasq() {
         fi
     done
 
-    # Add wildcard handling
-    content+="\n# Wildcard domains\n"
+    # Add wildcard handling using server= directive to forward to upstream DNS
+    # This allows subdomains to resolve while blocking non-allowlisted domains
+    content+="\n# Wildcard domains - forward to upstream DNS for resolution\n"
+    content+="# server=/*.domain.com/ syntax forwards matching queries to upstream\n"
     for domain in "${WILDCARD_DOMAINS[@]}"; do
-        # Convert *.example.com to address=/example.com/
+        # Convert *.example.com to server=/example.com/ (forward to upstream)
         local base_domain="${domain#\*.}"
-        content+="address=/$base_domain/127.0.0.1\n"
+        # server=/<domain>/ (empty address) means forward to upstream DNS
+        content+="server=/$base_domain/\n"
         ((domain_count++)) || true
     done
 

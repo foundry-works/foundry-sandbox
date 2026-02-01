@@ -1021,5 +1021,146 @@ class TestDnsBypassPrevention:
         assert 'IP literal' in data['error']
 
 
+# =============================================================================
+# Wildcard Domain Matching Tests
+# =============================================================================
+
+class TestMatchesDomainAllowlist:
+    """Tests for wildcard domain matching function."""
+
+    def test_wildcard_matches_subdomain(self):
+        """*.example.com matches foo.example.com."""
+        wildcards = ['*.example.com']
+        assert gateway.matches_domain_allowlist('foo.example.com', wildcards)
+
+    def test_wildcard_matches_deep_subdomain(self):
+        """*.example.com matches a.b.c.example.com."""
+        wildcards = ['*.example.com']
+        assert gateway.matches_domain_allowlist('a.b.c.example.com', wildcards)
+
+    def test_wildcard_matches_base_domain(self):
+        """*.example.com matches example.com (the base domain itself)."""
+        wildcards = ['*.example.com']
+        assert gateway.matches_domain_allowlist('example.com', wildcards)
+
+    def test_wildcard_does_not_match_different_domain(self):
+        """*.example.com does NOT match notexample.com."""
+        wildcards = ['*.example.com']
+        assert not gateway.matches_domain_allowlist('notexample.com', wildcards)
+
+    def test_wildcard_does_not_match_suffix_without_dot(self):
+        """*.example.com does NOT match fakeexample.com (no dot separator)."""
+        wildcards = ['*.example.com']
+        assert not gateway.matches_domain_allowlist('fakeexample.com', wildcards)
+
+    def test_wildcard_does_not_match_partial_domain(self):
+        """*.example.com does NOT match exampleXcom."""
+        wildcards = ['*.example.com']
+        assert not gateway.matches_domain_allowlist('exampleXcom', wildcards)
+
+    def test_wildcard_case_insensitive_hostname(self):
+        """Hostname matching is case-insensitive."""
+        wildcards = ['*.example.com']
+        assert gateway.matches_domain_allowlist('FOO.EXAMPLE.COM', wildcards)
+        assert gateway.matches_domain_allowlist('Foo.Example.Com', wildcards)
+
+    def test_wildcard_case_insensitive_pattern(self):
+        """Pattern matching is case-insensitive."""
+        wildcards = ['*.EXAMPLE.COM']
+        assert gateway.matches_domain_allowlist('foo.example.com', wildcards)
+
+    def test_wildcard_strips_trailing_dot(self):
+        """Trailing dots in hostnames are stripped."""
+        wildcards = ['*.example.com']
+        assert gateway.matches_domain_allowlist('foo.example.com.', wildcards)
+
+    def test_exact_match_works(self):
+        """Exact domain matches work."""
+        wildcards = ['api.example.com']
+        assert gateway.matches_domain_allowlist('api.example.com', wildcards)
+        assert not gateway.matches_domain_allowlist('other.example.com', wildcards)
+
+    def test_mixed_wildcards_and_exact(self):
+        """Mix of wildcards and exact matches works."""
+        wildcards = ['*.cdn.example.com', 'api.example.com']
+        assert gateway.matches_domain_allowlist('api.example.com', wildcards)
+        assert gateway.matches_domain_allowlist('foo.cdn.example.com', wildcards)
+        assert not gateway.matches_domain_allowlist('other.example.com', wildcards)
+
+    def test_multiple_wildcard_patterns(self):
+        """Multiple wildcard patterns are checked."""
+        wildcards = ['*.example.com', '*.example.org']
+        assert gateway.matches_domain_allowlist('foo.example.com', wildcards)
+        assert gateway.matches_domain_allowlist('foo.example.org', wildcards)
+        assert not gateway.matches_domain_allowlist('foo.example.net', wildcards)
+
+    def test_empty_wildcards_allows_all(self):
+        """Empty wildcards list allows all (legacy behavior)."""
+        assert gateway.matches_domain_allowlist('anything.com', [])
+        assert gateway.matches_domain_allowlist('any.domain.org', [])
+
+    def test_none_wildcards_uses_global(self):
+        """None wildcards uses global WILDCARD_DOMAINS."""
+        original = gateway.WILDCARD_DOMAINS
+        try:
+            gateway.WILDCARD_DOMAINS = ['*.test.com']
+            assert gateway.matches_domain_allowlist('foo.test.com')
+            assert not gateway.matches_domain_allowlist('foo.other.com')
+        finally:
+            gateway.WILDCARD_DOMAINS = original
+
+    def test_real_cdn_wildcards(self):
+        """Real-world CDN wildcard patterns work correctly."""
+        wildcards = ['*.cloudfront.net', '*.fastly.net', '*.amazonaws.com']
+        # Should match
+        assert gateway.matches_domain_allowlist('d1234.cloudfront.net', wildcards)
+        assert gateway.matches_domain_allowlist('cdn.fastly.net', wildcards)
+        assert gateway.matches_domain_allowlist('s3.us-east-1.amazonaws.com', wildcards)
+        # Should not match
+        assert not gateway.matches_domain_allowlist('cloudfront.example.com', wildcards)
+        assert not gateway.matches_domain_allowlist('fastly.example.com', wildcards)
+
+
+class TestCheckHostnameAllowlist:
+    """Tests for hostname allowlist checking in proxy endpoint."""
+
+    def test_hostname_allowed_with_wildcards(self, app):
+        """Hostname matching wildcard is allowed."""
+        original = gateway.WILDCARD_DOMAINS
+        try:
+            gateway.WILDCARD_DOMAINS = ['*.example.com']
+            with app.test_request_context('/', headers={'Host': 'foo.example.com'}):
+                is_allowed, response = gateway.check_hostname_allowlist('foo.example.com')
+                assert is_allowed
+                assert response is None
+        finally:
+            gateway.WILDCARD_DOMAINS = original
+
+    def test_hostname_denied_not_matching(self, app):
+        """Hostname not matching any wildcard is denied."""
+        original = gateway.WILDCARD_DOMAINS
+        try:
+            gateway.WILDCARD_DOMAINS = ['*.example.com']
+            with app.test_request_context('/', headers={'Host': 'evil.com'}):
+                is_allowed, response = gateway.check_hostname_allowlist('evil.com')
+                assert not is_allowed
+                assert response is not None
+                assert response.status_code == 403
+        finally:
+            gateway.WILDCARD_DOMAINS = original
+
+    def test_no_wildcards_allows_all(self, app):
+        """When no wildcards configured, all hostnames allowed (legacy)."""
+        original = gateway.WILDCARD_DOMAINS
+        try:
+            gateway.WILDCARD_DOMAINS = []
+            with app.test_request_context('/', headers={'Host': 'anything.com'}):
+                is_allowed, response = gateway.check_hostname_allowlist('anything.com')
+                assert is_allowed
+                assert response is None
+        finally:
+            gateway.WILDCARD_DOMAINS = original
+
+
 if __name__ == '__main__':
     pytest.main([__file__, '-v'])
