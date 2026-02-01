@@ -135,11 +135,48 @@ This threat model covers the **credential isolation gateway** - a proxy system t
 
 ---
 
+## Critical Configuration Requirements
+
+### DNS Routing Must Be Enabled for True Isolation
+
+**⚠️ IMPORTANT:** For complete credential isolation, DNS must be routed through the gateway.
+
+Without DNS routing through the gateway (using dnsmasq), sandboxes can bypass the gateway by:
+1. Using hardcoded IP addresses instead of domain names
+2. Using alternative DNS resolvers to resolve github.com directly
+3. Making network requests to IP addresses that bypass credential injection
+
+**Required Configuration:**
+
+In `docker-compose.credential-isolation.yml`, the sandbox must use the gateway as its DNS resolver:
+
+```yaml
+dev:
+  dns:
+    - gateway  # Route DNS through gateway's dnsmasq
+```
+
+The gateway's dnsmasq rewrites DNS responses for `github.com` to point to the gateway IP, ensuring all git traffic flows through the credential injection proxy.
+
+**Verification:**
+
+```bash
+# From sandbox: verify DNS routing
+dig github.com  # Should return gateway IP, not GitHub's actual IP
+
+# From sandbox: verify direct IP access is blocked
+curl -v https://140.82.112.4  # Should fail (GitHub IP blocked by network isolation)
+```
+
+**Impact if not configured:** IP-based network requests bypass credential injection and repository scoping. The gateway becomes security theater rather than actual isolation.
+
+---
+
 ## Explicit Non-Requirements
 
 The following capabilities were evaluated and **explicitly excluded** from the implementation. This section documents the rationale and accepted risks.
 
-### Rate Limiting and Session Limits - NOT IMPLEMENTED
+### Rate Limiting on Git Operations - ACCEPTED RISK
 
 **Decision:** Rate limiting on git operations and session creation limits are not implemented.
 
@@ -183,6 +220,38 @@ The following capabilities were evaluated and **explicitly excluded** from the i
 - A kernel/Docker vulnerability could allow container escape (mitigated by: infrastructure patching, not in scope of this implementation)
 - Exotic syscall-based attacks possible (mitigated by: Docker default seccomp, read-only filesystem, network isolation)
 
+### CAP_NET_RAW Dropped from Sandboxes - IMPLEMENTED
+
+**Decision:** Sandbox containers have CAP_NET_RAW capability dropped via `cap_drop: NET_RAW`.
+
+**Threat Model Rationale:**
+
+1. **Supply Chain Attack Protection**: Malicious npm packages, Python libraries, or other dependencies may contain code that attempts to exploit network-level attacks. By dropping CAP_NET_RAW, we prevent:
+   - IP spoofing (crafting packets with forged source addresses)
+   - ARP poisoning (redirecting traffic via fake ARP replies)
+   - Raw packet sniffing on the Docker bridge network
+
+2. **Defense-in-Depth for ICC=false**: While Docker's ICC=false blocks Layer 3/4 traffic between containers, it does NOT block Layer 2 (Ethernet) traffic. CAP_NET_RAW is required to craft raw packets that could bypass ICC at Layer 2. Dropping this capability closes this gap.
+
+3. **Session Token Protection**: Without CAP_NET_RAW, an attacker cannot:
+   - Spoof the source IP to bypass session IP binding
+   - Sniff unencrypted session tokens on the bridge network
+   - Perform ARP spoofing to redirect gateway traffic
+
+4. **Minimal Operational Impact**: The only tools affected are:
+   - `ping` / `traceroute` (ICMP requires raw sockets)
+   - Low-level network debugging tools
+   These are rarely needed in AI coding sandboxes.
+
+**Attack Vectors Blocked:**
+
+| Attack | Mechanism | Protection |
+|--------|-----------|------------|
+| IP Spoofing | CAP_NET_RAW + raw packets | Blocked - cannot create raw sockets |
+| ARP Poisoning | Craft ARP replies | Blocked - cannot create raw sockets |
+| Packet Sniffing | Raw sockets on bridge | Blocked - cannot create raw sockets |
+| Session Hijacking | Spoof container IP | Blocked - IP spoofing prevented |
+
 ### Mutual TLS (mTLS) for Internal Traffic - NOT IMPLEMENTED
 
 **Decision:** Gateway-to-sandbox communication uses plaintext HTTP over Docker internal network, not mTLS.
@@ -222,7 +291,8 @@ This section documents what IS implemented to address the primary threats.
 | Control | Implementation | Threat Addressed |
 |---------|----------------|------------------|
 | Internal network | `internal: true` on Docker network | Direct external access |
-| ICC disabled | `enable_icc: false` driver option | Container-to-container attacks |
+| ICC disabled | `enable_icc: false` driver option | Container-to-container attacks (L3/L4) |
+| CAP_NET_RAW dropped | `cap_drop: NET_RAW` | L2 attacks, IP spoofing, ARP poisoning |
 | DNS isolation | DNS routed through gateway dnsmasq | DNS exfiltration |
 | iptables rules | `safety/network-firewall.sh` | Defense-in-depth for network controls |
 
@@ -263,7 +333,7 @@ This section documents what IS implemented to address the primary threats.
 
 ## Attack Scenarios and Responses
 
-### Scenario 1: Malicious npm Package in Sandbox
+### Scenario 1: Malicious npm Package in Sandbox (Supply Chain Attack)
 
 **Attack:** User installs npm package that attempts to read environment variables and exfiltrate credentials.
 
@@ -271,7 +341,8 @@ This section documents what IS implemented to address the primary threats.
 1. Package reads `ANTHROPIC_API_KEY` -> gets `CREDENTIAL_PROXY_PLACEHOLDER`
 2. Package attempts direct HTTPS to api.anthropic.com -> blocked by network isolation
 3. Package attempts DNS exfiltration -> blocked by DNS isolation
-4. Attack fails, credentials remain secure
+4. Package attempts raw packet crafting to bypass network controls -> blocked by CAP_NET_RAW dropped
+5. Attack fails, credentials remain secure
 
 ### Scenario 2: AI-Generated Code Probes for Tokens
 
@@ -289,9 +360,10 @@ This section documents what IS implemented to address the primary threats.
 
 **Response:**
 1. Direct network connection to Sandbox B -> blocked by ICC=false
-2. ARP spoofing to intercept Sandbox B traffic -> blocked by network isolation
-3. DNS rebinding to redirect Sandbox B -> blocked by gateway DNS control
-4. Attack fails, Sandbox B remains isolated
+2. ARP spoofing to intercept Sandbox B traffic -> blocked by CAP_NET_RAW dropped (cannot create raw sockets)
+3. IP spoofing to impersonate Sandbox B -> blocked by CAP_NET_RAW dropped
+4. DNS rebinding to redirect Sandbox B -> blocked by gateway DNS control
+5. Attack fails, Sandbox B remains isolated
 
 ### Scenario 4: Session Token Theft and Reuse
 
@@ -341,6 +413,24 @@ curl http://gateway:8080/api/session -X POST  # Should fail from non-localhost
 
 # From different container: verify session token IP binding
 curl -H "Authorization: Bearer <sandbox-a-token>" http://gateway:8080/git/...  # Should fail from sandbox B
+```
+
+### CAP_NET_RAW Verification (Supply Chain Protection)
+
+```bash
+# From sandbox: verify CAP_NET_RAW is dropped
+cat /proc/self/status | grep CapEff
+# Decode capabilities (requires capsh on host):
+# capsh --decode=<hex_value>
+# Should NOT include cap_net_raw (bit 13)
+
+# From sandbox: verify raw socket creation fails
+python3 -c "import socket; socket.socket(socket.AF_INET, socket.SOCK_RAW, socket.IPPROTO_ICMP)"
+# Should raise: PermissionError: [Errno 1] Operation not permitted
+
+# From sandbox: verify ping fails (requires CAP_NET_RAW)
+ping -c 1 gateway
+# Should fail with "Operation not permitted" or similar
 ```
 
 ---

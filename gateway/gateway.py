@@ -76,15 +76,18 @@ def get_github_token():
     Get the real GitHub token for upstream authentication.
 
     Returns:
-        str: GitHub token from environment or session context
+        str: GitHub token from environment
+
+    Raises:
+        RuntimeError: If GITHUB_TOKEN is not set
     """
-    # Try to get from environment first
     token = os.environ.get('GITHUB_TOKEN')
     if token:
         return token
 
-    # Fallback to placeholder
-    return 'placeholder-github-token'
+    # Log error and raise - silent fallback causes confusing auth errors
+    logger.error('GITHUB_TOKEN environment variable is not set - git operations will fail')
+    raise RuntimeError('GITHUB_TOKEN environment variable is required but not set')
 
 def default_policy_hook(owner, repo, operation):
     """
@@ -375,10 +378,17 @@ def is_ip_literal(host):
     if not host:
         return False
 
-    # Remove port if present (e.g., "1.2.3.4:8080" -> "1.2.3.4")
-    host_only = host.split(':')[0]
-    # Also handle IPv6 addresses in brackets (e.g., "[::1]" or "[::1]:8080")
-    host_only = host_only.strip('[]')
+    # Handle IPv6 addresses in brackets (e.g., "[::1]" or "[2001:db8::1]:443")
+    if host.startswith('['):
+        # Extract IPv6 address from brackets
+        bracket_end = host.find(']')
+        if bracket_end > 0:
+            host_only = host[1:bracket_end]
+        else:
+            return False  # Malformed bracket notation
+    else:
+        # IPv4: Remove port if present (e.g., "1.2.3.4:8080" -> "1.2.3.4")
+        host_only = host.split(':')[0]
 
     try:
         ipaddress.ip_address(host_only)
@@ -463,7 +473,8 @@ def session_create_endpoint():
     Unix socket only (trusted orchestrator).
     """
     # Check if request comes from Unix socket (local)
-    if request.remote_addr not in ('127.0.0.1', 'localhost'):
+    # Note: 'localhost' would be resolved to '127.0.0.1' by the time it reaches here
+    if request.remote_addr != '127.0.0.1':
         audit_log('session_create_denied', extra_data={'reason': 'not_unix_socket'})
         return {'error': 'Session creation only allowed from Unix socket'}, 403
 
@@ -507,7 +518,8 @@ def session_destroy_endpoint(session_token):
     Unix socket only.
     """
     # Check if request comes from Unix socket (local)
-    if request.remote_addr not in ('127.0.0.1', 'localhost'):
+    # Note: 'localhost' would be resolved to '127.0.0.1' by the time it reaches here
+    if request.remote_addr != '127.0.0.1':
         audit_log('session_destroy_denied', extra_data={'reason': 'not_unix_socket', 'token': session_token})
         return {'error': 'Session destruction only allowed from Unix socket'}, 403
 
@@ -720,6 +732,19 @@ def git_proxy(owner, repo, git_path):
         })
         return Response('Access denied by policy', status=403)
 
+    # Get GitHub token first - fail fast if not configured
+    try:
+        github_token = get_github_token()
+    except RuntimeError as e:
+        audit_log('git_proxy_error', extra_data={
+            'owner': owner,
+            'repo': repo,
+            'path': git_path,
+            'error': 'github_token_missing',
+            'error_details': str(e)
+        })
+        return Response('Gateway configuration error: GitHub token not available', status=503)
+
     # Proxy to GitHub with streaming support
     try:
         # Construct upstream URL
@@ -742,7 +767,6 @@ def git_proxy(owner, repo, git_path):
             headers['Expect'] = expect_header
 
         # Replace Authorization header with GitHub token
-        github_token = get_github_token()
         headers['Authorization'] = f'token {github_token}'
 
         # Stream request body to avoid buffering large payloads (e.g., git push)
