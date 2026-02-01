@@ -78,6 +78,23 @@ else
     fi
 fi
 
+# Configure DNS to use gateway's dnsmasq when in gateway mode
+# This enables domain allowlisting - only approved domains can be resolved
+# We resolve the gateway IP dynamically to avoid static IP conflicts between sandboxes
+if [ "$SANDBOX_GATEWAY_ENABLED" = "true" ]; then
+    echo "Configuring DNS to use gateway..."
+    # Resolve gateway hostname using Docker's internal DNS (127.0.0.11)
+    GATEWAY_IP=$(getent hosts gateway | awk '{print $1}' | head -1)
+    if [ -n "$GATEWAY_IP" ]; then
+        echo "Gateway IP: $GATEWAY_IP"
+        # Configure resolv.conf to use gateway as DNS server
+        echo "nameserver $GATEWAY_IP" | sudo tee /etc/resolv.conf > /dev/null
+        echo "DNS configured to use gateway at $GATEWAY_IP"
+    else
+        echo "Warning: Could not resolve gateway hostname, using default DNS"
+    fi
+fi
+
 # Trust mitmproxy CA when mounted (explicit proxy mode)
 if [ -f "/certs/mitmproxy-ca.pem" ]; then
     echo "Configuring CA trust for proxy..."
