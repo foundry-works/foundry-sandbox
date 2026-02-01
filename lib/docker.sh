@@ -27,7 +27,9 @@ compose_up() {
 
     # Set up gateway socket directory for credential isolation
     if [ "$isolate_credentials" = "true" ]; then
-        export GATEWAY_SOCKET_DIR="/tmp/foundry-gateway-${container}"
+        # Use ~/.foundry-sandbox/sockets/ for Docker Desktop macOS compatibility
+        # Docker Desktop only allows bind mounts from specific paths (home directory, etc.)
+        export GATEWAY_SOCKET_DIR="$HOME/.foundry-sandbox/sockets/${container}"
         mkdir -p "$GATEWAY_SOCKET_DIR"
         chmod 700 "$GATEWAY_SOCKET_DIR"
         # Export for gateway.sh to use
@@ -60,7 +62,8 @@ compose_down() {
 
     # Set gateway socket path for credential isolation
     if [ "$isolate_credentials" = "true" ]; then
-        export GATEWAY_SOCKET_DIR="/tmp/foundry-gateway-${container}"
+        # Use ~/.foundry-sandbox/sockets/ for Docker Desktop macOS compatibility
+        export GATEWAY_SOCKET_DIR="$HOME/.foundry-sandbox/sockets/${container}"
         export GATEWAY_SOCKET_PATH="${GATEWAY_SOCKET_DIR}/gateway.sock"
     fi
 
@@ -68,8 +71,8 @@ compose_down() {
     if [ "$remove_volumes" = "true" ]; then
         run_cmd $compose_cmd -p "$container" down -v
         # Clean up gateway socket directory
-        if [ -d "/tmp/foundry-gateway-${container}" ]; then
-            rm -rf "/tmp/foundry-gateway-${container}" 2>/dev/null || true
+        if [ -d "$HOME/.foundry-sandbox/sockets/${container}" ]; then
+            rm -rf "$HOME/.foundry-sandbox/sockets/${container}" 2>/dev/null || true
         fi
     else
         run_cmd $compose_cmd -p "$container" down
