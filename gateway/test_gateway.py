@@ -359,21 +359,27 @@ class TestIsIpLiteral:
         assert gateway.is_ip_literal(host)
 
     @pytest.mark.parametrize('host', [
-        '::1',
         '[::1]',
         '[::1]:8080',
-        '2001:db8::1',
+        '[2001:db8::1]',
         '[2001:db8::1]:443',
     ])
-    def test_ipv6_literals_not_currently_detected(self, host):
-        """IPv6 literals are not currently detected (known limitation).
+    def test_ipv6_bracketed_literals_detected(self, host):
+        """IPv6 bracketed literals (standard HTTP Host format) are detected."""
+        assert gateway.is_ip_literal(host)
 
-        Note: The is_ip_literal function splits on ':' first, which breaks
-        IPv6 address parsing. For the current use case (sandbox containers
-        using IPv4), this is acceptable. A future enhancement could improve
-        IPv6 support by parsing brackets before splitting on colon.
+    @pytest.mark.parametrize('host', [
+        '::1',           # Bare IPv6 - not valid HTTP Host format
+        '2001:db8::1',   # Bare IPv6 - not valid HTTP Host format
+    ])
+    def test_bare_ipv6_not_detected(self, host):
+        """Bare IPv6 addresses (without brackets) are not detected.
+
+        This is acceptable because HTTP Host headers with IPv6 always use
+        bracket notation per RFC 3986. Bare IPv6 addresses would never
+        appear in a valid HTTP request Host header.
         """
-        # This documents current behavior - IPv6 detection is NOT supported
+        # Bare IPv6 splits on ':' and yields invalid result - acceptable
         assert not gateway.is_ip_literal(host)
 
     @pytest.mark.parametrize('host', [
@@ -786,6 +792,142 @@ class TestIpLiteralRequests:
             is_ip, response = gateway.check_ip_literal_request()
             assert not is_ip
             assert response is None
+
+
+# =============================================================================
+# DNS Bypass Prevention Tests
+# =============================================================================
+
+class TestDnsBypassPrevention:
+    """
+    Tests verifying that DNS-based bypass attempts are blocked.
+
+    These tests ensure that the gateway rejects requests that attempt to
+    bypass credential injection by using IP addresses directly instead of
+    DNS-resolved hostnames.
+
+    Security context: Without DNS routing through the gateway, sandboxes
+    could bypass the gateway by:
+    1. Using hardcoded GitHub IPs (e.g., 140.82.112.4)
+    2. Using alternative DNS resolvers to get real GitHub IPs
+    3. Making direct IP requests that skip credential injection
+
+    The gateway rejects IP literal requests to enforce that all traffic
+    must go through DNS resolution (which the gateway controls via dnsmasq).
+    """
+
+    def test_ipv4_literal_git_request_blocked(self, client, session_data):
+        """Git request to IPv4 literal is blocked."""
+        # Simulate request to GitHub IP directly (bypass attempt)
+        response = client.get(
+            '/git/owner/repo.git/info/refs',
+            headers={
+                'Host': '140.82.112.4',  # GitHub's actual IP
+                'Authorization': f"Bearer {session_data['token']}:{session_data['secret']}"
+            },
+            environ_base={'REMOTE_ADDR': '10.0.0.1'}
+        )
+        assert response.status_code == 403
+        data = json.loads(response.data)
+        assert 'IP literal' in data['error']
+
+    def test_ipv4_with_port_git_request_blocked(self, client, session_data):
+        """Git request to IPv4:port literal is blocked."""
+        response = client.get(
+            '/git/owner/repo.git/info/refs',
+            headers={
+                'Host': '140.82.112.4:443',
+                'Authorization': f"Bearer {session_data['token']}:{session_data['secret']}"
+            },
+            environ_base={'REMOTE_ADDR': '10.0.0.1'}
+        )
+        assert response.status_code == 403
+
+    def test_ipv6_literal_git_request_blocked(self, client, session_data):
+        """Git request to IPv6 literal is blocked."""
+        response = client.get(
+            '/git/owner/repo.git/info/refs',
+            headers={
+                'Host': '[2001:db8::1]',
+                'Authorization': f"Bearer {session_data['token']}:{session_data['secret']}"
+            },
+            environ_base={'REMOTE_ADDR': '10.0.0.1'}
+        )
+        assert response.status_code == 403
+
+    def test_ipv6_with_port_git_request_blocked(self, client, session_data):
+        """Git request to [IPv6]:port literal is blocked."""
+        response = client.get(
+            '/git/owner/repo.git/info/refs',
+            headers={
+                'Host': '[2001:db8::1]:443',
+                'Authorization': f"Bearer {session_data['token']}:{session_data['secret']}"
+            },
+            environ_base={'REMOTE_ADDR': '10.0.0.1'}
+        )
+        assert response.status_code == 403
+
+    def test_localhost_ipv4_blocked(self, client, session_data):
+        """Git request to 127.x.x.x is blocked (localhost bypass attempt)."""
+        response = client.get(
+            '/git/owner/repo.git/info/refs',
+            headers={
+                'Host': '127.0.0.1',
+                'Authorization': f"Bearer {session_data['token']}:{session_data['secret']}"
+            },
+            environ_base={'REMOTE_ADDR': '10.0.0.1'}
+        )
+        assert response.status_code == 403
+
+    def test_private_network_ip_blocked(self, client, session_data):
+        """Git request to private network IP is blocked."""
+        # These could be used to probe internal services
+        for ip in ['10.0.0.100', '172.16.0.1', '192.168.1.1']:
+            response = client.get(
+                '/git/owner/repo.git/info/refs',
+                headers={
+                    'Host': ip,
+                    'Authorization': f"Bearer {session_data['token']}:{session_data['secret']}"
+                },
+                environ_base={'REMOTE_ADDR': '10.0.0.1'}
+            )
+            assert response.status_code == 403, f"Expected 403 for IP {ip}"
+
+    def test_hostname_request_allowed(self, client, session_data):
+        """Git request to hostname (not IP) proceeds to validation."""
+        # This should pass IP literal check but may fail on other validation
+        # (e.g., upstream connection) - the key is it's NOT blocked as IP literal
+        with patch('gateway.requests.request') as mock_request:
+            mock_response = MagicMock()
+            mock_response.status_code = 200
+            mock_response.headers = {'Content-Type': 'application/x-git-upload-pack-advertisement'}
+            mock_response.iter_content = MagicMock(return_value=[b'test'])
+            mock_request.return_value = mock_response
+
+            with patch.dict('os.environ', {'GITHUB_TOKEN': 'test-token'}):
+                response = client.get(
+                    '/git/owner/repo.git/info/refs',
+                    headers={
+                        'Host': 'github.com',  # Hostname, not IP
+                        'Authorization': f"Bearer {session_data['token']}:{session_data['secret']}"
+                    },
+                    environ_base={'REMOTE_ADDR': '10.0.0.1'}
+                )
+                # Should NOT be 403 (IP literal rejection)
+                assert response.status_code != 403 or 'IP literal' not in response.data.decode()
+
+    def test_proxy_endpoint_ip_literal_blocked(self, client):
+        """General proxy endpoint also blocks IP literals."""
+        response = client.get(
+            '/proxy/some/path',
+            headers={
+                'Host': '8.8.8.8',
+                'Authorization': 'Bearer some-token'
+            }
+        )
+        assert response.status_code == 403
+        data = json.loads(response.data)
+        assert 'IP literal' in data['error']
 
 
 if __name__ == '__main__':
