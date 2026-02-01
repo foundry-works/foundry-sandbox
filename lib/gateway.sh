@@ -1,8 +1,9 @@
 #!/bin/bash
 # Gateway session management functions for credential isolation
 
-# Gateway socket path (mounted from gateway-socket volume)
-GATEWAY_SOCKET_PATH="${GATEWAY_SOCKET_PATH:-/var/run/gateway/gateway.sock}"
+# Gateway URL for session management (TCP-based)
+# Set by docker.sh after container starts via setup_gateway_url()
+# No default - must be set before calling gateway functions
 
 # Create a gateway session for a container
 # Args:
@@ -16,6 +17,11 @@ create_gateway_session() {
     local container_id="$1"
     local container_ip="$2"
     local repos="${3:-}"
+
+    if [ -z "$GATEWAY_URL" ]; then
+        log_error "create_gateway_session: GATEWAY_URL not set - call setup_gateway_url first"
+        return 1
+    fi
 
     if [ -z "$container_id" ] || [ -z "$container_ip" ]; then
         log_error "create_gateway_session: container_id and container_ip required"
@@ -40,13 +46,16 @@ create_gateway_session() {
             '{container_id: $cid, container_ip: $cip}')
     fi
 
-    # Call gateway API via Unix socket
+    # Call gateway API via TCP
     local response
-    response=$(curl -s --unix-socket "$GATEWAY_SOCKET_PATH" \
-        -X POST \
-        -H "Content-Type: application/json" \
-        -d "$json_body" \
-        "http://localhost/session/create" 2>&1)
+    local curl_args=(-s -X POST -H "Content-Type: application/json" -d "$json_body")
+
+    # Add session management key header if set
+    if [ -n "$GATEWAY_SESSION_MGMT_KEY" ]; then
+        curl_args+=(-H "X-Session-Mgmt-Key: $GATEWAY_SESSION_MGMT_KEY")
+    fi
+
+    response=$(curl "${curl_args[@]}" "${GATEWAY_URL}/session/create" 2>&1)
 
     local curl_exit=$?
     if [ $curl_exit -ne 0 ]; then
@@ -86,9 +95,14 @@ destroy_gateway_session() {
     fi
 
     local response
-    response=$(curl -s --unix-socket "$GATEWAY_SOCKET_PATH" \
-        -X DELETE \
-        "http://localhost/session/$token" 2>&1)
+    local curl_args=(-s -X DELETE)
+
+    # Add session management key header if set
+    if [ -n "$GATEWAY_SESSION_MGMT_KEY" ]; then
+        curl_args+=(-H "X-Session-Mgmt-Key: $GATEWAY_SESSION_MGMT_KEY")
+    fi
+
+    response=$(curl "${curl_args[@]}" "${GATEWAY_URL}/session/$token" 2>&1)
 
     local curl_exit=$?
     if [ $curl_exit -ne 0 ]; then
@@ -108,15 +122,22 @@ wait_for_gateway_health() {
     local timeout="${1:-30}"
     local elapsed=0
 
+    if [ -z "$GATEWAY_URL" ]; then
+        log_error "wait_for_gateway_health: GATEWAY_URL not set - call setup_gateway_url first"
+        return 1
+    fi
+
+    log_debug "Waiting for gateway health at ${GATEWAY_URL}..."
+
     while [ $elapsed -lt "$timeout" ]; do
-        if curl -s --unix-socket "$GATEWAY_SOCKET_PATH" "http://localhost/health" | grep -q '"status".*"healthy"'; then
+        if curl -s "${GATEWAY_URL}/health" | grep -q '"status".*"healthy"'; then
             return 0
         fi
         sleep 1
         elapsed=$((elapsed + 1))
     done
 
-    log_error "Gateway health check timed out after ${timeout}s"
+    log_error "Gateway health check timed out after ${timeout}s (URL: ${GATEWAY_URL})"
     log_error "Remediation steps:"
     log_error "  1. Check if gateway container is running: docker ps | grep gateway"
     log_error "  2. View gateway logs: docker logs <gateway-container>"
@@ -148,11 +169,14 @@ write_gateway_token_to_container() {
     # Security: Use pipe instead of embedding variable in shell string to prevent injection
     # Even though tokens are generated securely via secrets.token_urlsafe(32), this pattern
     # is safer as defense-in-depth against any future changes to token generation
+    # Note: Run as root (-u 0) because /run is owned by root
     local write_output
-    write_output=$(echo "$combined" | docker exec -i "$container_id" sh -c '
+    write_output=$(echo "$combined" | docker exec -i -u 0 "$container_id" sh -c '
         set -e
         mkdir -p /run/secrets
         cat > /run/secrets/gateway_token
+        # Make readable by sandbox user (ubuntu, uid 1000) but not world-readable
+        chown 1000:1000 /run/secrets/gateway_token
         chmod 0400 /run/secrets/gateway_token
         # Verify permissions were applied correctly
         perms=$(stat -c "%a" /run/secrets/gateway_token 2>/dev/null || stat -f "%Lp" /run/secrets/gateway_token 2>/dev/null)
@@ -183,7 +207,8 @@ get_container_ip() {
     local container_id="$1"
     local network="${2:-credential-isolation}"
 
-    docker inspect -f "{{.NetworkSettings.Networks.${network}.IPAddress}}" "$container_id" 2>/dev/null
+    # Use index function for network names with special characters (hyphens, underscores)
+    docker inspect -f "{{(index .NetworkSettings.Networks \"${network}\").IPAddress}}" "$container_id" 2>/dev/null
 }
 
 # Setup gateway session for a container
@@ -254,9 +279,9 @@ cleanup_gateway_session() {
         return 0
     fi
 
-    # Check if gateway socket exists (credential isolation enabled)
-    if [ ! -S "$GATEWAY_SOCKET_PATH" ]; then
-        log_debug "Gateway socket not found - skipping session cleanup"
+    # Check if gateway URL is configured (credential isolation enabled)
+    if [ -z "$GATEWAY_URL" ]; then
+        log_debug "Gateway URL not configured - skipping session cleanup"
         return 0
     fi
 

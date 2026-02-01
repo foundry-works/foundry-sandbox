@@ -323,6 +323,13 @@ OVERRIDES
 
     # Setup gateway session for credential isolation
     if [ "$isolate_credentials" = "true" ]; then
+        # Get the gateway's host port and set GATEWAY_URL
+        if ! setup_gateway_url "$container"; then
+            log_error "Failed to get gateway port - gateway container may not be running"
+            compose_down "$worktree_dir" "$claude_config_path" "$container" "$override_file" "true" "$isolate_credentials"
+            exit 1
+        fi
+
         # Extract repo owner/name from repo_url for session authorization
         local repo_spec
         repo_spec=$(echo "$repo_url" | sed -E 's#^(https?://)?github\.com/##; s#^git@github\.com:##; s#\.git$##')

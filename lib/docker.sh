@@ -1,5 +1,26 @@
 #!/bin/bash
 
+# Detect host auth configuration and export appropriate sandbox env vars
+# This determines which placeholder credentials to use based on what's configured on the host
+setup_credential_placeholders() {
+    # Claude: Use OAuth placeholder if CLAUDE_CODE_OAUTH_TOKEN is set on host
+    if [ -n "$CLAUDE_CODE_OAUTH_TOKEN" ]; then
+        export SANDBOX_ANTHROPIC_API_KEY=""  # Don't set API key
+        export SANDBOX_CLAUDE_OAUTH="CREDENTIAL_PROXY_PLACEHOLDER"
+    else
+        export SANDBOX_ANTHROPIC_API_KEY="CREDENTIAL_PROXY_PLACEHOLDER"
+        export SANDBOX_CLAUDE_OAUTH=""
+    fi
+
+    # Gemini: Check selectedType in settings file
+    local gemini_settings="$HOME/.gemini/settings.json"
+    if [ -f "$gemini_settings" ] && grep -q '"selectedType".*"oauth-personal"' "$gemini_settings"; then
+        export SANDBOX_GEMINI_API_KEY=""  # Don't set API key (OAuth in use)
+    else
+        export SANDBOX_GEMINI_API_KEY="CREDENTIAL_PROXY_PLACEHOLDER"
+    fi
+}
+
 get_compose_command() {
     local override_file="$1"
     local isolate_credentials="${2:-false}"
@@ -25,15 +46,12 @@ compose_up() {
     export CLAUDE_CONFIG_PATH="$claude_config_path"
     export CONTAINER_NAME="$container"
 
-    # Set up gateway socket directory for credential isolation
+    # For credential isolation, set up placeholders and generate session management key
     if [ "$isolate_credentials" = "true" ]; then
-        # Use ~/.foundry-sandbox/sockets/ for Docker Desktop macOS compatibility
-        # Docker Desktop only allows bind mounts from specific paths (home directory, etc.)
-        export GATEWAY_SOCKET_DIR="$HOME/.foundry-sandbox/sockets/${container}"
-        mkdir -p "$GATEWAY_SOCKET_DIR"
-        chmod 700 "$GATEWAY_SOCKET_DIR"
-        # Export for gateway.sh to use
-        export GATEWAY_SOCKET_PATH="${GATEWAY_SOCKET_DIR}/gateway.sock"
+        # Detect host auth config and set appropriate placeholder env vars
+        setup_credential_placeholders
+        # Generate a random session management key for this sandbox
+        export GATEWAY_SESSION_MGMT_KEY=$(openssl rand -base64 32)
     fi
 
     local compose_cmd
@@ -60,20 +78,9 @@ compose_down() {
         fi
     fi
 
-    # Set gateway socket path for credential isolation
-    if [ "$isolate_credentials" = "true" ]; then
-        # Use ~/.foundry-sandbox/sockets/ for Docker Desktop macOS compatibility
-        export GATEWAY_SOCKET_DIR="$HOME/.foundry-sandbox/sockets/${container}"
-        export GATEWAY_SOCKET_PATH="${GATEWAY_SOCKET_DIR}/gateway.sock"
-    fi
-
     compose_cmd=$(get_compose_command "$override_file" "$isolate_credentials")
     if [ "$remove_volumes" = "true" ]; then
         run_cmd $compose_cmd -p "$container" down -v
-        # Clean up gateway socket directory
-        if [ -d "$HOME/.foundry-sandbox/sockets/${container}" ]; then
-            rm -rf "$HOME/.foundry-sandbox/sockets/${container}" 2>/dev/null || true
-        fi
     else
         run_cmd $compose_cmd -p "$container" down
     fi
@@ -82,6 +89,38 @@ compose_down() {
 container_is_running() {
     local container="$1"
     docker ps --filter "name=^${container}-dev" --format "{{.Names}}" | grep -q .
+}
+
+# Get the gateway host port for a container (credential isolation)
+# Args:
+#   $1 - container: The container project name
+# Returns:
+#   Prints the host port to stdout, or empty if not found
+get_gateway_host_port() {
+    local container="$1"
+    local gateway_container="${container}-gateway-1"
+
+    # Get the host port mapped to container port 8080
+    docker port "$gateway_container" 8080 2>/dev/null | head -1 | sed 's/.*://'
+}
+
+# Set up GATEWAY_URL after containers start
+# Args:
+#   $1 - container: The container project name
+# Returns:
+#   0 on success, 1 on failure
+#   Sets GATEWAY_URL environment variable
+setup_gateway_url() {
+    local container="$1"
+    local port
+
+    port=$(get_gateway_host_port "$container")
+    if [ -z "$port" ]; then
+        return 1
+    fi
+
+    export GATEWAY_URL="http://127.0.0.1:${port}"
+    return 0
 }
 
 exec_in_container() {

@@ -7,22 +7,8 @@
 
 set -e
 
-# Create Unix socket directory with proper permissions
-SOCKET_DIR="/var/run/gateway"
-SOCKET_PATH="${SOCKET_DIR}/gateway.sock"
-READY_FILE="${SOCKET_DIR}/.ready"
+# Runtime user for privilege dropping
 RUN_USER="${GATEWAY_USER:-appuser}"
-
-echo "Creating socket directory: ${SOCKET_DIR}"
-# Use install -d for atomic directory creation with proper permissions
-# This prevents race conditions between mkdir and chmod
-if [ "$(id -u)" -eq 0 ]; then
-    install -d -m 755 -o "${RUN_USER}" -g "${RUN_USER}" "${SOCKET_DIR}"
-else
-    # Non-root: use subshell with umask to ensure correct permissions atomically
-    # This prevents TOCTOU race between mkdir and chmod
-    (umask 022 && mkdir -p "${SOCKET_DIR}")
-fi
 
 # Start dnsmasq for DNS routing (if configured)
 # This allows the gateway to control DNS resolution for sandboxed containers
@@ -51,17 +37,6 @@ cleanup() {
         echo "Stopping dnsmasq (PID: ${DNSMASQ_PID})..."
         kill -TERM "${DNSMASQ_PID}" 2>/dev/null || true
         wait "${DNSMASQ_PID}" 2>/dev/null || true
-    fi
-
-    # Remove socket file
-    if [ -S "${SOCKET_PATH}" ]; then
-        echo "Removing socket file: ${SOCKET_PATH}"
-        rm -f "${SOCKET_PATH}"
-    fi
-
-    # Remove ready file
-    if [ -f "${READY_FILE}" ]; then
-        rm -f "${READY_FILE}"
     fi
 
     echo "Gateway shutdown complete"
@@ -139,14 +114,14 @@ apply_startup_firewall() {
 # Apply firewall rules before starting any services
 apply_startup_firewall
 
-# Create ready file to signal firewall is configured
-# Other containers can wait for this file before sending requests
-touch "${READY_FILE}" 2>/dev/null || true
-echo "Gateway firewall barrier complete, ready file created: ${READY_FILE}"
+echo "Gateway firewall barrier complete"
 
-# Start Gunicorn bound to BOTH TCP port and Unix socket
-# - TCP 8080: For external HTTP traffic (git operations)
-# - Unix socket: For local session management (create/destroy)
+# Start Gunicorn bound to TCP port only
+# - TCP 8080: For all HTTP traffic (git operations + session management)
+#
+# Note: Unix socket binding was removed due to compatibility issues with
+# Docker Desktop's fakeowner filesystem on Linux. Session management from
+# the host now uses TCP via exposed port.
 #
 # IMPORTANT: Single-Worker Architecture Constraint
 # ================================================
@@ -166,7 +141,7 @@ echo "Gateway firewall barrier complete, ready file created: ${READY_FILE}"
 # - Session operations become: SET/GET/DEL with TTL on Redis keys
 # - This enables horizontal scaling with --workers N
 #
-echo "Starting Gunicorn on TCP :8080 and Unix socket ${SOCKET_PATH}..."
+echo "Starting Gunicorn on TCP :8080..."
 
 # Gunicorn timeout should exceed upstream read timeout (GATEWAY_READ_TIMEOUT, default 600s)
 # to prevent workers from being killed mid-request during large git operations
@@ -179,7 +154,6 @@ if [ "$(id -u)" -eq 0 ] && command -v gosu >/dev/null 2>&1; then
     echo "Dropping privileges to user: ${RUN_USER}"
     exec gosu "${RUN_USER}" gunicorn \
         --bind "0.0.0.0:8080" \
-        --bind "unix:${SOCKET_PATH}" \
         --workers 1 \
         --worker-class sync \
         --timeout "${GUNICORN_TIMEOUT}" \
@@ -190,7 +164,6 @@ if [ "$(id -u)" -eq 0 ] && command -v gosu >/dev/null 2>&1; then
 else
     exec gunicorn \
         --bind "0.0.0.0:8080" \
-        --bind "unix:${SOCKET_PATH}" \
         --workers 1 \
         --worker-class sync \
         --timeout "${GUNICORN_TIMEOUT}" \

@@ -65,7 +65,7 @@ cmd_start() {
 
     # Refresh gateway session on restart (if credential isolation enabled)
     # Destroys old token and creates a new one for security
-    if [ -S "$GATEWAY_SOCKET_PATH" ]; then
+    if setup_gateway_url "$container" 2>/dev/null; then
         # Clean up old session first
         cleanup_gateway_session "$container_id"
         # Create new session with fresh token

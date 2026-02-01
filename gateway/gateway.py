@@ -116,6 +116,10 @@ UPSTREAM_READ_TIMEOUT = int(os.environ.get('GATEWAY_READ_TIMEOUT', 600))
 # deployments would fail session validation. For horizontal scaling, replace
 # this dict with a Redis-backed session store.
 SESSIONS = {}  # {token: {'secret': secret, 'container_id': id, 'container_ip': ip, 'repos': [], 'created': datetime, 'last_accessed': datetime, 'expires_at': datetime}}
+
+# Session management API key (for TCP-based session management from host)
+# Required when session management is done via TCP instead of Unix socket
+SESSION_MGMT_KEY = os.environ.get('GATEWAY_SESSION_MGMT_KEY', '')
 SESSIONS_LOCK = threading.Lock()  # Protects SESSIONS dict from concurrent access by GC thread
 SESSION_TTL_INACTIVITY = timedelta(hours=24)  # 24 hour inactivity timeout
 SESSION_TTL_ABSOLUTE = timedelta(days=7)  # 7 day absolute timeout
@@ -635,17 +639,45 @@ def is_localhost(addr):
     return False
 
 
+def check_session_mgmt_auth():
+    """
+    Check if the request is authorized for session management.
+
+    Allows requests from:
+    1. Localhost (127.0.0.1, ::1) - traditional Unix socket / local TCP
+    2. Requests with valid X-Session-Mgmt-Key header matching GATEWAY_SESSION_MGMT_KEY
+
+    Returns:
+        tuple: (is_authorized, error_response) where error_response is None if authorized
+    """
+    # Allow localhost requests (Unix socket or local TCP)
+    if is_localhost(request.remote_addr):
+        return True, None
+
+    # Check for session management API key (for TCP from Docker host)
+    if SESSION_MGMT_KEY:
+        provided_key = request.headers.get('X-Session-Mgmt-Key', '')
+        if provided_key and hmac.compare_digest(SESSION_MGMT_KEY, provided_key):
+            return True, None
+
+    audit_log('session_mgmt_denied', extra_data={
+        'reason': 'unauthorized',
+        'remote_addr': request.remote_addr,
+        'has_key': bool(request.headers.get('X-Session-Mgmt-Key'))
+    })
+    return False, ({'error': 'Session management not authorized'}, 403)
+
+
 @app.route('/session/create', methods=['POST'])
 def session_create_endpoint():
     """
     Create a new session with token and secret binding to container IP.
-    Unix socket only (trusted orchestrator).
+    Requires localhost or valid session management API key.
     """
-    # Check if request comes from localhost (Unix socket or local TCP)
-    # Supports both IPv4 (127.0.0.1) and IPv6 (::1) localhost addresses
-    if not is_localhost(request.remote_addr):
-        audit_log('session_create_denied', extra_data={'reason': 'not_localhost', 'remote_addr': request.remote_addr})
-        return {'error': 'Session creation only allowed from localhost'}, 403
+    # Check authorization
+    authorized, error_response = check_session_mgmt_auth()
+    if not authorized:
+        return error_response
 
     try:
         data = request.json if request.json else {}
@@ -711,13 +743,12 @@ def session_create_endpoint():
 def session_destroy_endpoint(session_token):
     """
     Destroy a session by token.
-    Unix socket only.
+    Requires localhost or valid session management API key.
     """
-    # Check if request comes from localhost (Unix socket or local TCP)
-    # Supports both IPv4 (127.0.0.1) and IPv6 (::1) localhost addresses
-    if not is_localhost(request.remote_addr):
-        audit_log('session_destroy_denied', extra_data={'reason': 'not_localhost', 'remote_addr': request.remote_addr, 'token': session_token})
-        return {'error': 'Session destruction only allowed from localhost'}, 403
+    # Check authorization
+    authorized, error_response = check_session_mgmt_auth()
+    if not authorized:
+        return error_response
 
     if destroy_session(session_token):
         audit_log('session_destroy', extra_data={'token': session_token})
