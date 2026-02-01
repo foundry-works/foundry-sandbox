@@ -60,18 +60,21 @@ try:
 except ImportError:
     GeminiTokenManager = None  # type: ignore[misc, assignment]
 
-# OAuth placeholder token that sandbox sees
+# OAuth placeholder tokens that sandbox sees
 OAUTH_PLACEHOLDER = "CREDENTIAL_PROXY_PLACEHOLDER"
+OPENCODE_PLACEHOLDER = "OPENCODE_CREDENTIAL_PROXY_PLACEHOLDER"
 
 # OAuth token refresh endpoints to intercept
 REFRESH_ENDPOINTS = [
     ("auth0.openai.com", "/oauth/token"),
+    ("oauth2.googleapis.com", "/token"),
 ]
 
 # OpenCode host-to-provider mapping
 OPENCODE_PROVIDER_HOSTS = {
     "api.anthropic.com": "anthropic",
     "api.openai.com": "openai",
+    "chatgpt.com": "openai",
     "generativelanguage.googleapis.com": "google",
     "api.githubcopilot.com": "copilot",
     "copilot-proxy.githubusercontent.com": "copilot",
@@ -81,6 +84,7 @@ OPENCODE_PROVIDER_HOSTS = {
 GEMINI_API_HOSTS = [
     "generativelanguage.googleapis.com",
     "aiplatform.googleapis.com",
+    "cloudcode-pa.googleapis.com",
 ]
 
 
@@ -300,16 +304,29 @@ class CredentialInjector:
         """
         Intercept OAuth refresh requests and return placeholder tokens.
 
+        Supports multiple OAuth providers:
+        - auth0.openai.com: Codex CLI (uses oauth_manager)
+        - oauth2.googleapis.com: Gemini CLI (uses gemini_manager)
+
         Returns True if request was intercepted, False otherwise.
         """
         if not self._is_refresh_endpoint(flow):
             return False
 
-        if not self.oauth_manager:
+        host = flow.request.host
+        placeholder_response = None
+
+        # Route to appropriate token manager based on endpoint
+        if host == "auth0.openai.com" and self.oauth_manager:
+            ctx.log.info(f"Intercepting Codex OAuth refresh request to {host}")
+            placeholder_response = self.oauth_manager.get_placeholder_response()
+        elif host == "oauth2.googleapis.com" and self.gemini_manager:
+            ctx.log.info(f"Intercepting Gemini OAuth refresh request to {host}")
+            placeholder_response = self.gemini_manager.get_placeholder_response()
+
+        if placeholder_response is None:
             return False
 
-        ctx.log.info(f"Intercepting OAuth refresh request to {flow.request.host}")
-        placeholder_response = self.oauth_manager.get_placeholder_response()
         flow.response = http.Response.make(
             200,
             json.dumps(placeholder_response).encode(),
@@ -335,10 +352,10 @@ class CredentialInjector:
         if OAUTH_PLACEHOLDER not in auth_header:
             return False
 
-        # Only handle OpenAI endpoints (Codex CLI)
+        # Only handle OpenAI/ChatGPT endpoints (Codex CLI)
         # Don't intercept requests to other APIs like Anthropic
         host = flow.request.host
-        if host not in ("api.openai.com", "auth0.openai.com"):
+        if host not in ("api.openai.com", "auth0.openai.com", "chatgpt.com"):
             return False
 
         try:
@@ -366,7 +383,7 @@ class CredentialInjector:
             return False
 
         auth_header = flow.request.headers.get("Authorization", "")
-        if OAUTH_PLACEHOLDER not in auth_header:
+        if OPENCODE_PLACEHOLDER not in auth_header:
             return False
 
         host = flow.request.host

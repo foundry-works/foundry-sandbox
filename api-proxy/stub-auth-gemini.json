@@ -1,8 +1,9 @@
 {
-  "access_token": "CREDENTIAL_PROXY_PLACEHOLDER",
+  "_comment": "Mock OAuth credentials for Gemini CLI. IMPORTANT: id_token MUST be valid JWT format (header.payload.signature) or Gemini will prompt for re-authentication. The payload contains placeholder values - real credentials are injected by the proxy at request time.",
+  "access_token": "ya29.CREDENTIAL_PROXY_PLACEHOLDER",
   "expiry_date": 4102444800000,
-  "id_token": "CREDENTIAL_PROXY_PLACEHOLDER",
-  "refresh_token": "CREDENTIAL_PROXY_PLACEHOLDER",
+  "id_token": "eyJhbGciOiAiUlMyNTYiLCAidHlwIjogIkpXVCJ9.eyJpc3MiOiAiaHR0cHM6Ly9hY2NvdW50cy5nb29nbGUuY29tIiwgImF6cCI6ICJDUkVERU5USUFMX1BST1hZX1BMQUNFSE9MREVSIiwgImF1ZCI6ICJDUkVERU5USUFMX1BST1hZX1BMQUNFSE9MREVSIiwgInN1YiI6ICIwMDAwMDAwMDAwMDAwMDAwMDAwMDAiLCAiZW1haWwiOiAic2FuZGJveEBjcmVkZW50aWFsLXByb3h5LmxvY2FsIiwgImVtYWlsX3ZlcmlmaWVkIjogdHJ1ZSwgImlhdCI6IDE3MDAwMDAwMDAsICJleHAiOiA0MTAyNDQ0ODAwfQ.CREDENTIAL_PROXY_PLACEHOLDER_SIGNATURE",
+  "refresh_token": "1//CREDENTIAL_PROXY_PLACEHOLDER",
   "scope": "https://www.googleapis.com/auth/cloud-platform https://www.googleapis.com/auth/generative-language.retriever",
   "token_type": "Bearer"
 }

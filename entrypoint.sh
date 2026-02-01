@@ -18,8 +18,8 @@ mkdir -p "$HOME/.claude" \
          "$HOME/.foundry-mcp/metrics"
 
 # Fix ownership of directories that Docker may have created as root
-# (happens when credential-isolation mounts files before entrypoint runs)
-# Include parent directories (.local, .local/share) that Docker creates for nested mounts
+# Note: credential-isolation now mounts stubs to /etc/proxy-stubs/ and symlinks them,
+# avoiding the root ownership issue. This loop is kept as a safety net for other mounts.
 for dir in "$HOME/.codex" "$HOME/.local" "$HOME/.local/share" "$HOME/.local/share/opencode" "$HOME/.gemini"; do
     if [ -d "$dir" ] && [ "$(stat -c '%U' "$dir" 2>/dev/null)" = "root" ]; then
         sudo chown "$(id -u):$(id -g)" "$dir" 2>/dev/null || true
@@ -62,6 +62,30 @@ fi
 # This allows plugin/MCP registration to access GitHub if needed.
 # To apply network mode manually: sudo network-mode <limited|host-only|none>
 # The host script will call this after copy_configs_to_container completes.
+
+# Symlink proxy stub files when in gateway mode
+# Stubs are mounted to /etc/proxy-stubs/ to avoid Docker creating root-owned parent dirs
+# We symlink them to user directories after entrypoint creates those dirs with correct ownership
+if [ "$SANDBOX_GATEWAY_ENABLED" = "true" ]; then
+    if [ -f "/etc/proxy-stubs/codex-auth.json" ]; then
+        ln -sf /etc/proxy-stubs/codex-auth.json "$HOME/.codex/auth.json"
+    fi
+    if [ -f "/etc/proxy-stubs/opencode-auth.json" ]; then
+        ln -sf /etc/proxy-stubs/opencode-auth.json "$HOME/.local/share/opencode/auth.json"
+    fi
+    if [ -f "/etc/proxy-stubs/gemini-oauth.json" ]; then
+        ln -sf /etc/proxy-stubs/gemini-oauth.json "$HOME/.gemini/oauth_creds.json"
+    fi
+    if [ -f "/etc/proxy-stubs/gemini-accounts.json" ]; then
+        ln -sf /etc/proxy-stubs/gemini-accounts.json "$HOME/.gemini/google_accounts.json"
+    fi
+    if [ -f "/etc/proxy-stubs/gemini-settings.json" ]; then
+        ln -sf /etc/proxy-stubs/gemini-settings.json "$HOME/.gemini/settings.json"
+    fi
+    if [ -f "/etc/proxy-stubs/opencode-config.json" ]; then
+        ln -sf /etc/proxy-stubs/opencode-config.json "$HOME/.config/opencode/opencode.json"
+    fi
+fi
 
 # Apply gateway gitconfig conditionally
 # When SANDBOX_GATEWAY_ENABLED=true, route GitHub URLs through the gateway

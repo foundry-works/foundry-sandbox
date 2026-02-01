@@ -1,5 +1,11 @@
 {
-  "access_token": "CREDENTIAL_PROXY_PLACEHOLDER",
-  "refresh_token": "CREDENTIAL_PROXY_PLACEHOLDER",
-  "expires_at": 9999999999
+  "_comment": "Mock OAuth credentials for Codex CLI. IMPORTANT: id_token and access_token MUST be valid JWT format (header.payload.signature) or Codex will fail with 'invalid ID token format'. The payload contains placeholder values - real credentials are injected by the proxy at request time.",
+  "OPENAI_API_KEY": null,
+  "tokens": {
+    "id_token": "eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJodHRwczovL2F1dGgub3BlbmFpLmNvbS8iLCJzdWIiOiJDUkVERU5USUFMX1BST1hZX1BMQUNFSE9MREVSIiwiYXVkIjoiYXBwX0VNb2FtRUVaNzNmMENrWGFYcDdocmFubiIsImV4cCI6NDEwMjQ0NDgwMCwiaWF0IjoxNzAwMDAwMDAwfQ.CREDENTIAL_PROXY_PLACEHOLDER_SIGNATURE",
+    "access_token": "eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJodHRwczovL2F1dGgub3BlbmFpLmNvbS8iLCJzdWIiOiJDUkVERU5USUFMX1BST1hZX1BMQUNFSE9MREVSIiwiYXVkIjoiYXBwX0VNb2FtRUVaNzNmMENrWGFYcDdocmFubiIsImV4cCI6NDEwMjQ0NDgwMCwiaWF0IjoxNzAwMDAwMDAwfQ.CREDENTIAL_PROXY_PLACEHOLDER_SIGNATURE",
+    "refresh_token": "rt_CREDENTIAL_PROXY_PLACEHOLDER.CREDENTIAL_PROXY_PLACEHOLDER",
+    "account_id": "CREDENTIAL_PROXY_PLACEHOLDER"
+  },
+  "last_refresh": "2099-01-01T00:00:00.000Z"
 }

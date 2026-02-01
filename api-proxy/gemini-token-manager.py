@@ -91,22 +91,19 @@ class GeminiTokenManager:
 
     def get_valid_token(self) -> str:
         """
-        Get a valid access token.
+        Get the access token for injection.
 
-        For Gemini, we don't support automatic refresh since it requires
-        client credentials. If the token is expired, an error is raised
-        prompting the user to re-authenticate.
+        For Gemini, we don't check expiry here - we just return the token
+        and let the API call fail if it's expired. This gives clearer error
+        messages to the user than a proxy-side check.
 
         Returns:
-            Valid OAuth access token
+            OAuth access token
 
         Raises:
-            RuntimeError: If token is expired and needs manual refresh
-            ValueError: If no valid token available
+            ValueError: If no token available
         """
         with self._lock:
-            if self._is_token_expired():
-                self._refresh_access_token()
             if self._access_token is None:
                 raise ValueError("No valid access token available")
             return self._access_token
@@ -118,13 +115,13 @@ class GeminiTokenManager:
         Returns:
             Dict mimicking OAuth token response with placeholder values
         """
-        # Use far-future expiry (Jan 1, 2100 in milliseconds) to prevent
-        # client-side refresh attempts
+        # Use far-future expiry (Jan 1, 2100 in seconds for expires_in) to prevent
+        # client-side refresh attempts. Google OAuth response format.
         return {
-            "access_token": "CREDENTIAL_PROXY_PLACEHOLDER",
-            "refresh_token": "CREDENTIAL_PROXY_PLACEHOLDER",
-            "expiry_date": 4102444800000,  # Jan 1, 2100 in milliseconds
-            "id_token": "CREDENTIAL_PROXY_PLACEHOLDER",
+            "access_token": "ya29.CREDENTIAL_PROXY_PLACEHOLDER",
+            "refresh_token": "1//CREDENTIAL_PROXY_PLACEHOLDER",
+            "expires_in": 2147483647,  # Max int32 seconds (~68 years)
+            "id_token": "eyJhbGciOiAiUlMyNTYiLCAidHlwIjogIkpXVCJ9.eyJpc3MiOiAiaHR0cHM6Ly9hY2NvdW50cy5nb29nbGUuY29tIiwgImF6cCI6ICJDUkVERU5USUFMX1BST1hZX1BMQUNFSE9MREVSIiwgImF1ZCI6ICJDUkVERU5USUFMX1BST1hZX1BMQUNFSE9MREVSIiwgInN1YiI6ICIwMDAwMDAwMDAwMDAwMDAwMDAwMDAiLCAiZW1haWwiOiAic2FuZGJveEBjcmVkZW50aWFsLXByb3h5LmxvY2FsIiwgImVtYWlsX3ZlcmlmaWVkIjogdHJ1ZSwgImlhdCI6IDE3MDAwMDAwMDAsICJleHAiOiA0MTAyNDQ0ODAwfQ.CREDENTIAL_PROXY_PLACEHOLDER_SIGNATURE",
             "scope": self._scope or "https://www.googleapis.com/auth/cloud-platform https://www.googleapis.com/auth/generative-language.retriever",
             "token_type": "Bearer",
         }

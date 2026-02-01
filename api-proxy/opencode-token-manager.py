@@ -308,8 +308,8 @@ class MultiProviderTokenManager:
             Dict mimicking OAuth token response with placeholder values
         """
         return {
-            "access_token": "CREDENTIAL_PROXY_PLACEHOLDER",
-            "refresh_token": "CREDENTIAL_PROXY_PLACEHOLDER",
+            "access_token": "OPENCODE_CREDENTIAL_PROXY_PLACEHOLDER",
+            "refresh_token": "OPENCODE_CREDENTIAL_PROXY_PLACEHOLDER",
             "expires_in": 86400,
             "token_type": "Bearer",
         }

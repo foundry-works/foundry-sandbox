@@ -1,9 +1,9 @@
 #!/bin/bash
 #
 # Firewall allowlist configuration (auto-generated)
-# Generated from: /workspace/gateway/allowlist.conf
+# Generated from: /home/tyler/GitHub/foundry-sandbox/gateway/allowlist.conf
 # DO NOT EDIT MANUALLY - use build-configs.sh to regenerate
-# Generated: Sun Feb  1 06:45:06 EST 2026
+# Generated: Sun 01 Feb 2026 09:21:47 AM EST
 #
 # This file is sourced by safety/network-firewall.sh
 # Provides domain, rotating domain, and CIDR allowlists
@@ -30,12 +30,8 @@ declare -a ALLOWLIST_DOMAINS=(
     "api.anthropic.com"
     "console.anthropic.com"
     "claude.ai"
-    "api.openai.com"
-    "auth.openai.com"
-    "auth0.openai.com"
-    "platform.openai.com"
-    "chatgpt.com"
     "generativelanguage.googleapis.com"
+    "cloudcode-pa.googleapis.com"
     "accounts.google.com"
     "oauth2.googleapis.com"
     "api.groq.com"
@@ -99,13 +95,15 @@ declare -a KNOWN_IPS=(
 declare -a WILDCARD_DOMAINS=(
     "*.cloudfront.net"
     "*.fastly.net"
+    "*.openai.com"
+    "*.chatgpt.com"
     "*.cursor.com"
     "*.cursor.sh"
 )
 
 # Statistics
-# Total domains: 53
+# Total domains: 51
 # Rotating IP domains: 0
-# Wildcard domains: 4
+# Wildcard domains: 6
 # CIDR blocks: 19
 

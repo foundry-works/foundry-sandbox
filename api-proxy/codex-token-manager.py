@@ -10,10 +10,12 @@ Manages OAuth token lifecycle for ChatGPT authentication:
 Uses httpx with proxy=None to bypass mitmproxy for token refresh.
 """
 
+import base64
 import json
 import os
 import time
 import threading
+from datetime import datetime
 from typing import Optional
 
 import httpx
@@ -58,12 +60,96 @@ class OAuthTokenManager:
 
         self._access_token = tokens.get("access_token")
         self._refresh_token = tokens.get("refresh_token")
-        # Ensure expires_at is numeric (may be stored as string in some formats)
-        expires_at_raw = data.get("expires_at") or data.get("last_refresh", 0)
-        self._expires_at = float(expires_at_raw) if expires_at_raw else 0
+        # Extract expiry from JWT access_token (most reliable source)
+        # Falls back to expires_at field or last_refresh if JWT parsing fails
+        self._expires_at = self._extract_jwt_expiry(self._access_token)
+        if self._expires_at == 0:
+            expires_at_raw = data.get("expires_at") or data.get("last_refresh", 0)
+            self._expires_at = self._parse_expiry(expires_at_raw)
 
         if not self._access_token or not self._refresh_token:
             raise ValueError("Invalid auth.json: missing access_token or refresh_token")
+
+    def _extract_jwt_expiry(self, token: Optional[str]) -> float:
+        """
+        Extract the exp claim from a JWT token.
+
+        Args:
+            token: JWT token string (header.payload.signature)
+
+        Returns:
+            Unix timestamp of expiry, or 0 if extraction fails
+        """
+        if not token:
+            return 0
+
+        try:
+            # JWT format: header.payload.signature
+            parts = token.split(".")
+            if len(parts) != 3:
+                return 0
+
+            # Decode payload (base64url encoded)
+            payload_b64 = parts[1]
+            # Add padding if needed
+            padding = 4 - len(payload_b64) % 4
+            if padding < 4:
+                payload_b64 += "=" * padding
+
+            payload_json = base64.urlsafe_b64decode(payload_b64)
+            payload = json.loads(payload_json)
+
+            # Extract exp claim
+            exp = payload.get("exp")
+            if isinstance(exp, (int, float)):
+                return float(exp)
+        except Exception:
+            pass
+
+        return 0
+
+    def _parse_expiry(self, value) -> float:
+        """
+        Parse expiry time from various formats.
+
+        Supports:
+        - Numeric Unix timestamp (int or float)
+        - Numeric string ("1700000000")
+        - ISO 8601 date string ("2026-01-26T00:33:39.106494452Z")
+
+        Returns:
+            Unix timestamp as float, or 0 if parsing fails
+        """
+        if not value:
+            return 0
+
+        # Already numeric
+        if isinstance(value, (int, float)):
+            return float(value)
+
+        # String - try numeric first, then ISO date
+        if isinstance(value, str):
+            # Try parsing as numeric string
+            try:
+                return float(value)
+            except ValueError:
+                pass
+
+            # Try parsing as ISO date string
+            try:
+                # Handle various ISO formats with optional microseconds and Z suffix
+                value = value.rstrip("Z")
+                # Truncate nanoseconds to microseconds (Python only supports microseconds)
+                if "." in value:
+                    base, frac = value.rsplit(".", 1)
+                    frac = frac[:6]  # Keep only 6 digits for microseconds
+                    value = f"{base}.{frac}"
+                dt = datetime.fromisoformat(value)
+                return dt.timestamp()
+            except ValueError:
+                pass
+
+        return 0
 
     def _is_token_expired(self) -> bool:
         """Check if token is expired or will expire within buffer period."""
@@ -142,11 +228,12 @@ class OAuthTokenManager:
         Generate a placeholder token response for intercepted refresh requests.
 
         Returns:
-            Dict mimicking OAuth token response with placeholder values
+            Dict mimicking OAuth token response with placeholder values.
+            access_token must be valid JWT format to pass Codex CLI validation.
         """
         return {
-            "access_token": "CREDENTIAL_PROXY_PLACEHOLDER",
-            "refresh_token": "CREDENTIAL_PROXY_PLACEHOLDER",
+            "access_token": "eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJodHRwczovL2F1dGgub3BlbmFpLmNvbS8iLCJzdWIiOiJDUkVERU5USUFMX1BST1hZX1BMQUNFSE9MREVSIiwiYXVkIjoiYXBwX0VNb2FtRUVaNzNmMENrWGFYcDdocmFubiIsImV4cCI6NDEwMjQ0NDgwMCwiaWF0IjoxNzAwMDAwMDAwfQ.CREDENTIAL_PROXY_PLACEHOLDER_SIGNATURE",
+            "refresh_token": "rt_CREDENTIAL_PROXY_PLACEHOLDER.CREDENTIAL_PROXY_PLACEHOLDER",
             "expires_in": 86400,
             "token_type": "Bearer",
         }
