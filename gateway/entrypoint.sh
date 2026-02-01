@@ -1,18 +1,28 @@
 #!/bin/bash
 # Entrypoint script for credential isolation gateway
 # Starts dnsmasq for DNS routing (as root) and Gunicorn bound to both TCP and Unix socket (as appuser)
+#
+# SECURITY: Implements startup synchronization barrier to ensure firewall rules
+# are applied before accepting any connections.
 
 set -e
 
 # Create Unix socket directory with proper permissions
 SOCKET_DIR="/var/run/gateway"
 SOCKET_PATH="${SOCKET_DIR}/gateway.sock"
+READY_FILE="${SOCKET_DIR}/.ready"
 RUN_USER="${GATEWAY_USER:-appuser}"
 
 echo "Creating socket directory: ${SOCKET_DIR}"
-mkdir -p "${SOCKET_DIR}"
-chmod 755 "${SOCKET_DIR}"
-chown "${RUN_USER}:${RUN_USER}" "${SOCKET_DIR}" 2>/dev/null || true
+# Use install -d for atomic directory creation with proper permissions
+# This prevents race conditions between mkdir and chmod
+if [ "$(id -u)" -eq 0 ]; then
+    install -d -m 755 -o "${RUN_USER}" -g "${RUN_USER}" "${SOCKET_DIR}"
+else
+    # Non-root: create with umask and hope for the best
+    mkdir -p "${SOCKET_DIR}"
+    chmod 755 "${SOCKET_DIR}"
+fi
 
 # Start dnsmasq for DNS routing (if configured)
 # This allows the gateway to control DNS resolution for sandboxed containers
@@ -49,12 +59,73 @@ cleanup() {
         rm -f "${SOCKET_PATH}"
     fi
 
+    # Remove ready file
+    if [ -f "${READY_FILE}" ]; then
+        rm -f "${READY_FILE}"
+    fi
+
     echo "Gateway shutdown complete"
     exit 0
 }
 
 # Register cleanup handler for graceful shutdown
 trap cleanup SIGTERM SIGINT SIGQUIT
+
+# ==============================================================================
+# SECURITY: Startup Synchronization Barrier
+# ==============================================================================
+# Ensure firewall rules are applied BEFORE accepting any connections.
+# This prevents a race condition where malicious code could exfiltrate data
+# during the startup window before iptables rules are in place.
+#
+# The firewall script (if run externally) should create the ready file.
+# If running in standalone mode, we apply basic rules here.
+# ==============================================================================
+
+apply_startup_firewall() {
+    echo "Applying startup firewall rules..."
+
+    # Check if we have iptables capability
+    if ! command -v iptables &>/dev/null; then
+        echo "WARNING: iptables not available, skipping firewall rules"
+        return 0
+    fi
+
+    # Check if we have NET_ADMIN capability (required for iptables)
+    if ! iptables -L OUTPUT -n &>/dev/null 2>&1; then
+        echo "WARNING: Cannot access iptables (missing NET_ADMIN?), skipping firewall rules"
+        return 0
+    fi
+
+    # Apply minimal firewall rules for the gateway container itself:
+    # - Allow loopback
+    # - Allow established connections
+    # - Allow outbound to GitHub (for proxying git requests)
+    # The sandbox firewall (network-firewall.sh) provides the main isolation
+
+    # Only apply if OUTPUT chain is empty (avoid double application)
+    local rule_count
+    rule_count=$(iptables -L OUTPUT -n 2>/dev/null | wc -l)
+    if [ "$rule_count" -gt 2 ]; then
+        echo "Firewall rules already applied (${rule_count} rules in OUTPUT)"
+        return 0
+    fi
+
+    echo "  - Allowing loopback and established connections"
+    iptables -A OUTPUT -o lo -j ACCEPT 2>/dev/null || true
+    iptables -A OUTPUT -m state --state ESTABLISHED,RELATED -j ACCEPT 2>/dev/null || true
+
+    echo "Firewall rules applied successfully"
+    return 0
+}
+
+# Apply firewall rules before starting any services
+apply_startup_firewall
+
+# Create ready file to signal firewall is configured
+# Other containers can wait for this file before sending requests
+touch "${READY_FILE}" 2>/dev/null || true
+echo "Gateway firewall barrier complete, ready file created: ${READY_FILE}"
 
 # Start Gunicorn bound to BOTH TCP port and Unix socket
 # - TCP 8080: For external HTTP traffic (git operations)

@@ -42,9 +42,11 @@ refresh_rotating_ips() {
     for domain in "${ROTATING_IP_DOMAINS[@]}"; do
         log_verbose "  Refreshing: $domain"
         for i in {1..5}; do
-            local ips
-            ips=$(dig +short "$domain" A 2>/dev/null | grep -E '^[0-9]+\.' || true)
-            for ip in $ips; do
+            local ips_raw ip
+            ips_raw=$(dig +short "$domain" A 2>/dev/null | grep -E '^[0-9]+\.' || true)
+            # Use read loop to safely iterate over IPs without word splitting issues
+            while IFS= read -r ip; do
+                [ -z "$ip" ] && continue
                 if command -v ipset &>/dev/null && ipset list sandbox_allow_v4 &>/dev/null; then
                     ipset add -exist sandbox_allow_v4 "$ip" 2>/dev/null || true
                 else
@@ -52,7 +54,7 @@ refresh_rotating_ips() {
                     iptables -C OUTPUT -d "$ip" -j ACCEPT 2>/dev/null || \
                         iptables -I OUTPUT -d "$ip" -j ACCEPT 2>/dev/null || true
                 fi
-            done
+            done <<< "$ips_raw"
             sleep 0.2
         done
     done
@@ -325,6 +327,22 @@ GITHUB_CIDRS=(
     "143.55.64.0/20"     # Additional infrastructure
 )
 
+# Cloudflare IPv6 ranges (source: https://www.cloudflare.com/ips-v6)
+CLOUDFLARE_CIDRS_V6=(
+    "2400:cb00::/32"
+    "2606:4700::/32"
+    "2803:f800::/32"
+    "2405:b500::/32"
+    "2405:8100::/32"
+    "2a06:98c0::/29"
+    "2c0f:f248::/32"
+)
+
+# GitHub IPv6 ranges (from https://api.github.com/meta)
+GITHUB_CIDRS_V6=(
+    "2a0a:a440::/29"     # GitHub IPv6 range
+)
+
 # Track already-added IPs to avoid duplicates
 declare -A ADDED_IPS
 
@@ -354,10 +372,18 @@ add_ipv6_rule() {
     fi
 }
 
-# Function to add CIDR range to firewall
+# Function to add CIDR range to firewall (IPv4)
 add_cidr_rule() {
     local cidr="$1"
     iptables -A OUTPUT -d "$cidr" -j ACCEPT 2>/dev/null || true
+}
+
+# Function to add CIDR range to firewall (IPv6)
+add_cidr_rule_v6() {
+    local cidr="$1"
+    if command -v ip6tables &>/dev/null; then
+        ip6tables -A OUTPUT -d "$cidr" -j ACCEPT 2>/dev/null || true
+    fi
 }
 
 # Function to resolve domain and add rules
@@ -379,43 +405,46 @@ allow_domain() {
         log_verbose "    (rotating IP domain - resolving multiple times)"
         local all_ips=""
         for i in {1..5}; do
-            local ips
-            ips=$(dig +short "$domain" A 2>/dev/null | grep -E '^[0-9]+\.' || true)
-            all_ips="$all_ips $ips"
+            local ips_raw
+            ips_raw=$(dig +short "$domain" A 2>/dev/null | grep -E '^[0-9]+\.' || true)
+            all_ips="$all_ips"$'\n'"$ips_raw"
             sleep 0.2
         done
-        # Deduplicate and add
-        local unique_ips
-        unique_ips=$(echo "$all_ips" | tr ' ' '\n' | sort -u | grep -E '^[0-9]+\.' || true)
+        # Deduplicate and add using safe read loop
+        local unique_ips ip
+        unique_ips=$(echo "$all_ips" | sort -u | grep -E '^[0-9]+\.' || true)
         local ip_count=0
-        for ip in $unique_ips; do
+        while IFS= read -r ip; do
+            [ -z "$ip" ] && continue
             add_ip_rule "$ip"
             ((ip_count++)) || true
-        done
+        done <<< "$unique_ips"
         log_verbose "    Added $ip_count unique IPs"
     else
         # Standard single resolution
-        local ips
-        ips=$(dig +short "$domain" A 2>/dev/null | grep -E '^[0-9]+\.' || true)
+        local ips_raw ip
+        ips_raw=$(dig +short "$domain" A 2>/dev/null | grep -E '^[0-9]+\.' || true)
 
         # Also try AAAA records for IPv6
-        local ipv6s
-        ipv6s=$(dig +short "$domain" AAAA 2>/dev/null | grep -E '^[0-9a-f:]+' || true)
+        local ipv6s_raw
+        ipv6s_raw=$(dig +short "$domain" AAAA 2>/dev/null | grep -E '^[0-9a-f:]+' || true)
 
-        if [ -z "$ips" ] && [ -z "$ipv6s" ]; then
+        if [ -z "$ips_raw" ] && [ -z "$ipv6s_raw" ]; then
             log_verbose "    Warning: Could not resolve $domain"
             return
         fi
 
-        # Add rules for each resolved IP
-        for ip in $ips; do
+        # Add rules for each resolved IP using safe read loop
+        while IFS= read -r ip; do
+            [ -z "$ip" ] && continue
             add_ip_rule "$ip"
-        done
+        done <<< "$ips_raw"
 
-        # Add rules for IPv6
-        for ip in $ipv6s; do
+        # Add rules for IPv6 using safe read loop
+        while IFS= read -r ip; do
+            [ -z "$ip" ] && continue
             add_ipv6_rule "$ip"
-        done
+        done <<< "$ipv6s_raw"
     fi
 }
 
@@ -444,6 +473,22 @@ for cidr in "${GITHUB_CIDRS[@]}"; do
     add_cidr_rule "$cidr"
 done
 log_verbose "    Added ${#GITHUB_CIDRS[@]} GitHub CIDR blocks"
+
+# Allow Cloudflare IPv6 ranges
+if command -v ip6tables &>/dev/null; then
+    log_verbose "  Adding Cloudflare IPv6 CIDR ranges..."
+    for cidr in "${CLOUDFLARE_CIDRS_V6[@]}"; do
+        add_cidr_rule_v6 "$cidr"
+    done
+    log_verbose "    Added ${#CLOUDFLARE_CIDRS_V6[@]} Cloudflare IPv6 CIDR blocks"
+
+    # Allow GitHub IPv6 ranges
+    log_verbose "  Adding GitHub IPv6 CIDR ranges..."
+    for cidr in "${GITHUB_CIDRS_V6[@]}"; do
+        add_cidr_rule_v6 "$cidr"
+    done
+    log_verbose "    Added ${#GITHUB_CIDRS_V6[@]} GitHub IPv6 CIDR blocks"
+fi
 
 # Allow Docker gateway (for host communication)
 # Note: GATEWAY was already resolved earlier for DNS rules
@@ -506,12 +551,48 @@ if command -v ip6tables &>/dev/null; then
     ip6tables -F OUTPUT 2>/dev/null || true
     ip6tables -A OUTPUT -o lo -j ACCEPT 2>/dev/null || true
     ip6tables -A OUTPUT -m state --state ESTABLISHED,RELATED -j ACCEPT 2>/dev/null || true
+
+    # DNS restrictions for IPv6
     if [ ${#DNS_SERVERS_V6[@]} -gt 0 ]; then
         for dns in "${DNS_SERVERS_V6[@]}"; do
             ip6tables -A OUTPUT -p udp --dport 53 -d "$dns" -j ACCEPT 2>/dev/null || true
             ip6tables -A OUTPUT -p tcp --dport 53 -d "$dns" -j ACCEPT 2>/dev/null || true
         done
+        # Block DNS to all other IPv6 destinations (mirrors IPv4 behavior)
+        ip6tables -A OUTPUT -p udp --dport 53 -j DROP 2>/dev/null || true
+        ip6tables -A OUTPUT -p tcp --dport 53 -j DROP 2>/dev/null || true
     fi
+
+    # Allow traffic to credential-isolation gateway (IPv6) - mirrors IPv4 rules
+    if [ -n "${GATEWAY_HOST:-}" ]; then
+        GATEWAY_IP6=$(getent ahostsv6 "$GATEWAY_HOST" 2>/dev/null | awk '{print $1}' | head -1 || true)
+        if [ -n "$GATEWAY_IP6" ]; then
+            log_verbose "  Allowing credential gateway (IPv6): $GATEWAY_HOST ($GATEWAY_IP6)"
+            ip6tables -A OUTPUT -d "$GATEWAY_IP6" -j ACCEPT 2>/dev/null || true
+        fi
+    elif getent ahostsv6 gateway &>/dev/null 2>&1; then
+        GATEWAY_IP6=$(getent ahostsv6 gateway 2>/dev/null | awk '{print $1}' | head -1 || true)
+        if [ -n "$GATEWAY_IP6" ]; then
+            log_verbose "  Allowing credential gateway (IPv6): gateway ($GATEWAY_IP6)"
+            ip6tables -A OUTPUT -d "$GATEWAY_IP6" -j ACCEPT 2>/dev/null || true
+        fi
+    fi
+
+    # Allow traffic to api-proxy (IPv6) - mirrors IPv4 rules
+    if [ -n "${API_PROXY_HOST:-}" ]; then
+        API_PROXY_IP6=$(getent ahostsv6 "$API_PROXY_HOST" 2>/dev/null | awk '{print $1}' | head -1 || true)
+        if [ -n "$API_PROXY_IP6" ]; then
+            log_verbose "  Allowing API proxy (IPv6): $API_PROXY_HOST ($API_PROXY_IP6)"
+            ip6tables -A OUTPUT -d "$API_PROXY_IP6" -j ACCEPT 2>/dev/null || true
+        fi
+    elif getent ahostsv6 api-proxy &>/dev/null 2>&1; then
+        API_PROXY_IP6=$(getent ahostsv6 api-proxy 2>/dev/null | awk '{print $1}' | head -1 || true)
+        if [ -n "$API_PROXY_IP6" ]; then
+            log_verbose "  Allowing API proxy (IPv6): api-proxy ($API_PROXY_IP6)"
+            ip6tables -A OUTPUT -d "$API_PROXY_IP6" -j ACCEPT 2>/dev/null || true
+        fi
+    fi
+
     if [ "$USE_IPSET" = "true" ]; then
         ip6tables -A OUTPUT -m set --match-set "$IPSET_V6" dst -j ACCEPT 2>/dev/null || true
     fi
@@ -562,42 +643,66 @@ setup_docker_user_rules() {
     # Flush existing DOCKER-USER rules (but keep the default RETURN)
     iptables -F DOCKER-USER 2>/dev/null || true
 
-    # Allow established connections
-    iptables -I DOCKER-USER -m state --state ESTABLISHED,RELATED -j RETURN
+    # ===========================================================================
+    # DOCKER-USER Rule Ordering (explicit append order for predictability)
+    # ===========================================================================
+    # Rules are processed in order: first match wins.
+    # Order: ESTABLISHED -> DNS allow -> service allow -> DNS block -> egress block -> RETURN
+    # Using consistent -A (append) for predictable ordering.
+    # ===========================================================================
 
-    # Allow sandbox -> gateway (for git operations)
+    # 1. Allow established connections (fastest path for existing flows)
+    iptables -A DOCKER-USER -m state --state ESTABLISHED,RELATED -j RETURN
+    log_verbose "  [1] Allowing established connections"
+
+    # 2. Allow DNS (port 53) only to gateway (for dnsmasq) - BEFORE general gateway rule
     if [ -n "$GATEWAY_CONTAINER_IP" ]; then
-        iptables -I DOCKER-USER -s "$SANDBOX_SUBNET" -d "$GATEWAY_CONTAINER_IP" -j RETURN
-        log_verbose "  Allowing sandbox -> gateway ($GATEWAY_CONTAINER_IP)"
+        iptables -A DOCKER-USER -s "$SANDBOX_SUBNET" -d "$GATEWAY_CONTAINER_IP" -p udp --dport 53 -j RETURN
+        iptables -A DOCKER-USER -s "$SANDBOX_SUBNET" -d "$GATEWAY_CONTAINER_IP" -p tcp --dport 53 -j RETURN
+        log_verbose "  [2] Allowing DNS to gateway only"
     fi
 
-    # Allow sandbox -> api-proxy (for HTTPS API requests)
-    if [ -n "$API_PROXY_CONTAINER_IP" ]; then
-        iptables -I DOCKER-USER -s "$SANDBOX_SUBNET" -d "$API_PROXY_CONTAINER_IP" -j RETURN
-        log_verbose "  Allowing sandbox -> api-proxy ($API_PROXY_CONTAINER_IP)"
-    fi
-
-    # Allow DNS (port 53) only to gateway (for dnsmasq)
-    if [ -n "$GATEWAY_CONTAINER_IP" ]; then
-        iptables -I DOCKER-USER -s "$SANDBOX_SUBNET" -d "$GATEWAY_CONTAINER_IP" -p udp --dport 53 -j RETURN
-        iptables -I DOCKER-USER -s "$SANDBOX_SUBNET" -d "$GATEWAY_CONTAINER_IP" -p tcp --dport 53 -j RETURN
-        log_verbose "  Allowing DNS to gateway only"
-    fi
-
-    # Block all other DNS from sandbox (prevent DNS bypass)
+    # 3. Block all other DNS from sandbox (prevent DNS bypass) - BEFORE service allows
     iptables -A DOCKER-USER -s "$SANDBOX_SUBNET" -p udp --dport 53 -j DROP
     iptables -A DOCKER-USER -s "$SANDBOX_SUBNET" -p tcp --dport 53 -j DROP
-    log_verbose "  Blocking DNS to non-gateway destinations"
+    log_verbose "  [3] Blocking DNS to non-gateway destinations"
 
-    # Block direct egress from sandbox to external networks
-    # (traffic should go through gateway or api-proxy)
-    iptables -A DOCKER-USER -s "$SANDBOX_SUBNET" ! -d 172.16.0.0/12 -j DROP
-    log_verbose "  Blocking direct external egress from sandbox"
+    # 4. Allow sandbox -> gateway (for git operations)
+    if [ -n "$GATEWAY_CONTAINER_IP" ]; then
+        iptables -A DOCKER-USER -s "$SANDBOX_SUBNET" -d "$GATEWAY_CONTAINER_IP" -j RETURN
+        log_verbose "  [4] Allowing sandbox -> gateway ($GATEWAY_CONTAINER_IP)"
+    fi
 
-    # Final RETURN for other traffic (Docker's default behavior)
+    # 5. Allow sandbox -> api-proxy (for HTTPS API requests)
+    if [ -n "$API_PROXY_CONTAINER_IP" ]; then
+        iptables -A DOCKER-USER -s "$SANDBOX_SUBNET" -d "$API_PROXY_CONTAINER_IP" -j RETURN
+        log_verbose "  [5] Allowing sandbox -> api-proxy ($API_PROXY_CONTAINER_IP)"
+    fi
+
+    # 6. Block direct egress from sandbox to external networks
+    # Traffic should go through gateway or api-proxy.
+    # We allow traffic to RFC1918 private ranges (where our services live):
+    # - 10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16
+    # And block all public (non-private) destinations.
+    # Note: Traffic to gateway/api-proxy is already allowed by rules 4-5 above.
+    # This rule catches any remaining traffic to public IPs.
+    #
+    # Using ipset or multiple rules to match "not RFC1918" is complex.
+    # Instead, we use a simpler approach: since gateway/api-proxy allow rules
+    # come first, this final DROP catches traffic to any other destination.
+    # We explicitly allow the Docker bridge network ranges first.
+    iptables -A DOCKER-USER -s "$SANDBOX_SUBNET" -d 10.0.0.0/8 -j RETURN
+    iptables -A DOCKER-USER -s "$SANDBOX_SUBNET" -d 172.16.0.0/12 -j RETURN
+    iptables -A DOCKER-USER -s "$SANDBOX_SUBNET" -d 192.168.0.0/16 -j RETURN
+    # Block everything else from sandbox (public IPs)
+    iptables -A DOCKER-USER -s "$SANDBOX_SUBNET" -j DROP
+    log_verbose "  [6] Blocking direct external egress from sandbox (public IPs)"
+
+    # 7. Final RETURN for other traffic (Docker's default behavior)
     iptables -A DOCKER-USER -j RETURN
+    log_verbose "  [7] Final RETURN rule"
 
-    log_verbose "  DOCKER-USER rules applied"
+    log_verbose "  DOCKER-USER rules applied (7 rule groups)"
 }
 
 # Only run DOCKER-USER setup if we're on the host (have docker access)
