@@ -1,29 +1,6 @@
 {
-  "anthropic": {
-    "access": "OPENCODE_CREDENTIAL_PROXY_PLACEHOLDER",
-    "expires": "2099-12-31T23:59:59Z",
-    "refresh": "OPENCODE_CREDENTIAL_PROXY_PLACEHOLDER",
-    "type": "oauth"
-  },
-  "openai": {
-    "access": "eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJodHRwczovL2F1dGgub3BlbmFpLmNvbS8iLCJzdWIiOiJPUEVOQ09ERV9DUkVERU5USUFMX1BST1hZX1BMQUNFSE9MREVSIiwiYXVkIjoiYXBwX0VNb2FtRUVaNzNmMENrWGFYcDdocmFubiIsImV4cCI6NDEwMjQ0NDgwMCwiaWF0IjoxNzAwMDAwMDAwfQ.OPENCODE_CREDENTIAL_PROXY_PLACEHOLDER_SIGNATURE",
-    "accountId": "placeholder",
-    "expires": "2099-12-31T23:59:59Z",
-    "refresh": "rt_OPENCODE_CREDENTIAL_PROXY_PLACEHOLDER",
-    "type": "oauth"
-  },
-  "google": {
-    "access": "OPENCODE_CREDENTIAL_PROXY_PLACEHOLDER",
-    "email": "placeholder@example.com",
-    "expires": "2099-12-31T23:59:59Z",
-    "projectId": "placeholder",
-    "refresh": "OPENCODE_CREDENTIAL_PROXY_PLACEHOLDER",
-    "type": "oauth"
-  },
-  "copilot": {
-    "access": "OPENCODE_CREDENTIAL_PROXY_PLACEHOLDER",
-    "expires": "2099-12-31T23:59:59Z",
-    "refresh": "OPENCODE_CREDENTIAL_PROXY_PLACEHOLDER",
-    "type": "oauth"
+  "zai-coding-plan": {
+    "type": "api",
+    "key": "PROXY_PLACEHOLDER_OPENCODE"
   }
 }

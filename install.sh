@@ -267,6 +267,10 @@ install_from_source() {
     local source_dir="$1"
     mkdir -p "$INSTALL_DIR"
     sync_local_repo "$source_dir" "$INSTALL_DIR"
+
+    # Touch stub files to force Docker Desktop file sync to notice changes
+    # This is needed because Docker Desktop may cache bind mount contents
+    find "$INSTALL_DIR/api-proxy" -name 'stub-*.json' -exec touch {} \; 2>/dev/null || true
 }
 
 if [[ -d "$INSTALL_DIR" ]]; then

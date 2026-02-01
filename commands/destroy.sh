@@ -47,6 +47,9 @@ cmd_destroy() {
 
     compose_down "$worktree_path" "$claude_config_path" "$container" "$override_file" "true" 2>/dev/null || true
 
+    # Remove stubs volume (external volume not removed by compose down -v)
+    remove_stubs_volume "$container"
+
     if [ "$keep_worktree" = false ] && [ -d "$claude_config_path" ]; then
         echo "Removing Claude config..."
         rm -rf "$claude_config_path"

@@ -37,6 +37,26 @@ npm config set prefix "$HOME/.local" 2>/dev/null || true
 # Add foundry-upgrade alias for easy MCP plugin updates
 echo "alias foundry-upgrade='pip install --pre --upgrade foundry-mcp'" >> ~/.bashrc
 
+# Claude Code with ZAI GLM models (uses ZHIPU_API_KEY from environment)
+# Requires global-agent for Node.js proxy support (installed in Dockerfile)
+# Unset CLAUDE_CODE_OAUTH_TOKEN to avoid auth conflict with ANTHROPIC_API_KEY
+cat >> ~/.bashrc << 'CLAUDE_ZAI_ALIAS'
+claude-zai() {
+    GLOBAL_AGENT_HTTP_PROXY="http://api-proxy:8080" \
+    GLOBAL_AGENT_HTTPS_PROXY="http://api-proxy:8080" \
+    GLOBAL_AGENT_NO_PROXY="localhost,127.0.0.1" \
+    NODE_OPTIONS="--require $(npm root -g)/global-agent/bootstrap.js" \
+    CLAUDE_CODE_OAUTH_TOKEN= \
+    ANTHROPIC_BASE_URL="https://api.z.ai/api/anthropic" \
+    ANTHROPIC_API_KEY="${ZHIPU_API_KEY:-CREDENTIAL_PROXY_PLACEHOLDER}" \
+    API_TIMEOUT_MS=3000000 \
+    ANTHROPIC_DEFAULT_OPUS_MODEL="GLM-4.7" \
+    ANTHROPIC_DEFAULT_SONNET_MODEL="GLM-4.7" \
+    ANTHROPIC_DEFAULT_HAIKU_MODEL="GLM-4.5-Air" \
+    claude "$@"
+}
+CLAUDE_ZAI_ALIAS
+
 # API keys are expected to be passed via environment variables (docker-compose)
 
 # CLI tools are pre-installed in the image
@@ -63,27 +83,27 @@ fi
 # To apply network mode manually: sudo network-mode <limited|host-only|none>
 # The host script will call this after copy_configs_to_container completes.
 
-# Symlink proxy stub files when in gateway mode
-# Stubs are mounted to /etc/proxy-stubs/ to avoid Docker creating root-owned parent dirs
-# We symlink them to user directories after entrypoint creates those dirs with correct ownership
+# Copy proxy stub files when in gateway mode
+# Stubs are in a named volume (populated by populate_stubs_volume) with original filenames
+# Volume mount avoids Docker Desktop VirtioFS/gRPC-FUSE staleness issues
 if [ "$SANDBOX_GATEWAY_ENABLED" = "true" ]; then
-    if [ -f "/etc/proxy-stubs/codex-auth.json" ]; then
-        ln -sf /etc/proxy-stubs/codex-auth.json "$HOME/.codex/auth.json"
+    if [ -f "/etc/proxy-stubs/stub-auth-codex.json" ]; then
+        cp /etc/proxy-stubs/stub-auth-codex.json "$HOME/.codex/auth.json"
     fi
-    if [ -f "/etc/proxy-stubs/opencode-auth.json" ]; then
-        ln -sf /etc/proxy-stubs/opencode-auth.json "$HOME/.local/share/opencode/auth.json"
+    if [ -f "/etc/proxy-stubs/stub-auth-opencode.json" ]; then
+        cp /etc/proxy-stubs/stub-auth-opencode.json "$HOME/.local/share/opencode/auth.json"
     fi
-    if [ -f "/etc/proxy-stubs/gemini-oauth.json" ]; then
-        ln -sf /etc/proxy-stubs/gemini-oauth.json "$HOME/.gemini/oauth_creds.json"
+    if [ -f "/etc/proxy-stubs/stub-auth-gemini.json" ]; then
+        cp /etc/proxy-stubs/stub-auth-gemini.json "$HOME/.gemini/oauth_creds.json"
     fi
-    if [ -f "/etc/proxy-stubs/gemini-accounts.json" ]; then
-        ln -sf /etc/proxy-stubs/gemini-accounts.json "$HOME/.gemini/google_accounts.json"
+    if [ -f "/etc/proxy-stubs/stub-gemini-accounts.json" ]; then
+        cp /etc/proxy-stubs/stub-gemini-accounts.json "$HOME/.gemini/google_accounts.json"
     fi
-    if [ -f "/etc/proxy-stubs/gemini-settings.json" ]; then
-        ln -sf /etc/proxy-stubs/gemini-settings.json "$HOME/.gemini/settings.json"
+    if [ -f "/etc/proxy-stubs/stub-gemini-settings.json" ]; then
+        cp /etc/proxy-stubs/stub-gemini-settings.json "$HOME/.gemini/settings.json"
     fi
-    if [ -f "/etc/proxy-stubs/opencode-config.json" ]; then
-        ln -sf /etc/proxy-stubs/opencode-config.json "$HOME/.config/opencode/opencode.json"
+    if [ -f "/etc/proxy-stubs/stub-opencode-config.json" ]; then
+        cp /etc/proxy-stubs/stub-opencode-config.json "$HOME/.config/opencode/opencode.json"
     fi
 fi
 

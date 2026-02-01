@@ -123,7 +123,6 @@ DEFAULT_DOMAINS=(
 
     # OpenAI OAuth (needed for Codex CLI)
     "auth.openai.com"
-    "auth0.openai.com"
     "platform.openai.com"
     "chatgpt.com"
 

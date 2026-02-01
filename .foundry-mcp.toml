@@ -196,9 +196,9 @@ cache_ttl = 3600
 # Update order to match your preferred providers/models.
 priority = [
     "[cli]codex:gpt-5.2-codex",
-    "[cli]opencode:openai/gpt-5.2-codex",
     "[cli]cursor-agent:gpt-5.2-codex",
     "[cli]gemini:pro",
+    "[cli]opencode:zai-coding-plan/glm-4.7",
     "[cli]claude:opus",
 ]
 
@@ -241,8 +241,8 @@ default_provider = "[cli]gemini:pro"
 consensus_providers = [
     "[cli]gemini:pro",
     "[cli]codex:gpt-5.2-codex",
-    "[cli]opencode:openai/gpt-5.2-codex",
     "[cli]cursor-agent:gpt-5.2-codex",
+    "[cli]opencode:zai-coding-plan/glm-4.7",
     "[cli]claude:opus"
 ]
 
@@ -336,7 +336,7 @@ deep_research_refinement_provider = "[cli]gemini:pro"
 deep_research_planning_providers = [
     "[cli]gemini:flash",
     "[cli]codex:gpt-5.1-codex-mini",
-    "[cli]opencode:openai/gpt-5.1-codex-mini",
+    "[cli]opencode:zai-coding-plan/glm-4.7",
     "[cli]cursor-agent:gpt-5.2-codex-fast",
     "[cli]claude:sonnet"
 ]
@@ -345,7 +345,7 @@ deep_research_planning_providers = [
 deep_research_analysis_providers = [
     "[cli]gemini:pro",
     "[cli]codex:gpt-4.1",
-    "[cli]opencode:openai/gpt-4.1",
+    "[cli]opencode:zai-coding-plan/glm-4.7",
     "[cli]cursor-agent:gpt-4.1",
     "[cli]claude:opus"
 ]
@@ -354,8 +354,8 @@ deep_research_analysis_providers = [
 deep_research_synthesis_providers = [
     "[cli]gemini:pro",
     "[cli]codex:gpt-5.2-codex",
-    "[cli]opencode:openai/gpt-5.2-codex",
     "[cli]cursor-agent:gpt-5.2-codex",
+    "[cli]opencode:zai-coding-plan/glm-4.7",
     "[cli]claude:opus"
 ]
 
@@ -363,8 +363,8 @@ deep_research_synthesis_providers = [
 deep_research_refinement_providers = [
     "[cli]gemini:pro",
     "[cli]codex:gpt-5.2-codex",
-    "[cli]opencode:openai/gpt-5.2-codex",
     "[cli]cursor-agent:gpt-5.2-codex",
+    "[cli]opencode:zai-coding-plan/glm-4.7",
     "[cli]claude:opus"
 ]
 
@@ -488,7 +488,7 @@ deep_research_digest_provider = "[cli]gemini:flash"
 deep_research_digest_providers = [
     "[cli]gemini:flash",
     "[cli]codex:gpt-5.1-codex-mini",
-    "[cli]opencode:openai/gpt-5.1-codex-mini",
+    "[cli]opencode:zai-coding-plan/glm-4.7",
     "[cli]cursor-agent:gpt-5.2-codex-fast",
     "[cli]claude:haiku"
 ]
@@ -595,8 +595,8 @@ summarization_providers = [
     "[cli]gemini:flash",
     "[cli]claude:haiku",
     "[cli]codex:gpt-5.1-codex-mini",
-    "[cli]opencode:openai/gpt-5.1-codex-mini",
-    "[cli]cursor-agent:gpt-5.2-codex-fast"
+    "[cli]cursor-agent:gpt-5.2-codex-fast",
+    "[cli]opencode:zai-coding-plan/glm-4.7"
 ]
 
 # Timeout per summarization request in seconds

@@ -4,7 +4,7 @@ OAuth Token Manager for Codex CLI Authentication
 Manages OAuth token lifecycle for ChatGPT authentication:
 - Loads auth.json from mounted credentials path
 - Checks token expiry with configurable buffer
-- Refreshes tokens via Auth0 endpoint
+- Refreshes tokens via OpenAI OAuth endpoint
 - Thread-safe token access
 
 Uses httpx with proxy=None to bypass mitmproxy for token refresh.
@@ -20,9 +20,9 @@ from typing import Optional
 
 import httpx
 
-# OAuth configuration
-OAUTH_TOKEN_URL = "https://auth0.openai.com/oauth/token"
-OPENAI_CLIENT_ID = "REDACTED_CLIENT_ID"  # Codex CLI client ID
+# OAuth configuration (matches official Codex CLI)
+OAUTH_TOKEN_URL = "https://auth.openai.com/oauth/token"
+OPENAI_CLIENT_ID = "app_EMoamEEZ73f0CkXaXp7hrann"  # Codex CLI client ID
 TOKEN_EXPIRY_BUFFER_SECONDS = 300  # 5 minutes
 
 

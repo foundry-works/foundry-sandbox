@@ -52,6 +52,9 @@ compose_up() {
         setup_credential_placeholders
         # Generate a random session management key for this sandbox
         export GATEWAY_SESSION_MGMT_KEY=$(openssl rand -base64 32)
+        # Populate stubs volume (avoids Docker Desktop bind mount staleness)
+        populate_stubs_volume "$container"
+        export STUBS_VOLUME_NAME="${container}_stubs"
     fi
 
     local compose_cmd
@@ -134,4 +137,26 @@ copy_to_container() {
     local container_id="$2"
     local dst="$3"
     run_cmd docker cp "$src" "$container_id:$dst"
+}
+
+# Populate the stubs volume for credential isolation
+# Uses a temporary alpine container to copy stub files into the volume
+# This avoids Docker Desktop's VirtioFS/gRPC-FUSE file sync staleness issues
+populate_stubs_volume() {
+    local container="$1"
+    local volume_name="${container}_stubs"
+
+    docker volume create "$volume_name" >/dev/null 2>&1 || true
+
+    docker run --rm \
+        -v "$SCRIPT_DIR/api-proxy:/src:ro" \
+        -v "${volume_name}:/stubs" \
+        alpine:latest \
+        sh -c 'cp /src/stub-*.json /stubs/' || return 1
+}
+
+# Remove the stubs volume for a sandbox
+remove_stubs_volume() {
+    local container="$1"
+    docker volume rm "${container}_stubs" 2>/dev/null || true
 }

@@ -10,30 +10,24 @@ Provider Credential Map:
 - api2.cursor.sh: Authorization Bearer from CURSOR_API_KEY
 - api.openai.com: Authorization Bearer from OPENAI_API_KEY
 - generativelanguage.googleapis.com: x-goog-api-key from GOOGLE_API_KEY (or GEMINI_API_KEY)
-- api.groq.com: Authorization Bearer from GROQ_API_KEY
-- api.mistral.ai: Authorization Bearer from MISTRAL_API_KEY
-- api.deepseek.com: Authorization Bearer from DEEPSEEK_API_KEY
-- api.together.xyz: Authorization Bearer from TOGETHER_API_KEY
-- openrouter.ai: Authorization Bearer from OPENROUTER_API_KEY
-- api.fireworks.ai: Authorization Bearer from FIREWORKS_API_KEY
 - api.tavily.com: Authorization Bearer from TAVILY_API_KEY
 - api.semanticscholar.org: x-api-key from SEMANTIC_SCHOLAR_API_KEY
 - api.perplexity.ai: Authorization Bearer from PERPLEXITY_API_KEY
+- api.z.ai: x-api-key from ZHIPU_API_KEY
 
 OAuth Support (Codex CLI):
 - Detects CREDENTIAL_PROXY_PLACEHOLDER in Authorization header
 - Injects real OAuth token from mounted auth.json
 - Intercepts token refresh endpoints to return placeholder tokens
 
-OAuth Support (OpenCode CLI):
-- Detects CREDENTIAL_PROXY_PLACEHOLDER in Authorization header
-- Maps request host to provider (e.g., api.anthropic.com -> "anthropic")
-- Injects real OAuth token from multi-provider auth.json
-
 OAuth Support (Gemini CLI):
 - Detects CREDENTIAL_PROXY_PLACEHOLDER in Authorization header
 - Checks if request is to Gemini API hosts (generativelanguage/aiplatform)
 - Injects real OAuth token from mounted oauth_creds.json
+
+API Key Support (OpenCode CLI - zai-coding-plan):
+- Detects OPENCODE_PLACEHOLDER in Authorization header
+- Injects API key for Zhipu AI (open.bigmodel.cn, api.z.ai)
 """
 
 import json
@@ -48,11 +42,11 @@ try:
 except ImportError:
     OAuthTokenManager = None  # type: ignore[misc, assignment]
 
-# Import multi-provider OAuth token manager (available when OPENCODE_AUTH_FILE is set)
+# Import OpenCode API key manager (available when OPENCODE_AUTH_FILE is set)
 try:
-    from opencode_token_manager import MultiProviderTokenManager
+    from opencode_key_manager import OpenCodeKeyManager
 except ImportError:
-    MultiProviderTokenManager = None  # type: ignore[misc, assignment]
+    OpenCodeKeyManager = None  # type: ignore[misc, assignment]
 
 # Import Gemini OAuth token manager (available when GEMINI_OAUTH_FILE is set)
 try:
@@ -62,29 +56,25 @@ except ImportError:
 
 # OAuth placeholder tokens that sandbox sees
 OAUTH_PLACEHOLDER = "CREDENTIAL_PROXY_PLACEHOLDER"
-OPENCODE_PLACEHOLDER = "OPENCODE_CREDENTIAL_PROXY_PLACEHOLDER"
+OPENCODE_PLACEHOLDER = "PROXY_PLACEHOLDER_OPENCODE"
 
 # OAuth token refresh endpoints to intercept
 REFRESH_ENDPOINTS = [
-    ("auth0.openai.com", "/oauth/token"),
+    ("auth.openai.com", "/oauth/token"),
     ("oauth2.googleapis.com", "/token"),
 ]
-
-# OpenCode host-to-provider mapping
-OPENCODE_PROVIDER_HOSTS = {
-    "api.anthropic.com": "anthropic",
-    "api.openai.com": "openai",
-    "chatgpt.com": "openai",
-    "generativelanguage.googleapis.com": "google",
-    "api.githubcopilot.com": "copilot",
-    "copilot-proxy.githubusercontent.com": "copilot",
-}
 
 # Gemini API hosts (for OAuth token injection)
 GEMINI_API_HOSTS = [
     "generativelanguage.googleapis.com",
     "aiplatform.googleapis.com",
     "cloudcode-pa.googleapis.com",
+]
+
+# Zhipu AI API hosts (for OpenCode zai-coding-plan provider)
+ZHIPU_API_HOSTS = [
+    "open.bigmodel.cn",
+    "api.z.ai",
 ]
 
 
@@ -114,36 +104,6 @@ PROVIDER_MAP = {
         "fallback_env_var": "GEMINI_API_KEY",
         "format": "value",
     },
-    "api.groq.com": {
-        "header": "Authorization",
-        "env_var": "GROQ_API_KEY",
-        "format": "bearer",
-    },
-    "api.mistral.ai": {
-        "header": "Authorization",
-        "env_var": "MISTRAL_API_KEY",
-        "format": "bearer",
-    },
-    "api.deepseek.com": {
-        "header": "Authorization",
-        "env_var": "DEEPSEEK_API_KEY",
-        "format": "bearer",
-    },
-    "api.together.xyz": {
-        "header": "Authorization",
-        "env_var": "TOGETHER_API_KEY",
-        "format": "bearer",
-    },
-    "openrouter.ai": {
-        "header": "Authorization",
-        "env_var": "OPENROUTER_API_KEY",
-        "format": "bearer",
-    },
-    "api.fireworks.ai": {
-        "header": "Authorization",
-        "env_var": "FIREWORKS_API_KEY",
-        "format": "bearer",
-    },
     "api.tavily.com": {
         "header": "Authorization",
         "env_var": "TAVILY_API_KEY",
@@ -159,6 +119,11 @@ PROVIDER_MAP = {
         "env_var": "PERPLEXITY_API_KEY",
         "format": "bearer",
     },
+    "api.z.ai": {
+        "header": "x-api-key",
+        "env_var": "ZHIPU_API_KEY",
+        "format": "value",
+    },
 }
 
 
@@ -168,7 +133,7 @@ class CredentialInjector:
     def __init__(self):
         self.credentials_cache = {}
         self.oauth_manager: Optional[OAuthTokenManager] = None
-        self.opencode_manager: Optional[MultiProviderTokenManager] = None
+        self.opencode_manager: Optional[OpenCodeKeyManager] = None
         self.gemini_manager: Optional[GeminiTokenManager] = None
         self._load_credentials()
         self._init_oauth_manager()
@@ -249,21 +214,21 @@ class CredentialInjector:
             ctx.log.warn(f"Failed to initialize OAuth manager: {e}")
 
     def _init_opencode_manager(self) -> None:
-        """Initialize OpenCode multi-provider token manager if OPENCODE_AUTH_FILE is set."""
+        """Initialize OpenCode API key manager if OPENCODE_AUTH_FILE is set."""
         opencode_auth_file = os.environ.get("OPENCODE_AUTH_FILE")
         if not opencode_auth_file:
-            ctx.log.info("OPENCODE_AUTH_FILE not set, OpenCode OAuth support disabled")
+            ctx.log.info("OPENCODE_AUTH_FILE not set, OpenCode API key support disabled")
             return
 
-        if MultiProviderTokenManager is None:
-            ctx.log.warn("Multi-provider token manager module not available")
+        if OpenCodeKeyManager is None:
+            ctx.log.warn("OpenCode key manager module not available")
             return
 
         try:
-            self.opencode_manager = MultiProviderTokenManager(opencode_auth_file)
+            self.opencode_manager = OpenCodeKeyManager(opencode_auth_file)
             providers = self.opencode_manager.get_providers()
             ctx.log.info(
-                f"OpenCode multi-provider token manager initialized from {opencode_auth_file} "
+                f"OpenCode key manager initialized from {opencode_auth_file} "
                 f"with providers: {', '.join(providers)}"
             )
         except FileNotFoundError:
@@ -305,7 +270,7 @@ class CredentialInjector:
         Intercept OAuth refresh requests and return placeholder tokens.
 
         Supports multiple OAuth providers:
-        - auth0.openai.com: Codex CLI (uses oauth_manager)
+        - auth.openai.com: Codex CLI (uses oauth_manager)
         - oauth2.googleapis.com: Gemini CLI (uses gemini_manager)
 
         Returns True if request was intercepted, False otherwise.
@@ -317,7 +282,7 @@ class CredentialInjector:
         placeholder_response = None
 
         # Route to appropriate token manager based on endpoint
-        if host == "auth0.openai.com" and self.oauth_manager:
+        if host == "auth.openai.com" and self.oauth_manager:
             ctx.log.info(f"Intercepting Codex OAuth refresh request to {host}")
             placeholder_response = self.oauth_manager.get_placeholder_response()
         elif host == "oauth2.googleapis.com" and self.gemini_manager:
@@ -355,7 +320,7 @@ class CredentialInjector:
         # Only handle OpenAI/ChatGPT endpoints (Codex CLI)
         # Don't intercept requests to other APIs like Anthropic
         host = flow.request.host
-        if host not in ("api.openai.com", "auth0.openai.com", "chatgpt.com"):
+        if host not in ("api.openai.com", "auth.openai.com", "chatgpt.com"):
             return False
 
         try:
@@ -372,12 +337,13 @@ class CredentialInjector:
             )
             return True
 
-    def _handle_opencode_oauth_injection(self, flow: http.HTTPFlow) -> bool:
+    def _handle_opencode_api_key_injection(self, flow: http.HTTPFlow) -> bool:
         """
-        Detect OpenCode OAuth placeholder and inject real token.
+        Detect OpenCode placeholder and inject API key for Zhipu AI.
 
-        Maps request host to provider and retrieves the appropriate token.
-        Returns True if OAuth token was injected, False otherwise.
+        Checks if request is to Zhipu API hosts (open.bigmodel.cn, api.z.ai)
+        and injects the API key from the zai-coding-plan provider.
+        Returns True if API key was injected, False otherwise.
         """
         if not self.opencode_manager:
             return False
@@ -387,24 +353,24 @@ class CredentialInjector:
             return False
 
         host = flow.request.host
-        provider = OPENCODE_PROVIDER_HOSTS.get(host)
-        if not provider:
+        if host not in ZHIPU_API_HOSTS:
             return False
 
-        if not self.opencode_manager.has_provider(provider):
-            ctx.log.warn(f"OpenCode provider {provider} not configured in auth file")
+        # Get API key for zai-coding-plan provider
+        if not self.opencode_manager.has_provider("zai-coding-plan"):
+            ctx.log.warn("OpenCode zai-coding-plan provider not configured in auth file")
             return False
 
         try:
-            real_token = self.opencode_manager.get_valid_token(provider)
-            flow.request.headers["Authorization"] = f"Bearer {real_token}"
-            ctx.log.info(f"Injected real OAuth token for OpenCode provider {provider} ({host})")
+            api_key = self.opencode_manager.get_api_key("zai-coding-plan")
+            flow.request.headers["Authorization"] = f"Bearer {api_key}"
+            ctx.log.info(f"Injected API key for OpenCode zai-coding-plan ({host})")
             return True
         except Exception as e:
-            ctx.log.error(f"Failed to get OpenCode OAuth token for {provider}: {e}")
+            ctx.log.error(f"Failed to get OpenCode API key for zai-coding-plan: {e}")
             flow.response = http.Response.make(
                 500,
-                json.dumps({"error": f"OpenCode OAuth token error: {e}"}).encode(),
+                json.dumps({"error": f"OpenCode API key error: {e}"}).encode(),
                 {"Content-Type": "application/json"},
             )
             return True
@@ -448,12 +414,14 @@ class CredentialInjector:
         if self._handle_refresh_intercept(flow):
             return
 
-        # 2. Handle OAuth placeholder injection (Codex CLI)
-        if self._handle_oauth_injection(flow):
+        # 2. Handle OpenCode API key injection (zai-coding-plan / Zhipu AI)
+        # Must run before Codex CLI handler because the OpenCode placeholder
+        # contains "OPENCODE" which could cause matching issues.
+        if self._handle_opencode_api_key_injection(flow):
             return
 
-        # 3. Handle OpenCode OAuth placeholder injection
-        if self._handle_opencode_oauth_injection(flow):
+        # 3. Handle OAuth placeholder injection (Codex CLI)
+        if self._handle_oauth_injection(flow):
             return
 
         # 4. Handle Gemini OAuth placeholder injection

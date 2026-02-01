@@ -48,7 +48,6 @@ The sandbox automatically copies configuration files from your host into contain
 | `~/.config/gh/` | `/home/ubuntu/.config/gh/` | GitHub CLI (from `gh auth login`) |
 | `~/.gemini/` | `/home/ubuntu/.gemini/` | Gemini CLI OAuth (from `gemini auth`) |
 | `~/.config/opencode/opencode.json` | `/home/ubuntu/.config/opencode/opencode.json` | OpenCode config |
-| `~/.config/opencode/antigravity-accounts.json` | `/home/ubuntu/.config/opencode/antigravity-accounts.json` | OpenCode Antigravity accounts (host file only) |
 | `~/.local/share/opencode/auth.json` | `/home/ubuntu/.local/share/opencode/auth.json` | OpenCode auth (from `opencode auth login`) |
 
 ## Tool-Specific Notes
@@ -65,11 +64,7 @@ Sandboxes default to disabling update checks and analytics via `~/.codex/config.
 
 ### OpenCode
 
-Run `opencode auth login` for standard auth. For the best experience, install these plugins on your host first:
-- [opencode-openai-codex-auth](https://github.com/numman-ali/opencode-openai-codex-auth) - Use OpenAI/Codex with ChatGPT subscription
-- [opencode-gemini-auth](https://github.com/jenslys/opencode-gemini-auth) - Use Gemini CLI subscription
-
-Follow the instructions in each repo to set them up on your host before creating sandboxes.
+Run `opencode auth login` for standard auth. OAuth for OpenAI/Codex models works automatically via the sandbox proxy - no additional plugins needed.
 
 To set a sandbox-wide OpenCode default model (when `~/.config/opencode/opencode.json` has no `model` set), use:
 

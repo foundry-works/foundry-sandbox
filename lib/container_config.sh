@@ -1423,6 +1423,9 @@ if "disableAutoUpdate" not in general:
 if "disableUpdateNag" not in general:
     general["disableUpdateNag"] = True
     changed = True
+if "previewFeatures" not in general:
+    general["previewFeatures"] = True
+    changed = True
 if general:
     data["general"] = general
 
@@ -1553,7 +1556,6 @@ copy_configs_to_container() {
     elif file_exists "$SCRIPT_DIR/opencode.json"; then
         copy_file_to_container "$container_id" "$SCRIPT_DIR/opencode.json" "$CONTAINER_HOME/.config/opencode/opencode.json"
     fi
-    file_exists ~/.config/opencode/antigravity-accounts.json && copy_file_to_container "$container_id" ~/.config/opencode/antigravity-accounts.json "$CONTAINER_HOME/.config/opencode/antigravity-accounts.json"
     file_exists ~/.cursor/cli-config.json && copy_file_to_container "$container_id" ~/.cursor/cli-config.json "$CONTAINER_HOME/.cursor/cli-config.json"
     # Skip settings writes when credential isolation is enabled (dirs may be read-only)
     if [ "$isolate_credentials" != "true" ]; then
@@ -1666,7 +1668,6 @@ sync_runtime_credentials() {
     elif file_exists "$SCRIPT_DIR/opencode.json"; then
         copy_file_to_container_quiet "$container_id" "$SCRIPT_DIR/opencode.json" "$CONTAINER_HOME/.config/opencode/opencode.json"
     fi
-    file_exists ~/.config/opencode/antigravity-accounts.json && copy_file_to_container_quiet "$container_id" ~/.config/opencode/antigravity-accounts.json "$CONTAINER_HOME/.config/opencode/antigravity-accounts.json"
     file_exists ~/.local/share/opencode/auth.json && copy_file_to_container_quiet "$container_id" ~/.local/share/opencode/auth.json "$CONTAINER_HOME/.local/share/opencode/auth.json"
     file_exists ~/.cursor/cli-config.json && copy_file_to_container_quiet "$container_id" ~/.cursor/cli-config.json "$CONTAINER_HOME/.cursor/cli-config.json"
     sync_opencode_foundry "$container_id" "1"

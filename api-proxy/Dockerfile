@@ -50,6 +50,5 @@ VOLUME ["/etc/proxy/credentials", "/etc/proxy/certs"]
 # Default environment variables
 ENV PROXY_MODE=regular
 ENV PROXY_LOG_LEVEL=info
-ENV PROXY_INJECT_CREDENTIALS=true
 
 ENTRYPOINT ["/opt/proxy/entrypoint.sh"]

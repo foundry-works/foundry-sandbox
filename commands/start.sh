@@ -59,7 +59,16 @@ cmd_start() {
         log_info "GitHub CLI token exported for container"
     fi
 
-    compose_up "$worktree_path" "$claude_config_path" "$container" "$override_file"
+    # Check if credential isolation is enabled (api-proxy container exists)
+    # and repopulate stubs volume before starting
+    local isolate_credentials=""
+    if docker ps -a --format '{{.Names}}' | grep -q "^${container}-api-proxy-"; then
+        isolate_credentials="true"
+        populate_stubs_volume "$container"
+        export STUBS_VOLUME_NAME="${container}_stubs"
+    fi
+
+    compose_up "$worktree_path" "$claude_config_path" "$container" "$override_file" "$isolate_credentials"
 
     local container_id="${container}-dev-1"
 
