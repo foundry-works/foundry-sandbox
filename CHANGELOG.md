@@ -7,6 +7,37 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-02-01
+
+### Added
+- **Credential Isolation Gateway**: Complete implementation of a secure proxy gateway for credential isolation
+  - HTTP/HTTPS egress proxy with domain allowlist enforcement
+  - DNS filtering via dnsmasq to restrict domain resolution
+  - Network firewall rules for limited egress mode
+  - Audit logging for all proxy allow/deny decisions
+  - IP literal request blocking to prevent DNS bypass attacks
+- Wildcard domain support (`*.example.com`) for dynamic subdomains
+  - Suffix-based matching for CDNs and rotating API endpoints
+  - Gateway-level hostname validation against wildcard patterns
+  - DNS forwarding for wildcard domains via dnsmasq `server=` directive
+  - Wildcard mode in firewall opens ports 80/443 (security via DNS + gateway)
+- Gateway security hardening:
+  - Privilege dropping after startup (runs as unprivileged user)
+  - Session limits and rate limiting
+  - Input sanitization and request validation
+  - CAP_NET_RAW capability handling for health checks
+  - IPv6 firewall rules mirroring IPv4 restrictions
+- Conditional gateway mode with Basic auth and repository scoping
+- Security documentation: threat model and security overview for credential isolation
+- Comprehensive test suite for gateway functionality:
+  - DNS bypass prevention tests
+  - Wildcard domain matching tests
+  - Hostname allowlist validation tests
+
+### Changed
+- Cursor domain configuration simplified from individual domains to wildcards (`*.cursor.com`, `*.cursor.sh`)
+- Removed rotating IP domain handling (replaced by wildcard mode)
+
 ## [0.5.8] - 2026-01-29
 
 ### Changed
@@ -231,7 +262,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Tab completion for bash
 - macOS and Linux support
 
-[Unreleased]: https://github.com/foundry-works/foundry-sandbox/compare/v0.5.8...HEAD
+[Unreleased]: https://github.com/foundry-works/foundry-sandbox/compare/v0.6.0...HEAD
+[0.6.0]: https://github.com/foundry-works/foundry-sandbox/compare/v0.5.8...v0.6.0
 [0.5.8]: https://github.com/foundry-works/foundry-sandbox/compare/v0.5.7...v0.5.8
 [0.5.7]: https://github.com/foundry-works/foundry-sandbox/compare/v0.5.6...v0.5.7
 [0.5.6]: https://github.com/foundry-works/foundry-sandbox/compare/v0.5.5...v0.5.6
