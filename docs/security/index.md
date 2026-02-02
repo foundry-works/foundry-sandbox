@@ -24,7 +24,8 @@ Foundry Sandbox implements **defense in depth** with multiple security layers:
 |                    +-------------------+  +-------------------+        |
 |                    |  Credential       |  |   API Proxy      |        |
 |                    |  Gateway          |  |   (mitmproxy)    |        |
-|                    |  [GITHUB_TOKEN]   |  |   [API_KEYS]     |        |
+|                    |  [GITHUB_TOKEN]   |  |   [API_KEYS +    |        |
+|                    |                  |  |    GITHUB_TOKEN*]|        |
 |                    +-------------------+  +-------------------+        |
 +---------------------------------------------------------------------------+
 ```
@@ -98,9 +99,11 @@ Dangerous commands are **intercepted with warnings**:
 
 | Credential | Gateway | API Proxy | Sandbox |
 |------------|---------|-----------|---------|
-| GITHUB_TOKEN | Yes | No | Session token only |
+| GITHUB_TOKEN | Yes | Optional* | Session token only |
 | ANTHROPIC_API_KEY | No | Yes | Placeholder |
 | OPENAI_API_KEY | No | Yes | Placeholder |
+
+*Optional: The API proxy only uses `GITHUB_TOKEN`/`GH_TOKEN` for GitHub API requests (e.g., PRs, releases). Git operations still go through the gateway, and the sandbox never receives real GitHub tokens.
 
 ## Reporting Security Issues
 

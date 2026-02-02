@@ -454,23 +454,26 @@ def check_ref_updates(request_body: bytes, owner: str, repo: str) -> tuple:
     return blocked, details
 
 # Default policy hook allows all operations
-def get_github_token():
+def get_github_token(required: bool = True):
     """
-    Get the real GitHub token for upstream authentication.
+    Get the GitHub token for upstream authentication.
 
     Returns:
-        str: GitHub token from environment
+        str | None: GitHub token from environment, or None if not required
 
     Raises:
-        RuntimeError: If GITHUB_TOKEN is not set
+        RuntimeError: If required and token is not set
     """
-    token = os.environ.get('GITHUB_TOKEN')
+    token = os.environ.get('GITHUB_TOKEN') or os.environ.get('GH_TOKEN')
     if token:
         return token
 
+    if not required:
+        return None
+
     # Log error and raise - silent fallback causes confusing auth errors
-    logger.error('GITHUB_TOKEN environment variable is not set - git operations will fail')
-    raise RuntimeError('GITHUB_TOKEN environment variable is required but not set')
+    logger.error('GITHUB_TOKEN/GH_TOKEN environment variable is not set - git operations will fail')
+    raise RuntimeError('GitHub token is required but not set')
 
 def default_policy_hook(owner, repo, operation):
     """
@@ -1155,7 +1158,12 @@ def git_proxy(owner, repo, git_path):
             'repo': repo,
             'path': git_path
         })
-        return Response('Unauthorized', status=401)
+        # WWW-Authenticate header is required for git to send credentials on retry
+        return Response(
+            'Unauthorized',
+            status=401,
+            headers={'WWW-Authenticate': 'Basic realm="gateway"'}
+        )
 
     # Parse authorization header (supports both Bearer and Basic formats)
     # - Bearer format: "Bearer token:secret" (direct API calls)
@@ -1266,18 +1274,24 @@ def git_proxy(owner, repo, git_path):
         })
         return Response('Access denied by policy', status=403)
 
-    # Get GitHub token first - fail fast if not configured
-    try:
-        github_token = get_github_token()
-    except RuntimeError as e:
-        audit_log('git_proxy_error', extra_data={
-            'owner': owner,
-            'repo': repo,
-            'path': git_path,
-            'error': 'github_token_missing',
-            'error_details': str(e)
-        })
-        return Response('Gateway configuration error: GitHub token not available', status=503)
+    # Get GitHub token when needed.
+    # - Read operations: token optional (public repos can be accessed anonymously).
+    # - Write operations: token required (auth + history protection enforcement).
+    github_token = None
+    if operation == 'write':
+        try:
+            github_token = get_github_token(required=True)
+        except RuntimeError as e:
+            audit_log('git_proxy_error', extra_data={
+                'owner': owner,
+                'repo': repo,
+                'path': git_path,
+                'error': 'github_token_missing',
+                'error_details': str(e)
+            })
+            return Response('Gateway configuration error: GitHub token not available for write operations', status=503)
+    else:
+        github_token = get_github_token(required=False)
 
     # For git-receive-pack (push), check for force push / history rewriting operations
     # This requires reading only the initial pkt-line header section (bounded)
@@ -1364,8 +1378,9 @@ def git_proxy(owner, repo, git_path):
         if expect_header:
             headers['Expect'] = expect_header
 
-        # Replace Authorization header with GitHub token
-        headers['Authorization'] = f'token {github_token}'
+        # Replace Authorization header with GitHub token (if available)
+        if github_token:
+            headers['Authorization'] = f'token {github_token}'
 
         # Determine request body for upstream
         # For git-receive-pack, we already read a prefix for validation.

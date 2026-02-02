@@ -232,39 +232,33 @@ install_pip_requirements() {
     return 0
 }
 
-# Install CLAUDE.md and AGENTS.md from foundry plugins into workspace.
-# Appends content if files exist in source repos, creates destination if needed.
+# Install CLAUDE.md and AGENTS.md from stubs into workspace.
+# Appends content if stub files exist, creates destination if needed.
 # Uses <foundry-instructions> tags (already in source files) to detect duplicates.
 #
 # Arguments:
 #   $1 - container_id: The container to modify
 install_foundry_workspace_docs() {
     local container_id="$1"
-    local foundry_cache="${CLAUDE_PLUGINS_CACHE:-$HOME/.cache/claude-plugins}"
-    local opencode_foundry_path="${SANDBOX_OPENCODE_FOUNDRY_PATH:-$SANDBOX_HOME/vendor/opencode-foundry}"
-
-    # Expand ~ if present
-    [[ "$opencode_foundry_path" == "~/"* ]] && opencode_foundry_path="${opencode_foundry_path/#\~/$HOME}"
-
     local claude_md_src="$SANDBOX_HOME/stubs/CLAUDE.md"
-    local agents_md_src="$opencode_foundry_path/AGENTS.md"
+    local agents_md_src="$SANDBOX_HOME/stubs/AGENTS.md"
     local marker="<foundry-instructions>"
 
-    # Install CLAUDE.md from claude-foundry
+    # Install CLAUDE.md from stubs
     if file_exists "$claude_md_src"; then
         # Check if already installed (marker present)
         if ! docker exec "$container_id" grep -qF "$marker" /workspace/CLAUDE.md 2>/dev/null; then
-            log_info "Installing CLAUDE.md from claude-foundry..."
+            log_info "Installing CLAUDE.md from stubs..."
             docker exec "$container_id" sh -c "[ ! -f /workspace/CLAUDE.md ] && touch /workspace/CLAUDE.md"
             docker exec -i "$container_id" sh -c "echo '' >> /workspace/CLAUDE.md && cat >> /workspace/CLAUDE.md" < "$claude_md_src"
         fi
     fi
 
-    # Install AGENTS.md from opencode-foundry
+    # Install AGENTS.md from stubs
     if file_exists "$agents_md_src"; then
         # Check if already installed (marker present)
         if ! docker exec "$container_id" grep -qF "$marker" /workspace/AGENTS.md 2>/dev/null; then
-            log_info "Installing AGENTS.md from opencode-foundry..."
+            log_info "Installing AGENTS.md from stubs..."
             docker exec "$container_id" sh -c "[ ! -f /workspace/AGENTS.md ] && touch /workspace/AGENTS.md"
             docker exec -i "$container_id" sh -c "echo '' >> /workspace/AGENTS.md && cat >> /workspace/AGENTS.md" < "$agents_md_src"
         fi

@@ -329,12 +329,14 @@ cast destroy repo-debug-issue-123 --yes
 
 ### GitHub Authentication
 
-Ensure `GITHUB_TOKEN` is set on your host:
+Ensure `GITHUB_TOKEN` is set on your host (or use `gh auth login`):
 
 ```bash
 export GITHUB_TOKEN="ghp_..."
 cast new private-org/private-repo feature
 ```
+
+Public repos can be accessed without a token, but private repos and push operations require one.
 
 ### SSH Access
 

@@ -152,7 +152,7 @@ populate_stubs_volume() {
         -v "$SCRIPT_DIR/api-proxy:/src:ro" \
         -v "${volume_name}:/stubs" \
         alpine:latest \
-        sh -c 'cp /src/stub-*.json /stubs/' || return 1
+        sh -c 'cp /src/stub-*.json /src/stub-*.yml /stubs/ 2>/dev/null || cp /src/stub-*.json /stubs/' || return 1
 }
 
 # Remove the stubs volume for a sandbox

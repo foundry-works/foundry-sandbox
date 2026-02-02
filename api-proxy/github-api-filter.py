@@ -11,19 +11,25 @@ Blocked operations (matching shell-overrides.sh):
 - gh secret         → /repos/{owner}/{repo}/actions/secrets/*
 - gh variable       → /repos/{owner}/{repo}/actions/variables/*
 
+PR Operations (controlled by ALLOW_PR_OPERATIONS env var):
+- Always blocked: merge, reopen (history protection)
+- Conditionally blocked: create, comment, review, update, close
+- Always allowed: read operations (view, list, checks)
+
 Design: Allowlist approach - only explicitly permitted operations pass through.
 This ensures gh api raw access is blocked while normal gh commands work.
 """
 
 import json
+import os
 import re
 from mitmproxy import http, ctx
 
-# GitHub API hosts
-GITHUB_API_HOSTS = [
-    "api.github.com",
-    "uploads.github.com",  # For release asset uploads
-]
+# Import shared GitHub configuration
+from github_config import GITHUB_API_HOSTS
+
+# Check if PR operations are allowed (env var set by sandbox creation)
+ALLOW_PR_OPERATIONS = os.environ.get("ALLOW_PR_OPERATIONS", "").lower() in ("true", "1", "yes")
 
 # Allowlisted safe operations (method, path_pattern)
 # Patterns use regex - be specific to avoid over-permitting
@@ -38,13 +44,11 @@ ALLOWED_OPERATIONS = [
     ("POST", r"^/repos/[^/]+/[^/]+/issues/\d+/comments$"),  # Add comment
     ("PATCH", r"^/repos/[^/]+/[^/]+/issues/\d+$"),  # Update issue
 
-    # --- Pull Requests ---
+    # --- Pull Requests (read-only always allowed) ---
     ("GET", r"^/repos/[^/]+/[^/]+/pulls.*"),
-    ("POST", r"^/repos/[^/]+/[^/]+/pulls$"),  # Create PR
-    ("POST", r"^/repos/[^/]+/[^/]+/pulls/\d+/comments$"),  # Add PR comment
-    ("POST", r"^/repos/[^/]+/[^/]+/pulls/\d+/reviews$"),  # Add PR review
-    ("PATCH", r"^/repos/[^/]+/[^/]+/pulls/\d+$"),  # Update PR
-    # Note: PUT .../pulls/.../merge is intentionally NOT allowed (history protection)
+    # Note: PR write operations (create/comment/review/update) are conditionally allowed
+    # based on ALLOW_PR_OPERATIONS env var - see CONDITIONAL_PR_OPERATIONS below
+    # Note: PUT .../pulls/.../merge is ALWAYS blocked (history protection)
 
     # --- Commits & Branches ---
     ("GET", r"^/repos/[^/]+/[^/]+/commits.*"),
@@ -66,6 +70,7 @@ ALLOWED_OPERATIONS = [
     ("GET", r"^/repos/[^/]+/[^/]+/releases.*"),
     ("POST", r"^/repos/[^/]+/[^/]+/releases$"),  # Create release
     ("PATCH", r"^/repos/[^/]+/[^/]+/releases/\d+$"),  # Update release
+    ("POST", r"^/repos/[^/]+/[^/]+/releases/\d+/assets.*"),  # Upload release asset (uploads.github.com)
     # Note: DELETE releases is intentionally not allowed
 
     # --- Labels & Milestones ---
@@ -125,8 +130,33 @@ ALLOWED_OPERATIONS = [
     ("POST", r"^/repos/[^/]+/[^/]+/statuses/.*"),
     ("GET", r"^/repos/[^/]+/[^/]+/commits/[^/]+/status$"),
 
-    # --- GraphQL (allowed but monitored - gh uses this heavily) ---
+    # --- GraphQL (allowed but mutations are filtered - see request handler) ---
     ("POST", r"^/graphql$"),
+]
+
+# Conditionally allowed PR operations (only when ALLOW_PR_OPERATIONS is set)
+# These are blocked by default but can be enabled with --allow-pr flag
+CONDITIONAL_PR_OPERATIONS = [
+    ("POST", r"^/repos/[^/]+/[^/]+/pulls$"),  # Create PR
+    ("POST", r"^/repos/[^/]+/[^/]+/pulls/\d+/comments$"),  # Add PR comment
+    ("POST", r"^/repos/[^/]+/[^/]+/pulls/\d+/reviews$"),  # Add PR review
+    ("PATCH", r"^/repos/[^/]+/[^/]+/pulls/\d+$"),  # Update PR (close, update title/body)
+]
+
+# GraphQL mutations that are always blocked (history protection)
+ALWAYS_BLOCKED_GRAPHQL_MUTATIONS = [
+    "mergePullRequest",
+    "reopenPullRequest",
+]
+
+# GraphQL mutations that are conditionally blocked (when ALLOW_PR_OPERATIONS is not set)
+CONDITIONAL_BLOCKED_GRAPHQL_MUTATIONS = [
+    "createPullRequest",
+    "updatePullRequest",
+    "addPullRequestReview",
+    "submitPullRequestReview",
+    "closePullRequest",
+    "addPullRequestReviewComment",
 ]
 
 # Explicitly blocked patterns (checked before allowlist for clear error messages)
@@ -151,6 +181,9 @@ BLOCKED_PATTERNS = [
 
     # PR merge via API (creates merge commits, modifies branch)
     ("PUT", r"^/repos/[^/]+/[^/]+/pulls/\d+/merge$", "gh pr merge: merges pull request (requires human approval)"),
+
+    # Note: PR reopen is detected by checking PATCH request body for state: open
+    # This is handled in the request() method, not here in static patterns
 
     # Merge commits via API
     ("POST", r"^/repos/[^/]+/[^/]+/merges$", "gh api: creates merge commit (requires human approval)"),
@@ -206,6 +239,10 @@ BLOCKED_PATTERNS = [
 # Compile regex patterns for performance
 _allowed_compiled = [(method, re.compile(pattern)) for method, pattern in ALLOWED_OPERATIONS]
 _blocked_compiled = [(method, re.compile(pattern), msg) for method, pattern, msg in BLOCKED_PATTERNS]
+_conditional_pr_compiled = [(method, re.compile(pattern)) for method, pattern in CONDITIONAL_PR_OPERATIONS]
+
+# Regex to detect PR PATCH endpoint for reopen detection
+_pr_patch_pattern = re.compile(r"^/repos/[^/]+/[^/]+/pulls/\d+$")
 
 
 class GitHubAPIFilter:
@@ -232,11 +269,45 @@ class GitHubAPIFilter:
                 self._block_request(flow, message)
                 return
 
+        # Check for PR reopen (PATCH to pulls endpoint with state: open)
+        # This is always blocked regardless of ALLOW_PR_OPERATIONS
+        if method == "PATCH" and _pr_patch_pattern.match(path_without_query):
+            if self._is_pr_reopen(flow):
+                ctx.log.warn(f"BLOCKED GitHub API: {method} {path} - PR reopen not allowed")
+                self._block_request(flow, "gh pr reopen: reopening closed PRs requires human approval")
+                return
+
+        # Check GraphQL mutations
+        if method == "POST" and path_without_query == "/graphql":
+            blocked_mutation = self._check_graphql_mutations(flow)
+            if blocked_mutation:
+                ctx.log.warn(f"BLOCKED GitHub GraphQL: {blocked_mutation}")
+                self._block_request(flow, f"GraphQL mutation '{blocked_mutation}' is not permitted")
+                return
+
+        # Check conditional PR operations (blocked by default, allowed with --allow-pr)
+        if not ALLOW_PR_OPERATIONS:
+            for pr_method, pattern in _conditional_pr_compiled:
+                if method == pr_method and pattern.match(path_without_query):
+                    ctx.log.warn(f"BLOCKED GitHub API (PR ops disabled): {method} {path}")
+                    self._block_request(
+                        flow,
+                        f"PR operations blocked by sandbox policy. Use --allow-pr flag to enable."
+                    )
+                    return
+
         # Check allowlist
         for allowed_method, pattern in _allowed_compiled:
             if method == allowed_method and pattern.match(path_without_query):
                 ctx.log.info(f"Allowed GitHub API: {method} {path}")
                 return
+
+        # Check if it's a conditional PR operation that's now allowed
+        if ALLOW_PR_OPERATIONS:
+            for pr_method, pattern in _conditional_pr_compiled:
+                if method == pr_method and pattern.match(path_without_query):
+                    ctx.log.info(f"Allowed GitHub API (PR ops enabled): {method} {path}")
+                    return
 
         # Not in allowlist - block with generic message
         ctx.log.warn(f"BLOCKED GitHub API (not in allowlist): {method} {path}")
@@ -244,6 +315,47 @@ class GitHubAPIFilter:
             flow,
             f"gh api: raw API access not permitted ({method} {path_without_query})"
         )
+
+    def _is_pr_reopen(self, flow: http.HTTPFlow) -> bool:
+        """Check if a PATCH request is attempting to reopen a PR."""
+        try:
+            content = flow.request.get_text()
+            if not content:
+                return False
+            data = json.loads(content)
+            # Check if state is being set to "open"
+            return data.get("state") == "open"
+        except (json.JSONDecodeError, UnicodeDecodeError):
+            return False
+
+    def _check_graphql_mutations(self, flow: http.HTTPFlow) -> str | None:
+        """
+        Check GraphQL request for blocked mutations.
+        Returns the mutation name if blocked, None otherwise.
+        """
+        try:
+            content = flow.request.get_text()
+            if not content:
+                return None
+            data = json.loads(content)
+            query = data.get("query", "")
+
+            # Check always-blocked mutations first
+            for mutation in ALWAYS_BLOCKED_GRAPHQL_MUTATIONS:
+                # Look for mutation keyword followed by the mutation name
+                # Handles both "mutation { mutationName" and "mutation MutationName"
+                if re.search(rf'\b{mutation}\s*\(', query, re.IGNORECASE):
+                    return mutation
+
+            # Check conditionally-blocked mutations if PR ops are disabled
+            if not ALLOW_PR_OPERATIONS:
+                for mutation in CONDITIONAL_BLOCKED_GRAPHQL_MUTATIONS:
+                    if re.search(rf'\b{mutation}\s*\(', query, re.IGNORECASE):
+                        return mutation
+
+            return None
+        except (json.JSONDecodeError, UnicodeDecodeError):
+            return None
 
     def _block_request(self, flow: http.HTTPFlow, reason: str) -> None:
         """Return 403 Forbidden with explanation."""

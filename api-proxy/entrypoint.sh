@@ -79,6 +79,9 @@ start_mitmproxy() {
     local log_level="${PROXY_LOG_LEVEL:-info}"
     log "Starting mitmproxy in ${mode} mode (web UI disabled)..."
 
+    # Ensure addon modules can import from /opt/proxy
+    export PYTHONPATH="/opt/proxy:${PYTHONPATH:-}"
+
     local args=(
         --mode "${mode}"
         --listen-port 8080

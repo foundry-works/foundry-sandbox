@@ -7,7 +7,37 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-<<<<<<< HEAD
+## [0.8.0] - 2026-02-02
+
+### Added
+- **Tavily MCP server integration** for all AI tools (Claude Code, OpenCode, Codex CLI, Gemini CLI)
+  - Auto-configured in each tool's MCP server settings
+  - Permissions auto-approval for `mcp__tavily-mcp__*` tools
+  - Requires `TAVILY_API_KEY` environment variable
+- **Guided interactive mode** for `cast new` command
+  - TUI-based questionnaire using gum (with read fallback)
+  - Friendly prompts for repo, branch, working directory, and options
+  - Summary confirmation before sandbox creation
+- **GitHub API filter improvements**
+  - Conditional PR operations controlled by `--allow-pr` / `ALLOW_PR_OPERATIONS`
+  - GraphQL mutation filtering for history protection (`mergePullRequest`, `reopenPullRequest` always blocked)
+  - Release asset upload support for `uploads.github.com`
+- **Improved installer** with auto-install for dependencies
+  - tmux: auto-installs via Homebrew (macOS), apt, dnf, or yum
+  - gum: auto-installs via Homebrew (macOS), optional on Linux
+  - Better error messages with platform-specific installation instructions
+- **AGENTS.md stub file** for foundry workflow documentation in sandboxes
+- `api-proxy/github_config.py` for shared GitHub API configuration
+
+### Changed
+- **Gateway public repo support**: Read operations no longer require GitHub token (public repos accessible anonymously)
+- **Gateway auth handling**: Added `WWW-Authenticate` header for proper git credential retry
+- GitHub token lookup now checks both `GITHUB_TOKEN` and `GH_TOKEN` environment variables
+- mitmproxy CA certificate automatically added to system trust store for git SSL verification
+
+### Fixed
+- Git operations to public repos now work without authentication in gateway
+
 ## [0.7.0] - 2026-02-01
 
 ### Added
@@ -336,7 +366,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Tab completion for bash
 - macOS and Linux support
 
-[Unreleased]: https://github.com/foundry-works/foundry-sandbox/compare/v0.7.0...HEAD
+[Unreleased]: https://github.com/foundry-works/foundry-sandbox/compare/v0.8.0...HEAD
+[0.8.0]: https://github.com/foundry-works/foundry-sandbox/compare/v0.7.0...v0.8.0
 [0.7.0]: https://github.com/foundry-works/foundry-sandbox/compare/v0.6.0...v0.7.0
 [0.6.0]: https://github.com/foundry-works/foundry-sandbox/compare/v0.5.9...v0.6.0
 [0.5.9]: https://github.com/foundry-works/foundry-sandbox/compare/v0.5.8...v0.5.9

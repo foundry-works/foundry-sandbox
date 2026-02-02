@@ -66,6 +66,12 @@ cmd_start() {
         isolate_credentials="true"
         populate_stubs_volume "$container"
         export STUBS_VOLUME_NAME="${container}_stubs"
+        # Export ALLOW_PR_OPERATIONS from metadata
+        if [ "${SANDBOX_ALLOW_PR:-0}" = "1" ]; then
+            export ALLOW_PR_OPERATIONS=true
+        else
+            export ALLOW_PR_OPERATIONS=
+        fi
     fi
 
     compose_up "$worktree_path" "$claude_config_path" "$container" "$override_file" "$isolate_credentials"

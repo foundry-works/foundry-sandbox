@@ -52,6 +52,7 @@ This threat model covers the **credential isolation gateway** - a proxy system t
 |                                             +------------------+ |
 |                                             |    API Proxy     | |
 |                                             |  - API keys      | |
+|                                             |  - GITHUB_TOKEN* | |
 |                                             |  - HTTPS MITM    | |
 |                                             +------------------+ |
 +------------------------------------------------------------------+
@@ -309,9 +310,12 @@ This section documents what IS implemented to address the primary threats.
 
 | Control | Implementation | Threat Addressed |
 |---------|----------------|------------------|
-| Git credential injection | Gateway injects GITHUB_TOKEN | Token exposure in sandbox |
+| Git credential injection | Gateway injects GITHUB_TOKEN (git) | Token exposure in sandbox |
+| GitHub API credential injection | API proxy injects GITHUB_TOKEN (optional) | Token exposure in sandbox |
 | API credential injection | API proxy injects API keys | API key exposure in sandbox |
 | Placeholder values | Sandbox sees `CREDENTIAL_PROXY_PLACEHOLDER` | Environment variable scraping |
+
+*Optional: The API proxy only uses `GITHUB_TOKEN`/`GH_TOKEN` for GitHub API requests (e.g., PRs, releases). Git operations remain gateway-only.
 
 ### Layer 4: Request Validation
 

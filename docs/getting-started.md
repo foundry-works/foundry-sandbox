@@ -140,8 +140,9 @@ Removes the container, worktree, and associated configs. You'll be prompted to c
 ```bash
 # GitHub - use gh CLI (recommended)
 gh auth login
+# Token is pulled from keychain automatically (GH_TOKEN -> GITHUB_TOKEN)
 
-# Or export token directly
+# Or export token directly (required for private repos or write ops)
 export GITHUB_TOKEN="ghp_..."
 
 # Claude Code - get token via: claude setup-token
@@ -152,6 +153,8 @@ export CLAUDE_CODE_OAUTH_TOKEN="..."
 ```
 
 These are passed into containers automatically.
+
+Public repositories can be used without a GitHub token, but requests may be rate limited. Private repos and push operations require a token.
 
 ## Next Steps
 

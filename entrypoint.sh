@@ -59,6 +59,22 @@ claude-zai() {
 }
 CLAUDE_ZAI_ALIAS
 
+# Wrapper for gh CLI to handle auth status in credential isolation mode
+# Shows helpful message instead of "invalid token" error (expected with proxy architecture)
+cat >> ~/.bashrc << 'GH_WRAPPER'
+gh() {
+    if [[ "$1" == "auth" && "$2" == "status" ]]; then
+        echo "github.com"
+        echo "  ✓ Credential isolation mode active"
+        echo "  - GitHub operations work via proxy credential injection"
+        echo "  - Real token is never exposed inside sandbox"
+        echo "  - Test with: gh repo view"
+        return 0
+    fi
+    command gh "$@"
+}
+GH_WRAPPER
+
 # API keys are expected to be passed via environment variables (docker-compose)
 
 # CLI tools are pre-installed in the image
@@ -116,6 +132,9 @@ if [ "$SANDBOX_GATEWAY_ENABLED" = "true" ]; then
     if [ -f "/etc/proxy-stubs/stub-opencode-config.json" ]; then
         cp /etc/proxy-stubs/stub-opencode-config.json "$HOME/.config/opencode/opencode.json"
     fi
+    if [ -f "/etc/proxy-stubs/stub-gh-hosts.yml" ]; then
+        cp /etc/proxy-stubs/stub-gh-hosts.yml "$HOME/.config/gh/hosts.yml"
+    fi
 fi
 
 # Apply gateway gitconfig conditionally
@@ -123,8 +142,23 @@ fi
 # Otherwise, use direct GitHub access
 if [ "$SANDBOX_GATEWAY_ENABLED" = "true" ] && [ -f "/etc/gitconfig.gateway" ]; then
     echo "Gateway mode enabled - configuring git URL rewriting..."
-    sudo cp /etc/gitconfig.gateway /etc/gitconfig 2>/dev/null || \
-        cp /etc/gitconfig.gateway /etc/gitconfig 2>/dev/null || true
+    if sudo cp /etc/gitconfig.gateway /etc/gitconfig 2>&1; then
+        echo "Git URL rewriting configured successfully"
+    elif cp /etc/gitconfig.gateway /etc/gitconfig 2>&1; then
+        echo "Git URL rewriting configured (without sudo)"
+    else
+        echo "ERROR: Failed to copy gitconfig.gateway to /etc/gitconfig"
+    fi
+    # Verify the copy succeeded
+    if [ -f "/etc/gitconfig" ]; then
+        echo "Verified: /etc/gitconfig exists"
+    else
+        echo "WARNING: /etc/gitconfig does not exist after copy attempt"
+    fi
+
+    # Enable automatic remote tracking on first push (Git 2.37+)
+    # This means `git push` will automatically set up tracking without needing `-u`
+    git config --global push.autoSetupRemote true
 else
     # Remove any gateway gitconfig to allow direct GitHub access
     if [ -f "/etc/gitconfig" ] && grep -q "gateway:8080" /etc/gitconfig 2>/dev/null; then

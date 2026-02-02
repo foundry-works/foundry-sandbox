@@ -135,7 +135,7 @@ The sandbox contains **zero real credentials**:
 
 | Credential | Where it lives | What sandbox sees |
 |------------|----------------|-------------------|
-| GITHUB_TOKEN | Gateway container | Nothing (session token for auth) |
+| GITHUB_TOKEN | Gateway container (git), API Proxy container (GitHub API, optional) | Nothing (session token for auth) |
 | ANTHROPIC_API_KEY | API Proxy container | `CREDENTIAL_PROXY_PLACEHOLDER` |
 | OPENAI_API_KEY | API Proxy container | `CREDENTIAL_PROXY_PLACEHOLDER` |
 | Other API keys | API Proxy container | `CREDENTIAL_PROXY_PLACEHOLDER` |

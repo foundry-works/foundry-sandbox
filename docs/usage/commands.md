@@ -510,7 +510,8 @@ These environment variables affect `cast` behavior:
 | `OPENCODE_DISABLE_LSP_DOWNLOAD` | Disable OpenCode LSP downloads | `1` |
 | `OPENCODE_DISABLE_SHARE` | Disable OpenCode sharing | `1` |
 | `ANTHROPIC_API_KEY` | Passed to containers | - |
-| `GITHUB_TOKEN` | Passed to containers | - |
+| `GITHUB_TOKEN` | Optional; GitHub API + private repo access | - |
+| `GH_TOKEN` | Optional; fallback to `GITHUB_TOKEN` (gh keychain) | - |
 | `CLAUDE_CODE_OAUTH_TOKEN` | Passed to containers | - |
 | `OPENAI_API_KEY` | Passed to containers | - |
 | `TAVILY_API_KEY` | Passed to containers | - |

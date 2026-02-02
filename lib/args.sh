@@ -15,6 +15,7 @@ parse_new_args() {
     NEW_PIP_REQUIREMENTS=""
     NEW_ISOLATE_CREDENTIALS=true
     NEW_ALLOW_DANGEROUS_MOUNT=false
+    NEW_ALLOW_PR=false
 
     while [ $# -gt 0 ]; do
         case "$1" in
@@ -70,6 +71,9 @@ parse_new_args() {
                 ;;
             --allow-dangerous-mount)
                 NEW_ALLOW_DANGEROUS_MOUNT=true
+                ;;
+            --allow-pr|--with-pr)
+                NEW_ALLOW_PR=true
                 ;;
             --pip-requirements|-r)
                 shift

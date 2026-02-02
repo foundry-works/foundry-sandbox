@@ -87,18 +87,124 @@ echo ""
 # Check prerequisites
 echo -e "${BLUE}Checking prerequisites...${NC}"
 
-check_command() {
-    if ! command -v "$1" &>/dev/null; then
-        echo -e "${RED}Error: $1 is required but not installed.${NC}"
-        echo "  Install $1 and try again."
-        exit 1
+check_git() {
+    if command -v git &>/dev/null; then
+        echo -e "  ${GREEN}✓${NC} git"
+        return 0
     fi
-    echo -e "  ${GREEN}✓${NC} $1"
+    echo -e "  ${RED}✗${NC} git (not found)"
+    echo ""
+    echo -e "${RED}Error: git is required but not installed.${NC}"
+    echo ""
+    if [[ "$(uname)" == "Darwin" ]]; then
+        echo "  Install with: xcode-select --install"
+        echo "  Or: brew install git"
+    else
+        echo "  Install with: sudo apt-get install git"
+        echo "  Or: sudo dnf install git"
+    fi
+    exit 1
 }
 
-check_command git
-check_command docker
-check_command tmux
+check_docker() {
+    if command -v docker &>/dev/null; then
+        echo -e "  ${GREEN}✓${NC} docker"
+        return 0
+    fi
+    echo -e "  ${RED}✗${NC} docker (not found)"
+    echo ""
+    echo -e "${RED}Error: Docker is required but not installed.${NC}"
+    echo ""
+    if [[ "$(uname)" == "Darwin" ]]; then
+        echo "  Install Docker Desktop: https://docs.docker.com/desktop/install/mac-install/"
+        echo "  Or with Homebrew: brew install --cask docker"
+    else
+        echo "  Install Docker Engine: https://docs.docker.com/engine/install/"
+    fi
+    exit 1
+}
+
+install_tmux() {
+    if command -v tmux &>/dev/null; then
+        echo -e "  ${GREEN}✓${NC} tmux"
+        return 0
+    fi
+
+    echo -ne "  Installing tmux..."
+    if [[ "$(uname)" == "Darwin" ]]; then
+        if command -v brew &>/dev/null; then
+            brew install tmux &>/dev/null
+        else
+            echo -e "\r  ${RED}✗${NC} tmux (Homebrew required)"
+            echo -e "${RED}Error: Install Homebrew first, then run installer again.${NC}"
+            exit 1
+        fi
+    elif command -v apt-get &>/dev/null; then
+        sudo apt-get update &>/dev/null && sudo apt-get install -y tmux &>/dev/null
+    elif command -v dnf &>/dev/null; then
+        sudo dnf install -y tmux &>/dev/null
+    elif command -v yum &>/dev/null; then
+        sudo yum install -y tmux &>/dev/null
+    else
+        echo -e "\r  ${RED}✗${NC} tmux (unknown package manager)"
+        echo -e "${RED}Error: Install tmux manually and run installer again.${NC}"
+        exit 1
+    fi
+
+    if command -v tmux &>/dev/null; then
+        echo -e "\r  ${GREEN}✓${NC} tmux (installed)              "
+    else
+        echo -e "\r  ${RED}✗${NC} tmux (installation failed)"
+        exit 1
+    fi
+}
+
+install_gum() {
+    if command -v gum &>/dev/null; then
+        echo -e "  ${GREEN}✓${NC} gum"
+        return 0
+    fi
+
+    echo -ne "  Installing gum..."
+    if [[ "$(uname)" == "Darwin" ]]; then
+        if command -v brew &>/dev/null; then
+            brew install gum &>/dev/null
+        else
+            echo -e "\r  ${YELLOW}⚠${NC} gum (skipped - no brew)"
+            return 0
+        fi
+    elif command -v apt-get &>/dev/null; then
+        # Add Charm repo for Debian/Ubuntu
+        sudo mkdir -p /etc/apt/keyrings
+        curl -fsSL https://repo.charm.sh/apt/gpg.key | sudo gpg --dearmor -o /etc/apt/keyrings/charm.gpg 2>/dev/null
+        echo "deb [signed-by=/etc/apt/keyrings/charm.gpg] https://repo.charm.sh/apt/ * *" | sudo tee /etc/apt/sources.list.d/charm.list >/dev/null
+        sudo apt-get update &>/dev/null && sudo apt-get install -y gum &>/dev/null
+    elif command -v dnf &>/dev/null; then
+        sudo dnf install -y 'dnf-command(copr)' &>/dev/null
+        sudo dnf copr enable -y atim/charm-tools &>/dev/null
+        sudo dnf install -y gum &>/dev/null
+    elif command -v yum &>/dev/null; then
+        # Fallback: download binary directly
+        local arch=$(uname -m)
+        [[ "$arch" == "x86_64" ]] && arch="amd64"
+        [[ "$arch" == "aarch64" ]] && arch="arm64"
+        curl -fsSL "https://github.com/charmbracelet/gum/releases/latest/download/gum_linux_${arch}.tar.gz" 2>/dev/null | sudo tar -xzf - -C /usr/local/bin gum 2>/dev/null
+    else
+        echo -e "\r  ${YELLOW}⚠${NC} gum (skipped - unknown package manager)"
+        return 0
+    fi
+
+    if command -v gum &>/dev/null; then
+        echo -e "\r  ${GREEN}✓${NC} gum (installed)              "
+    else
+        echo -e "\r  ${YELLOW}⚠${NC} gum (install failed - optional)"
+    fi
+}
+
+check_git
+check_docker
+install_tmux
+install_gum
 
 # Check Docker daemon (with timeout to avoid hanging)
 echo -ne "  Checking docker daemon..."

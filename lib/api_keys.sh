@@ -139,13 +139,24 @@ check_api_keys_with_prompt() {
 }
 
 # Extract gh CLI token from system keyring/keychain
-# Sets GH_TOKEN environment variable if gh is authenticated
+# Sets GH_TOKEN (and GITHUB_TOKEN if unset) when gh is authenticated
 # Returns: 0 if token exported, 1 if not available
 export_gh_token() {
+    if [ -n "${GITHUB_TOKEN:-}" ] || [ -n "${GH_TOKEN:-}" ]; then
+        if [ -z "${GITHUB_TOKEN:-}" ] && [ -n "${GH_TOKEN:-}" ]; then
+            export GITHUB_TOKEN="$GH_TOKEN"
+        fi
+        return 0
+    fi
+
     if command -v gh >/dev/null 2>&1 && gh auth status >/dev/null 2>&1; then
-        GH_TOKEN=$(gh auth token 2>/dev/null)
-        export GH_TOKEN
-        if [ -n "$GH_TOKEN" ]; then
+        local token
+        token=$(gh auth token 2>/dev/null)
+        if [ -n "$token" ]; then
+            export GH_TOKEN="$token"
+            if [ -z "${GITHUB_TOKEN:-}" ]; then
+                export GITHUB_TOKEN="$token"
+            fi
             return 0
         fi
     fi

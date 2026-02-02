@@ -13,6 +13,8 @@ Provider Credential Map:
 - api.semanticscholar.org: x-api-key from SEMANTIC_SCHOLAR_API_KEY
 - api.perplexity.ai: Authorization Bearer from PERPLEXITY_API_KEY
 - api.z.ai: x-api-key from ZHIPU_API_KEY
+- api.github.com: Authorization Bearer from GITHUB_TOKEN (or GH_TOKEN)
+- uploads.github.com: Authorization Bearer from GITHUB_TOKEN (or GH_TOKEN)
 
 OAuth Support (Codex CLI):
 - Detects CREDENTIAL_PROXY_PLACEHOLDER in Authorization header
@@ -147,6 +149,7 @@ load_hostname_allowlist()
 # OAuth placeholder tokens that sandbox sees
 OAUTH_PLACEHOLDER = "CREDENTIAL_PROXY_PLACEHOLDER"
 OPENCODE_PLACEHOLDER = "PROXY_PLACEHOLDER_OPENCODE"
+GITHUB_PLACEHOLDER_MARKER = "CREDENTIAL_PROXY_PLACEHOLDER"
 
 # OAuth token refresh endpoints to intercept
 REFRESH_ENDPOINTS = [
@@ -208,6 +211,19 @@ PROVIDER_MAP = {
         "header": "x-api-key",
         "env_var": "ZHIPU_API_KEY",
         "format": "value",
+    },
+    # GitHub API hosts (for gh CLI and API access)
+    "api.github.com": {
+        "header": "Authorization",
+        "env_var": "GITHUB_TOKEN",
+        "fallback_env_var": "GH_TOKEN",
+        "format": "bearer",
+    },
+    "uploads.github.com": {
+        "header": "Authorization",
+        "env_var": "GITHUB_TOKEN",
+        "fallback_env_var": "GH_TOKEN",
+        "format": "bearer",
     },
 }
 
@@ -547,6 +563,11 @@ class CredentialInjector:
             return
 
         if host not in self.credentials_cache:
+            if host in ("api.github.com", "uploads.github.com"):
+                # Allow unauthenticated GitHub API requests when no token is available
+                self._strip_github_placeholder(flow)
+                ctx.log.info(f"No GitHub token available; allowing unauthenticated request to {host}")
+                return
             ctx.log.error(f"Missing credential for {host}, returning 500")
             flow.response = http.Response.make(
                 500,
@@ -567,6 +588,13 @@ class CredentialInjector:
 
         flow.request.headers[header_name] = cred["value"]
         ctx.log.info(f"Injected {header_name} for {host}")
+
+    def _strip_github_placeholder(self, flow: http.HTTPFlow) -> None:
+        """Remove placeholder GitHub Authorization header to allow anonymous access."""
+        auth_header = flow.request.headers.get("Authorization", "")
+        if GITHUB_PLACEHOLDER_MARKER in auth_header:
+            del flow.request.headers["Authorization"]
+            ctx.log.info("Removed placeholder GitHub Authorization header")
 
 
 addons = [CredentialInjector()]

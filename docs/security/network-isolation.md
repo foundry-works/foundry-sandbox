@@ -108,10 +108,12 @@ Additional iptables rules in `safety/network-firewall.sh`:
 
 | Credential | Gateway | API Proxy | Sandbox |
 |------------|---------|-----------|---------|
-| GITHUB_TOKEN | Yes | No | No |
+| GITHUB_TOKEN | Yes | Optional* | No |
 | ANTHROPIC_API_KEY | No | Yes | Placeholder |
 | OPENAI_API_KEY | No | Yes | Placeholder |
 | Other API Keys | No | Yes | Placeholder |
+
+*Optional: The API proxy only uses `GITHUB_TOKEN`/`GH_TOKEN` for GitHub API requests (e.g., PRs, releases). Git operations remain gateway-only.
 
 ## Proof of No Bypass Path
 
