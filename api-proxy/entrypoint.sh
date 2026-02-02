@@ -77,7 +77,7 @@ disable_missing_auth_file() {
 start_mitmproxy() {
     local mode="${PROXY_MODE:-regular}"
     local log_level="${PROXY_LOG_LEVEL:-info}"
-    log "Starting mitmproxy in ${mode} mode..."
+    log "Starting mitmproxy in ${mode} mode (web UI disabled)..."
 
     local args=(
         --mode "${mode}"
@@ -93,14 +93,8 @@ start_mitmproxy() {
         args+=(--set flow_detail=3)
     fi
 
-    args+=(
-        --set web_open_browser=false
-        --web-host 0.0.0.0
-        --web-port 8081
-    )
-
     log "mitmproxy args: ${args[*]}"
-    exec mitmweb "${args[@]}"
+    exec mitmdump "${args[@]}"
 }
 
 main() {

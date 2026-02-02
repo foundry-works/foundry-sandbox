@@ -184,6 +184,11 @@ UPSTREAM_PROTOCOL = 'https'
 # Zero SHA for detecting branch creation/deletion
 ZERO_SHA = '0' * 40
 
+# Max bytes to read from git-receive-pack before packfile begins.
+# Used to avoid buffering large push bodies in memory.
+MAX_PKTLINE_BYTES = int(os.environ.get('GATEWAY_MAX_PKTLINE_BYTES', 65536))
+PKTLINE_READ_CHUNK = int(os.environ.get('GATEWAY_PKTLINE_CHUNK', 8192))
+
 
 def parse_pktline(data: bytes) -> list:
     """
@@ -256,6 +261,69 @@ def parse_pktline(data: bytes) -> list:
                 updates.append((old_sha, new_sha, refname, capabilities))
 
     return updates
+
+
+def read_pktline_prefix(stream, max_bytes=MAX_PKTLINE_BYTES, chunk_size=PKTLINE_READ_CHUNK):
+    """
+    Read and parse the pkt-line header section from a git-receive-pack body.
+
+    Returns:
+        tuple: (buffer_bytes, pktline_end, error)
+            buffer_bytes: all bytes read from the stream (may include some packfile bytes)
+            pktline_end: index of end-of-header (flush packet), or None if not found
+            error: None on success, otherwise one of:
+                   'max_exceeded', 'invalid_length', 'eof'
+    """
+    buf = bytearray()
+    pos = 0
+
+    while True:
+        # Parse as many pkt-lines as possible from current buffer
+        while True:
+            if len(buf) - pos < 4:
+                break
+            try:
+                length_hex = buf[pos:pos + 4].decode('ascii')
+                length = int(length_hex, 16)
+            except (ValueError, UnicodeDecodeError):
+                return bytes(buf), None, 'invalid_length'
+
+            # Flush packet marks end of header section
+            if length == 0:
+                return bytes(buf), pos + 4, None
+
+            if length < 4:
+                return bytes(buf), None, 'invalid_length'
+
+            # Need more data for this pkt-line
+            if len(buf) - pos < length:
+                break
+
+            pos += length
+
+        # Need more data from stream
+        if len(buf) >= max_bytes:
+            return bytes(buf), None, 'max_exceeded'
+
+        to_read = min(chunk_size, max_bytes - len(buf))
+        chunk = stream.read(to_read)
+        if not chunk:
+            return bytes(buf), None, 'eof'
+        buf.extend(chunk)
+
+
+def iter_prefixed_stream(prefix: bytes, stream, chunk_size=PKTLINE_READ_CHUNK):
+    """
+    Yield a previously-read prefix, then stream the remainder.
+    Keeps memory usage bounded while forwarding the full request body upstream.
+    """
+    if prefix:
+        yield prefix
+    while True:
+        chunk = stream.read(chunk_size)
+        if not chunk:
+            break
+        yield chunk
 
 
 def is_fast_forward(old_sha: str, new_sha: str, owner: str, repo: str) -> bool:
@@ -1212,16 +1280,41 @@ def git_proxy(owner, repo, git_path):
         return Response('Gateway configuration error: GitHub token not available', status=503)
 
     # For git-receive-pack (push), check for force push / history rewriting operations
-    # This requires buffering the request body to parse pkt-line format
-    request_body_bytes = None
+    # This requires reading only the initial pkt-line header section (bounded)
+    request_body_prefix = None
+    pktline_end = None
     if git_path == 'git-receive-pack' and request.method == 'POST':
-        # Read request body for force push detection
-        # Note: This buffers the body in memory, but push request bodies are typically small
-        # (they contain ref updates, not the actual pack data which comes later)
-        request_body_bytes = request.get_data()
+        # Read bounded pkt-line header for force-push detection (avoid OOM)
+        request_body_prefix, pktline_end, pktline_err = read_pktline_prefix(request.stream)
+
+        if pktline_err == 'max_exceeded':
+            audit_log('git_denied', extra_data={
+                'reason': 'pktline_too_large',
+                'owner': owner,
+                'repo': repo,
+                'path': git_path,
+                'max_bytes': MAX_PKTLINE_BYTES
+            })
+            return Response('Git request header too large', status=413)
+        if pktline_err == 'invalid_length':
+            audit_log('git_denied', extra_data={
+                'reason': 'malformed_pktline',
+                'owner': owner,
+                'repo': repo,
+                'path': git_path
+            })
+            return Response('Malformed git request', status=400)
+        if pktline_err == 'eof' or pktline_end is None:
+            audit_log('git_denied', extra_data={
+                'reason': 'incomplete_pktline',
+                'owner': owner,
+                'repo': repo,
+                'path': git_path
+            })
+            return Response('Incomplete git request', status=400)
 
         # Check for blocked ref updates (force push, deletion, etc.)
-        blocked_updates, block_details = check_ref_updates(request_body_bytes, owner, repo)
+        blocked_updates, block_details = check_ref_updates(request_body_prefix[:pktline_end], owner, repo)
 
         if blocked_updates:
             audit_log('git_denied', extra_data={
@@ -1275,13 +1368,13 @@ def git_proxy(owner, repo, git_path):
         headers['Authorization'] = f'token {github_token}'
 
         # Determine request body for upstream
-        # If we already read the body for force push detection, use that
-        # Otherwise, stream it for memory efficiency
+        # For git-receive-pack, we already read a prefix for validation.
+        # Stream the prefix + remaining body to keep memory usage bounded.
         request_body = None
         if request.method in ['POST', 'PUT']:
-            if request_body_bytes is not None:
-                # Use buffered body from force push check
-                request_body = request_body_bytes
+            if request_body_prefix is not None:
+                # Prefix already read; stream prefix + remainder
+                request_body = iter_prefixed_stream(request_body_prefix, request.stream)
             else:
                 # Use streaming to avoid loading entire request into memory
                 request_body = request.stream
