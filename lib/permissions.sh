@@ -17,6 +17,7 @@ SETTINGS_FILE = os.path.join(SETTINGS_DIR, "settings.json")
 FOUNDRY_ALLOW = [
     "Skill(foundry:*)",
     "mcp__plugin_foundry_foundry-mcp__*",
+    "mcp__tavily-mcp__*",
     "Bash(git add:*)",
     "Bash(git branch:*)",
     "Bash(git checkout:*)",

@@ -89,7 +89,8 @@ RUN rm -f /usr/lib/python*/EXTERNALLY-MANAGED
 RUN npm install -g @anthropic-ai/claude-code \
     && npm install -g @google/gemini-cli \
     && npm install -g @openai/codex \
-    && npm install -g opencode-ai @opencode-ai/sdk
+    && npm install -g opencode-ai @opencode-ai/sdk \
+    && npm install -g tavily-mcp
 
 # Install Python packages globally (to /usr/local/lib/python3)
 RUN pip3 install foundry-mcp pytest-asyncio hypothesis cc-context-stats pyright
