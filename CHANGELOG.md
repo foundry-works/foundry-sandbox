@@ -10,6 +10,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [0.7.0] - 2026-02-01
 
 ### Added
+- `stubs/` directory for files injected into sandboxes (CLAUDE.md stub)
+- Expanded red team security tests with comprehensive attack scenarios
+  - Credential extraction attempts (env vars, files, proxy attacks)
+  - Network escape vectors (DNS bypass, IP literals, tunneling)
+  - Container escape attempts (mounts, sockets, cgroups)
+  - Social engineering defense tests
+- Security documentation reorganization:
+  - `docs/security/index.md` - Security overview and quick reference
+  - `docs/security/credential-isolation.md` - Credential isolation threat model
+  - `docs/security/sandbox-threats.md` - Sandbox threat model and attack taxonomy
+  - `docs/security/security-architecture.md` - Defense-in-depth architecture
+
+### Changed
+- Simplified project `CLAUDE.md` to concise developer reference
+- Reorganized security documentation into `docs/security/` directory
+
+### Added
 - Git push ref update parsing and fast-forward detection in gateway
 - GitHub API filter proxy support
 - `*.openai.com` and `*.chatgpt.com` wildcards to firewall allowlist
