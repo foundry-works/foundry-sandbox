@@ -5,13 +5,11 @@
 # Sets up iptables rules to whitelist specific domains while blocking all
 # other outbound traffic. Used in "limited" network mode.
 #
-# Whitelisted domains by default:
+# Whitelisted domains by default (see gateway/allowlist.conf for full list):
 # - GitHub: github.com, api.github.com, gist.github.com, etc.
-# - Package registries: npm, pypi, go, cargo
-# - AI APIs: Anthropic, OpenAI, Google (Gemini)
-# - AI Tools: OpenCode, GitHub Copilot
-# - Research: Tavily, Perplexity, Semantic Scholar, Google CSE
-# - Docker Hub
+# - AI APIs: Anthropic, OpenAI, Google (Gemini), Z.AI
+# - AI Tools: OpenCode
+# - Research: Tavily, Perplexity, Semantic Scholar
 #
 # Add custom domains via: SANDBOX_ALLOWED_DOMAINS="domain1.com,domain2.com"
 #

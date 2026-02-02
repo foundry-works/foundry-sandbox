@@ -228,7 +228,7 @@ codexdsp    # alias for: codex --dangerously-bypass-approvals-and-sandbox
 ### OpenCode
 
 ```bash
-# Requires OPENAI_API_KEY
+# Uses zai-coding-plan provider (run: opencode auth login)
 opencode
 ```
 
@@ -359,7 +359,7 @@ Control network access for sensitive work or offline development.
 ### Restricted Network for Sensitive Code
 
 ```bash
-# Only allow essential services (github, npm, pypi, AI APIs)
+# Only allow essential services (GitHub, AI APIs, research APIs)
 cast new owner/repo sensitive-feature --network=limited
 
 # Inside sandbox, test that restrictions work

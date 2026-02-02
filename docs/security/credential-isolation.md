@@ -13,7 +13,7 @@ This threat model covers the **credential isolation gateway** - a proxy system t
 
 ### What This Document Does NOT Cover
 
-- General AI sandbox safety (see [threat-model.md](threat-model.md))
+- General AI sandbox safety (see [sandbox-threats.md](sandbox-threats.md))
 - Host-level security (OS hardening, Docker daemon security)
 - Upstream service security (GitHub, Anthropic, OpenAI)
 
@@ -484,9 +484,9 @@ ping -c 1 gateway
 
 ## Related Documentation
 
-- [Network Isolation Model](network-isolation.md) - Detailed network architecture
-- [Safety Layers](safety-layers.md) - General sandbox safety mechanisms
-- [General Threat Model](threat-model.md) - AI-as-threat-actor model for sandbox safety
+- [Network Isolation](network-isolation.md) - Detailed network architecture
+- [Security Architecture](security-architecture.md) - Security pillars and defense layers
+- [Sandbox Threats](sandbox-threats.md) - AI-as-threat-actor model for sandbox safety
 
 ---
 

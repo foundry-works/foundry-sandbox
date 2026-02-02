@@ -69,10 +69,10 @@ Dangerous commands are **intercepted with warnings**:
 
 | Document | Description |
 |----------|-------------|
-| [Credential Isolation Threat Model](security/THREAT_MODEL.md) | Trust boundaries, threats, and explicit non-requirements for credential isolation |
-| [Network Isolation Model](security/network-isolation.md) | Detailed network architecture and isolation proof |
-| [Safety Layers](security/safety-layers.md) | Implementation details for each defense layer |
-| [General Threat Model](security/threat-model.md) | AI-as-threat-actor model for sandbox safety |
+| [Credential Isolation](credential-isolation.md) | Trust boundaries, threats, and explicit non-requirements for credential isolation |
+| [Network Isolation](network-isolation.md) | Detailed network architecture and isolation proof |
+| [Security Architecture](security-architecture.md) | Security pillars and defense layers |
+| [Sandbox Threats](sandbox-threats.md) | AI-as-threat-actor model for sandbox safety |
 
 ## Quick Reference
 

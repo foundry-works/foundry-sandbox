@@ -63,13 +63,7 @@ Sandboxes default to disabling update checks and analytics via `~/.codex/config.
 
 ### OpenCode
 
-Run `opencode auth login` for standard auth. OAuth for OpenAI/Codex models works automatically via the sandbox proxy - no additional plugins needed.
-
-To set a sandbox-wide OpenCode default model (when `~/.config/opencode/opencode.json` has no `model` set), use:
-
-```bash
-export SANDBOX_OPENCODE_DEFAULT_MODEL="openai/gpt-5.2-codex"
-```
+Run `opencode auth login` for zai-coding-plan authentication.
 
 ### Tmux
 

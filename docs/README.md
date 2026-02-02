@@ -31,12 +31,31 @@ claude
 | Document | Description |
 |----------|-------------|
 | [Getting Started](getting-started.md) | Installation, setup, and first sandbox |
+| [Configuration](configuration.md) | API keys, plugins, and config files |
 | [Architecture](architecture.md) | Technical design and diagrams |
-| [Security: Threat Model](security/threat-model.md) | What we protect against and why |
-| [Security: Safety Layers](security/safety-layers.md) | Defense in depth explained |
-| [Usage: Commands](usage/commands.md) | Complete command reference |
-| [Usage: Workflows](usage/workflows.md) | Common patterns and examples |
-| [Contributing](development/contributing.md) | For contributors |
+
+### Security
+
+| Document | Description |
+|----------|-------------|
+| [Security Overview](security/index.md) | Security architecture and quick reference |
+| [Sandbox Threats](security/sandbox-threats.md) | AI-as-threat-actor model |
+| [Credential Isolation](security/credential-isolation.md) | Gateway threat model |
+| [Security Architecture](security/security-architecture.md) | Security pillars and defense layers |
+| [Network Isolation](security/network-isolation.md) | Network architecture |
+
+### Usage
+
+| Document | Description |
+|----------|-------------|
+| [Commands](usage/commands.md) | Complete CLI reference |
+| [Workflows](usage/workflows.md) | Common patterns |
+
+### Development
+
+| Document | Description |
+|----------|-------------|
+| [Contributing](development/contributing.md) | How to contribute |
 
 ## Quick Reference
 

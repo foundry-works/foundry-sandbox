@@ -37,6 +37,18 @@ if [ "$SANDBOX_GATEWAY_ENABLED" = "true" ]; then
         # External domains will be filtered by the allowlist
         echo "nameserver $GATEWAY_IP" > /etc/resolv.conf
         echo "DNS configured to use gateway at $GATEWAY_IP"
+
+        # Block DNS bypass - only allow DNS to gateway
+        # This prevents dig @8.8.8.8 and similar direct DNS queries to external resolvers
+        echo "Setting up DNS firewall rules..."
+        iptables -A OUTPUT -p udp --dport 53 -d "$GATEWAY_IP" -j ACCEPT
+        iptables -A OUTPUT -p tcp --dport 53 -d "$GATEWAY_IP" -j ACCEPT
+        # Block DNS to all other destinations
+        iptables -A OUTPUT -p udp --dport 53 -j DROP
+        iptables -A OUTPUT -p tcp --dport 53 -j DROP
+        echo "DNS firewall rules applied"
+        # Note: /proc/kcore masking requires SYS_ADMIN (too dangerous to grant)
+        # Network isolation (internal: true) is the primary security boundary
     else
         echo "Warning: Could not resolve gateway hostname, using default DNS"
     fi

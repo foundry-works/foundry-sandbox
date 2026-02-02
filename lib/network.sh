@@ -3,7 +3,7 @@
 # Network mode management for sandbox containers
 #
 # Supported modes:
-#   limited    - Whitelist only (github, npm, pypi, AI APIs, deep research APIs) - default
+#   limited    - Whitelist only (GitHub, AI APIs, research APIs) - default
 #   host-only  - Local network only (Docker gateway, private subnets)
 #   none       - Complete block (loopback only)
 #

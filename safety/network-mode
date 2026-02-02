@@ -6,7 +6,7 @@
 # No container restart required when the container has a network interface.
 #
 # Modes:
-#   limited    - Whitelist domains only (github, npm, pypi, AI APIs, deep research APIs)
+#   limited    - Whitelist domains only (GitHub, AI APIs, research APIs)
 #   host-only  - Local network only (Docker gateway, common subnets)
 #   none       - Complete block (loopback only, simulated via iptables)
 #
@@ -400,7 +400,7 @@ show_help() {
     echo "Mode changes require sudo. Detailed status and list may also require sudo."
     echo ""
     echo "Modes:"
-    echo "  limited    Only whitelisted domains (github, npm, pypi, AI APIs, deep research)"
+    echo "  limited    Only whitelisted domains (GitHub, AI APIs, research APIs)"
     echo "  host-only  Local network only (Docker gateway, private subnets)"
     echo "  none       Block all outbound except loopback (simulated)"
     echo ""

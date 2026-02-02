@@ -246,7 +246,7 @@ install_foundry_workspace_docs() {
     # Expand ~ if present
     [[ "$opencode_foundry_path" == "~/"* ]] && opencode_foundry_path="${opencode_foundry_path/#\~/$HOME}"
 
-    local claude_md_src="$foundry_cache/claude-foundry/CLAUDE.md"
+    local claude_md_src="$SANDBOX_HOME/stubs/CLAUDE.md"
     local agents_md_src="$opencode_foundry_path/AGENTS.md"
     local marker="<foundry-instructions>"
 

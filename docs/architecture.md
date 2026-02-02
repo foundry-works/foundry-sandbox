@@ -15,14 +15,12 @@ This document explains the technical design of Foundry Sandbox: how components f
 │  │               DOCKER CONTAINER                       │   │
 │  │                                                      │   │
 │  │  ┌──────────────────────────────────────────────┐   │   │
-│  │  │            SAFETY LAYERS                      │   │   │
+│  │  │         SECURITY CONTROLS                     │   │   │
+│  │  │   (see docs/security/security-architecture)   │   │   │
 │  │  │                                               │   │   │
-│  │  │  Layer 1: Shell Overrides (UX warnings)      │   │   │
-│  │  │  Layer 2: Credential Redaction (mask secrets)│   │   │
-│  │  │  Layer 3: Operator Approval (human-in-loop)  │   │   │
-│  │  │  Layer 4: Sudoers Allowlist (kernel-enforced)│   │   │
-│  │  │  Layer 5: Network Isolation (iptables)       │   │   │
-│  │  │  Layer 6: Read-only Root (Docker enforced)   │   │   │
+│  │  │  • Read-only filesystem    (Docker)           │   │   │
+│  │  │  • Network isolation       (Docker/dns/ipt)   │   │   │
+│  │  │  • Credential isolation    (gateway)          │   │   │
 │  │  └──────────────────────────────────────────────┘   │   │
 │  │                                                      │   │
 │  │  /workspace ◄─── volume mount (git worktree)        │   │
@@ -117,7 +115,7 @@ tmpfs:
   - /run:mode=755,size=64m
   - /var/cache/apt:mode=755,size=256m
   - /var/lib/apt/lists:mode=755,size=128m
-  - /home/ubuntu:mode=755,uid=1000,gid=1000,size=1g
+  - /home/ubuntu:mode=755,uid=1000,gid=1000,size=2g
 ```
 
 **Why tmpfs for /home?**
@@ -167,22 +165,30 @@ Created by `cast new`, records sandbox configuration:
 
 ## Entrypoint Flow
 
-When a container starts, `entrypoint.sh` runs:
+Container startup uses two entrypoints depending on mode:
 
 ```
 Container Start
       │
-      ▼
-Create /home directories (tmpfs is empty; ~/.claude is mounted)
-      │
-      ▼
-Set up npm prefix for local installs
-      │
-      ▼
-API keys from environment (docker-compose)
-      │
-      ▼
-Fix git worktree paths (host → container)
+      ├─────────────────────────────────────┐
+      │ (credential isolation enabled)      │ (standard mode)
+      ▼                                     │
+entrypoint-root.sh (as root)                │
+  • Configure DNS → gateway                 │
+  • Add internal services to /etc/hosts     │
+  • Set up DNS firewall (iptables)          │
+  • Mask /proc/kcore                         │
+  • Drop privileges (gosu)                  │
+      │                                     │
+      ▼                                     ▼
+entrypoint.sh (as ubuntu) ◄─────────────────┘
+  • Create /home directories (tmpfs is empty)
+  • Fix ownership of root-created dirs
+  • Set up npm prefix for local installs
+  • Configure Claude onboarding
+  • Copy proxy stubs (gateway mode)
+  • Apply gateway gitconfig (gateway mode)
+  • Trust mitmproxy CA (if mounted)
       │
       ▼
 Execute passed command (default: /bin/bash)
@@ -190,7 +196,7 @@ Execute passed command (default: /bin/bash)
 
 ### Git Path Translation
 
-Worktrees reference the bare repo by absolute path. Since host and container have different home directories (e.g., `/home/username` vs `/home/ubuntu`), the entrypoint fixes these paths at startup.
+Worktrees reference the bare repo by absolute path. Since host and container have different paths, the **host script** (`lib/container_config.sh`) fixes these paths after copying the repos directory—not the container entrypoint.
 
 ## Code Organization
 
@@ -199,7 +205,9 @@ foundry-sandbox/
 ├── sandbox.sh              # Main entry point
 ├── Dockerfile              # Container image definition
 ├── docker-compose.yml      # Container runtime config
-├── entrypoint.sh           # Container startup script
+├── entrypoint.sh           # Container startup script (user)
+├── entrypoint-root.sh      # Root wrapper (credential isolation)
+├── install.sh              # Installation script
 ├── completion.bash         # Bash tab completion
 │
 ├── lib/                    # Library modules
@@ -209,6 +217,8 @@ foundry-sandbox/
 │   ├── git_worktree.sh     # Worktree management
 │   ├── docker.sh           # Docker/compose helpers
 │   ├── state.sh            # Sandbox state management
+│   ├── gateway.sh          # Gateway/credential isolation
+│   ├── container_config.sh # Container setup (git path fixes)
 │   └── ...                 # Other modules
 │
 ├── commands/               # Command implementations
@@ -218,13 +228,15 @@ foundry-sandbox/
 │   ├── destroy.sh          # cast destroy
 │   └── ...                 # Other commands
 │
-└── safety/                     # Security guardrails
-    ├── shell-overrides.sh      # Layer 1: Shell functions
-    ├── credential-redaction.sh # Layer 2: Credential masking
-    ├── operator-approve        # Layer 3: Human approval
-    ├── sudoers-allowlist       # Layer 4: Sudo restrictions
-    ├── network-firewall.sh     # Layer 5: Network isolation
-    └── network-mode            # Layer 5: Mode switcher
+└── safety/                         # Security controls
+    ├── sudoers-allowlist           # Sudo command restrictions
+    ├── network-firewall.sh         # iptables rules
+    ├── network-mode                # Network mode switcher
+    ├── gateway-credential-helper   # Git credential helper (gateway)
+    ├── gateway-gitconfig           # Git URL rewriting (gateway)
+    ├── shell-overrides.sh          # UX warnings (not security)
+    ├── credential-redaction.sh     # Output masking (not security)
+    └── operator-approve            # TTY-based human approval
 ```
 
 ## Component Interactions
@@ -235,34 +247,52 @@ User runs: cast new owner/repo
               ▼
 ┌─────────────────────────────────┐
 │ sandbox.sh                      │
-│  - parse command                │
 │  - source lib/*.sh              │
+│  - export_docker_env            │
+│  - validate_environment         │
 │  - dispatch to commands/new.sh  │
 └─────────────────────────────────┘
               │
               ▼
 ┌─────────────────────────────────┐
 │ commands/new.sh                 │
-│  - validate repo URL            │
+│  - validate repo URL, API keys  │
 │  - ensure bare repo exists      │
 │  - create worktree              │
 │  - set up Claude config         │
+│  - prepopulate foundry skills   │
 │  - docker compose up            │
+└─────────────────────────────────┘
+              │
+              ▼
+┌─────────────────────────────────┐
+│ Docker Container (starting)     │
+│  - entrypoint-root.sh (gateway) │
+│  - entrypoint.sh runs           │
+└─────────────────────────────────┘
+              │
+              ▼
+┌─────────────────────────────────┐
+│ commands/new.sh (continued)     │
+│  - setup gateway session        │
+│    (if credential isolation)    │
 │  - copy configs to container    │
+│  - install workspace perms      │
+│  - apply network restrictions   │ ← after container starts
 │  - attach via tmux              │
 └─────────────────────────────────┘
               │
               ▼
 ┌─────────────────────────────────┐
-│ Docker Container                │
-│  - entrypoint.sh runs           │
-│  - safety layers active         │
+│ Docker Container (ready)        │
+│  - network restrictions active  │
 │  - user shell ready             │
 └─────────────────────────────────┘
 ```
 
 ## Next Steps
 
-- [Security: Threat Model](security/threat-model.md) - What we protect against
-- [Security: Safety Layers](security/safety-layers.md) - Defense in depth details
+- [Security Overview](security/index.md) - Security architecture quick reference
+- [Sandbox Threats](security/sandbox-threats.md) - What we protect against
+- [Security Architecture](security/security-architecture.md) - Defense in depth details
 - [Commands](usage/commands.md) - Full command reference

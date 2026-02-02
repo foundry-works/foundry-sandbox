@@ -428,13 +428,394 @@ else
     test_warn "mitmproxy CA not found at /certs/mitmproxy-ca.pem"
 fi
 
-# Check if we can make requests without the proxy CA
+# Test that mitmproxy is intercepting HTTPS traffic
 echo ""
 info "Testing certificate validation..."
-if curl -s --cacert /etc/ssl/certs/ca-certificates.crt --max-time 10 "https://api.anthropic.com/" 2>&1 | grep -q "certificate"; then
-    test_pass "Certificate validation working (mitmproxy intercepting)"
+
+# Test 1: curl should FAIL without mitmproxy CA (proves interception is active)
+if ! curl -sf --cacert /etc/ssl/certs/ca-certificates.crt --max-time 10 "https://api.anthropic.com/" >/dev/null 2>&1; then
+    test_pass "HTTPS interception active (system CA rejects mitmproxy cert)"
 else
-    test_warn "Certificate test inconclusive"
+    test_fail "HTTPS interception NOT active (system CA accepted connection)"
+fi
+
+# Test 2: curl should complete TLS handshake with mitmproxy CA (proves proxy setup works)
+# Note: -s silences progress, but we check TLS success not HTTP status (API returns 404 on /)
+CURL_OUT=$(curl -s --cacert /certs/mitmproxy-ca.pem --max-time 10 -w "%{ssl_verify_result}" -o /dev/null "https://api.anthropic.com/" 2>&1)
+if [[ "$CURL_OUT" == "0" ]]; then
+    test_pass "mitmproxy CA trust working (TLS handshake succeeds)"
+else
+    test_warn "mitmproxy CA trust issue (ssl_verify_result=$CURL_OUT)"
+fi
+
+# ============================================================================
+header "11. FILESYSTEM ISOLATION"
+# ============================================================================
+
+echo ""
+echo "Testing read-only root filesystem and tmpfs constraints..."
+
+# Detect credential-isolation mode
+# In this mode, filesystem is intentionally writable for DNS configuration
+CREDENTIAL_ISOLATION_MODE=false
+if [ -n "${SANDBOX_GATEWAY_ENABLED:-}" ] || [ -f /run/secrets/gateway_token ]; then
+    CREDENTIAL_ISOLATION_MODE=true
+    info "Credential-isolation mode detected (SANDBOX_GATEWAY_ENABLED or gateway_token present)"
+fi
+
+# Test writes to protected paths
+for path in "/usr/bin/test-file" "/etc/test-file" "/opt/test-file"; do
+    if touch "$path" 2>/dev/null; then
+        rm -f "$path" 2>/dev/null
+        if [ "$CREDENTIAL_ISOLATION_MODE" = "true" ]; then
+            test_warn "Write to $path allowed (expected in credential-isolation mode)"
+        else
+            test_fail "Write succeeded to protected path: $path"
+        fi
+    else
+        test_pass "Write blocked to protected path: $path"
+    fi
+done
+
+# Test writes to allowed tmpfs paths
+for path in "/tmp/test-file" "/var/tmp/test-file"; do
+    if touch "$path" 2>/dev/null; then
+        rm -f "$path"
+        test_pass "Write allowed to tmpfs: $path"
+    else
+        test_warn "Write failed to tmpfs: $path (might be read-only mode)"
+    fi
+done
+
+# Test sensitive file access
+CURRENT_USER=$(whoami)
+if [[ -r /etc/shadow ]]; then
+    if [ "$CURRENT_USER" = "root" ]; then
+        test_warn "/etc/shadow readable (running as root)"
+    elif [ "$CREDENTIAL_ISOLATION_MODE" = "true" ]; then
+        test_warn "/etc/shadow readable (credential-isolation starts as root)"
+    else
+        test_fail "/etc/shadow readable as $CURRENT_USER"
+    fi
+else
+    test_pass "/etc/shadow not readable"
+fi
+
+if [[ -d /root ]] && ls /root/ >/dev/null 2>&1; then
+    ROOT_CONTENTS=$(ls -A /root/ 2>/dev/null | wc -l)
+    if [[ $ROOT_CONTENTS -gt 0 ]]; then
+        test_warn "/root/ accessible with $ROOT_CONTENTS items"
+    else
+        test_pass "/root/ empty or inaccessible"
+    fi
+else
+    test_pass "/root/ not accessible"
+fi
+
+# Test tmpfs size limit (try to write >512MB to /tmp)
+echo ""
+info "Testing tmpfs size limits..."
+if dd if=/dev/zero of=/tmp/large-test bs=1M count=600 2>/dev/null; then
+    rm -f /tmp/large-test
+    test_fail "Wrote 600MB to /tmp (tmpfs limit not enforced)"
+else
+    rm -f /tmp/large-test 2>/dev/null
+    test_pass "Large file write to /tmp failed (tmpfs limit working)"
+fi
+
+# ============================================================================
+header "12. SHELL SAFETY OVERRIDES"
+# ============================================================================
+
+echo ""
+echo "Testing Layer 1 shell override protections..."
+echo "(These are UX-level protections, bypassable by design)"
+
+# Source shell overrides if available
+if [[ -f /etc/profile.d/shell-overrides.sh ]]; then
+    source /etc/profile.d/shell-overrides.sh 2>/dev/null
+    info "Shell overrides loaded from /etc/profile.d/shell-overrides.sh"
+else
+    test_warn "Shell overrides not found at /etc/profile.d/shell-overrides.sh"
+fi
+
+# Test dangerous command overrides (these should be blocked by shell functions)
+# We test by checking if the function exists and captures the pattern
+
+# Check if rm is overridden
+if type rm 2>/dev/null | grep -q "function"; then
+    test_pass "rm command is overridden by shell function"
+else
+    test_warn "rm command not overridden (shell overrides may not be active)"
+fi
+
+# Check if git is overridden
+if type git 2>/dev/null | grep -q "function"; then
+    test_pass "git command is overridden by shell function"
+else
+    test_warn "git command not overridden (shell overrides may not be active)"
+fi
+
+# Verify bypass works (legitimate use via absolute path)
+if [[ -x /bin/rm ]]; then
+    touch /tmp/safe-delete-test 2>/dev/null
+    if /bin/rm /tmp/safe-delete-test 2>/dev/null; then
+        test_pass "Legitimate bypass via /bin/rm works"
+    else
+        test_warn "Could not test /bin/rm bypass"
+    fi
+fi
+
+# ============================================================================
+header "13. CAPABILITY VERIFICATION"
+# ============================================================================
+
+echo ""
+echo "Testing dropped Linux capabilities..."
+
+# Test CAP_NET_RAW (should be dropped - prevents raw sockets, ping without setuid)
+info "Testing CAP_NET_RAW (should be dropped)..."
+
+# Method 1: Try ping (needs CAP_NET_RAW if not setuid)
+if ping -c 1 -W 1 127.0.0.1 >/dev/null 2>&1; then
+    # Ping worked - check if it's setuid or we have CAP_NET_RAW
+    if [[ -u /bin/ping ]] || [[ -u /usr/bin/ping ]]; then
+        test_pass "ping works via setuid (CAP_NET_RAW not needed)"
+    else
+        test_warn "ping works without setuid (CAP_NET_RAW may be present)"
+    fi
+else
+    test_pass "ping failed (CAP_NET_RAW dropped or ping not setuid)"
+fi
+
+# Method 2: Try creating raw socket with Python if available
+if command -v python3 &>/dev/null; then
+    RAW_SOCKET_TEST=$(python3 -c "
+import socket
+try:
+    s = socket.socket(socket.AF_INET, socket.SOCK_RAW, socket.IPPROTO_ICMP)
+    s.close()
+    print('SUCCESS')
+except PermissionError:
+    print('EPERM')
+except Exception as e:
+    print(f'ERROR:{e}')
+" 2>&1)
+    if [[ "$RAW_SOCKET_TEST" == "EPERM" ]]; then
+        test_pass "Raw socket creation blocked (CAP_NET_RAW dropped)"
+    elif [[ "$RAW_SOCKET_TEST" == "SUCCESS" ]]; then
+        test_fail "Raw socket creation succeeded (CAP_NET_RAW present!)"
+    else
+        test_warn "Raw socket test inconclusive: $RAW_SOCKET_TEST"
+    fi
+else
+    info "Python3 not available for raw socket test"
+fi
+
+# Test access to sensitive kernel interfaces
+if [[ -r /proc/kcore ]]; then
+    if [ "$CREDENTIAL_ISOLATION_MODE" = "true" ]; then
+        test_warn "/proc/kcore readable (known limitation - network isolation is primary boundary)"
+    else
+        test_fail "/proc/kcore is readable"
+    fi
+else
+    test_pass "/proc/kcore not readable"
+fi
+
+if [[ -d /sys/kernel/security ]] && ls /sys/kernel/security/ >/dev/null 2>&1; then
+    test_warn "/sys/kernel/security is accessible"
+else
+    test_pass "/sys/kernel/security not accessible"
+fi
+
+# ============================================================================
+header "14. ADDITIONAL CREDENTIAL PATTERNS"
+# ============================================================================
+
+echo ""
+echo "Scanning for additional credential patterns in environment and files..."
+
+# Check environment for high-entropy secrets
+info "Checking environment for credential patterns..."
+
+# Slack tokens
+if env | grep -qE "xox[baprs]-[0-9a-zA-Z-]+"; then
+    test_fail "Slack token pattern found in environment"
+else
+    test_pass "No Slack tokens in environment"
+fi
+
+# Private key patterns in environment (unusual but check)
+if env | grep -qE "BEGIN (RSA|EC|OPENSSH|PRIVATE) "; then
+    test_fail "Private key material found in environment"
+else
+    test_pass "No private key material in environment"
+fi
+
+# Generic high-entropy check for KEY/TOKEN/SECRET vars
+SUSPICIOUS_VARS=$(env | grep -iE "^[^=]*(KEY|TOKEN|SECRET|PASSWORD|CREDENTIAL)[^=]*=" | \
+    grep -vE "(PLACEHOLDER|PROXY|PATH|LESS|COLORS)" | \
+    awk -F= 'length($2) > 32 {print $1}')
+if [[ -n "$SUSPICIOUS_VARS" ]]; then
+    test_warn "High-entropy values in sensitive-named vars: $SUSPICIOUS_VARS"
+else
+    test_pass "No suspicious high-entropy credential variables"
+fi
+
+# Scan common locations for credential files
+echo ""
+info "Scanning for credential files..."
+
+# GCP service account files
+if find /tmp /home -name "*.json" -exec grep -l '"type":\s*"service_account"' {} \; 2>/dev/null | head -1 | grep -q .; then
+    test_fail "GCP service account JSON found"
+else
+    test_pass "No GCP service account files found"
+fi
+
+# Private keys in accessible locations
+if find /tmp /home -name "*.pem" -o -name "id_rsa" -o -name "id_ed25519" 2>/dev/null | head -1 | grep -q .; then
+    FOUND_KEYS=$(find /tmp /home -name "*.pem" -o -name "id_rsa" -o -name "id_ed25519" 2>/dev/null | head -5)
+    test_warn "Private key files found: $FOUND_KEYS"
+else
+    test_pass "No private key files in /tmp or /home"
+fi
+
+# ============================================================================
+header "15. NETWORK BYPASS ATTEMPTS"
+# ============================================================================
+
+echo ""
+echo "Testing additional network escape vectors..."
+
+# Direct DNS query bypass attempts
+info "Testing direct DNS queries (should be blocked)..."
+
+# UDP DNS to 8.8.8.8
+if command -v dig &>/dev/null; then
+    DIG_RESULT=$(dig +short +timeout=3 +tries=1 @8.8.8.8 google.com 2>&1)
+    if [[ -n "$DIG_RESULT" ]] && ! echo "$DIG_RESULT" | grep -qiE "(timeout|refused|error|unreachable|failed|no servers)"; then
+        test_fail "Direct UDP DNS to 8.8.8.8 succeeded"
+    else
+        test_pass "Direct UDP DNS to 8.8.8.8 blocked/timeout"
+    fi
+elif command -v nslookup &>/dev/null; then
+    NS_RESULT=$(timeout 5 nslookup google.com 8.8.8.8 2>&1)
+    if echo "$NS_RESULT" | grep -qE "^Address.*[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+"; then
+        test_fail "Direct DNS to 8.8.8.8 succeeded (nslookup)"
+    else
+        test_pass "Direct DNS to 8.8.8.8 blocked (nslookup)"
+    fi
+else
+    info "dig/nslookup not available for direct DNS test"
+fi
+
+# IPv6 egress attempt
+info "Testing IPv6 egress..."
+IPV6_RESULT=$(curl -6 -s --connect-timeout 5 --max-time 10 "https://ipv6.google.com/" 2>&1)
+if [[ $? -eq 0 ]] && ! echo "$IPV6_RESULT" | grep -qiE "(error|couldn't|timeout)"; then
+    test_fail "IPv6 egress succeeded"
+else
+    test_pass "IPv6 egress blocked (no IPv6 routes or filtered)"
+fi
+
+# Cloud metadata endpoint (169.254.169.254)
+info "Testing cloud metadata endpoint access..."
+METADATA_RESULT=$(curl -s --connect-timeout 3 --max-time 5 "http://169.254.169.254/latest/meta-data/" 2>&1)
+if [[ $? -eq 0 ]] && ! echo "$METADATA_RESULT" | grep -qiE "(error|timeout|refused|blocked)"; then
+    test_fail "Cloud metadata endpoint accessible!"
+else
+    test_pass "Cloud metadata endpoint blocked"
+fi
+
+# Wildcard subdomain test (should work if wildcards allowed)
+info "Testing wildcard domain resolution..."
+if nslookup "test-subdomain.api.openai.com" >/dev/null 2>&1; then
+    test_pass "Wildcard subdomain resolves (test-subdomain.api.openai.com)"
+else
+    test_warn "Wildcard subdomain did not resolve (may be expected)"
+fi
+
+# Non-allowlisted subdomain (should be blocked)
+if nslookup "evil-subdomain.github.com" >/dev/null 2>&1; then
+    # DNS resolved, but proxy should still block
+    EVIL_RESP=$(curl -s --connect-timeout 5 --max-time 10 "https://evil-subdomain.github.com/" 2>&1)
+    if echo "$EVIL_RESP" | grep -qE "(not in allowlist|blocked|refused)"; then
+        test_pass "Non-allowlisted subdomain blocked by proxy"
+    else
+        test_warn "Non-allowlisted subdomain DNS resolved (proxy may still block)"
+    fi
+else
+    test_pass "Non-allowlisted subdomain DNS blocked"
+fi
+
+# ============================================================================
+header "16. SENSITIVE PATH ACCESS"
+# ============================================================================
+
+echo ""
+echo "Verifying sensitive credential paths not exposed..."
+
+# OAuth credential paths that should NOT be accessible in sandbox
+OAUTH_PATHS=(
+    "$HOME/.codex/auth.json"
+    "$HOME/.local/share/opencode/auth.json"
+    "$HOME/.gemini/oauth_creds.json"
+    "$HOME/.config/gh/hosts.yml"
+)
+
+for path in "${OAUTH_PATHS[@]}"; do
+    if [[ -f "$path" ]]; then
+        # File exists - check if it has real credentials
+        if grep -qE "(access_token|refresh_token|oauth_token)" "$path" 2>/dev/null; then
+            test_fail "OAuth credentials found at $path"
+        else
+            test_warn "File exists at $path (check contents)"
+        fi
+    else
+        test_pass "OAuth path not exposed: $path"
+    fi
+done
+
+# SSH/GPG directories should be empty or non-existent
+for dir in "$HOME/.ssh" "$HOME/.gnupg"; do
+    if [[ -d "$dir" ]]; then
+        CONTENTS=$(ls -A "$dir" 2>/dev/null | wc -l)
+        if [[ $CONTENTS -gt 0 ]]; then
+            test_warn "$dir exists with $CONTENTS items"
+            ls -la "$dir" 2>/dev/null | head -5 | sed 's/^/    /'
+        else
+            test_pass "$dir empty"
+        fi
+    else
+        test_pass "$dir does not exist"
+    fi
+done
+
+# Session token should exist but be restricted (credential isolation mode)
+if [[ -f /run/secrets/gateway_token ]]; then
+    if [[ -r /run/secrets/gateway_token ]]; then
+        # Check permissions
+        PERMS=$(stat -c "%a" /run/secrets/gateway_token 2>/dev/null)
+        if [[ "$PERMS" == "400" ]] || [[ "$PERMS" == "600" ]]; then
+            test_pass "Gateway token exists with restricted permissions ($PERMS)"
+        else
+            test_warn "Gateway token permissions: $PERMS (expected 400 or 600)"
+        fi
+    else
+        test_pass "Gateway token exists but not readable by current user"
+    fi
+else
+    info "No gateway token (not in credential isolation mode)"
+fi
+
+# Real credentials directory (api-proxy only)
+if [[ -d /credentials ]]; then
+    test_fail "/credentials directory accessible in sandbox!"
+    ls -la /credentials 2>/dev/null | head -10 | sed 's/^/    /'
+else
+    test_pass "/credentials directory not accessible"
 fi
 
 # ============================================================================

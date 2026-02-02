@@ -11,11 +11,11 @@ Foundry Sandbox solves this by providing isolated Docker environments with defen
 ## Key Features
 
 - **Ephemeral Workspaces** - Git worktrees per sandbox; destroy when done with no trace
-- **Defense in Depth** - 6 safety layers from shell overrides to read-only root filesystem
+- **Defense in Depth** - Multiple security pillars enforced by Docker and the kernel
 - **Multiple AI Tools** - Claude Code, Gemini CLI, Codex CLI, and OpenCode pre-installed
 - **Fast Creation** - Worktrees share git objects; new sandboxes spin up in seconds
-- **Network Control** - Full, limited (whitelist), host-only, or no network access
-- **Credential Isolation** - Optional proxy mode keeps API keys out of sandboxes entirely
+- **Network Control** - Limited (allowlist), host-only, or no network access
+- **Credential Isolation** - API keys stay outside sandboxes via proxy (enabled by default)
 - **Volume Mounts** - Mount host directories read-write or read-only
 - **JSON Output** - All commands support `--json` for scripting and automation
 
@@ -82,7 +82,7 @@ cast destroy sandbox-name --yes
 - **Requires Docker** - No native process isolation; container overhead applies
 - **Linux/macOS focus** - Windows requires WSL2
 - **Shared git history** - All sandboxes share the same bare repo; force-push from one affects others
-- **No GPU passthrough** - Standard Docker networking; GPU workloads need additional configuration
+- **No GPU passthrough** - GPU workloads need additional Docker configuration
 
 ## Documentation
 
@@ -93,8 +93,8 @@ cast destroy sandbox-name --yes
 | [Workflows](docs/usage/workflows.md) | Common patterns and recipes |
 | [Configuration](docs/configuration.md) | API keys, plugins, and config files |
 | [Architecture](docs/architecture.md) | Technical design and diagrams |
-| [Safety Layers](docs/security/safety-layers.md) | Defense in depth details |
-| [Threat Model](docs/security/threat-model.md) | What we protect against |
+| [Security Overview](docs/security/index.md) | Security architecture quick reference |
+| [Sandbox Threats](docs/security/sandbox-threats.md) | AI-as-threat-actor model |
 | [Contributing](docs/development/contributing.md) | For contributors |
 
 ## Support

@@ -139,6 +139,12 @@ COPY entrypoint.sh /usr/local/bin/entrypoint.sh
 COPY entrypoint-root.sh /usr/local/bin/entrypoint-root.sh
 RUN chmod +x /usr/local/bin/entrypoint.sh /usr/local/bin/entrypoint-root.sh
 
+# Clean up root home directory and restrict access (security best practice)
+# Removes build artifacts and shell configs that could be information leaks
+RUN rm -rf /root/.bash_history /root/.bashrc /root/.profile \
+           /root/.ssh /root/.cache /root/.local /root/.gnupg /root/.npm 2>/dev/null || true && \
+    chmod 700 /root
+
 USER $USERNAME
 WORKDIR /workspace
 
