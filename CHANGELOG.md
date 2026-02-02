@@ -7,10 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-02-01
+
+### Added
+- Git push ref update parsing and fast-forward detection in gateway
+- GitHub API filter proxy support
+- `*.openai.com` and `*.chatgpt.com` wildcards to firewall allowlist
+- `chatgpt.com` and `cloudcode-pa.googleapis.com` to OAuth injection
+- Multi-sandbox support with dynamic DNS configuration
+
 ### Changed
 - **Default credential isolation**: `--isolate-credentials` is now the default behavior
   - API keys are held in a proxy container and never enter the sandbox
   - Use `--no-isolate-credentials` to opt out (not recommended)
+- **OpenCode authentication**: Switched from OAuth to API key authentication for zai-coding-plan model
+- **Codex OAuth endpoint**: Updated from `auth0.openai.com` to `auth.openai.com`
+- **Firewall architecture**: Simplified to wildcard DNS filtering mode (replaced rotating IP domain handling)
+- **Gateway socket location**: Moved from `/tmp` to `~/.foundry-sandbox/sockets/` for Docker Desktop macOS compatibility
+- Gateway socket now uses bind mount instead of named volume for host accessibility
 
 ### Removed
 - **Full network mode**: `--network=full` has been removed for security reasons
@@ -18,6 +32,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Attempting to use `full` mode shows a helpful error message
 - **Runtime domain additions**: `sudo network-mode allow <domain>` has been disabled
   - To allow additional domains, set `SANDBOX_ALLOWED_DOMAINS` on the host before creating the sandbox
+- Cursor AI tool configuration and references
+
+### Fixed
+- Dynamic DNS configuration for multi-sandbox support (no more IP conflicts)
+- OAuth token handling for Codex, Gemini, and OpenCode CLIs
+  - Extract JWT exp claim for accurate token expiry
+  - Use distinct placeholders for OpenCode vs Codex
+  - Add Gemini and OpenCode config stubs for OAuth
+- Gateway socket accessible from host for session management
+- Gateway and sandbox infrastructure improvements
 
 ## [0.6.0] - 2026-02-01
 
@@ -273,7 +297,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Tab completion for bash
 - macOS and Linux support
 
-[Unreleased]: https://github.com/foundry-works/foundry-sandbox/compare/v0.6.0...HEAD
+[Unreleased]: https://github.com/foundry-works/foundry-sandbox/compare/v0.7.0...HEAD
+[0.7.0]: https://github.com/foundry-works/foundry-sandbox/compare/v0.6.0...v0.7.0
 [0.6.0]: https://github.com/foundry-works/foundry-sandbox/compare/v0.5.8...v0.6.0
 [0.5.8]: https://github.com/foundry-works/foundry-sandbox/compare/v0.5.7...v0.5.8
 [0.5.7]: https://github.com/foundry-works/foundry-sandbox/compare/v0.5.6...v0.5.7
