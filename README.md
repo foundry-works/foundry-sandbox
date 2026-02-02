@@ -4,9 +4,20 @@ Safe, ephemeral workspaces for AI-assisted coding—isolate mistakes, not produc
 
 ## Overview
 
-AI coding assistants are powerful but imperfect. They can hallucinate destructive commands, misunderstand context, or make changes you didn't intend. Running them directly on your machine means one bad `rm -rf` or `git push --force` away from real damage.
+Your API keys and tokens are exposed to everything running on your machine—including malicious dependencies, compromised tools, and AI assistants that might leak them. Supply chain attacks are increasingly common, and a single `npm install` can run arbitrary code with access to your credentials.
 
-Foundry Sandbox solves this by providing isolated Docker environments with defense-in-depth safety layers. Each sandbox is a disposable git worktree where AI tools can operate freely while multiple safeguards prevent accidents from escaping. You get the productivity of AI assistance with the confidence that mistakes stay contained.
+Foundry Sandbox provides ephemeral Docker workspaces where credentials never enter the container. A gateway proxy holds your real API keys and tokens on the host, injecting them into outbound requests only after validation. Code running inside the sandbox—whether it's an AI assistant, a build script, or a malicious package—never sees the actual credentials.
+
+Beyond credential isolation, sandboxes provide defense in depth:
+
+- **Read-only filesystem** — Prevents destructive commands like `rm -rf /`
+- **Network allowlists** — Egress restricted to approved domains (GitHub, AI APIs, etc.)
+- **Disposable worktrees** — Each sandbox is a git worktree; create in seconds, destroy with zero trace
+- **Multi-tool ready** — Claude Code, Gemini CLI, Codex CLI, and OpenCode pre-installed
+
+The result: run AI assistants and untrusted code with the confidence that your credentials and host system are protected by multiple independent security layers.
+
+Finally, in addition to providing tight security guardrails, this sandbox is designed to enable spec-driven development using the `foundry-mcp` server and `claude-foundry` plugin, which are automatically installed and pre-configured.
 
 ## Key Features
 
