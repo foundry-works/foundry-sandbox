@@ -79,9 +79,9 @@ parse_new_args "user/repo" "branch"
 assert_eq "no --pip-requirements flag" "" "$NEW_PIP_REQUIREMENTS"
 
 # Test pip-requirements with other flags
-parse_new_args "user/repo" "--network" "full" "--pip-requirements" "reqs.txt" "--sparse"
+parse_new_args "user/repo" "--network" "limited" "--pip-requirements" "reqs.txt" "--sparse"
 assert_eq "--pip-requirements with other flags" "reqs.txt" "$NEW_PIP_REQUIREMENTS"
-assert_eq "other flags still work (network)" "full" "$NEW_NETWORK_MODE"
+assert_eq "other flags still work (network)" "limited" "$NEW_NETWORK_MODE"
 assert_eq "other flags still work (sparse)" "true" "$NEW_SPARSE_CHECKOUT"
 
 echo ""

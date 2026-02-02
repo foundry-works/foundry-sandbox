@@ -1,5 +1,26 @@
 #!/bin/bash
 
+# Detect host auth configuration and export appropriate sandbox env vars
+# This determines which placeholder credentials to use based on what's configured on the host
+setup_credential_placeholders() {
+    # Claude: Use OAuth placeholder if CLAUDE_CODE_OAUTH_TOKEN is set on host
+    if [ -n "$CLAUDE_CODE_OAUTH_TOKEN" ]; then
+        export SANDBOX_ANTHROPIC_API_KEY=""  # Don't set API key
+        export SANDBOX_CLAUDE_OAUTH="CREDENTIAL_PROXY_PLACEHOLDER"
+    else
+        export SANDBOX_ANTHROPIC_API_KEY="CREDENTIAL_PROXY_PLACEHOLDER"
+        export SANDBOX_CLAUDE_OAUTH=""
+    fi
+
+    # Gemini: Check selectedType in settings file
+    local gemini_settings="$HOME/.gemini/settings.json"
+    if [ -f "$gemini_settings" ] && grep -q '"selectedType".*"oauth-personal"' "$gemini_settings"; then
+        export SANDBOX_GEMINI_API_KEY=""  # Don't set API key (OAuth in use)
+    else
+        export SANDBOX_GEMINI_API_KEY="CREDENTIAL_PROXY_PLACEHOLDER"
+    fi
+}
+
 get_compose_command() {
     local override_file="$1"
     local isolate_credentials="${2:-false}"
@@ -25,6 +46,17 @@ compose_up() {
     export CLAUDE_CONFIG_PATH="$claude_config_path"
     export CONTAINER_NAME="$container"
 
+    # For credential isolation, set up placeholders and generate session management key
+    if [ "$isolate_credentials" = "true" ]; then
+        # Detect host auth config and set appropriate placeholder env vars
+        setup_credential_placeholders
+        # Generate a random session management key for this sandbox
+        export GATEWAY_SESSION_MGMT_KEY=$(openssl rand -base64 32)
+        # Populate stubs volume (avoids Docker Desktop bind mount staleness)
+        populate_stubs_volume "$container"
+        export STUBS_VOLUME_NAME="${container}_stubs"
+    fi
+
     local compose_cmd
     compose_cmd=$(get_compose_command "$override_file" "$isolate_credentials")
     run_cmd $compose_cmd -p "$container" up -d
@@ -48,6 +80,7 @@ compose_down() {
             isolate_credentials="true"
         fi
     fi
+
     compose_cmd=$(get_compose_command "$override_file" "$isolate_credentials")
     if [ "$remove_volumes" = "true" ]; then
         run_cmd $compose_cmd -p "$container" down -v
@@ -59,6 +92,38 @@ compose_down() {
 container_is_running() {
     local container="$1"
     docker ps --filter "name=^${container}-dev" --format "{{.Names}}" | grep -q .
+}
+
+# Get the gateway host port for a container (credential isolation)
+# Args:
+#   $1 - container: The container project name
+# Returns:
+#   Prints the host port to stdout, or empty if not found
+get_gateway_host_port() {
+    local container="$1"
+    local gateway_container="${container}-gateway-1"
+
+    # Get the host port mapped to container port 8080
+    docker port "$gateway_container" 8080 2>/dev/null | head -1 | sed 's/.*://'
+}
+
+# Set up GATEWAY_URL after containers start
+# Args:
+#   $1 - container: The container project name
+# Returns:
+#   0 on success, 1 on failure
+#   Sets GATEWAY_URL environment variable
+setup_gateway_url() {
+    local container="$1"
+    local port
+
+    port=$(get_gateway_host_port "$container")
+    if [ -z "$port" ]; then
+        return 1
+    fi
+
+    export GATEWAY_URL="http://127.0.0.1:${port}"
+    return 0
 }
 
 exec_in_container() {
@@ -74,37 +139,24 @@ copy_to_container() {
     run_cmd docker cp "$src" "$container_id:$dst"
 }
 
-# Copy and sanitize Gemini settings.json to container
-# Removes tools section to start fresh in sandbox, preserving auth preferences
-copy_gemini_settings_to_container() {
-    local container_id="$1"
-    local settings_file="${HOME}/.gemini/settings.json"
-    local dest_path="/home/ubuntu/.gemini/settings.json"
+# Populate the stubs volume for credential isolation
+# Uses a temporary alpine container to copy stub files into the volume
+# This avoids Docker Desktop's VirtioFS/gRPC-FUSE file sync staleness issues
+populate_stubs_volume() {
+    local container="$1"
+    local volume_name="${container}_stubs"
 
-    # Skip if settings.json doesn't exist on host
-    if [ ! -f "$settings_file" ]; then
-        return 0
-    fi
+    docker volume create "$volume_name" >/dev/null 2>&1 || true
 
-    # Check if jq is available
-    if ! command -v jq &>/dev/null; then
-        log_warn "jq not available; skipping Gemini settings.json sanitization"
-        return 0
-    fi
+    docker run --rm \
+        -v "$SCRIPT_DIR/api-proxy:/src:ro" \
+        -v "${volume_name}:/stubs" \
+        alpine:latest \
+        sh -c 'cp /src/stub-*.json /stubs/' || return 1
+}
 
-    # Read, sanitize (remove tools section), and copy
-    local sanitized
-    sanitized=$(jq 'del(.tools)' "$settings_file" 2>/dev/null) || return 0
-
-    # Write to temp file and copy to container
-    local tmp_file
-    tmp_file=$(mktemp)
-    echo "$sanitized" > "$tmp_file"
-
-    # Ensure .gemini directory exists and copy file
-    docker exec "$container_id" mkdir -p "$(dirname "$dest_path")" 2>/dev/null || true
-    docker cp "$tmp_file" "$container_id:$dest_path" 2>/dev/null || true
-    docker exec "$container_id" chown ubuntu:ubuntu "$dest_path" 2>/dev/null || true
-
-    rm -f "$tmp_file"
+# Remove the stubs volume for a sandbox
+remove_stubs_volume() {
+    local container="$1"
+    docker volume rm "${container}_stubs" 2>/dev/null || true
 }

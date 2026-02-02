@@ -11,17 +11,12 @@ ubuntu ALL=(ALL) NOPASSWD: /usr/sbin/service * stop
 ubuntu ALL=(ALL) NOPASSWD: /usr/sbin/service * restart
 ubuntu ALL=(ALL) NOPASSWD: /usr/sbin/service * status
 
-# Fix ownership of directories created by Docker mounts (credential isolation mode)
-# Limited to home directory for safety
-ubuntu ALL=(ALL) NOPASSWD: /usr/bin/chown -R * /home/ubuntu/.*
-ubuntu ALL=(ALL) NOPASSWD: /usr/bin/chown * /home/ubuntu/.*
-
 # Network mode switching
-# Preserve environment variables needed for credential isolation
-Defaults!/usr/local/bin/network-firewall.sh env_keep += "SANDBOX_CREDENTIAL_PROXY SANDBOX_NETWORK_MODE SANDBOX_DEBUG"
-Defaults!/usr/local/bin/network-mode env_keep += "SANDBOX_CREDENTIAL_PROXY SANDBOX_NETWORK_MODE SANDBOX_DEBUG"
 ubuntu ALL=(ALL) NOPASSWD: /usr/local/bin/network-firewall.sh
 ubuntu ALL=(ALL) NOPASSWD: /usr/local/bin/network-mode *
+
+# DNS configuration (for credential isolation gateway)
+ubuntu ALL=(ALL) NOPASSWD: /usr/bin/tee /etc/resolv.conf
 
 # Add other safe commands as needed:
 # ubuntu ALL=(ALL) NOPASSWD: /usr/bin/npm *

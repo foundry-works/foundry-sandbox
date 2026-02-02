@@ -7,6 +7,98 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+<<<<<<< HEAD
+## [0.7.0] - 2026-02-01
+
+### Added
+- `stubs/` directory for files injected into sandboxes (CLAUDE.md stub)
+- Expanded red team security tests with comprehensive attack scenarios
+  - Credential extraction attempts (env vars, files, proxy attacks)
+  - Network escape vectors (DNS bypass, IP literals, tunneling)
+  - Container escape attempts (mounts, sockets, cgroups)
+  - Social engineering defense tests
+- Security documentation reorganization:
+  - `docs/security/index.md` - Security overview and quick reference
+  - `docs/security/credential-isolation.md` - Credential isolation threat model
+  - `docs/security/sandbox-threats.md` - Sandbox threat model and attack taxonomy
+  - `docs/security/security-architecture.md` - Defense-in-depth architecture
+
+### Changed
+- Simplified project `CLAUDE.md` to concise developer reference
+- Reorganized security documentation into `docs/security/` directory
+
+### Added
+- Git push ref update parsing and fast-forward detection in gateway
+- GitHub API filter proxy support
+- `*.openai.com` and `*.chatgpt.com` wildcards to firewall allowlist
+- `chatgpt.com` and `cloudcode-pa.googleapis.com` to OAuth injection
+- Multi-sandbox support with dynamic DNS configuration
+- **Dual-layer egress filtering**: Defense-in-depth security for credential isolation
+  - API proxy hostname validation: Blocks HTTP requests to non-allowlisted hosts before proxying
+  - DNS default-deny mode: dnsmasq blocks all domains by default, only forwards allowlisted domains
+  - Both layers share the same `firewall-allowlist.generated` configuration
+  - Prevents data exfiltration to arbitrary external services
+
+### Changed
+- **DNS security hardening**: dnsmasq now uses `no-resolv` and `address=/#/` to block all unallowlisted domains
+- DNS queries forwarded to Docker's internal DNS (127.0.0.11) instead of upstream resolvers
+- Added DNS query logging for security auditing
+- **Default credential isolation**: `--isolate-credentials` is now the default behavior
+  - API keys are held in a proxy container and never enter the sandbox
+  - Use `--no-isolate-credentials` to opt out (not recommended)
+- **OpenCode authentication**: Switched from OAuth to API key authentication for zai-coding-plan model
+- **Codex OAuth endpoint**: Updated from `auth0.openai.com` to `auth.openai.com`
+- **Firewall architecture**: Simplified to wildcard DNS filtering mode (replaced rotating IP domain handling)
+- **Gateway socket location**: Moved from `/tmp` to `~/.foundry-sandbox/sockets/` for Docker Desktop macOS compatibility
+- Gateway socket now uses bind mount instead of named volume for host accessibility
+
+### Removed
+- **Full network mode**: `--network=full` has been removed for security reasons
+  - Available modes: `limited` (default), `host-only`, `none`
+  - Attempting to use `full` mode shows a helpful error message
+- **Runtime domain additions**: `sudo network-mode allow <domain>` has been disabled
+  - To allow additional domains, set `SANDBOX_ALLOWED_DOMAINS` on the host before creating the sandbox
+- Cursor AI tool configuration and references
+
+### Fixed
+- Dynamic DNS configuration for multi-sandbox support (no more IP conflicts)
+- OAuth token handling for Codex, Gemini, and OpenCode CLIs
+  - Extract JWT exp claim for accurate token expiry
+  - Use distinct placeholders for OpenCode vs Codex
+  - Add Gemini and OpenCode config stubs for OAuth
+- Gateway socket accessible from host for session management
+- Gateway and sandbox infrastructure improvements
+
+## [0.6.0] - 2026-02-01
+
+### Added
+- **Credential Isolation Gateway**: Complete implementation of a secure proxy gateway for credential isolation
+  - HTTP/HTTPS egress proxy with domain allowlist enforcement
+  - DNS filtering via dnsmasq to restrict domain resolution
+  - Network firewall rules for limited egress mode
+  - Audit logging for all proxy allow/deny decisions
+  - IP literal request blocking to prevent DNS bypass attacks
+- Wildcard domain support (`*.example.com`) for dynamic subdomains
+  - Suffix-based matching for CDNs and rotating API endpoints
+  - Gateway-level hostname validation against wildcard patterns
+  - DNS forwarding for wildcard domains via dnsmasq `server=` directive
+  - Wildcard mode in firewall opens ports 80/443 (security via DNS + gateway)
+- Gateway security hardening:
+  - Privilege dropping after startup (runs as unprivileged user)
+  - Session limits and rate limiting
+  - Input sanitization and request validation
+  - CAP_NET_RAW capability handling for health checks
+  - IPv6 firewall rules mirroring IPv4 restrictions
+- Conditional gateway mode with Basic auth and repository scoping
+- Security documentation: threat model and security overview for credential isolation
+- Comprehensive test suite for gateway functionality:
+  - DNS bypass prevention tests
+  - Wildcard domain matching tests
+  - Hostname allowlist validation tests
+
+### Changed
+- Removed rotating IP domain handling (replaced by wildcard mode)
+
 ## [0.5.9] - 2026-01-31
 
 ### Added
@@ -238,13 +330,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Network modes: full, limited (whitelist), host-only, none
 - Volume mount support (`--mount`, `--copy`)
 - SSH agent forwarding (`--with-ssh`)
-- Pre-installed AI tools: Claude Code, Gemini CLI, Codex CLI, OpenCode, Cursor Agent
+- Pre-installed AI tools: Claude Code, Gemini CLI, Codex CLI, OpenCode
 - Pre-installed claude-foundry plugin with MCP server
 - JSON output for all commands (`--json`)
 - Tab completion for bash
 - macOS and Linux support
 
-[Unreleased]: https://github.com/foundry-works/foundry-sandbox/compare/v0.5.8...HEAD
+[Unreleased]: https://github.com/foundry-works/foundry-sandbox/compare/v0.7.0...HEAD
+[0.7.0]: https://github.com/foundry-works/foundry-sandbox/compare/v0.6.0...v0.7.0
+[0.6.0]: https://github.com/foundry-works/foundry-sandbox/compare/v0.5.9...v0.6.0
+[0.5.9]: https://github.com/foundry-works/foundry-sandbox/compare/v0.5.8...v0.5.9
 [0.5.8]: https://github.com/foundry-works/foundry-sandbox/compare/v0.5.7...v0.5.8
 [0.5.7]: https://github.com/foundry-works/foundry-sandbox/compare/v0.5.6...v0.5.7
 [0.5.6]: https://github.com/foundry-works/foundry-sandbox/compare/v0.5.5...v0.5.6

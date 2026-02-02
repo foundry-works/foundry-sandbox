@@ -1,19 +1,6 @@
 {
   "zai-coding-plan": {
     "type": "api",
-    "key": "CREDENTIAL_PROXY_PLACEHOLDER"
-  },
-  "openai": {
-    "type": "oauth",
-    "access": "CREDENTIAL_PROXY_PLACEHOLDER",
-    "refresh": "CREDENTIAL_PROXY_PLACEHOLDER",
-    "expires": 4102444800000,
-    "accountId": "placeholder"
-  },
-  "google": {
-    "type": "oauth",
-    "access": "CREDENTIAL_PROXY_PLACEHOLDER",
-    "refresh": "CREDENTIAL_PROXY_PLACEHOLDER",
-    "expires": 4102444800000
+    "key": "PROXY_PLACEHOLDER_OPENCODE"
   }
 }

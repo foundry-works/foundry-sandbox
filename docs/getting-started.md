@@ -28,29 +28,12 @@ curl -fsSL https://raw.githubusercontent.com/foundry-works/foundry-sandbox/main/
 This installs to `~/.foundry-sandbox` and:
 - Adds the `cast` alias to your shell
 - Enables tab completion
-- Builds the Docker image (Ubuntu 24.04-based with Node.js, Go, Python, Claude Code, Gemini CLI, Codex CLI, OpenCode, Cursor Agent, and safety guardrails)
+- Builds the Docker image (Ubuntu 24.04-based with Node.js, Go, Python, Claude Code, Gemini CLI, Codex CLI, OpenCode, and safety guardrails)
 
 After installation, reload your shell:
 
 ```bash
 source ~/.bashrc  # or ~/.zshrc
-```
-
-### Manual Install
-
-If you prefer manual installation:
-
-```bash
-# Clone
-git clone https://github.com/foundry-works/foundry-sandbox.git ~/.foundry-sandbox
-
-# Add to ~/.bashrc or ~/.zshrc
-echo "alias cast='~/.foundry-sandbox/sandbox.sh'" >> ~/.bashrc
-echo "source ~/.foundry-sandbox/completion.bash" >> ~/.bashrc
-
-# Reload and build
-source ~/.bashrc
-cast build
 ```
 
 ## Creating Your First Sandbox
@@ -81,17 +64,7 @@ cast new owner/repo my-new-feature main
 
 Creates `my-new-feature` branch starting from `main`.
 
-### With Network Restrictions (Optional)
-
-```bash
-# Limited network (only github, npm, pypi, AI APIs)
-cast new owner/repo feature --network=limited
-
-# No network at all
-cast new owner/repo offline-work --network=none
-```
-
-See [Security > Safety Layers](security/safety-layers.md) for details on network modes.
+For advanced options like `--network`, `--mount`, and `--sparse`, see [Commands](usage/commands.md).
 
 ## Working in Your Sandbox
 
@@ -100,24 +73,10 @@ Once attached, you're in a bash shell inside the container at `/workspace` (your
 ### Run an AI Assistant
 
 ```bash
-# Claude Code
-claude
-
-# Or with skip-permissions mode (for trusted operations)
-claudedsp    # alias for: claude --dangerously-skip-permissions
-
-# Gemini CLI
-gemini
-
-# Codex CLI
-codex
-codexdsp     # alias for: codex --dangerously-bypass-approvals-and-sandbox
-
-# OpenCode
-opencode
-
-# Cursor Agent
-cursor
+claude      # Claude Code
+gemini      # Gemini CLI
+codex       # Codex CLI
+opencode    # OpenCode
 ```
 
 ### Navigate and Edit
@@ -176,20 +135,20 @@ cast destroy sandbox-name
 
 Removes the container, worktree, and associated configs. You'll be prompted to confirm.
 
-```bash
-# Skip confirmation
-cast destroy sandbox-name --yes
-```
-
 ## Environment Variables
 
-Set these before running `cast` for API access inside containers:
-
 ```bash
-export ANTHROPIC_API_KEY="sk-ant-..."
+# GitHub - use gh CLI (recommended)
+gh auth login
+
+# Or export token directly
 export GITHUB_TOKEN="ghp_..."
-export OPENAI_API_KEY="sk-..."
-# For Gemini CLI, run: gemini auth (OAuth creds in ~/.gemini/ are copied to container)
+
+# Claude Code - get token via: claude setup-token
+export CLAUDE_CODE_OAUTH_TOKEN="..."
+
+# For Gemini CLI, run: gemini auth
+# For Codex CLI, run: codex login
 ```
 
 These are passed into containers automatically.
@@ -197,6 +156,7 @@ These are passed into containers automatically.
 ## Next Steps
 
 - [Architecture](architecture.md) - Understand how sandboxes work
-- [Security](security/threat-model.md) - Learn about the safety guarantees
+- [Security Overview](security/index.md) - Security architecture quick reference
+- [Sandbox Threats](security/sandbox-threats.md) - Learn about the safety guarantees
 - [Commands](usage/commands.md) - Full command reference
 - [Workflows](usage/workflows.md) - Common patterns and recipes

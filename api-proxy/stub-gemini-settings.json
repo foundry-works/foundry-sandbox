@@ -1,0 +1,13 @@
+{
+  "model": {
+    "name": "pro"
+  },
+  "general": {
+    "previewFeatures": true
+  },
+  "security": {
+    "auth": {
+      "selectedType": "oauth-personal"
+    }
+  }
+}

@@ -15,6 +15,7 @@ RUN apt-get update && apt-get install -y \
     ca-certificates \
     gnupg \
     sudo \
+    gosu \
     ripgrep \
     fd-find \
     fzf \
@@ -86,10 +87,12 @@ RUN chmod +x /usr/local/bin/network-firewall.sh /usr/local/bin/network-mode
 RUN rm -f /usr/lib/python*/EXTERNALLY-MANAGED
 
 # Install AI tools globally as root (to /usr/local, survives tmpfs on /home)
+# global-agent is needed for claude-zai to route DNS through the HTTP proxy
 RUN npm install -g @anthropic-ai/claude-code \
     && npm install -g @google/gemini-cli \
     && npm install -g @openai/codex \
-    && npm install -g opencode-ai @opencode-ai/sdk
+    && npm install -g opencode-ai @opencode-ai/sdk \
+    && npm install -g global-agent
 
 # Install Python packages globally (to /usr/local/lib/python3)
 RUN pip3 install foundry-mcp pytest-asyncio hypothesis cc-context-stats pyright
@@ -101,18 +104,12 @@ RUN PROVIDERS_DIR=$(python3 -c "import foundry_mcp.core.providers as p; print(p.
     mkdir -p "$PROVIDERS_DIR/node_modules" && \
     ln -sf /usr/local/lib/node_modules/@opencode-ai "$PROVIDERS_DIR/node_modules/@opencode-ai"
 
-# Install Cursor Agent to /opt (survives tmpfs on /home)
-RUN mkdir -p /opt/cursor && \
-    curl https://cursor.com/install -fsS | HOME=/opt/cursor bash && \
-    ln -sf /opt/cursor/.local/bin/agent /usr/local/bin/agent && \
-    ln -sf /opt/cursor/.local/bin/cursor-agent /usr/local/bin/cursor-agent
-
 # Add useful aliases to system bashrc (before switching to non-root user)
 # Home directory is tmpfs at runtime, so user .bashrc won't persist
 # API keys are passed via environment variables (docker-compose), not sourced from files
 RUN echo "alias claudedsp='claude --dangerously-skip-permissions'" >> /etc/bash.bashrc && \
     echo "alias codexdsp='codex --dangerously-bypass-approvals-and-sandbox'" >> /etc/bash.bashrc && \
-    echo "alias reinstall-foundry='sudo network-mode full && claude plugin marketplace add foundry-works/claude-foundry && claude plugin install foundry@claude-foundry && claude plugin enable foundry@claude-foundry && sudo network-mode limited'" >> /etc/bash.bashrc
+    echo "alias reinstall-foundry='claude plugin marketplace add foundry-works/claude-foundry && claude plugin install foundry@claude-foundry && claude plugin enable foundry@claude-foundry'" >> /etc/bash.bashrc
 
 # Install bash completions for sandbox aliases
 COPY safety/sandbox-completions.bash /etc/bash_completion.d/sandbox-completions
@@ -124,9 +121,29 @@ RUN mkdir -p /etc/skel/.ssh && \
     chmod 700 /etc/skel/.ssh && \
     chmod 644 /etc/skel/.ssh/known_hosts
 
-# Copy entrypoint to system path (not /home which is tmpfs)
+# Git URL rewriting for credential isolation gateway (conditional)
+# The gitconfig is created at runtime by entrypoint.sh when SANDBOX_GATEWAY_ENABLED=true
+# This ensures credentials never reach the sandbox - the gateway injects them
+# When gateway is disabled, direct GitHub access is used
+# Create the gateway gitconfig template (will be applied conditionally at runtime)
+COPY safety/gateway-gitconfig /etc/gitconfig.gateway
+RUN chmod 644 /etc/gitconfig.gateway
+
+# Gateway credential helper - reads token from /run/secrets/gateway_token
+# Outputs via git credential protocol; never logs/echoes the token
+COPY safety/gateway-credential-helper /usr/local/bin/gateway-credential-helper
+RUN chmod 755 /usr/local/bin/gateway-credential-helper
+
+# Copy entrypoints to system path (not /home which is tmpfs)
 COPY entrypoint.sh /usr/local/bin/entrypoint.sh
-RUN chmod +x /usr/local/bin/entrypoint.sh
+COPY entrypoint-root.sh /usr/local/bin/entrypoint-root.sh
+RUN chmod +x /usr/local/bin/entrypoint.sh /usr/local/bin/entrypoint-root.sh
+
+# Clean up root home directory and restrict access (security best practice)
+# Removes build artifacts and shell configs that could be information leaks
+RUN rm -rf /root/.bash_history /root/.bashrc /root/.profile \
+           /root/.ssh /root/.cache /root/.local /root/.gnupg /root/.npm 2>/dev/null || true && \
+    chmod 700 /root
 
 USER $USERNAME
 WORKDIR /workspace

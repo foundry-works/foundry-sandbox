@@ -56,7 +56,6 @@ services:
       - OPENCODE_DISABLE_LSP_DOWNLOAD=${OPENCODE_DISABLE_LSP_DOWNLOAD:-1}
       - OPENCODE_DISABLE_SHARE=${OPENCODE_DISABLE_SHARE:-1}
       # Optional API keys if needed (Gemini uses OAuth in ~/.gemini/)
-      - CURSOR_API_KEY
       - CLAUDE_CODE_OAUTH_TOKEN
       # Deep research providers (foundry-mcp)
       - TAVILY_API_KEY

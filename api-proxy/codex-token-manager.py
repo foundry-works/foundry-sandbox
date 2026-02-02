@@ -4,60 +4,26 @@ OAuth Token Manager for Codex CLI Authentication
 Manages OAuth token lifecycle for ChatGPT authentication:
 - Loads auth.json from mounted credentials path
 - Checks token expiry with configurable buffer
-- Refreshes tokens via Auth0 endpoint
+- Refreshes tokens via OpenAI OAuth endpoint
 - Thread-safe token access
 
 Uses httpx with proxy=None to bypass mitmproxy for token refresh.
 """
 
+import base64
 import json
 import os
 import time
 import threading
+from datetime import datetime
 from typing import Optional
 
 import httpx
 
-# OAuth configuration
+# OAuth configuration (matches official Codex CLI)
 OAUTH_TOKEN_URL = "https://auth.openai.com/oauth/token"
+OPENAI_CLIENT_ID = "app_EMoamEEZ73f0CkXaXp7hrann"  # Codex CLI client ID
 TOKEN_EXPIRY_BUFFER_SECONDS = 300  # 5 minutes
-
-# =============================================================================
-# OpenAI Codex CLI OAuth Client ID - PUBLIC AND SAFE TO COMMIT
-# =============================================================================
-#
-# This OAuth client ID is NOT a secret. It is intentionally public and safe
-# to commit to version control.
-#
-# WHY THIS IS SAFE:
-# -----------------
-# OAuth 2.0 "installed applications" (desktop/CLI/mobile apps) have public
-# client IDs because the app runs on user devices where secrets cannot be
-# protected. Security relies on the redirect URI and user consent, not the
-# client ID.
-#
-# SOURCE:
-# -------
-# This client ID is from the official OpenAI Codex CLI source code:
-# https://github.com/openai/codex/blob/main/codex-rs/core/src/auth.rs
-#
-# VERIFICATION:
-# -------------
-# To verify this is unchanged from the official source:
-# curl -s https://raw.githubusercontent.com/openai/codex/main/codex-rs/core/src/auth.rs | grep CLIENT_ID
-#
-# =============================================================================
-OPENAI_CLIENT_ID = "app_EMoamEEZ73f0CkXaXp7hrann"
-
-# JWT placeholder for Codex OAuth tokens
-# Contains CREDENTIAL_PROXY_PLACEHOLDER in the sub claim for proxy detection
-# Payload decodes to: {"iss": "https://auth.openai.com/", "sub": "CREDENTIAL_PROXY_PLACEHOLDER",
-#                      "aud": "app_EMoamEEZ73f0CkXaXp7hrann", "exp": 4102444800, "iat": 1700000000}
-CODEX_PLACEHOLDER_JWT = (
-    "eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9."
-    "eyJpc3MiOiJodHRwczovL2F1dGgub3BlbmFpLmNvbS8iLCJzdWIiOiJDUkVERU5USUFMX1BST1hZX1BMQUNFSE9MREVSIiwiYXVkIjoiYXBwX0VNb2FtRUVaNzNmMENrWGFYcDdocmFubiIsImV4cCI6NDEwMjQ0NDgwMCwiaWF0IjoxNzAwMDAwMDAwfQ."
-    "CREDENTIAL_PROXY_PLACEHOLDER_SIGNATURE"
-)
 
 
 class OAuthTokenManager:
@@ -94,69 +60,96 @@ class OAuthTokenManager:
 
         self._access_token = tokens.get("access_token")
         self._refresh_token = tokens.get("refresh_token")
+        # Extract expiry from JWT access_token (most reliable source)
+        # Falls back to expires_at field or last_refresh if JWT parsing fails
+        self._expires_at = self._extract_jwt_expiry(self._access_token)
+        if self._expires_at == 0:
+            expires_at_raw = data.get("expires_at") or data.get("last_refresh", 0)
+            self._expires_at = self._parse_expiry(expires_at_raw)
 
         if not self._access_token or not self._refresh_token:
             raise ValueError("Invalid auth.json: missing access_token or refresh_token")
 
-        # Determine expiry: prefer explicit expires_at, otherwise extract from JWT
-        expires_at_raw = data.get("expires_at")
-        if expires_at_raw:
-            self._expires_at = self._parse_expiry(expires_at_raw)
-        else:
-            # Extract exp from JWT access_token (last_refresh is not the expiry time)
-            self._expires_at = self._extract_jwt_expiry(self._access_token)
+    def _extract_jwt_expiry(self, token: Optional[str]) -> float:
+        """
+        Extract the exp claim from a JWT token.
 
-    def _parse_expiry(self, value) -> float:
-        """Parse expiry value - handles numeric timestamps and ISO date strings."""
-        if not value:
-            return 0
-        # Already a number
-        if isinstance(value, (int, float)):
-            return float(value)
-        # Try parsing as float string (e.g., "1700000000")
-        try:
-            return float(value)
-        except (ValueError, TypeError):
-            pass
-        # Try parsing as ISO timestamp (e.g., "2026-01-26T00:33:39.106494452Z")
-        try:
-            from datetime import datetime
-            # Handle various ISO formats
-            dt_str = str(value).replace("Z", "+00:00")
-            # Python's fromisoformat can't handle nanoseconds, truncate to microseconds
-            if "." in dt_str:
-                base, frac_tz = dt_str.split(".", 1)
-                # Split fraction from timezone
-                if "+" in frac_tz:
-                    frac, tz = frac_tz.split("+", 1)
-                    frac = frac[:6]  # Truncate to microseconds
-                    dt_str = f"{base}.{frac}+{tz}"
-                elif "-" in frac_tz:
-                    frac, tz = frac_tz.split("-", 1)
-                    frac = frac[:6]
-                    dt_str = f"{base}.{frac}-{tz}"
-                else:
-                    dt_str = f"{base}.{frac_tz[:6]}"
-            dt = datetime.fromisoformat(dt_str)
-            return dt.timestamp()
-        except (ValueError, TypeError):
+        Args:
+            token: JWT token string (header.payload.signature)
+
+        Returns:
+            Unix timestamp of expiry, or 0 if extraction fails
+        """
+        if not token:
             return 0
 
-    def _extract_jwt_expiry(self, token: str) -> float:
-        """Extract expiry timestamp from JWT access token."""
-        import base64
         try:
             # JWT format: header.payload.signature
             parts = token.split(".")
             if len(parts) != 3:
                 return 0
-            # Decode payload (add padding for base64)
+
+            # Decode payload (base64url encoded)
             payload_b64 = parts[1]
-            payload_b64 += "=" * (4 - len(payload_b64) % 4)
-            payload = json.loads(base64.urlsafe_b64decode(payload_b64))
-            return float(payload.get("exp", 0))
-        except (ValueError, TypeError, json.JSONDecodeError, IndexError):
+            # Add padding if needed
+            padding = 4 - len(payload_b64) % 4
+            if padding < 4:
+                payload_b64 += "=" * padding
+
+            payload_json = base64.urlsafe_b64decode(payload_b64)
+            payload = json.loads(payload_json)
+
+            # Extract exp claim
+            exp = payload.get("exp")
+            if isinstance(exp, (int, float)):
+                return float(exp)
+        except Exception:
+            pass
+
+        return 0
+
+    def _parse_expiry(self, value) -> float:
+        """
+        Parse expiry time from various formats.
+
+        Supports:
+        - Numeric Unix timestamp (int or float)
+        - Numeric string ("1700000000")
+        - ISO 8601 date string ("2026-01-26T00:33:39.106494452Z")
+
+        Returns:
+            Unix timestamp as float, or 0 if parsing fails
+        """
+        if not value:
             return 0
+
+        # Already numeric
+        if isinstance(value, (int, float)):
+            return float(value)
+
+        # String - try numeric first, then ISO date
+        if isinstance(value, str):
+            # Try parsing as numeric string
+            try:
+                return float(value)
+            except ValueError:
+                pass
+
+            # Try parsing as ISO date string
+            try:
+                # Handle various ISO formats with optional microseconds and Z suffix
+                value = value.rstrip("Z")
+                # Truncate nanoseconds to microseconds (Python only supports microseconds)
+                if "." in value:
+                    base, frac = value.rsplit(".", 1)
+                    frac = frac[:6]  # Keep only 6 digits for microseconds
+                    value = f"{base}.{frac}"
+                dt = datetime.fromisoformat(value)
+                return dt.timestamp()
+            except ValueError:
+                pass
+
+        return 0
 
     def _is_token_expired(self) -> bool:
         """Check if token is expired or will expire within buffer period."""
@@ -235,14 +228,12 @@ class OAuthTokenManager:
         Generate a placeholder token response for intercepted refresh requests.
 
         Returns:
-            Dict mimicking Auth0 OAuth token response with placeholder values.
-            Uses JWT-formatted tokens to satisfy Codex CLI validation.
+            Dict mimicking OAuth token response with placeholder values.
+            access_token must be valid JWT format to pass Codex CLI validation.
         """
         return {
-            "access_token": CODEX_PLACEHOLDER_JWT,
-            "id_token": CODEX_PLACEHOLDER_JWT,
-            "refresh_token": "CREDENTIAL_PROXY_PLACEHOLDER",
+            "access_token": "eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJodHRwczovL2F1dGgub3BlbmFpLmNvbS8iLCJzdWIiOiJDUkVERU5USUFMX1BST1hZX1BMQUNFSE9MREVSIiwiYXVkIjoiYXBwX0VNb2FtRUVaNzNmMENrWGFYcDdocmFubiIsImV4cCI6NDEwMjQ0NDgwMCwiaWF0IjoxNzAwMDAwMDAwfQ.CREDENTIAL_PROXY_PLACEHOLDER_SIGNATURE",
+            "refresh_token": "rt_CREDENTIAL_PROXY_PLACEHOLDER.CREDENTIAL_PROXY_PLACEHOLDER",
             "expires_in": 86400,
             "token_type": "Bearer",
-            "scope": "openid profile email offline_access",
         }

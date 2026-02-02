@@ -15,6 +15,7 @@ cmd_new() {
     local sparse_checkout="$NEW_SPARSE_CHECKOUT"
     local pip_requirements="$NEW_PIP_REQUIREMENTS"
     local isolate_credentials="$NEW_ISOLATE_CREDENTIALS"
+    local allow_dangerous_mount="$NEW_ALLOW_DANGEROUS_MOUNT"
     local ssh_agent_sock=""
     local repo_root=""
     local current_branch=""
@@ -84,15 +85,17 @@ cmd_new() {
         echo "  --mount, -v host:container[:ro]  Mount host path into container"
         echo "  --copy, -c  host:container       Copy host path into container (once at creation)"
         echo "  --network, -n <mode>             Network isolation mode (default: limited)"
-        echo "                                   Modes: full, limited, host-only, none"
+        echo "                                   Modes: limited, host-only, none"
         echo "  --with-ssh                       Enable SSH agent forwarding (opt-in, agent-only)"
         echo "  --skip-key-check                 Skip API key validation"
         echo "  --wd <path>                      Working directory within repo (relative path)"
         echo "  --sparse                         Enable sparse checkout (requires --wd)"
         echo "  --pip-requirements, -r <path>    Install Python packages from requirements.txt"
         echo "                                   Use 'auto' to detect /workspace/requirements.txt"
-        echo "  --isolate-credentials, --isolate Isolate API keys in a proxy container"
-        echo "                                   Keys never enter sandbox; injected by proxy"
+        echo "  --no-isolate-credentials         Disable credential isolation (enabled by default)"
+        echo "                                   Pass API keys directly to sandbox"
+        echo "  --allow-dangerous-mount          Bypass credential directory protection blocklist"
+        echo "                                   (dangerous - use only with caution)"
         echo ""
         echo "Examples:"
         echo "  $0 new user/repo                     # auto-create sandbox branch from main"
@@ -104,7 +107,7 @@ cmd_new() {
         echo "  $0 new user/repo feature --network=limited  # restrict network to whitelist"
         echo "  $0 new user/monorepo feature --wd packages/backend"
         echo "  $0 new user/monorepo feature --wd packages/backend --sparse"
-        echo "  $0 new user/repo feature --isolate-credentials  # credentials in proxy"
+        echo "  $0 new user/repo feature --no-isolate-credentials  # pass keys directly"
         exit 1
     fi
 
@@ -239,8 +242,24 @@ cmd_new() {
     local override_file
     override_file=$(path_override_file "$name")
     local claude_home_path
+
+    # Validate mount paths against dangerous path blocklist
+    if [ "$allow_dangerous_mount" != "true" ] && [ ${#mounts[@]} -gt 0 ]; then
+        for mount in "${mounts[@]}"; do
+            # Extract source path (before first colon)
+            local source_path="${mount%%:*}"
+            if ! validate_mount_path "$source_path"; then
+                echo "Use --allow-dangerous-mount to bypass this check (not recommended)"
+                exit 1
+            fi
+        done
+    fi
+
     if [ ${#mounts[@]} -gt 0 ]; then
         echo "Adding custom mounts..."
+        if [ "$allow_dangerous_mount" = "true" ]; then
+            echo "WARNING: --allow-dangerous-mount bypasses credential directory protection. Use with caution."
+        fi
         cat > "$override_file" <<OVERRIDES
 services:
   dev:
@@ -252,12 +271,9 @@ OVERRIDES
     fi
 
     # Add network mode configuration
-    if [ -n "$network_mode" ] && [ "$network_mode" != "full" ]; then
+    if [ -n "$network_mode" ]; then
         echo "Setting network mode: $network_mode"
         add_network_to_override "$network_mode" "$override_file"
-    elif [ "$network_mode" = "full" ]; then
-        # Full mode: still add capabilities for runtime switching
-        add_network_to_override "full" "$override_file"
     fi
 
     claude_home_path=$(path_claude_home "$name")
@@ -294,14 +310,38 @@ OVERRIDES
     echo "Starting container: $container..."
     if [ "$isolate_credentials" = "true" ]; then
         echo "Credential isolation enabled - API keys will be held in proxy container"
-        # Conditionally add ANTHROPIC_API_KEY placeholder only when OAuth is not available
-        # This prevents the "Detected custom API key" prompt when OAuth is configured
-        add_anthropic_credential_to_override "$override_file"
-        # Conditionally add GEMINI_API_KEY placeholder only when OAuth is not configured
-        # This prevents auth conflicts when user has oauth-personal in settings.json
-        add_gemini_credential_to_override "$override_file"
+        # Validate git remotes don't contain embedded credentials
+        # This is critical for credential isolation - credentials must go through the gateway
+        if ! validate_git_remotes "$worktree_dir/.git"; then
+            die "Cannot enable credential isolation with embedded git credentials"
+        fi
     fi
     compose_up "$worktree_dir" "$claude_config_path" "$container" "$override_file" "$isolate_credentials"
+
+    # Setup gateway session for credential isolation
+    if [ "$isolate_credentials" = "true" ]; then
+        # Get the gateway's host port and set GATEWAY_URL
+        if ! setup_gateway_url "$container"; then
+            log_error "Failed to get gateway port - gateway container may not be running"
+            compose_down "$worktree_dir" "$claude_config_path" "$container" "$override_file" "true" "$isolate_credentials"
+            exit 1
+        fi
+
+        # Extract repo owner/name from repo_url for session authorization
+        local repo_spec
+        repo_spec=$(echo "$repo_url" | sed -E 's#^(https?://)?github\.com/##; s#^git@github\.com:##; s#\.git$##')
+        if ! setup_gateway_session "$container_id" "$repo_spec"; then
+            log_error "Failed to create gateway session - destroying sandbox"
+            compose_down "$worktree_dir" "$claude_config_path" "$container" "$override_file" "true" "$isolate_credentials"
+            echo ""
+            echo "Gateway session creation failed. See error messages above for remediation."
+            echo "To create sandbox without credential isolation, use --no-isolate-credentials flag."
+            exit 1
+        fi
+        # Export gateway enabled flag for container_config.sh
+        export SANDBOX_GATEWAY_ENABLED=true
+    fi
+
     copy_configs_to_container "$container_id" "0" "$runtime_enable_ssh" "$working_dir" "$isolate_credentials"
 
     if [ ${#copies[@]} -gt 0 ]; then
@@ -332,12 +372,12 @@ OVERRIDES
     fi
 
     # Apply network restrictions AFTER plugin/MCP registration completes
-    if [ -n "$network_mode" ] && [ "$network_mode" != "full" ]; then
+    if [ -n "$network_mode" ]; then
         echo "Applying network mode: $network_mode"
         if [ "$network_mode" = "limited" ]; then
-            run_cmd docker exec "$container_id" bash -c 'sudo SANDBOX_CREDENTIAL_PROXY="$SANDBOX_CREDENTIAL_PROXY" /usr/local/bin/network-mode limited'
+            run_cmd docker exec "$container_id" sudo /usr/local/bin/network-firewall.sh
         else
-            run_cmd docker exec "$container_id" bash -c "sudo SANDBOX_CREDENTIAL_PROXY=\"\$SANDBOX_CREDENTIAL_PROXY\" /usr/local/bin/network-mode $network_mode"
+            run_cmd docker exec "$container_id" sudo /usr/local/bin/network-mode "$network_mode"
         fi
     fi
 

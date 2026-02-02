@@ -36,7 +36,19 @@ cmd_destroy() {
 
     tmux kill-session -t "$session" 2>/dev/null || true
 
+    # Cleanup gateway session before destroying container (if credential isolation was enabled)
+    local container_id="${container}-dev-1"
+    if docker ps -q -f "name=${container_id}" 2>/dev/null | grep -q .; then
+        # Set up GATEWAY_URL if gateway container is running
+        if setup_gateway_url "$container" 2>/dev/null; then
+            cleanup_gateway_session "$container_id"
+        fi
+    fi
+
     compose_down "$worktree_path" "$claude_config_path" "$container" "$override_file" "true" 2>/dev/null || true
+
+    # Remove stubs volume (external volume not removed by compose down -v)
+    remove_stubs_volume "$container"
 
     if [ "$keep_worktree" = false ] && [ -d "$claude_config_path" ]; then
         echo "Removing Claude config..."

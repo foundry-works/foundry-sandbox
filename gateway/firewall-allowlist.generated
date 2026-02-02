@@ -1,0 +1,62 @@
+#!/bin/bash
+#
+# Firewall allowlist configuration (auto-generated)
+# Generated from: /gateway/allowlist.conf
+# DO NOT EDIT MANUALLY - use build-configs.sh to regenerate
+# Generated: Mon Feb  2 01:30:32 UTC 2026
+#
+# This file is sourced by safety/network-firewall.sh
+# Provides domain, rotating domain, and CIDR allowlists
+#
+
+# Standard domains (resolved once at firewall setup)
+declare -a ALLOWLIST_DOMAINS=(
+    "github.com"
+    "api.github.com"
+    "raw.githubusercontent.com"
+    "objects.githubusercontent.com"
+    "codeload.github.com"
+    "gist.github.com"
+    "gist.api.github.com"
+    "gist.githubusercontent.com"
+    "api.anthropic.com"
+    "console.anthropic.com"
+    "claude.ai"
+    "generativelanguage.googleapis.com"
+    "cloudcode-pa.googleapis.com"
+    "accounts.google.com"
+    "oauth2.googleapis.com"
+    "api.z.ai"
+    "open.bigmodel.cn"
+    "opencode.ai"
+    "opncd.ai"
+    "api.tavily.com"
+    "api.perplexity.ai"
+    "api.semanticscholar.org"
+)
+
+# Rotating IP domains (resolved multiple times to capture IP pool)
+declare -a ROTATING_IP_DOMAINS=(
+)
+
+# CIDR blocks (from allowlist.conf comments)
+declare -a CIDR_BLOCKS=(
+)
+
+# Known IPs that don't resolve via public DNS
+declare -a KNOWN_IPS=(
+    # (No hardcoded IPs currently needed)
+)
+
+# Wildcard domains (for pattern matching)
+declare -a WILDCARD_DOMAINS=(
+    "*.openai.com"
+    "*.chatgpt.com"
+)
+
+# Statistics
+# Total domains: 24
+# Rotating IP domains: 0
+# Wildcard domains: 2
+# CIDR blocks: 0
+

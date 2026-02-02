@@ -7,38 +7,31 @@ Credentials are read from environment variables and injected as headers.
 Provider Credential Map:
 - api.anthropic.com: Authorization Bearer from CLAUDE_CODE_OAUTH_TOKEN,
                      or x-api-key from ANTHROPIC_API_KEY
-- api2.cursor.sh: Authorization Bearer from CURSOR_API_KEY
 - api.openai.com: Authorization Bearer from OPENAI_API_KEY
 - generativelanguage.googleapis.com: x-goog-api-key from GOOGLE_API_KEY (or GEMINI_API_KEY)
 - api.tavily.com: Authorization Bearer from TAVILY_API_KEY
 - api.semanticscholar.org: x-api-key from SEMANTIC_SCHOLAR_API_KEY
 - api.perplexity.ai: Authorization Bearer from PERPLEXITY_API_KEY
+- api.z.ai: x-api-key from ZHIPU_API_KEY
 
 OAuth Support (Codex CLI):
 - Detects CREDENTIAL_PROXY_PLACEHOLDER in Authorization header
 - Injects real OAuth token from mounted auth.json
 - Intercepts token refresh endpoints to return placeholder tokens
 
-OAuth Support (OpenCode CLI):
-- Detects CREDENTIAL_PROXY_PLACEHOLDER in Authorization header
-- Maps request host to provider (e.g., api.anthropic.com -> "anthropic")
-- Injects real OAuth token from multi-provider auth.json
-
 OAuth Support (Gemini CLI):
 - Detects CREDENTIAL_PROXY_PLACEHOLDER in Authorization header
 - Checks if request is to Gemini API hosts (generativelanguage/aiplatform)
 - Injects real OAuth token from mounted oauth_creds.json
+
+API Key Support (OpenCode CLI - zai-coding-plan):
+- Detects OPENCODE_PLACEHOLDER in Authorization header
+- Injects API key for Zhipu AI (open.bigmodel.cn, api.z.ai)
 """
 
 import json
 import os
-import sys
 from typing import Optional
-
-# Add the addon directory to Python path for token manager imports
-_addon_dir = os.path.dirname(os.path.abspath(__file__))
-if _addon_dir not in sys.path:
-    sys.path.insert(0, _addon_dir)
 
 from mitmproxy import http, ctx
 
@@ -48,11 +41,11 @@ try:
 except ImportError:
     OAuthTokenManager = None  # type: ignore[misc, assignment]
 
-# Import multi-provider OAuth token manager (available when OPENCODE_AUTH_FILE is set)
+# Import OpenCode API key manager (available when OPENCODE_AUTH_FILE is set)
 try:
-    from opencode_token_manager import MultiProviderTokenManager
+    from opencode_token_manager import OpenCodeKeyManager
 except ImportError:
-    MultiProviderTokenManager = None  # type: ignore[misc, assignment]
+    OpenCodeKeyManager = None  # type: ignore[misc, assignment]
 
 # Import Gemini OAuth token manager (available when GEMINI_OAUTH_FILE is set)
 try:
@@ -60,47 +53,118 @@ try:
 except ImportError:
     GeminiTokenManager = None  # type: ignore[misc, assignment]
 
-# OAuth placeholder token that sandbox sees
-OAUTH_PLACEHOLDER = "CREDENTIAL_PROXY_PLACEHOLDER"
+# ============================================================================
+# HOSTNAME ALLOWLIST (Egress Filtering)
+# ============================================================================
+# SECURITY: Only allow connections to explicitly allowlisted domains.
+# This prevents data exfiltration to arbitrary external services.
 
-# JWT-formatted placeholder for id_token (Gemini validates JWT format locally)
-# Contains CREDENTIAL_PROXY_PLACEHOLDER in the azp/aud claims for proxy detection
-OAUTH_PLACEHOLDER_JWT = "eyJhbGciOiAiUlMyNTYiLCAidHlwIjogIkpXVCJ9.eyJpc3MiOiAiaHR0cHM6Ly9hY2NvdW50cy5nb29nbGUuY29tIiwgImF6cCI6ICJDUkVERU5USUFMX1BST1hZX1BMQUNFSE9MREVSIiwgImF1ZCI6ICJDUkVERU5USUFMX1BST1hZX1BMQUNFSE9MREVSIiwgInN1YiI6ICIwMDAwMDAwMDAwMDAwMDAwMDAwMDAiLCAiZW1haWwiOiAic2FuZGJveEBjcmVkZW50aWFsLXByb3h5LmxvY2FsIiwgImVtYWlsX3ZlcmlmaWVkIjogdHJ1ZSwgImlhdCI6IDE3MDAwMDAwMDAsICJleHAiOiA0MTAyNDQ0ODAwfQ.CREDENTIAL_PROXY_PLACEHOLDER_SIGNATURE"
+ALLOWLIST_DOMAINS: list = []  # Exact domain matches
+WILDCARD_DOMAINS: list = []   # Wildcard patterns (e.g., "*.openai.com")
+
+
+def load_hostname_allowlist():
+    """
+    Load hostname allowlist from gateway's firewall-allowlist.generated.
+
+    The same allowlist is used by both the gateway and the API proxy.
+    """
+    global ALLOWLIST_DOMAINS, WILDCARD_DOMAINS
+
+    # Try multiple paths (inside container vs development)
+    config_paths = [
+        "/gateway/firewall-allowlist.generated",  # Docker volume mount
+        "/app/firewall-allowlist.generated",      # Alternative mount
+        os.path.join(os.path.dirname(__file__), "..", "gateway", "firewall-allowlist.generated"),  # Development
+    ]
+
+    config_path = None
+    for path in config_paths:
+        if os.path.exists(path):
+            config_path = path
+            break
+
+    if not config_path:
+        ctx.log.warn("Hostname allowlist not found - blocking all non-provider hosts")
+        return
+
+    try:
+        import re
+        with open(config_path, 'r') as f:
+            content = f.read()
+
+        # Parse ALLOWLIST_DOMAINS array from bash syntax
+        allowlist_match = re.search(r'ALLOWLIST_DOMAINS=\(\s*(.*?)\s*\)', content, re.DOTALL)
+        if allowlist_match:
+            domains = re.findall(r'"([^"*][^"]*)"', allowlist_match.group(1))
+            ALLOWLIST_DOMAINS = [d.lower() for d in domains]
+            ctx.log.info(f"Loaded {len(ALLOWLIST_DOMAINS)} exact domain patterns")
+
+        # Parse WILDCARD_DOMAINS array from bash syntax
+        wildcard_match = re.search(r'WILDCARD_DOMAINS=\(\s*(.*?)\s*\)', content, re.DOTALL)
+        if wildcard_match:
+            wildcards = re.findall(r'"(\*\.[^"]+)"', wildcard_match.group(1))
+            WILDCARD_DOMAINS = [w.lower() for w in wildcards]
+            ctx.log.info(f"Loaded {len(WILDCARD_DOMAINS)} wildcard domain patterns")
+
+        total = len(ALLOWLIST_DOMAINS) + len(WILDCARD_DOMAINS)
+        ctx.log.info(f"Hostname allowlist loaded: {total} entries from {config_path}")
+
+    except Exception as e:
+        ctx.log.error(f"Failed to load hostname allowlist: {e}")
+
+
+def is_hostname_allowed(hostname: str) -> bool:
+    """
+    Check if hostname is allowed by the egress allowlist.
+
+    Args:
+        hostname: The target hostname (e.g., "api.anthropic.com")
+
+    Returns:
+        bool: True if allowed, False if blocked
+    """
+    hostname = hostname.lower().rstrip('.')
+
+    # Check exact domain matches
+    if hostname in ALLOWLIST_DOMAINS:
+        return True
+
+    # Check wildcard patterns
+    for pattern in WILDCARD_DOMAINS:
+        pattern = pattern.lower().rstrip('.')
+        if pattern.startswith('*.'):
+            suffix = pattern[2:]  # "*.example.com" -> "example.com"
+            if hostname == suffix or hostname.endswith('.' + suffix):
+                return True
+
+    return False
+
+
+# Load allowlist at module initialization
+load_hostname_allowlist()
+
+# OAuth placeholder tokens that sandbox sees
+OAUTH_PLACEHOLDER = "CREDENTIAL_PROXY_PLACEHOLDER"
+OPENCODE_PLACEHOLDER = "PROXY_PLACEHOLDER_OPENCODE"
 
 # OAuth token refresh endpoints to intercept
 REFRESH_ENDPOINTS = [
-    ("auth.openai.com", "/oauth/token"),   # Legacy Auth0
-    ("auth.openai.com", "/oauth/token"),    # New OpenAI auth
+    ("auth.openai.com", "/oauth/token"),
+    ("oauth2.googleapis.com", "/token"),
 ]
-
-# Google OAuth validation endpoints (for placeholder token validation)
-GOOGLE_VALIDATION_ENDPOINTS = [
-    ("www.googleapis.com", "/oauth2/v1/tokeninfo"),
-    ("www.googleapis.com", "/oauth2/v3/tokeninfo"),
-    ("oauth2.googleapis.com", "/tokeninfo"),
-]
-
-# Google userinfo endpoint (called by Gemini CLI during init to validate user)
-GOOGLE_USERINFO_ENDPOINTS = [
-    ("www.googleapis.com", "/oauth2/v2/userinfo"),
-    ("www.googleapis.com", "/oauth2/v1/userinfo"),
-]
-
-# OpenCode host-to-provider mapping
-OPENCODE_PROVIDER_HOSTS = {
-    "api.anthropic.com": "anthropic",
-    "api.openai.com": "openai",
-    "generativelanguage.googleapis.com": "google",
-    "api.githubcopilot.com": "copilot",
-    "copilot-proxy.githubusercontent.com": "copilot",
-    "api.z.ai": "zai-coding-plan",  # Z.AI / Zhipu GLM provider
-}
 
 # Gemini API hosts (for OAuth token injection)
 GEMINI_API_HOSTS = [
     "generativelanguage.googleapis.com",
     "aiplatform.googleapis.com",
-    "cloudcode-pa.googleapis.com",  # Gemini CLI initialization endpoint
+    "cloudcode-pa.googleapis.com",
+]
+
+# Zhipu AI API hosts (for OpenCode zai-coding-plan provider)
+ZHIPU_API_HOSTS = [
+    "open.bigmodel.cn",
+    "api.z.ai",
 ]
 
 
@@ -113,11 +177,6 @@ PROVIDER_MAP = {
         "alt_env_var": "CLAUDE_CODE_OAUTH_TOKEN",
         "alt_header": "Authorization",
         "alt_format": "bearer",
-    },
-    "api2.cursor.sh": {
-        "header": "Authorization",
-        "env_var": "CURSOR_API_KEY",
-        "format": "bearer",
     },
     "api.openai.com": {
         "header": "Authorization",
@@ -145,6 +204,11 @@ PROVIDER_MAP = {
         "env_var": "PERPLEXITY_API_KEY",
         "format": "bearer",
     },
+    "api.z.ai": {
+        "header": "x-api-key",
+        "env_var": "ZHIPU_API_KEY",
+        "format": "value",
+    },
 }
 
 
@@ -154,7 +218,7 @@ class CredentialInjector:
     def __init__(self):
         self.credentials_cache = {}
         self.oauth_manager: Optional[OAuthTokenManager] = None
-        self.opencode_manager: Optional[MultiProviderTokenManager] = None
+        self.opencode_manager: Optional[OpenCodeKeyManager] = None
         self.gemini_manager: Optional[GeminiTokenManager] = None
         self._load_credentials()
         self._init_oauth_manager()
@@ -235,21 +299,21 @@ class CredentialInjector:
             ctx.log.warn(f"Failed to initialize OAuth manager: {e}")
 
     def _init_opencode_manager(self) -> None:
-        """Initialize OpenCode multi-provider token manager if OPENCODE_AUTH_FILE is set."""
+        """Initialize OpenCode API key manager if OPENCODE_AUTH_FILE is set."""
         opencode_auth_file = os.environ.get("OPENCODE_AUTH_FILE")
         if not opencode_auth_file:
-            ctx.log.info("OPENCODE_AUTH_FILE not set, OpenCode OAuth support disabled")
+            ctx.log.info("OPENCODE_AUTH_FILE not set, OpenCode API key support disabled")
             return
 
-        if MultiProviderTokenManager is None:
-            ctx.log.warn("Multi-provider token manager module not available")
+        if OpenCodeKeyManager is None:
+            ctx.log.warn("OpenCode key manager module not available")
             return
 
         try:
-            self.opencode_manager = MultiProviderTokenManager(opencode_auth_file)
+            self.opencode_manager = OpenCodeKeyManager(opencode_auth_file)
             providers = self.opencode_manager.get_providers()
             ctx.log.info(
-                f"OpenCode multi-provider token manager initialized from {opencode_auth_file} "
+                f"OpenCode key manager initialized from {opencode_auth_file} "
                 f"with providers: {', '.join(providers)}"
             )
         except FileNotFoundError:
@@ -286,167 +350,36 @@ class CredentialInjector:
         path = flow.request.path
         return any(host == h and path.startswith(p) for h, p in REFRESH_ENDPOINTS)
 
-    def _is_gemini_refresh_endpoint(self, flow: http.HTTPFlow) -> bool:
-        """Check if request is to Google OAuth token refresh endpoint."""
-        host = flow.request.host
-        path = flow.request.path
-        return host == "oauth2.googleapis.com" and path.startswith("/token")
-
     def _handle_refresh_intercept(self, flow: http.HTTPFlow) -> bool:
         """
         Intercept OAuth refresh requests and return placeholder tokens.
+
+        Supports multiple OAuth providers:
+        - auth.openai.com: Codex CLI (uses oauth_manager)
+        - oauth2.googleapis.com: Gemini CLI (uses gemini_manager)
 
         Returns True if request was intercepted, False otherwise.
         """
         if not self._is_refresh_endpoint(flow):
             return False
 
-        if not self.oauth_manager:
+        host = flow.request.host
+        placeholder_response = None
+
+        # Route to appropriate token manager based on endpoint
+        if host == "auth.openai.com" and self.oauth_manager:
+            ctx.log.info(f"Intercepting Codex OAuth refresh request to {host}")
+            placeholder_response = self.oauth_manager.get_placeholder_response()
+        elif host == "oauth2.googleapis.com" and self.gemini_manager:
+            ctx.log.info(f"Intercepting Gemini OAuth refresh request to {host}")
+            placeholder_response = self.gemini_manager.get_placeholder_response()
+
+        if placeholder_response is None:
             return False
 
-        ctx.log.info(f"Intercepting OAuth refresh request to {flow.request.host}")
-        placeholder_response = self.oauth_manager.get_placeholder_response()
         flow.response = http.Response.make(
             200,
             json.dumps(placeholder_response).encode(),
-            {"Content-Type": "application/json"},
-        )
-        return True
-
-    def _handle_gemini_refresh_intercept(self, flow: http.HTTPFlow) -> bool:
-        """
-        Intercept Google OAuth refresh requests for Gemini CLI.
-
-        Returns True if request was intercepted, False otherwise.
-        """
-        if not self._is_gemini_refresh_endpoint(flow):
-            return False
-
-        if not self.gemini_manager:
-            return False
-
-        # Verify it's a refresh_token grant
-        try:
-            content_type = flow.request.headers.get("Content-Type", "")
-            body_text = flow.request.get_text()
-
-            if "application/x-www-form-urlencoded" in content_type:
-                from urllib.parse import parse_qs
-                params = parse_qs(body_text)
-                grant_type = params.get("grant_type", [""])[0]
-            elif "application/json" in content_type:
-                params = json.loads(body_text)
-                grant_type = params.get("grant_type", "")
-            else:
-                return False
-
-            if grant_type != "refresh_token":
-                return False
-        except Exception:
-            return False
-
-        ctx.log.info("Intercepting Google OAuth refresh request for Gemini")
-
-        # Google OAuth returns expires_in (seconds), not expiry_date (ms)
-        # id_token must be valid JWT format as Gemini validates it locally
-        response_data = {
-            "access_token": OAUTH_PLACEHOLDER,
-            "expires_in": 3600,
-            "scope": self.gemini_manager._scope or "https://www.googleapis.com/auth/cloud-platform https://www.googleapis.com/auth/generative-language.retriever",
-            "token_type": "Bearer",
-            "id_token": OAUTH_PLACEHOLDER_JWT,
-        }
-
-        flow.response = http.Response.make(
-            200,
-            json.dumps(response_data).encode(),
-            {"Content-Type": "application/json"},
-        )
-        return True
-
-    def _handle_google_tokeninfo_intercept(self, flow: http.HTTPFlow) -> bool:
-        """
-        Intercept Google tokeninfo requests to validate placeholder tokens.
-
-        Returns True if request was intercepted, False otherwise.
-        """
-        host = flow.request.host
-        path = flow.request.path
-
-        is_tokeninfo = any(
-            host == h and path.startswith(p)
-            for h, p in GOOGLE_VALIDATION_ENDPOINTS
-        )
-
-        if not is_tokeninfo or not self.gemini_manager:
-            return False
-
-        # Check for placeholder token in request (URL, body, or Authorization header)
-        # google-auth-library sends token in Authorization header: Bearer <token>
-        auth_header = flow.request.headers.get("Authorization", "")
-        request_content = flow.request.get_text() + flow.request.url + auth_header
-        if OAUTH_PLACEHOLDER not in request_content:
-            return False
-
-        ctx.log.info("Intercepting Google tokeninfo for placeholder validation")
-
-        import time
-        response_data = {
-            "azp": "gemini-cli",
-            "aud": "gemini-cli",
-            "scope": self.gemini_manager._scope or "https://www.googleapis.com/auth/cloud-platform",
-            "exp": str(int(time.time()) + 3600),
-            "expires_in": "3600",
-            "access_type": "offline",
-        }
-
-        flow.response = http.Response.make(
-            200,
-            json.dumps(response_data).encode(),
-            {"Content-Type": "application/json"},
-        )
-        return True
-
-    def _handle_google_userinfo_intercept(self, flow: http.HTTPFlow) -> bool:
-        """
-        Intercept Google userinfo requests to validate placeholder tokens.
-
-        Gemini CLI calls this endpoint during initialization to verify the user.
-        Returns True if request was intercepted, False otherwise.
-        """
-        host = flow.request.host
-        path = flow.request.path
-
-        is_userinfo = any(
-            host == h and path.startswith(p)
-            for h, p in GOOGLE_USERINFO_ENDPOINTS
-        )
-
-        if not is_userinfo:
-            return False
-
-        # Check for placeholder token in Authorization header
-        auth_header = flow.request.headers.get("Authorization", "")
-        if OAUTH_PLACEHOLDER not in auth_header:
-            return False
-
-        ctx.log.info("Intercepting Google userinfo for placeholder validation")
-
-        # Return fake userinfo response matching the stub oauth_creds.json
-        response_data = {
-            "id": "000000000000000000000",
-            "email": "sandbox@credential-proxy.local",
-            "verified_email": True,
-            "name": "Sandbox User",
-            "given_name": "Sandbox",
-            "family_name": "User",
-            "picture": "",
-            "locale": "en",
-        }
-
-        flow.response = http.Response.make(
-            200,
-            json.dumps(response_data).encode(),
             {"Content-Type": "application/json"},
         )
         return True
@@ -469,11 +402,10 @@ class CredentialInjector:
         if OAUTH_PLACEHOLDER not in auth_header:
             return False
 
-        # Only handle OpenAI endpoints (Codex CLI)
+        # Only handle OpenAI/ChatGPT endpoints (Codex CLI)
         # Don't intercept requests to other APIs like Anthropic
-        # Codex CLI uses chatgpt.com/backend-api for API calls
         host = flow.request.host
-        if host not in ("api.openai.com", "auth.openai.com", "auth.openai.com", "chatgpt.com"):
+        if host not in ("api.openai.com", "auth.openai.com", "chatgpt.com"):
             return False
 
         try:
@@ -490,39 +422,55 @@ class CredentialInjector:
             )
             return True
 
-    def _handle_opencode_oauth_injection(self, flow: http.HTTPFlow) -> bool:
+    def _handle_opencode_api_key_injection(self, flow: http.HTTPFlow) -> bool:
         """
-        Detect OpenCode OAuth placeholder and inject real token.
+        Detect OpenCode placeholder and inject API key for Zhipu AI.
 
-        Maps request host to provider and retrieves the appropriate token.
-        Returns True if OAuth token was injected, False otherwise.
+        Checks if request is to Zhipu API hosts (open.bigmodel.cn, api.z.ai)
+        and injects the API key from the zai-coding-plan provider.
+        Falls back to ZHIPU_API_KEY env var if auth file not available.
+        Returns True if API key was injected, False otherwise.
         """
-        if not self.opencode_manager:
-            return False
-
         auth_header = flow.request.headers.get("Authorization", "")
-        if OAUTH_PLACEHOLDER not in auth_header:
+        if OPENCODE_PLACEHOLDER not in auth_header:
             return False
 
         host = flow.request.host
-        provider = OPENCODE_PROVIDER_HOSTS.get(host)
-        if not provider:
+        if host not in ZHIPU_API_HOSTS:
             return False
 
-        if not self.opencode_manager.has_provider(provider):
-            ctx.log.warn(f"OpenCode provider {provider} not configured in auth file")
-            return False
+        api_key = None
 
-        try:
-            real_token = self.opencode_manager.get_valid_token(provider)
-            flow.request.headers["Authorization"] = f"Bearer {real_token}"
-            ctx.log.info(f"Injected real OAuth token for OpenCode provider {provider} ({host})")
-            return True
-        except Exception as e:
-            # Log warning and fall through to host-based injection
-            # This allows CLAUDE_CODE_OAUTH_TOKEN to be used as fallback for api.anthropic.com
-            ctx.log.warn(f"OpenCode OAuth failed for {provider}, falling back to host-based injection: {e}")
-            return False
+        # Try to get API key from OpenCode auth file first
+        if self.opencode_manager:
+            if self.opencode_manager.has_provider("zai-coding-plan"):
+                try:
+                    api_key = self.opencode_manager.get_api_key("zai-coding-plan")
+                    ctx.log.info(f"Got API key from OpenCode auth file for zai-coding-plan")
+                except Exception as e:
+                    ctx.log.warn(f"Failed to get API key from OpenCode auth file: {e}")
+            else:
+                ctx.log.warn("OpenCode zai-coding-plan provider not configured in auth file")
+        else:
+            ctx.log.info("OpenCode manager not available, trying ZHIPU_API_KEY env var")
+
+        # Fall back to ZHIPU_API_KEY env var if auth file didn't work
+        if not api_key:
+            api_key = os.environ.get("ZHIPU_API_KEY")
+            if api_key:
+                ctx.log.info(f"Got API key from ZHIPU_API_KEY env var for OpenCode")
+            else:
+                ctx.log.error("No API key available: neither OpenCode auth file nor ZHIPU_API_KEY env var")
+                flow.response = http.Response.make(
+                    500,
+                    json.dumps({"error": "Credential not configured: ZHIPU_API_KEY not set and OpenCode auth file not available"}).encode(),
+                    {"Content-Type": "application/json"},
+                )
+                return True
+
+        flow.request.headers["Authorization"] = f"Bearer {api_key}"
+        ctx.log.info(f"Injected API key for OpenCode zai-coding-plan ({host})")
+        return True
 
     def _handle_gemini_oauth_injection(self, flow: http.HTTPFlow) -> bool:
         """
@@ -559,37 +507,42 @@ class CredentialInjector:
 
     def request(self, flow: http.HTTPFlow) -> None:
         """Process outbound request and inject credentials if applicable."""
-        # 1. Intercept Google userinfo requests (for Gemini init validation)
-        if self._handle_google_userinfo_intercept(flow):
+        host = flow.request.host
+
+        # 0. SECURITY: Validate hostname against allowlist (egress filtering)
+        # Block connections to non-allowlisted domains to prevent data exfiltration
+        if not is_hostname_allowed(host):
+            ctx.log.warn(f"BLOCKED: Request to non-allowlisted host: {host}")
+            flow.response = http.Response.make(
+                403,
+                json.dumps({
+                    "error": "Hostname not in allowlist",
+                    "message": f"The destination host '{host}' is not permitted by the egress policy",
+                    "host": host,
+                }).encode(),
+                {"Content-Type": "application/json"},
+            )
             return
 
-        # 2. Intercept Google tokeninfo (validation) requests
-        if self._handle_google_tokeninfo_intercept(flow):
-            return
-
-        # 3. Intercept Gemini OAuth refresh requests
-        if self._handle_gemini_refresh_intercept(flow):
-            return
-
-        # 4. Intercept Codex OAuth refresh endpoints (return placeholder tokens)
+        # 1. Intercept OAuth refresh endpoints (return placeholder tokens)
         if self._handle_refresh_intercept(flow):
             return
 
-        # 5. Handle OAuth placeholder injection (Codex CLI)
+        # 2. Handle OpenCode API key injection (zai-coding-plan / Zhipu AI)
+        # Must run before Codex CLI handler because the OpenCode placeholder
+        # contains "OPENCODE" which could cause matching issues.
+        if self._handle_opencode_api_key_injection(flow):
+            return
+
+        # 3. Handle OAuth placeholder injection (Codex CLI)
         if self._handle_oauth_injection(flow):
             return
 
-        # 6. Handle Gemini OAuth placeholder injection (before OpenCode to prioritize Gemini for its API hosts)
+        # 4. Handle Gemini OAuth placeholder injection
         if self._handle_gemini_oauth_injection(flow):
             return
 
-        # 7. Handle OpenCode OAuth placeholder injection
-        if self._handle_opencode_oauth_injection(flow):
-            return
-
-        # 8. Host-based API key injection (existing behavior)
-        host = flow.request.host
-
+        # 5. Host-based API key injection (existing behavior)
         if host not in PROVIDER_MAP:
             return
 

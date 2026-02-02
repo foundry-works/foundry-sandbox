@@ -4,7 +4,7 @@
 # This container holds API credentials and injects them into outbound requests,
 # keeping credentials isolated from the sandbox environment.
 
-FROM mitmproxy/mitmproxy:latest
+FROM mitmproxy/mitmproxy:11.1.0
 
 # Labels for container identification
 LABEL org.opencontainers.image.title="API Credential Proxy"
@@ -25,6 +25,8 @@ COPY inject-credentials.py /opt/proxy/inject-credentials.py
 COPY codex-token-manager.py /opt/proxy/codex_token_manager.py
 COPY opencode-token-manager.py /opt/proxy/opencode_token_manager.py
 COPY gemini-token-manager.py /opt/proxy/gemini_token_manager.py
+# Copy the GitHub API security filter
+COPY github-api-filter.py /opt/proxy/github-api-filter.py
 
 # Copy the entrypoint script
 COPY entrypoint.sh /opt/proxy/entrypoint.sh
@@ -50,6 +52,5 @@ VOLUME ["/etc/proxy/credentials", "/etc/proxy/certs"]
 # Default environment variables
 ENV PROXY_MODE=regular
 ENV PROXY_LOG_LEVEL=info
-ENV PROXY_INJECT_CREDENTIALS=true
 
 ENTRYPOINT ["/opt/proxy/entrypoint.sh"]

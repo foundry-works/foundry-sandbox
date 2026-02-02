@@ -5,15 +5,23 @@
 # Sets up iptables rules to whitelist specific domains while blocking all
 # other outbound traffic. Used in "limited" network mode.
 #
-# Whitelisted domains by default:
+# Whitelisted domains by default (see gateway/allowlist.conf for full list):
 # - GitHub: github.com, api.github.com, gist.github.com, etc.
-# - Package registries: npm, pypi, go, cargo
-# - AI APIs: Anthropic, OpenAI, Google (Gemini)
-# - AI Tools: Cursor
-# - Research: Tavily, Perplexity, Semantic Scholar, Google CSE
-# - Docker Hub
+# - AI APIs: Anthropic, OpenAI, Google (Gemini), Z.AI
+# - AI Tools: OpenCode
+# - Research: Tavily, Perplexity, Semantic Scholar
 #
 # Add custom domains via: SANDBOX_ALLOWED_DOMAINS="domain1.com,domain2.com"
+#
+# Wildcard Mode:
+# ==============
+# When wildcard domains (*.openai.com, etc.) are configured, the firewall
+# opens ports 80/443 to any destination. Security is maintained through:
+# 1. DNS filtering (dnsmasq only resolves allowlisted domains)
+# 2. Gateway hostname validation (blocks requests to non-allowlisted hosts)
+#
+# For non-wildcard domains, IPs are resolved ONCE at startup. If external
+# services change their IPs, restart the sandbox to re-resolve.
 #
 
 set -e
@@ -23,164 +31,63 @@ log_verbose() {
     [ "$SANDBOX_DEBUG" = "1" ] && echo "$@" || true
 }
 
-# Domains that use load balancer IP rotation (resolve multiple times)
-# NOTE: This array is defined early so it's available for refresh_rotating_ips()
-ROTATING_IP_DOMAINS=(
-    "api2.cursor.sh"
-    "api3.cursor.sh"
-    "api4.cursor.sh"
-    "api5.cursor.sh"
-    "api6.cursor.sh"
-    "api7.cursor.sh"
-    "api8.cursor.sh"
-)
-
-# Function to refresh rotating domain IPs (can be called separately)
-# NOTE: Defined early so we can exit early when called with "refresh"
-refresh_rotating_ips() {
-    log_verbose "Refreshing IPs for rotating domains..."
-    for domain in "${ROTATING_IP_DOMAINS[@]}"; do
-        log_verbose "  Refreshing: $domain"
-        for i in {1..5}; do
-            local ips
-            ips=$(dig +short "$domain" A 2>/dev/null | grep -E '^[0-9]+\.' || true)
-            for ip in $ips; do
-                if command -v ipset &>/dev/null && ipset list sandbox_allow_v4 &>/dev/null; then
-                    ipset add -exist sandbox_allow_v4 "$ip" 2>/dev/null || true
-                else
-                    # Add rule if not already present (iptables will just fail silently on duplicate)
-                    iptables -C OUTPUT -d "$ip" -j ACCEPT 2>/dev/null || \
-                        iptables -I OUTPUT -d "$ip" -j ACCEPT 2>/dev/null || true
-                fi
-            done
-            sleep 0.2
-        done
-    done
-    log_verbose "Refresh complete."
-}
-
-# Handle refresh-only mode (must come before full setup)
-# This avoids resolving rotating domains twice when called from attach.sh
-if [ "${1:-}" = "refresh" ]; then
-    refresh_rotating_ips
-    exit 0
-fi
-
 # Use ipset for efficient allowlists when available.
 IPSET_V4="sandbox_allow_v4"
 IPSET_V6="sandbox_allow_v6"
 USE_IPSET=false
 
-# Default whitelisted domains for AI development workflows
-DEFAULT_DOMAINS=(
-    # GitHub
-    "github.com"
-    "api.github.com"
-    "raw.githubusercontent.com"
-    "objects.githubusercontent.com"
-    "codeload.github.com"
-    "gist.github.com"
-    "gist.githubusercontent.com"
-
-    # NPM Registry
-    "registry.npmjs.org"
-
-    # PyPI
-    "pypi.org"
-    "files.pythonhosted.org"
-
-    # Go modules
-    "proxy.golang.org"
-    "sum.golang.org"
-
-    # Rust/Cargo
-    "crates.io"
-    "static.crates.io"
-
-    # AI Provider APIs (major)
-    "api.anthropic.com"
-    "generativelanguage.googleapis.com"
-    "api.openai.com"
-
-    # OpenAI OAuth (needed for Codex CLI)
-    "auth.openai.com"
-    "auth.openai.com"
-    "platform.openai.com"
-    "chatgpt.com"
-
-    # Claude Code OAuth
-    "claude.ai"
-    "console.anthropic.com"
-
-    # Google OAuth (needed for Gemini CLI auth)
-    "accounts.google.com"
-    "oauth2.googleapis.com"
-
-    # AI Provider APIs (alternative)
-    "api.groq.com"
-    "api.mistral.ai"
-    "api.deepseek.com"
-    "api.together.xyz"
-    "api.cohere.com"
-    "api.fireworks.ai"
-    "openrouter.ai"
-
-    # Z.AI / Zhipu (GLM models)
-    "api.z.ai"
-    "open.bigmodel.cn"
-
-    # AI Coding Tools - Cursor (expanded)
-    "cursor.com"
-    "www.cursor.com"
-    "api.cursor.com"
-    "api2.cursor.sh"
-    "api3.cursor.sh"
-    "api4.cursor.sh"
-    "api5.cursor.sh"
-    "api6.cursor.sh"
-    "api7.cursor.sh"
-    "api8.cursor.sh"
-    "agent.api5.cursor.sh"
-    "www2.cursor.sh"
-    "authenticate.cursor.sh"
-    "authenticator.cursor.sh"
-    "prod.authentication.cursor.sh"
-    "us-asia.gcpp.cursor.sh"
-    "us-eu.gcpp.cursor.sh"
-    "us-only.gcpp.cursor.sh"
-    "repo42.cursor.sh"
-    "marketplace.cursorapi.com"
-    "cursor-cdn.com"
-    "downloads.cursor.com"
-    "download.todesktop.com"
-    "opencode.ai"
-    "models.dev"
-    "opncd.ai"
-    "api.githubcopilot.com"
-
-    # Deep Research APIs (content extraction handled server-side)
-    "api.tavily.com"
-    "api.perplexity.ai"
-    "api.semanticscholar.org"
-    "www.googleapis.com"
-
-    # Docker Hub (for pulling images if needed)
-    "registry-1.docker.io"
-    "auth.docker.io"
-    "production.cloudflare.docker.com"
-)
-
 # Parse additional domains from environment variable
 EXTRA_DOMAINS=()
-if [ -n "$SANDBOX_ALLOWED_DOMAINS" ]; then
+if [ -n "${SANDBOX_ALLOWED_DOMAINS:-}" ]; then
     IFS=',' read -ra EXTRA_DOMAINS <<< "$SANDBOX_ALLOWED_DOMAINS"
 fi
 
-# Combine default and extra domains
-ALL_DOMAINS=("${DEFAULT_DOMAINS[@]}" "${EXTRA_DOMAINS[@]}")
+# Initialize domain arrays (will be populated from generated file)
+ALLOWLIST_DOMAINS=()
+ALL_DOMAINS=()
+
+# ============================================================================
+# Domain Allowlist Configuration
+# ============================================================================
+# Domains are loaded from the generated allowlist file (gateway/firewall-allowlist.generated)
+# which is the single source of truth derived from gateway/allowlist.conf.
+#
+# When wildcard domains (*.example.com) are configured, we cannot pre-resolve
+# IPs at firewall setup time. Instead, we:
+# 1. Open egress on ports 80/443 (HTTP/HTTPS)
+# 2. Rely on DNS filtering (dnsmasq) to restrict domain resolution
+# 3. Rely on gateway hostname validation to enforce allowlist
+# ============================================================================
+WILDCARD_DOMAINS=()
+FIREWALL_ALLOWLIST_FILE="${SCRIPT_DIR:-/workspace/gateway}/firewall-allowlist.generated"
+if [ -z "${SCRIPT_DIR:-}" ]; then
+    # Try relative path from this script's location
+    SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+    FIREWALL_ALLOWLIST_FILE="$SCRIPT_DIR/../gateway/firewall-allowlist.generated"
+fi
+
+if [ -f "$FIREWALL_ALLOWLIST_FILE" ]; then
+    # Source the file to get ALLOWLIST_DOMAINS and WILDCARD_DOMAINS arrays
+    # shellcheck source=/dev/null
+    source "$FIREWALL_ALLOWLIST_FILE"
+    log_verbose "Loaded firewall allowlist: ${#ALLOWLIST_DOMAINS[@]} domains, ${#WILDCARD_DOMAINS[@]} wildcards"
+else
+    log_verbose "Warning: Firewall allowlist not found at $FIREWALL_ALLOWLIST_FILE"
+    log_verbose "         Using empty allowlist - only DNS and gateway traffic will be allowed"
+fi
+
+# Combine allowlist domains with any extra domains from environment
+ALL_DOMAINS=("${ALLOWLIST_DOMAINS[@]}" "${EXTRA_DOMAINS[@]}")
+
+# Check if wildcard mode should be enabled
+WILDCARD_MODE=false
+if [ ${#WILDCARD_DOMAINS[@]} -gt 0 ]; then
+    WILDCARD_MODE=true
+    log_verbose "Wildcard mode enabled - will open egress ports 80/443"
+fi
 
 log_verbose "Setting up firewall for limited network mode..."
-log_verbose "Whitelisted domains: ${ALL_DOMAINS[*]}"
+log_verbose "Whitelisted domains: ${#ALL_DOMAINS[@]} explicit + ${#WILDCARD_DOMAINS[@]} wildcards"
 
 # Initialize ipset allowlists if available
 if command -v ipset &>/dev/null; then
@@ -288,43 +195,6 @@ else
     iptables -A OUTPUT -p tcp --dport 53 -j ACCEPT
 fi
 
-# Known IPs for domains that don't resolve via public DNS
-# (e.g., api5.cursor.sh uses hardcoded IPs in the agent binary)
-KNOWN_IPS=(
-    # Cursor Agent backends (AWS us-east-1)
-    "44.197.141.31"   # api5.cursor.sh
-    "184.73.249.78"   # api2.cursor.sh
-)
-
-# Cloudflare IP ranges (Cursor uses CF as proxy)
-# Source: https://www.cloudflare.com/ips-v4
-CLOUDFLARE_CIDRS=(
-    "173.245.48.0/20"
-    "103.21.244.0/22"
-    "103.22.200.0/22"
-    "103.31.4.0/22"
-    "141.101.64.0/18"
-    "108.162.192.0/18"
-    "190.93.240.0/20"
-    "188.114.96.0/20"
-    "197.234.240.0/22"
-    "198.41.128.0/17"
-    "162.158.0.0/15"
-    "104.16.0.0/13"
-    "104.24.0.0/14"
-    "172.64.0.0/13"
-    "131.0.72.0/22"
-)
-
-# GitHub IP ranges (from https://api.github.com/meta)
-# Covers web, api, git, and pages endpoints
-GITHUB_CIDRS=(
-    "140.82.112.0/20"    # Primary GitHub servers
-    "192.30.252.0/22"    # Legacy GitHub
-    "185.199.108.0/22"   # GitHub Pages / raw content
-    "143.55.64.0/20"     # Additional infrastructure
-)
-
 # Track already-added IPs to avoid duplicates
 declare -A ADDED_IPS
 
@@ -354,96 +224,42 @@ add_ipv6_rule() {
     fi
 }
 
-# Function to add CIDR range to firewall
-add_cidr_rule() {
-    local cidr="$1"
-    iptables -A OUTPUT -d "$cidr" -j ACCEPT 2>/dev/null || true
-}
-
 # Function to resolve domain and add rules
 allow_domain() {
     local domain="$1"
     log_verbose "  Allowing: $domain"
 
-    # Check if this domain uses rotating IPs
-    local is_rotating=false
-    for rotating in "${ROTATING_IP_DOMAINS[@]}"; do
-        if [ "$domain" = "$rotating" ]; then
-            is_rotating=true
-            break
-        fi
-    done
+    # Resolve domain to IPv4 addresses
+    local ips_raw ip
+    ips_raw=$(dig +short "$domain" A 2>/dev/null | grep -E '^[0-9]+\.' || true)
 
-    if [ "$is_rotating" = true ]; then
-        # Resolve multiple times to capture more IPs from the rotation pool
-        log_verbose "    (rotating IP domain - resolving multiple times)"
-        local all_ips=""
-        for i in {1..5}; do
-            local ips
-            ips=$(dig +short "$domain" A 2>/dev/null | grep -E '^[0-9]+\.' || true)
-            all_ips="$all_ips $ips"
-            sleep 0.2
-        done
-        # Deduplicate and add
-        local unique_ips
-        unique_ips=$(echo "$all_ips" | tr ' ' '\n' | sort -u | grep -E '^[0-9]+\.' || true)
-        local ip_count=0
-        for ip in $unique_ips; do
-            add_ip_rule "$ip"
-            ((ip_count++)) || true
-        done
-        log_verbose "    Added $ip_count unique IPs"
-    else
-        # Standard single resolution
-        local ips
-        ips=$(dig +short "$domain" A 2>/dev/null | grep -E '^[0-9]+\.' || true)
+    # Also try AAAA records for IPv6
+    local ipv6s_raw
+    ipv6s_raw=$(dig +short "$domain" AAAA 2>/dev/null | grep -E '^[0-9a-f:]+' || true)
 
-        # Also try AAAA records for IPv6
-        local ipv6s
-        ipv6s=$(dig +short "$domain" AAAA 2>/dev/null | grep -E '^[0-9a-f:]+' || true)
-
-        if [ -z "$ips" ] && [ -z "$ipv6s" ]; then
-            log_verbose "    Warning: Could not resolve $domain"
-            return
-        fi
-
-        # Add rules for each resolved IP
-        for ip in $ips; do
-            add_ip_rule "$ip"
-        done
-
-        # Add rules for IPv6
-        for ip in $ipv6s; do
-            add_ipv6_rule "$ip"
-        done
+    if [ -z "$ips_raw" ] && [ -z "$ipv6s_raw" ]; then
+        log_verbose "    Warning: Could not resolve $domain"
+        return
     fi
+
+    # Add rules for each resolved IP using safe read loop
+    while IFS= read -r ip; do
+        [ -z "$ip" ] && continue
+        add_ip_rule "$ip"
+    done <<< "$ips_raw"
+
+    # Add rules for IPv6 using safe read loop
+    while IFS= read -r ip; do
+        [ -z "$ip" ] && continue
+        add_ipv6_rule "$ip"
+    done <<< "$ipv6s_raw"
 }
 
-# Allow traffic to whitelisted domains
+# Allow traffic to whitelisted domains (non-wildcard domains only)
+# Wildcard domains are handled by opening ports 80/443 in wildcard mode
 for domain in "${ALL_DOMAINS[@]}"; do
     allow_domain "$domain"
 done
-
-# Add known IPs that don't resolve via public DNS
-log_verbose "  Adding known IPs (non-DNS resolved)..."
-for ip in "${KNOWN_IPS[@]}"; do
-    add_ip_rule "$ip"
-    log_verbose "    Added: $ip"
-done
-
-# Allow Cloudflare IP ranges (Cursor uses CF as proxy)
-log_verbose "  Adding Cloudflare CIDR ranges..."
-for cidr in "${CLOUDFLARE_CIDRS[@]}"; do
-    add_cidr_rule "$cidr"
-done
-log_verbose "    Added ${#CLOUDFLARE_CIDRS[@]} Cloudflare CIDR blocks"
-
-# Allow GitHub IP ranges
-log_verbose "  Adding GitHub CIDR ranges..."
-for cidr in "${GITHUB_CIDRS[@]}"; do
-    add_cidr_rule "$cidr"
-done
-log_verbose "    Added ${#GITHUB_CIDRS[@]} GitHub CIDR blocks"
 
 # Allow Docker gateway (for host communication)
 # Note: GATEWAY was already resolved earlier for DNS rules
@@ -452,48 +268,294 @@ if [ -n "$GATEWAY" ]; then
     iptables -A OUTPUT -d "$GATEWAY" -j ACCEPT
 fi
 
-# Allow credential proxy if configured (for --isolate mode)
-# SANDBOX_CREDENTIAL_PROXY is set to the Docker hostname of the api-proxy container
-if [ -n "$SANDBOX_CREDENTIAL_PROXY" ]; then
-    # Resolve Docker internal hostname to IP
-    PROXY_IP=$(getent hosts "$SANDBOX_CREDENTIAL_PROXY" | awk '{print $1}')
-    if [ -n "$PROXY_IP" ]; then
-        log_verbose "  Allowing credential proxy: $SANDBOX_CREDENTIAL_PROXY -> $PROXY_IP"
-        if [ "$USE_IPSET" = "true" ]; then
-            ipset add -exist "$IPSET_V4" "$PROXY_IP" 2>/dev/null || true
-        else
-            iptables -A OUTPUT -d "$PROXY_IP" -j ACCEPT 2>/dev/null || true
-        fi
-    else
-        log_verbose "  Warning: Could not resolve credential proxy hostname: $SANDBOX_CREDENTIAL_PROXY"
+# ============================================================================
+# Sandbox Isolation Rules (defense-in-depth)
+# ============================================================================
+# These rules complement ICC=false on the credential-isolation network.
+# They explicitly allow sandbox -> gateway and sandbox -> api-proxy
+# while ensuring sandbox -> sandbox is blocked.
+#
+# Container names are resolved via Docker DNS when running inside the network.
+# ============================================================================
+
+# Allow traffic to credential-isolation gateway (for git operations)
+# The gateway holds GitHub credentials and proxies git requests
+if [ -n "${GATEWAY_HOST:-}" ]; then
+    GATEWAY_IP=$(getent hosts "$GATEWAY_HOST" 2>/dev/null | awk '{print $1}' || true)
+    if [ -n "$GATEWAY_IP" ]; then
+        log_verbose "  Allowing credential gateway: $GATEWAY_HOST ($GATEWAY_IP)"
+        iptables -A OUTPUT -d "$GATEWAY_IP" -j ACCEPT
     fi
+elif getent hosts gateway &>/dev/null; then
+    GATEWAY_IP=$(getent hosts gateway | awk '{print $1}')
+    log_verbose "  Allowing credential gateway: gateway ($GATEWAY_IP)"
+    iptables -A OUTPUT -d "$GATEWAY_IP" -j ACCEPT
 fi
+
+# Allow traffic to api-proxy (for HTTPS API requests)
+# The api-proxy holds API credentials and injects them into requests
+if [ -n "${API_PROXY_HOST:-}" ]; then
+    API_PROXY_IP=$(getent hosts "$API_PROXY_HOST" 2>/dev/null | awk '{print $1}' || true)
+    if [ -n "$API_PROXY_IP" ]; then
+        log_verbose "  Allowing API proxy: $API_PROXY_HOST ($API_PROXY_IP)"
+        iptables -A OUTPUT -d "$API_PROXY_IP" -j ACCEPT
+    fi
+elif getent hosts api-proxy &>/dev/null; then
+    API_PROXY_IP=$(getent hosts api-proxy | awk '{print $1}')
+    log_verbose "  Allowing API proxy: api-proxy ($API_PROXY_IP)"
+    iptables -A OUTPUT -d "$API_PROXY_IP" -j ACCEPT
+fi
+
+# Note: Sandbox-to-sandbox blocking is handled by ICC=false on the
+# credential-isolation network. These iptables rules are defense-in-depth.
 
 # Allow traffic to ipset allowlists
 if [ "$USE_IPSET" = "true" ]; then
     iptables -A OUTPUT -m set --match-set "$IPSET_V4" dst -j ACCEPT
 fi
 
+# ============================================================================
+# Wildcard Mode: Open HTTP/HTTPS egress
+# ============================================================================
+# When wildcard domains are configured, we cannot pre-resolve IPs.
+# Security is enforced at:
+# 1. DNS layer: dnsmasq only resolves allowlisted domains
+# 2. Gateway layer: validates hostname matches wildcard patterns
+# 3. IP literals are still blocked (requests must use DNS)
+# ============================================================================
+if [ "$WILDCARD_MODE" = "true" ]; then
+    log_verbose "Wildcard mode: allowing egress on ports 80/443"
+    log_verbose "  Wildcards: ${WILDCARD_DOMAINS[*]}"
+    # Allow HTTP/HTTPS to any destination (DNS and gateway enforce security)
+    iptables -A OUTPUT -p tcp --dport 80 -j ACCEPT
+    iptables -A OUTPUT -p tcp --dport 443 -j ACCEPT
+fi
+
 # Drop all other outbound traffic
 iptables -A OUTPUT -j DROP
 
-# Also set up IPv6 rules if available
+# ============================================================================
+# IPv6 Firewall Rules
+# ============================================================================
+# SECURITY: IPv6 must be properly firewalled or disabled. Without ip6tables,
+# sandboxes could bypass all network isolation via IPv6 connections.
+#
+# Strategy:
+# 1. If ip6tables is available, apply matching IPv6 rules
+# 2. If ip6tables is unavailable, check if IPv6 is disabled at kernel level
+# 3. If IPv6 is enabled but ip6tables unavailable, FAIL FAST to prevent bypass
+# ============================================================================
+
 if command -v ip6tables &>/dev/null; then
+    # ip6tables available - apply matching IPv6 firewall rules
     ip6tables -F OUTPUT 2>/dev/null || true
     ip6tables -A OUTPUT -o lo -j ACCEPT 2>/dev/null || true
     ip6tables -A OUTPUT -m state --state ESTABLISHED,RELATED -j ACCEPT 2>/dev/null || true
+
+    # DNS restrictions for IPv6
     if [ ${#DNS_SERVERS_V6[@]} -gt 0 ]; then
         for dns in "${DNS_SERVERS_V6[@]}"; do
             ip6tables -A OUTPUT -p udp --dport 53 -d "$dns" -j ACCEPT 2>/dev/null || true
             ip6tables -A OUTPUT -p tcp --dport 53 -d "$dns" -j ACCEPT 2>/dev/null || true
         done
+        # Block DNS to all other IPv6 destinations (mirrors IPv4 behavior)
+        ip6tables -A OUTPUT -p udp --dport 53 -j DROP 2>/dev/null || true
+        ip6tables -A OUTPUT -p tcp --dport 53 -j DROP 2>/dev/null || true
     fi
+
+    # Allow traffic to credential-isolation gateway (IPv6) - mirrors IPv4 rules
+    if [ -n "${GATEWAY_HOST:-}" ]; then
+        GATEWAY_IP6=$(getent ahostsv6 "$GATEWAY_HOST" 2>/dev/null | awk '{print $1}' | head -1 || true)
+        if [ -n "$GATEWAY_IP6" ]; then
+            log_verbose "  Allowing credential gateway (IPv6): $GATEWAY_HOST ($GATEWAY_IP6)"
+            ip6tables -A OUTPUT -d "$GATEWAY_IP6" -j ACCEPT 2>/dev/null || true
+        fi
+    elif getent ahostsv6 gateway &>/dev/null 2>&1; then
+        GATEWAY_IP6=$(getent ahostsv6 gateway 2>/dev/null | awk '{print $1}' | head -1 || true)
+        if [ -n "$GATEWAY_IP6" ]; then
+            log_verbose "  Allowing credential gateway (IPv6): gateway ($GATEWAY_IP6)"
+            ip6tables -A OUTPUT -d "$GATEWAY_IP6" -j ACCEPT 2>/dev/null || true
+        fi
+    fi
+
+    # Allow traffic to api-proxy (IPv6) - mirrors IPv4 rules
+    if [ -n "${API_PROXY_HOST:-}" ]; then
+        API_PROXY_IP6=$(getent ahostsv6 "$API_PROXY_HOST" 2>/dev/null | awk '{print $1}' | head -1 || true)
+        if [ -n "$API_PROXY_IP6" ]; then
+            log_verbose "  Allowing API proxy (IPv6): $API_PROXY_HOST ($API_PROXY_IP6)"
+            ip6tables -A OUTPUT -d "$API_PROXY_IP6" -j ACCEPT 2>/dev/null || true
+        fi
+    elif getent ahostsv6 api-proxy &>/dev/null 2>&1; then
+        API_PROXY_IP6=$(getent ahostsv6 api-proxy 2>/dev/null | awk '{print $1}' | head -1 || true)
+        if [ -n "$API_PROXY_IP6" ]; then
+            log_verbose "  Allowing API proxy (IPv6): api-proxy ($API_PROXY_IP6)"
+            ip6tables -A OUTPUT -d "$API_PROXY_IP6" -j ACCEPT 2>/dev/null || true
+        fi
+    fi
+
     if [ "$USE_IPSET" = "true" ]; then
         ip6tables -A OUTPUT -m set --match-set "$IPSET_V6" dst -j ACCEPT 2>/dev/null || true
     fi
+
+    # Wildcard mode: allow IPv6 HTTP/HTTPS egress (mirrors IPv4)
+    if [ "$WILDCARD_MODE" = "true" ]; then
+        log_verbose "Wildcard mode (IPv6): allowing egress on ports 80/443"
+        ip6tables -A OUTPUT -p tcp --dport 80 -j ACCEPT 2>/dev/null || true
+        ip6tables -A OUTPUT -p tcp --dport 443 -j ACCEPT 2>/dev/null || true
+    fi
+
     ip6tables -A OUTPUT -j DROP 2>/dev/null || true
+    log_verbose "IPv6 firewall rules applied successfully."
+else
+    # ip6tables not available - check if IPv6 is disabled at kernel level
+    # This is safe because disabled IPv6 means no IPv6 bypass is possible
+    IPV6_DISABLED=false
+
+    # Check multiple indicators that IPv6 is disabled
+    if [ -f /proc/sys/net/ipv6/conf/all/disable_ipv6 ]; then
+        if [ "$(cat /proc/sys/net/ipv6/conf/all/disable_ipv6 2>/dev/null)" = "1" ]; then
+            IPV6_DISABLED=true
+        fi
+    fi
+
+    # Also check if there are any IPv6 addresses on interfaces (excluding loopback)
+    if [ "$IPV6_DISABLED" = "false" ]; then
+        # If no non-loopback IPv6 addresses exist, treat as effectively disabled
+        if ! ip -6 addr show 2>/dev/null | grep -v '::1' | grep -q 'inet6'; then
+            IPV6_DISABLED=true
+        fi
+    fi
+
+    if [ "$IPV6_DISABLED" = "true" ]; then
+        log_verbose "Warning: ip6tables unavailable, but IPv6 is disabled at kernel level - safe to continue."
+    else
+        # SECURITY CRITICAL: IPv6 is enabled but we cannot firewall it
+        # This is a bypass risk - fail fast to prevent unfiltered IPv6 egress
+        echo "FATAL: ip6tables is unavailable but IPv6 is enabled." >&2
+        echo "       Sandboxes could bypass network isolation via IPv6." >&2
+        echo "       Either install ip6tables or disable IPv6:" >&2
+        echo "         sysctl -w net.ipv6.conf.all.disable_ipv6=1" >&2
+        echo "         sysctl -w net.ipv6.conf.default.disable_ipv6=1" >&2
+        exit 1
+    fi
+fi
+
+# ============================================================================
+# DOCKER-USER Chain Rules (host-level defense-in-depth)
+# ============================================================================
+# The DOCKER-USER chain is processed BEFORE Docker's own rules for FORWARD
+# traffic. These rules provide host-level enforcement that cannot be bypassed
+# by container configuration.
+#
+# Use case: Run on the Docker host to enforce network isolation even if
+# container networking is misconfigured.
+# ============================================================================
+
+setup_docker_user_rules() {
+    log_verbose "Setting up DOCKER-USER chain rules..."
+
+    # Get the credential-isolation network subnet (if available)
+    local SANDBOX_SUBNET=""
+    if command -v docker &>/dev/null; then
+        SANDBOX_SUBNET=$(docker network inspect credential-isolation --format '{{range .IPAM.Config}}{{.Subnet}}{{end}}' 2>/dev/null || true)
+    fi
+
+    # Get gateway container IP
+    local GATEWAY_CONTAINER_IP=""
+    if command -v docker &>/dev/null; then
+        GATEWAY_CONTAINER_IP=$(docker inspect gateway --format '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' 2>/dev/null | head -1 || true)
+    fi
+
+    # Get api-proxy container IP
+    local API_PROXY_CONTAINER_IP=""
+    if command -v docker &>/dev/null; then
+        API_PROXY_CONTAINER_IP=$(docker inspect api-proxy --format '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' 2>/dev/null | head -1 || true)
+    fi
+
+    if [ -z "$SANDBOX_SUBNET" ]; then
+        log_verbose "  Warning: Could not determine sandbox subnet, skipping DOCKER-USER rules"
+        return
+    fi
+
+    log_verbose "  Sandbox subnet: $SANDBOX_SUBNET"
+    log_verbose "  Gateway IP: ${GATEWAY_CONTAINER_IP:-unknown}"
+    log_verbose "  API Proxy IP: ${API_PROXY_CONTAINER_IP:-unknown}"
+
+    # Flush existing DOCKER-USER rules (but keep the default RETURN)
+    iptables -F DOCKER-USER 2>/dev/null || true
+
+    # ===========================================================================
+    # DOCKER-USER Rule Ordering (explicit append order for predictability)
+    # ===========================================================================
+    # Rules are processed in order: first match wins.
+    # Order: ESTABLISHED -> DNS allow -> service allow -> DNS block -> egress block -> RETURN
+    # Using consistent -A (append) for predictable ordering.
+    # ===========================================================================
+
+    # 1. Allow established connections (fastest path for existing flows)
+    iptables -A DOCKER-USER -m state --state ESTABLISHED,RELATED -j RETURN
+    log_verbose "  [1] Allowing established connections"
+
+    # 2. Allow DNS (port 53) only to gateway (for dnsmasq) - BEFORE general gateway rule
+    if [ -n "$GATEWAY_CONTAINER_IP" ]; then
+        iptables -A DOCKER-USER -s "$SANDBOX_SUBNET" -d "$GATEWAY_CONTAINER_IP" -p udp --dport 53 -j RETURN
+        iptables -A DOCKER-USER -s "$SANDBOX_SUBNET" -d "$GATEWAY_CONTAINER_IP" -p tcp --dport 53 -j RETURN
+        log_verbose "  [2] Allowing DNS to gateway only"
+    fi
+
+    # 3. Block all other DNS from sandbox (prevent DNS bypass) - BEFORE service allows
+    iptables -A DOCKER-USER -s "$SANDBOX_SUBNET" -p udp --dport 53 -j DROP
+    iptables -A DOCKER-USER -s "$SANDBOX_SUBNET" -p tcp --dport 53 -j DROP
+    log_verbose "  [3] Blocking DNS to non-gateway destinations"
+
+    # 4. Allow sandbox -> gateway (for git operations)
+    if [ -n "$GATEWAY_CONTAINER_IP" ]; then
+        iptables -A DOCKER-USER -s "$SANDBOX_SUBNET" -d "$GATEWAY_CONTAINER_IP" -j RETURN
+        log_verbose "  [4] Allowing sandbox -> gateway ($GATEWAY_CONTAINER_IP)"
+    fi
+
+    # 5. Allow sandbox -> api-proxy (for HTTPS API requests)
+    if [ -n "$API_PROXY_CONTAINER_IP" ]; then
+        iptables -A DOCKER-USER -s "$SANDBOX_SUBNET" -d "$API_PROXY_CONTAINER_IP" -j RETURN
+        log_verbose "  [5] Allowing sandbox -> api-proxy ($API_PROXY_CONTAINER_IP)"
+    fi
+
+    # 6. Block direct egress from sandbox to external networks
+    # Traffic should go through gateway or api-proxy.
+    # We allow traffic to RFC1918 private ranges (where our services live):
+    # - 10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16
+    # And block all public (non-private) destinations.
+    # Note: Traffic to gateway/api-proxy is already allowed by rules 4-5 above.
+    # This rule catches any remaining traffic to public IPs.
+    #
+    # Using ipset or multiple rules to match "not RFC1918" is complex.
+    # Instead, we use a simpler approach: since gateway/api-proxy allow rules
+    # come first, this final DROP catches traffic to any other destination.
+    # We explicitly allow the Docker bridge network ranges first.
+    iptables -A DOCKER-USER -s "$SANDBOX_SUBNET" -d 10.0.0.0/8 -j RETURN
+    iptables -A DOCKER-USER -s "$SANDBOX_SUBNET" -d 172.16.0.0/12 -j RETURN
+    iptables -A DOCKER-USER -s "$SANDBOX_SUBNET" -d 192.168.0.0/16 -j RETURN
+    # Block everything else from sandbox (public IPs)
+    iptables -A DOCKER-USER -s "$SANDBOX_SUBNET" -j DROP
+    log_verbose "  [6] Blocking direct external egress from sandbox (public IPs)"
+
+    # 7. Final RETURN for other traffic (Docker's default behavior)
+    iptables -A DOCKER-USER -j RETURN
+    log_verbose "  [7] Final RETURN rule"
+
+    log_verbose "  DOCKER-USER rules applied (7 rule groups)"
+}
+
+# Only run DOCKER-USER setup if we're on the host (have docker access)
+# and explicitly requested via SETUP_DOCKER_USER=1
+if [ "${SETUP_DOCKER_USER:-}" = "1" ] && command -v docker &>/dev/null; then
+    setup_docker_user_rules
 fi
 
 log_verbose "Firewall rules applied successfully."
-log_verbose "Allowed: ${#ALL_DOMAINS[@]} domains + ${#CLOUDFLARE_CIDRS[@]} Cloudflare CIDRs + ${#GITHUB_CIDRS[@]} GitHub CIDRs + Docker gateway + DNS (resolvers/gateway) + loopback"
+if [ "$WILDCARD_MODE" = "true" ]; then
+    log_verbose "Allowed: ${#ALL_DOMAINS[@]} explicit domains + ${#WILDCARD_DOMAINS[@]} wildcard patterns + ports 80/443 (wildcard mode) + Docker gateway + DNS + loopback"
+else
+    log_verbose "Allowed: ${#ALL_DOMAINS[@]} domains + Docker gateway + DNS (resolvers/gateway) + loopback"
+fi
 log_verbose "All other outbound traffic is blocked."

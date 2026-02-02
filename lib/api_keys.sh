@@ -5,7 +5,6 @@
 # Note: Gemini uses OAuth via ~/.gemini/oauth_creds.json (from `gemini auth`), not an API key
 AI_PROVIDER_KEYS=(
     "CLAUDE_CODE_OAUTH_TOKEN"
-    "CURSOR_API_KEY"
 )
 
 # Colors (defined locally for use in install.sh which doesn't load other libs)
@@ -47,7 +46,6 @@ show_missing_ai_keys_warning() {
     echo "Expected at least one of:"
     echo "  - CLAUDE_CODE_OAUTH_TOKEN (Claude Code)"
     echo "  - OPENAI_API_KEY (OpenAI/Codex)"
-    echo "  - CURSOR_API_KEY (Cursor)"
     echo "  - ~/.gemini/oauth_creds.json (Gemini CLI via 'gemini auth')"
     echo ""
 }

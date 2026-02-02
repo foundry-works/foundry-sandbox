@@ -28,6 +28,7 @@ source "$SCRIPT_DIR/lib/json.sh"
 source "$SCRIPT_DIR/lib/inspect.sh"
 source "$SCRIPT_DIR/lib/network.sh"
 source "$SCRIPT_DIR/lib/permissions.sh"
+source "$SCRIPT_DIR/lib/gateway.sh"
 source "$SCRIPT_DIR/commands/build.sh"
 
 export_docker_env

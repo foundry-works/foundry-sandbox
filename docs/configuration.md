@@ -25,7 +25,6 @@ API keys are passed to containers via environment variables. Set them in your sh
 ```bash
 # AI Provider Keys (at least one required)
 export CLAUDE_CODE_OAUTH_TOKEN="..."   # Get via: claude setup-token
-export CURSOR_API_KEY="key-..."
 
 # Search Provider Keys (optional - for deep research features)
 export TAVILY_API_KEY="..."
@@ -48,7 +47,6 @@ The sandbox automatically copies configuration files from your host into contain
 | `~/.config/gh/` | `/home/ubuntu/.config/gh/` | GitHub CLI (from `gh auth login`) |
 | `~/.gemini/` | `/home/ubuntu/.gemini/` | Gemini CLI OAuth (from `gemini auth`) |
 | `~/.config/opencode/opencode.json` | `/home/ubuntu/.config/opencode/opencode.json` | OpenCode config |
-| `~/.config/opencode/antigravity-accounts.json` | `/home/ubuntu/.config/opencode/antigravity-accounts.json` | OpenCode Antigravity accounts (host file only) |
 | `~/.local/share/opencode/auth.json` | `/home/ubuntu/.local/share/opencode/auth.json` | OpenCode auth (from `opencode auth login`) |
 
 ## Tool-Specific Notes
@@ -65,17 +63,7 @@ Sandboxes default to disabling update checks and analytics via `~/.codex/config.
 
 ### OpenCode
 
-Run `opencode auth login` for standard auth. For the best experience, install these plugins on your host first:
-- [opencode-openai-codex-auth](https://github.com/numman-ali/opencode-openai-codex-auth) - Use OpenAI/Codex with ChatGPT subscription
-- [opencode-gemini-auth](https://github.com/jenslys/opencode-gemini-auth) - Use Gemini CLI subscription
-
-Follow the instructions in each repo to set them up on your host before creating sandboxes.
-
-To set a sandbox-wide OpenCode default model (when `~/.config/opencode/opencode.json` has no `model` set), use:
-
-```bash
-export SANDBOX_OPENCODE_DEFAULT_MODEL="openai/gpt-5.2-codex"
-```
+Run `opencode auth login` for zai-coding-plan authentication.
 
 ### Tmux
 

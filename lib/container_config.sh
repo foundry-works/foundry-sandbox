@@ -246,7 +246,7 @@ install_foundry_workspace_docs() {
     # Expand ~ if present
     [[ "$opencode_foundry_path" == "~/"* ]] && opencode_foundry_path="${opencode_foundry_path/#\~/$HOME}"
 
-    local claude_md_src="$foundry_cache/claude-foundry/CLAUDE.md"
+    local claude_md_src="$SANDBOX_HOME/stubs/CLAUDE.md"
     local agents_md_src="$opencode_foundry_path/AGENTS.md"
     local marker="<foundry-instructions>"
 
@@ -1056,9 +1056,19 @@ ensure_github_https_git() {
 
 # Configure gh as the git credential helper for HTTPS authentication
 # This leverages existing gh auth credentials from ~/.config/gh
+# When SANDBOX_GATEWAY_ENABLED=true, skip this - credentials are injected by the gateway
 configure_gh_credential_helper() {
     local container_id="$1"
     local quiet="${2:-0}"
+
+    # Skip when credential isolation gateway is enabled
+    # The gateway injects credentials; no token material should be in the container
+    if [ "${SANDBOX_GATEWAY_ENABLED:-}" = "true" ]; then
+        if [ "$quiet" != "1" ]; then
+            log_debug "Skipping gh credential helper (gateway enabled)"
+        fi
+        return 0
+    fi
 
     # Only configure if gh config exists in container
     docker exec -u "$CONTAINER_USER" "$container_id" sh -c "
@@ -1413,6 +1423,9 @@ if "disableAutoUpdate" not in general:
 if "disableUpdateNag" not in general:
     general["disableUpdateNag"] = True
     changed = True
+if "previewFeatures" not in general:
+    general["previewFeatures"] = True
+    changed = True
 if general:
     data["general"] = general
 
@@ -1438,108 +1451,6 @@ if changed or not os.path.exists(path):
     with open(path, "w") as f:
         json.dump(data, f, indent=2)
         f.write("\n")
-PY
-}
-
-# Force Gemini to use API key auth instead of OAuth
-# Called in credential isolation mode when OAuth credentials are not available
-ensure_gemini_apikey_auth() {
-    local container_id="$1"
-    local quiet="${2:-0}"
-    local run_fn="run_cmd"
-    if [ "$quiet" = "1" ]; then
-        run_fn="run_cmd_quiet"
-    fi
-
-    if [ "$quiet" != "1" ]; then
-        log_info "Configuring Gemini for API key auth (credential isolation mode)..."
-    fi
-
-    $run_fn docker exec -u "$CONTAINER_USER" -i "$container_id" python3 - <<'PY'
-import json
-import os
-
-path = "/home/ubuntu/.gemini/settings.json"
-os.makedirs(os.path.dirname(path), exist_ok=True)
-
-data = {}
-if os.path.exists(path):
-    try:
-        with open(path, "r") as f:
-            data = json.load(f)
-    except json.JSONDecodeError:
-        data = {}
-
-if not isinstance(data, dict):
-    data = {}
-
-# Force API key auth - OAuth doesn't work in Docker due to keytar/keyring
-security = data.get("security")
-if not isinstance(security, dict):
-    security = {}
-auth = security.get("auth")
-if not isinstance(auth, dict):
-    auth = {}
-
-# Change from oauth-personal to gemini-api-key
-auth["selectedType"] = "gemini-api-key"
-security["auth"] = auth
-data["security"] = security
-
-with open(path, "w") as f:
-    json.dump(data, f, indent=2)
-    f.write("\n")
-PY
-}
-
-# Configure Gemini to use OAuth auth in credential isolation mode
-# Called when OAuth credentials exist on the host
-ensure_gemini_oauth_auth() {
-    local container_id="$1"
-    local quiet="${2:-0}"
-    local run_fn="run_cmd"
-    if [ "$quiet" = "1" ]; then
-        run_fn="run_cmd_quiet"
-    fi
-
-    if [ "$quiet" != "1" ]; then
-        log_info "Configuring Gemini for OAuth auth (credential isolation mode)..."
-    fi
-
-    $run_fn docker exec -u "$CONTAINER_USER" -i "$container_id" python3 - <<'PY'
-import json
-import os
-
-path = "/home/ubuntu/.gemini/settings.json"
-os.makedirs(os.path.dirname(path), exist_ok=True)
-
-data = {}
-if os.path.exists(path):
-    try:
-        with open(path, "r") as f:
-            data = json.load(f)
-    except json.JSONDecodeError:
-        data = {}
-
-if not isinstance(data, dict):
-    data = {}
-
-# Set OAuth personal auth mode
-security = data.get("security")
-if not isinstance(security, dict):
-    security = {}
-auth = security.get("auth")
-if not isinstance(auth, dict):
-    auth = {}
-
-# Use oauth-personal for OAuth authentication
-auth["selectedType"] = "oauth-personal"
-security["auth"] = auth
-data["security"] = security
-
-with open(path, "w") as f:
-    json.dump(data, f, indent=2)
-    f.write("\n")
 PY
 }
 
@@ -1611,7 +1522,6 @@ copy_configs_to_container() {
         "$CONTAINER_HOME/.gemini" \
         "$CONTAINER_HOME/.config/opencode" \
         "$CONTAINER_HOME/.local/share/opencode" \
-        "$CONTAINER_HOME/.cursor" \
         "$CONTAINER_HOME/.codex" \
         "$CONTAINER_HOME/.ssh" \
         "$CONTAINER_HOME/.ssh/sockets"
@@ -1621,12 +1531,18 @@ copy_configs_to_container() {
         copy_file_to_container "$container_id" ~/.claude.json "$CONTAINER_HOME/.claude.json"
         copy_file_to_container "$container_id" ~/.claude.json "$CONTAINER_HOME/.claude/.claude.json"
     fi
+    # Fix ownership immediately (docker exec may run as root in credential isolation mode)
+    docker exec "$container_id" chown -R "$CONTAINER_USER:$CONTAINER_USER" "$CONTAINER_HOME/.claude" "$CONTAINER_HOME/.claude.json" 2>/dev/null || true
     ensure_claude_onboarding "$container_id"
     ensure_foundry_mcp_config "$container_id"
     if file_exists ~/.claude/settings.json; then
         copy_file_to_container "$container_id" ~/.claude/settings.json "$CONTAINER_HOME/.claude/settings.json"
     fi
-    file_exists ~/.claude/statusline.conf && copy_file_to_container "$container_id" ~/.claude/statusline.conf "$CONTAINER_HOME/.claude/statusline.conf"
+    if file_exists ~/.claude/statusline.conf; then
+        copy_file_to_container "$container_id" ~/.claude/statusline.conf "$CONTAINER_HOME/.claude/statusline.conf"
+    elif file_exists "$SCRIPT_DIR/statusline.conf"; then
+        copy_file_to_container "$container_id" "$SCRIPT_DIR/statusline.conf" "$CONTAINER_HOME/.claude/statusline.conf"
+    fi
     ensure_claude_statusline "$container_id"
     dir_exists ~/.config/gh && copy_dir_to_container "$container_id" ~/.config/gh "$CONTAINER_HOME/.config/gh"
     # Skip auth file copies when credential isolation is enabled (they're mounted as stubs)
@@ -1639,31 +1555,12 @@ copy_configs_to_container() {
         file_exists ~/.local/share/opencode/auth.json && copy_file_to_container "$container_id" ~/.local/share/opencode/auth.json "$CONTAINER_HOME/.local/share/opencode/auth.json"
         dir_exists ~/.codex && copy_dir_to_container "$container_id" ~/.codex "$CONTAINER_HOME/.codex" "${CODEX_COPY_EXCLUDES[@]}"
     fi
-    # Gemini CLI settings and account info (not credentials, copy in all modes)
-    if file_exists ~/.gemini/settings.json || file_exists ~/.gemini/google_accounts.json; then
-        # Fix ownership if directory was created by Docker mounts (will be root-owned)
-        docker exec -u root "$container_id" sh -c "mkdir -p '$CONTAINER_HOME/.gemini' && chown $CONTAINER_USER:$CONTAINER_USER '$CONTAINER_HOME/.gemini'" 2>/dev/null || true
-        file_exists ~/.gemini/settings.json && copy_file_to_container "$container_id" ~/.gemini/settings.json "$CONTAINER_HOME/.gemini/settings.json"
-        file_exists ~/.gemini/google_accounts.json && copy_file_to_container "$container_id" ~/.gemini/google_accounts.json "$CONTAINER_HOME/.gemini/google_accounts.json"
-    fi
-    # In credential isolation mode, configure Gemini auth based on available credentials
-    if [ "$isolate_credentials" = "true" ]; then
-        if [ -f "$HOME/.gemini/oauth_creds.json" ]; then
-            # OAuth credentials available - use OAuth mode
-            ensure_gemini_oauth_auth "$container_id"
-        else
-            # No OAuth - fallback to API key auth
-            ensure_gemini_apikey_auth "$container_id"
-        fi
-    fi
     # OpenCode config (not credentials)
     if file_exists ~/.config/opencode/opencode.json; then
         copy_file_to_container "$container_id" ~/.config/opencode/opencode.json "$CONTAINER_HOME/.config/opencode/opencode.json"
     elif file_exists "$SCRIPT_DIR/opencode.json"; then
         copy_file_to_container "$container_id" "$SCRIPT_DIR/opencode.json" "$CONTAINER_HOME/.config/opencode/opencode.json"
     fi
-    file_exists ~/.config/opencode/antigravity-accounts.json && copy_file_to_container "$container_id" ~/.config/opencode/antigravity-accounts.json "$CONTAINER_HOME/.config/opencode/antigravity-accounts.json"
-    file_exists ~/.cursor/cli-config.json && copy_file_to_container "$container_id" ~/.cursor/cli-config.json "$CONTAINER_HOME/.cursor/cli-config.json"
     # Skip settings writes when credential isolation is enabled (dirs may be read-only)
     if [ "$isolate_credentials" != "true" ]; then
         ensure_gemini_settings "$container_id"
@@ -1712,7 +1609,6 @@ copy_configs_to_container() {
             $CONTAINER_HOME/.claude \
             $CONTAINER_HOME/.config \
             $CONTAINER_HOME/.gemini \
-            $CONTAINER_HOME/.cursor \
             $CONTAINER_HOME/.codex \
             $CONTAINER_HOME/.ssh \
             $CONTAINER_HOME/.sandboxes \
@@ -1765,7 +1661,11 @@ sync_runtime_credentials() {
     if file_exists ~/.claude/settings.json; then
         copy_file_to_container_quiet "$container_id" ~/.claude/settings.json "$CONTAINER_HOME/.claude/settings.json"
     fi
-    file_exists ~/.claude/statusline.conf && copy_file_to_container_quiet "$container_id" ~/.claude/statusline.conf "$CONTAINER_HOME/.claude/statusline.conf"
+    if file_exists ~/.claude/statusline.conf; then
+        copy_file_to_container_quiet "$container_id" ~/.claude/statusline.conf "$CONTAINER_HOME/.claude/statusline.conf"
+    elif file_exists "$SCRIPT_DIR/statusline.conf"; then
+        copy_file_to_container_quiet "$container_id" "$SCRIPT_DIR/statusline.conf" "$CONTAINER_HOME/.claude/statusline.conf"
+    fi
     ensure_claude_foundry_mcp "$container_id" "1"
     ensure_claude_statusline "$container_id" "1"
     dir_exists ~/.config/gh && copy_dir_to_container_quiet "$container_id" ~/.config/gh "$CONTAINER_HOME/.config/gh"
@@ -1775,9 +1675,7 @@ sync_runtime_credentials() {
     elif file_exists "$SCRIPT_DIR/opencode.json"; then
         copy_file_to_container_quiet "$container_id" "$SCRIPT_DIR/opencode.json" "$CONTAINER_HOME/.config/opencode/opencode.json"
     fi
-    file_exists ~/.config/opencode/antigravity-accounts.json && copy_file_to_container_quiet "$container_id" ~/.config/opencode/antigravity-accounts.json "$CONTAINER_HOME/.config/opencode/antigravity-accounts.json"
     file_exists ~/.local/share/opencode/auth.json && copy_file_to_container_quiet "$container_id" ~/.local/share/opencode/auth.json "$CONTAINER_HOME/.local/share/opencode/auth.json"
-    file_exists ~/.cursor/cli-config.json && copy_file_to_container_quiet "$container_id" ~/.cursor/cli-config.json "$CONTAINER_HOME/.cursor/cli-config.json"
     sync_opencode_foundry "$container_id" "1"
     ensure_opencode_default_model "$container_id" "1"
     ensure_gemini_settings "$container_id" "1"

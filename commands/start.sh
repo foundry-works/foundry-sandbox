@@ -59,9 +59,34 @@ cmd_start() {
         log_info "GitHub CLI token exported for container"
     fi
 
-    compose_up "$worktree_path" "$claude_config_path" "$container" "$override_file"
+    # Check if credential isolation is enabled (api-proxy container exists)
+    # and repopulate stubs volume before starting
+    local isolate_credentials=""
+    if docker ps -a --format '{{.Names}}' | grep -q "^${container}-api-proxy-"; then
+        isolate_credentials="true"
+        populate_stubs_volume "$container"
+        export STUBS_VOLUME_NAME="${container}_stubs"
+    fi
+
+    compose_up "$worktree_path" "$claude_config_path" "$container" "$override_file" "$isolate_credentials"
 
     local container_id="${container}-dev-1"
+
+    # Refresh gateway session on restart (if credential isolation enabled)
+    # Destroys old token and creates a new one for security
+    if setup_gateway_url "$container" 2>/dev/null; then
+        # Clean up old session first
+        cleanup_gateway_session "$container_id"
+        # Create new session with fresh token
+        local repo_spec="${SANDBOX_REPO_URL:-}"
+        repo_spec=$(echo "$repo_spec" | sed -E 's#^(https?://)?github\.com/##; s#^git@github\.com:##; s#\.git$##')
+        if setup_gateway_session "$container_id" "$repo_spec"; then
+            export SANDBOX_GATEWAY_ENABLED=true
+        else
+            log_warn "Gateway session refresh failed - git operations may not work"
+        fi
+    fi
+
     copy_configs_to_container "$container_id" "0" "$enable_ssh" "$SANDBOX_WORKING_DIR"
 
     # Log sparse checkout reminder if enabled
@@ -75,12 +100,12 @@ cmd_start() {
     fi
 
     # Apply network restrictions AFTER plugin/MCP registration completes
-    if [ -n "${SANDBOX_NETWORK_MODE:-}" ] && [ "$SANDBOX_NETWORK_MODE" != "full" ]; then
+    if [ -n "${SANDBOX_NETWORK_MODE:-}" ]; then
         echo "Applying network mode: $SANDBOX_NETWORK_MODE"
         if [ "$SANDBOX_NETWORK_MODE" = "limited" ]; then
-            run_cmd docker exec "$container_id" bash -c 'sudo SANDBOX_CREDENTIAL_PROXY="$SANDBOX_CREDENTIAL_PROXY" /usr/local/bin/network-mode limited'
+            run_cmd docker exec "$container_id" sudo /usr/local/bin/network-firewall.sh
         else
-            run_cmd docker exec "$container_id" bash -c "sudo SANDBOX_CREDENTIAL_PROXY=\"\$SANDBOX_CREDENTIAL_PROXY\" /usr/local/bin/network-mode $SANDBOX_NETWORK_MODE"
+            run_cmd docker exec "$container_id" sudo /usr/local/bin/network-mode "$SANDBOX_NETWORK_MODE"
         fi
     fi
 }
