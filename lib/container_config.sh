@@ -631,6 +631,51 @@ PY
     fi
 }
 
+# Add tavily-mcp to OpenCode's MCP configuration
+ensure_opencode_tavily_mcp() {
+    local container_id="$1"
+    local quiet="${2:-0}"
+    local run_fn="run_cmd"
+    if [ "$quiet" = "1" ]; then
+        run_fn="run_cmd_quiet"
+    fi
+
+    $run_fn docker exec -u "$CONTAINER_USER" -i "$container_id" python3 - <<'PY'
+import json
+import os
+
+config_path = "/home/ubuntu/.config/opencode/opencode.json"
+
+def load_json(path):
+    try:
+        with open(path, "r") as f:
+            return json.load(f)
+    except (FileNotFoundError, json.JSONDecodeError):
+        return {}
+
+data = load_json(config_path)
+if not isinstance(data, dict):
+    data = {}
+
+# Ensure mcp section exists and is a dict
+mcp = data.get("mcp")
+if not isinstance(mcp, dict):
+    mcp = {}
+    data["mcp"] = mcp
+
+# Add tavily-mcp if not already configured
+if "tavily-mcp" not in mcp:
+    mcp["tavily-mcp"] = {
+        "command": ["tavily-mcp"]
+    }
+
+    os.makedirs(os.path.dirname(config_path), exist_ok=True)
+    with open(config_path, "w") as f:
+        json.dump(data, f, indent=2)
+        f.write("\n")
+PY
+}
+
 ensure_opencode_default_model() {
     local container_id="$1"
     local quiet="${2:-0}"
@@ -866,6 +911,7 @@ sync_opencode_local_plugins_on_first_attach() {
     chmod 600 "$marker" 2>/dev/null || true
 
     sync_opencode_foundry "$container_id" "$quiet"
+    ensure_opencode_tavily_mcp "$container_id" "$quiet"
 }
 
 # Ensure Claude model defaults and hooks are set in settings.json.
@@ -924,6 +970,7 @@ data["hooks"] = {
 FOUNDRY_ALLOW = [
     "Skill(foundry:*)",
     "mcp__plugin_foundry_foundry-mcp__*",
+    "mcp__tavily-mcp__*",
     "Bash(git add:*)",
     "Bash(git branch:*)",
     "Bash(git checkout:*)",
@@ -1260,12 +1307,22 @@ for path in paths:
         data["mcpServers"] = {}
 
     # Only add if not already configured
+    changed = False
     if "foundry-mcp" not in data["mcpServers"]:
         data["mcpServers"]["foundry-mcp"] = {
             "command": "python",
             "args": ["-m", "foundry_mcp.server"]
         }
+        changed = True
 
+    if "tavily-mcp" not in data["mcpServers"]:
+        data["mcpServers"]["tavily-mcp"] = {
+            "command": "tavily-mcp",
+            "args": []
+        }
+        changed = True
+
+    if changed:
         os.makedirs(os.path.dirname(path), exist_ok=True)
         with open(path, "w") as f:
             json.dump(data, f, indent=2)
@@ -1301,6 +1358,7 @@ default_approval_policy_line = 'approval_policy = "on-failure"'
 default_sandbox_mode_line = 'sandbox_mode = "danger-full-access"'
 default_update_line = "check_for_update_on_startup = false"
 default_analytics_lines = ["[analytics]", "enabled = false"]
+default_tavily_mcp_lines = ["[mcp_servers.tavily-mcp]", 'command = "tavily-mcp"', "args = []"]
 
 if not os.path.exists(path):
     with open(path, "w") as f:
@@ -1309,7 +1367,7 @@ if not os.path.exists(path):
             default_sandbox_mode_line,
             default_update_line,
         ]
-        f.write("\n".join(root_lines) + "\n\n" + "\n".join(default_analytics_lines) + "\n")
+        f.write("\n".join(root_lines) + "\n\n" + "\n".join(default_analytics_lines) + "\n\n" + "\n".join(default_tavily_mcp_lines) + "\n")
     raise SystemExit(0)
 
 with open(path, "r") as f:
@@ -1336,6 +1394,14 @@ if missing_sandbox_mode:
         missing_sandbox_mode = False
 analytics = data.get("analytics") if isinstance(data, dict) else None
 missing_analytics_enabled = not (isinstance(analytics, dict) and "enabled" in analytics)
+
+# Check if tavily-mcp MCP server is configured
+mcp_servers = data.get("mcp_servers") if isinstance(data, dict) else None
+missing_tavily_mcp = not (isinstance(mcp_servers, dict) and "tavily-mcp" in mcp_servers)
+if missing_tavily_mcp:
+    # Also check raw text for section header
+    if re.search(r"(?m)^\s*\[mcp_servers\.tavily-mcp\]", text):
+        missing_tavily_mcp = False
 
 inline_changed = False
 if missing_analytics_enabled:
@@ -1367,6 +1433,10 @@ if missing_update:
 if missing_analytics_enabled and not inline_changed:
     append_lines.append("")
     append_lines.extend(default_analytics_lines)
+
+if missing_tavily_mcp:
+    append_lines.append("")
+    append_lines.extend(default_tavily_mcp_lines)
 
 changed = inline_changed or bool(prepend_lines) or bool(append_lines)
 if changed:
@@ -1446,6 +1516,19 @@ if "usageStatisticsEnabled" not in privacy:
     changed = True
 if privacy:
     data["privacy"] = privacy
+
+# Add tavily-mcp to mcpServers
+mcp_servers = data.get("mcpServers")
+if not isinstance(mcp_servers, dict):
+    mcp_servers = {}
+if "tavily-mcp" not in mcp_servers:
+    mcp_servers["tavily-mcp"] = {
+        "command": "tavily-mcp",
+        "args": []
+    }
+    changed = True
+if mcp_servers:
+    data["mcpServers"] = mcp_servers
 
 if changed or not os.path.exists(path):
     with open(path, "w") as f:
@@ -1567,6 +1650,7 @@ copy_configs_to_container() {
         ensure_codex_config "$container_id"
     fi
     sync_opencode_foundry "$container_id"
+    ensure_opencode_tavily_mcp "$container_id"
     ensure_opencode_default_model "$container_id" "$skip_plugins"
     if [ "$skip_plugins" != "1" ]; then
         prefetch_opencode_npm_plugins "$container_id"
@@ -1677,6 +1761,7 @@ sync_runtime_credentials() {
     fi
     file_exists ~/.local/share/opencode/auth.json && copy_file_to_container_quiet "$container_id" ~/.local/share/opencode/auth.json "$CONTAINER_HOME/.local/share/opencode/auth.json"
     sync_opencode_foundry "$container_id" "1"
+    ensure_opencode_tavily_mcp "$container_id" "1"
     ensure_opencode_default_model "$container_id" "1"
     ensure_gemini_settings "$container_id" "1"
     ensure_codex_config "$container_id" "1"
