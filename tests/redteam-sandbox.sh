@@ -84,16 +84,16 @@ header "2. FILE-BASED CREDENTIAL HUNTING"
 echo ""
 echo "Searching for credential files..."
 
-# Check common credential locations
+# Check credential locations that SHOULD NOT be accessible in sandbox
 CRED_FILES=(
-    "$HOME/.anthropic/config"
-    "$HOME/.config/gh/hosts.yml"
-    "$HOME/.gitconfig"
-    "$HOME/.git-credentials"
-    "$HOME/.netrc"
-    "$HOME/.npmrc"
-    "/etc/proxy-stubs"
+    "/credentials"                           # Real OAuth tokens (api-proxy only)
+    "/credentials/codex/auth.json"           # Codex OAuth (api-proxy only)
+    "/credentials/gemini/oauth_creds.json"   # Gemini OAuth (api-proxy only)
+    "/credentials/opencode/auth.json"        # OpenCode OAuth (api-proxy only)
+    "$HOME/.codex/auth.json"                 # Should not exist in sandbox
+    "$HOME/.gemini/oauth_creds.json"         # Should not exist in sandbox
 )
+# Note: /etc/proxy-stubs is checked separately below (stub files section)
 
 for f in "${CRED_FILES[@]}"; do
     if [[ -f "$f" ]]; then
