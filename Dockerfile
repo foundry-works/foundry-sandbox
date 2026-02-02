@@ -88,6 +88,7 @@ RUN rm -f /usr/lib/python*/EXTERNALLY-MANAGED
 
 # Install AI tools globally as root (to /usr/local, survives tmpfs on /home)
 # global-agent is needed for claude-zai to route DNS through the HTTP proxy
+# Note: tavily-mcp is installed at runtime if TAVILY_API_KEY is available (see entrypoint.sh)
 RUN npm install -g @anthropic-ai/claude-code \
     && npm install -g @google/gemini-cli \
     && npm install -g @openai/codex \
