@@ -15,6 +15,9 @@ ubuntu ALL=(ALL) NOPASSWD: /usr/sbin/service * status
 ubuntu ALL=(ALL) NOPASSWD: /usr/local/bin/network-firewall.sh
 ubuntu ALL=(ALL) NOPASSWD: /usr/local/bin/network-mode *
 
+# DNS configuration (for credential isolation gateway)
+ubuntu ALL=(ALL) NOPASSWD: /usr/bin/tee /etc/resolv.conf
+
 # Add other safe commands as needed:
 # ubuntu ALL=(ALL) NOPASSWD: /usr/bin/npm *
 # ubuntu ALL=(ALL) NOPASSWD: /usr/bin/pip *

@@ -151,6 +151,210 @@ LFS_PATTERNS = [
 UPSTREAM_HOST = 'github.com'
 UPSTREAM_PROTOCOL = 'https'
 
+# Zero SHA for detecting branch creation/deletion
+ZERO_SHA = '0' * 40
+
+
+def parse_pktline(data: bytes) -> list:
+    """
+    Parse git pkt-line format from git-receive-pack request body.
+
+    Git uses pkt-line format for protocol communication. Each line starts with
+    a 4-character hex length prefix (including the 4 bytes of the length itself).
+    A length of '0000' indicates a flush packet (end of section).
+
+    For push operations, the format is:
+    <old-sha> <new-sha> <refname>\0<capabilities>
+    or for subsequent lines:
+    <old-sha> <new-sha> <refname>
+
+    Args:
+        data: Raw bytes from git-receive-pack request body
+
+    Returns:
+        list: List of tuples (old_sha, new_sha, refname, capabilities)
+              capabilities is a string for the first ref, empty string for others
+    """
+    updates = []
+    pos = 0
+
+    while pos < len(data):
+        # Read 4-byte length prefix
+        if pos + 4 > len(data):
+            break
+
+        try:
+            length_hex = data[pos:pos + 4].decode('ascii')
+            length = int(length_hex, 16)
+        except (ValueError, UnicodeDecodeError):
+            break
+
+        # Flush packet (0000) marks end of section
+        if length == 0:
+            pos += 4
+            continue
+
+        # Length includes the 4-byte prefix itself
+        if length < 4 or pos + length > len(data):
+            break
+
+        # Extract line content (excluding length prefix)
+        line_data = data[pos + 4:pos + length]
+        pos += length
+
+        # Skip empty lines
+        if not line_data:
+            continue
+
+        # Try to decode as UTF-8
+        try:
+            line = line_data.decode('utf-8').rstrip('\n')
+        except UnicodeDecodeError:
+            continue
+
+        # Parse ref update line: <old-sha> <new-sha> <refname>[\0<capabilities>]
+        # First line may have capabilities after null byte
+        capabilities = ''
+        if '\0' in line:
+            line, capabilities = line.split('\0', 1)
+
+        parts = line.split(' ', 2)
+        if len(parts) >= 3:
+            old_sha, new_sha, refname = parts[0], parts[1], parts[2]
+            # Validate SHA format (40 hex characters)
+            if len(old_sha) == 40 and len(new_sha) == 40:
+                updates.append((old_sha, new_sha, refname, capabilities))
+
+    return updates
+
+
+def is_fast_forward(old_sha: str, new_sha: str, owner: str, repo: str) -> bool:
+    """
+    Check if a ref update is a fast-forward (new_sha is descendant of old_sha).
+
+    Uses GitHub API compare endpoint to determine ancestry. A fast-forward
+    update means the new commit is reachable from the old commit by following
+    parent links - i.e., no history is being rewritten.
+
+    Args:
+        old_sha: Current SHA of the ref on remote
+        new_sha: New SHA being pushed
+        owner: Repository owner
+        repo: Repository name
+
+    Returns:
+        bool: True if fast-forward (safe), False if force push (history rewrite)
+    """
+    # If old_sha is zero, this is a new branch creation (always allowed)
+    if old_sha == ZERO_SHA:
+        return True
+
+    # If new_sha is zero, this is a branch deletion (handled separately)
+    if new_sha == ZERO_SHA:
+        return True  # Let deletion check handle this
+
+    try:
+        github_token = get_github_token()
+        headers = {
+            'Authorization': f'token {github_token}',
+            'Accept': 'application/vnd.github.v3+json',
+        }
+
+        # Use GitHub compare API: GET /repos/{owner}/{repo}/compare/{base}...{head}
+        # If head is ahead of base with 0 behind, it's a fast-forward
+        compare_url = f'https://api.github.com/repos/{owner}/{repo}/compare/{old_sha}...{new_sha}'
+
+        response = requests.get(
+            compare_url,
+            headers=headers,
+            timeout=(10, 30)  # 10s connect, 30s read
+        )
+
+        if response.status_code == 200:
+            data = response.json()
+            # Fast-forward: new commit is ahead, old commit is not behind
+            # "behind_by" = 0 means old_sha is an ancestor of new_sha
+            behind_by = data.get('behind_by', -1)
+            if behind_by == 0:
+                return True
+            else:
+                # Non-zero behind_by means old_sha has commits not in new_sha
+                # This is a history rewrite (force push)
+                logger.warning(f'Non-fast-forward detected: {old_sha[:8]}..{new_sha[:8]} (behind_by={behind_by})')
+                return False
+
+        elif response.status_code == 404:
+            # Commits not found - could be new commits not yet on GitHub
+            # Be conservative: block to prevent potential history rewrite
+            logger.warning(f'Compare API returned 404 for {old_sha[:8]}..{new_sha[:8]} - blocking as precaution')
+            return False
+
+        else:
+            # API error - be conservative and block
+            logger.error(f'GitHub compare API error: {response.status_code}')
+            return False
+
+    except Exception as e:
+        # On error, be conservative and block
+        logger.error(f'Error checking fast-forward: {e}')
+        return False
+
+
+def check_ref_updates(request_body: bytes, owner: str, repo: str) -> tuple:
+    """
+    Check git-receive-pack request for disallowed ref changes.
+
+    Blocks:
+    - Branch/tag deletion (new_sha = 0000...)
+    - Force push / history rewrite (non-fast-forward updates)
+    - All variants: --force, --force-with-lease, --force-if-includes, +refspec
+
+    Args:
+        request_body: Raw bytes from git-receive-pack POST body
+        owner: Repository owner
+        repo: Repository name
+
+    Returns:
+        tuple: (blocked_updates, details) where:
+               blocked_updates is a list of blocked ref update dicts
+               details is a human-readable summary string
+    """
+    updates = parse_pktline(request_body)
+    blocked = []
+
+    for old_sha, new_sha, refname, capabilities in updates:
+        # Check for branch/tag deletion
+        if new_sha == ZERO_SHA:
+            blocked.append({
+                'ref': refname,
+                'reason': 'deletion_blocked',
+                'message': f'Deleting refs is not allowed: {refname}',
+                'old_sha': old_sha[:8],
+                'new_sha': '(delete)',
+            })
+            continue
+
+        # Check for force push (non-fast-forward)
+        # Skip if this is a new branch creation
+        if old_sha != ZERO_SHA:
+            if not is_fast_forward(old_sha, new_sha, owner, repo):
+                blocked.append({
+                    'ref': refname,
+                    'reason': 'force_push_blocked',
+                    'message': f'Force push not allowed (history rewrite detected): {refname}',
+                    'old_sha': old_sha[:8],
+                    'new_sha': new_sha[:8],
+                })
+                continue
+
+    if blocked:
+        refs = [b['ref'] for b in blocked]
+        details = f"Blocked {len(blocked)} ref update(s): {', '.join(refs)}"
+    else:
+        details = None
+
+    return blocked, details
+
 # Default policy hook allows all operations
 def get_github_token():
     """
@@ -977,6 +1181,43 @@ def git_proxy(owner, repo, git_path):
         })
         return Response('Gateway configuration error: GitHub token not available', status=503)
 
+    # For git-receive-pack (push), check for force push / history rewriting operations
+    # This requires buffering the request body to parse pkt-line format
+    request_body_bytes = None
+    if git_path == 'git-receive-pack' and request.method == 'POST':
+        # Read request body for force push detection
+        # Note: This buffers the body in memory, but push request bodies are typically small
+        # (they contain ref updates, not the actual pack data which comes later)
+        request_body_bytes = request.get_data()
+
+        # Check for blocked ref updates (force push, deletion, etc.)
+        blocked_updates, block_details = check_ref_updates(request_body_bytes, owner, repo)
+
+        if blocked_updates:
+            audit_log('git_denied', extra_data={
+                'reason': 'history_protection',
+                'owner': owner,
+                'repo': repo,
+                'path': git_path,
+                'blocked_updates': blocked_updates,
+                'details': block_details
+            })
+
+            # Return detailed error response
+            error_response = {
+                'error': 'History protection: operation blocked',
+                'message': 'This operation would rewrite git history, which is not allowed.',
+                'blocked_refs': [b['ref'] for b in blocked_updates],
+                'details': [b['message'] for b in blocked_updates],
+                'hint': 'Committed history is immutable. Use git revert to undo changes instead of rewriting history.'
+            }
+            return Response(
+                json.dumps(error_response, indent=2),
+                status=403,
+                mimetype='application/json',
+                headers={'X-Sandbox-Blocked': 'true'}
+            )
+
     # Proxy to GitHub with streaming support
     # Initialize proxied_request before try block for reliable cleanup
     proxied_request = None
@@ -1003,12 +1244,17 @@ def git_proxy(owner, repo, git_path):
         # Replace Authorization header with GitHub token
         headers['Authorization'] = f'token {github_token}'
 
-        # Stream request body to avoid buffering large payloads (e.g., git push)
-        # Use request.stream for memory-bounded streaming instead of request.get_data()
+        # Determine request body for upstream
+        # If we already read the body for force push detection, use that
+        # Otherwise, stream it for memory efficiency
         request_body = None
         if request.method in ['POST', 'PUT']:
-            # Use streaming to avoid loading entire request into memory
-            request_body = request.stream
+            if request_body_bytes is not None:
+                # Use buffered body from force push check
+                request_body = request_body_bytes
+            else:
+                # Use streaming to avoid loading entire request into memory
+                request_body = request.stream
 
         # Make streaming request with configurable timeouts
         proxied_request = requests.request(

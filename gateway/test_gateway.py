@@ -1162,5 +1162,312 @@ class TestCheckHostnameAllowlist:
             gateway.WILDCARD_DOMAINS = original
 
 
+# =============================================================================
+# Force Push / History Protection Tests
+# =============================================================================
+
+class TestParsePktline:
+    """Tests for git pkt-line format parsing."""
+
+    def test_parse_simple_ref_update(self):
+        """Parse a simple ref update line."""
+        # Format: 4-char hex length + old_sha + new_sha + refname
+        old_sha = 'a' * 40
+        new_sha = 'b' * 40
+        refname = 'refs/heads/main'
+        line = f"{old_sha} {new_sha} {refname}"
+        # Length includes the 4 bytes of length prefix + newline
+        length = len(line) + 4 + 1
+        pktline = f"{length:04x}{line}\n".encode()
+
+        result = gateway.parse_pktline(pktline)
+        assert len(result) == 1
+        assert result[0][0] == old_sha
+        assert result[0][1] == new_sha
+        assert result[0][2] == refname
+
+    def test_parse_ref_update_with_capabilities(self):
+        """Parse ref update with capabilities (first line format)."""
+        old_sha = 'a' * 40
+        new_sha = 'b' * 40
+        refname = 'refs/heads/main'
+        capabilities = 'report-status side-band-64k'
+        line = f"{old_sha} {new_sha} {refname}\x00{capabilities}"
+        length = len(line) + 4 + 1
+        pktline = f"{length:04x}{line}\n".encode()
+
+        result = gateway.parse_pktline(pktline)
+        assert len(result) == 1
+        assert result[0][0] == old_sha
+        assert result[0][1] == new_sha
+        assert result[0][2] == refname
+        assert result[0][3] == capabilities
+
+    def test_parse_multiple_ref_updates(self):
+        """Parse multiple ref updates."""
+        updates = []
+        data = b''
+        for i, ref in enumerate(['refs/heads/main', 'refs/heads/feature']):
+            old_sha = chr(ord('a') + i) * 40
+            new_sha = chr(ord('c') + i) * 40
+            line = f"{old_sha} {new_sha} {ref}"
+            length = len(line) + 4 + 1
+            data += f"{length:04x}{line}\n".encode()
+            updates.append((old_sha, new_sha, ref))
+
+        result = gateway.parse_pktline(data)
+        assert len(result) == 2
+        for i, (old_sha, new_sha, ref) in enumerate(updates):
+            assert result[i][0] == old_sha
+            assert result[i][1] == new_sha
+            assert result[i][2] == ref
+
+    def test_parse_branch_deletion(self):
+        """Parse branch deletion (new_sha = zeros)."""
+        old_sha = 'a' * 40
+        new_sha = '0' * 40  # Deletion
+        refname = 'refs/heads/to-delete'
+        line = f"{old_sha} {new_sha} {refname}"
+        length = len(line) + 4 + 1
+        pktline = f"{length:04x}{line}\n".encode()
+
+        result = gateway.parse_pktline(pktline)
+        assert len(result) == 1
+        assert result[0][1] == '0' * 40  # Deletion marker
+
+    def test_parse_branch_creation(self):
+        """Parse branch creation (old_sha = zeros)."""
+        old_sha = '0' * 40  # Creation
+        new_sha = 'b' * 40
+        refname = 'refs/heads/new-branch'
+        line = f"{old_sha} {new_sha} {refname}"
+        length = len(line) + 4 + 1
+        pktline = f"{length:04x}{line}\n".encode()
+
+        result = gateway.parse_pktline(pktline)
+        assert len(result) == 1
+        assert result[0][0] == '0' * 40  # Creation marker
+
+    def test_parse_flush_packet(self):
+        """Flush packet (0000) is handled correctly."""
+        old_sha = 'a' * 40
+        new_sha = 'b' * 40
+        refname = 'refs/heads/main'
+        line = f"{old_sha} {new_sha} {refname}"
+        length = len(line) + 4 + 1
+        # Data with flush packet at end
+        data = f"{length:04x}{line}\n0000".encode()
+
+        result = gateway.parse_pktline(data)
+        assert len(result) == 1  # Only one real update
+
+    def test_parse_empty_data(self):
+        """Empty data returns empty list."""
+        result = gateway.parse_pktline(b'')
+        assert result == []
+
+    def test_parse_malformed_data(self):
+        """Malformed data is handled gracefully."""
+        result = gateway.parse_pktline(b'not valid pktline data')
+        assert result == []
+
+
+class TestCheckRefUpdates:
+    """Tests for ref update checking (force push detection)."""
+
+    def test_branch_deletion_blocked(self):
+        """Branch deletion is blocked."""
+        old_sha = 'a' * 40
+        new_sha = '0' * 40  # Deletion
+        refname = 'refs/heads/main'
+        line = f"{old_sha} {new_sha} {refname}"
+        length = len(line) + 4 + 1
+        pktline = f"{length:04x}{line}\n".encode()
+
+        blocked, details = gateway.check_ref_updates(pktline, 'owner', 'repo')
+        assert len(blocked) == 1
+        assert blocked[0]['reason'] == 'deletion_blocked'
+        assert 'refs/heads/main' in blocked[0]['ref']
+
+    def test_branch_creation_allowed(self):
+        """Branch creation (new branch) is allowed."""
+        old_sha = '0' * 40  # Creation
+        new_sha = 'b' * 40
+        refname = 'refs/heads/new-branch'
+        line = f"{old_sha} {new_sha} {refname}"
+        length = len(line) + 4 + 1
+        pktline = f"{length:04x}{line}\n".encode()
+
+        # Mock is_fast_forward to not be called (creation skips it)
+        blocked, details = gateway.check_ref_updates(pktline, 'owner', 'repo')
+        assert len(blocked) == 0
+
+    def test_force_push_blocked(self):
+        """Force push (non-fast-forward) is blocked."""
+        old_sha = 'a' * 40
+        new_sha = 'b' * 40
+        refname = 'refs/heads/main'
+        line = f"{old_sha} {new_sha} {refname}"
+        length = len(line) + 4 + 1
+        pktline = f"{length:04x}{line}\n".encode()
+
+        # Mock is_fast_forward to return False (force push)
+        with patch.object(gateway, 'is_fast_forward', return_value=False):
+            blocked, details = gateway.check_ref_updates(pktline, 'owner', 'repo')
+            assert len(blocked) == 1
+            assert blocked[0]['reason'] == 'force_push_blocked'
+
+    def test_fast_forward_allowed(self):
+        """Fast-forward push is allowed."""
+        old_sha = 'a' * 40
+        new_sha = 'b' * 40
+        refname = 'refs/heads/main'
+        line = f"{old_sha} {new_sha} {refname}"
+        length = len(line) + 4 + 1
+        pktline = f"{length:04x}{line}\n".encode()
+
+        # Mock is_fast_forward to return True (normal push)
+        with patch.object(gateway, 'is_fast_forward', return_value=True):
+            blocked, details = gateway.check_ref_updates(pktline, 'owner', 'repo')
+            assert len(blocked) == 0
+
+
+class TestIsFastForward:
+    """Tests for fast-forward detection via GitHub API."""
+
+    def test_new_branch_is_fast_forward(self):
+        """Creating a new branch (old_sha=0) is considered fast-forward."""
+        result = gateway.is_fast_forward('0' * 40, 'b' * 40, 'owner', 'repo')
+        assert result is True
+
+    def test_deletion_deferred(self):
+        """Deletion (new_sha=0) returns True (handled separately)."""
+        result = gateway.is_fast_forward('a' * 40, '0' * 40, 'owner', 'repo')
+        assert result is True
+
+    def test_fast_forward_via_api(self):
+        """Fast-forward detected via GitHub API (behind_by=0)."""
+        with patch.object(gateway, 'get_github_token', return_value='fake-token'):
+            with patch('gateway.requests.get') as mock_get:
+                mock_response = MagicMock()
+                mock_response.status_code = 200
+                mock_response.json.return_value = {'behind_by': 0, 'ahead_by': 5}
+                mock_get.return_value = mock_response
+
+                result = gateway.is_fast_forward('a' * 40, 'b' * 40, 'owner', 'repo')
+                assert result is True
+
+    def test_non_fast_forward_via_api(self):
+        """Non-fast-forward detected via GitHub API (behind_by>0)."""
+        with patch.object(gateway, 'get_github_token', return_value='fake-token'):
+            with patch('gateway.requests.get') as mock_get:
+                mock_response = MagicMock()
+                mock_response.status_code = 200
+                mock_response.json.return_value = {'behind_by': 3, 'ahead_by': 5}
+                mock_get.return_value = mock_response
+
+                result = gateway.is_fast_forward('a' * 40, 'b' * 40, 'owner', 'repo')
+                assert result is False
+
+    def test_api_404_blocks_conservatively(self):
+        """API 404 (commits not found) blocks as precaution."""
+        with patch.object(gateway, 'get_github_token', return_value='fake-token'):
+            with patch('gateway.requests.get') as mock_get:
+                mock_response = MagicMock()
+                mock_response.status_code = 404
+                mock_get.return_value = mock_response
+
+                result = gateway.is_fast_forward('a' * 40, 'b' * 40, 'owner', 'repo')
+                assert result is False
+
+    def test_api_error_blocks_conservatively(self):
+        """API error blocks as precaution."""
+        with patch.object(gateway, 'get_github_token', return_value='fake-token'):
+            with patch('gateway.requests.get') as mock_get:
+                mock_get.side_effect = Exception('Connection error')
+
+                result = gateway.is_fast_forward('a' * 40, 'b' * 40, 'owner', 'repo')
+                assert result is False
+
+
+class TestGitProxyHistoryProtection:
+    """Integration tests for history protection in git proxy endpoint."""
+
+    def test_force_push_blocked_at_proxy(self, client, session_data):
+        """Force push to git-receive-pack is blocked at proxy level."""
+        # Create pkt-line data for a force push scenario
+        old_sha = 'a' * 40
+        new_sha = 'b' * 40
+        refname = 'refs/heads/main'
+        line = f"{old_sha} {new_sha} {refname}"
+        length = len(line) + 4 + 1
+        pktline = f"{length:04x}{line}\n0000".encode()
+
+        with patch.object(gateway, 'get_github_token', return_value='fake-token'):
+            with patch.object(gateway, 'is_fast_forward', return_value=False):
+                response = client.post(
+                    '/git/owner/repo.git/git-receive-pack',
+                    data=pktline,
+                    content_type='application/x-git-receive-pack-request',
+                    headers={'Authorization': f"Bearer {session_data['token']}:{session_data['secret']}"},
+                    environ_base={'REMOTE_ADDR': '10.0.0.1'}
+                )
+
+                assert response.status_code == 403
+                data = json.loads(response.data)
+                assert 'History protection' in data['error']
+                assert 'refs/heads/main' in data['blocked_refs']
+
+    def test_branch_deletion_blocked_at_proxy(self, client, session_data):
+        """Branch deletion via git-receive-pack is blocked."""
+        old_sha = 'a' * 40
+        new_sha = '0' * 40  # Deletion
+        refname = 'refs/heads/feature'
+        line = f"{old_sha} {new_sha} {refname}"
+        length = len(line) + 4 + 1
+        pktline = f"{length:04x}{line}\n0000".encode()
+
+        with patch.object(gateway, 'get_github_token', return_value='fake-token'):
+            response = client.post(
+                '/git/owner/repo.git/git-receive-pack',
+                data=pktline,
+                content_type='application/x-git-receive-pack-request',
+                headers={'Authorization': f"Bearer {session_data['token']}:{session_data['secret']}"},
+                environ_base={'REMOTE_ADDR': '10.0.0.1'}
+            )
+
+            assert response.status_code == 403
+            data = json.loads(response.data)
+            assert 'History protection' in data['error']
+
+    def test_normal_push_allowed(self, client, session_data):
+        """Normal fast-forward push is allowed."""
+        old_sha = 'a' * 40
+        new_sha = 'b' * 40
+        refname = 'refs/heads/main'
+        line = f"{old_sha} {new_sha} {refname}"
+        length = len(line) + 4 + 1
+        pktline = f"{length:04x}{line}\n0000".encode()
+
+        with patch.object(gateway, 'get_github_token', return_value='fake-token'):
+            with patch.object(gateway, 'is_fast_forward', return_value=True):
+                with patch('gateway.requests.request') as mock_request:
+                    mock_response = MagicMock()
+                    mock_response.status_code = 200
+                    mock_response.headers = {'Content-Type': 'application/x-git-receive-pack-result'}
+                    mock_response.iter_content = MagicMock(return_value=[b'ok'])
+                    mock_request.return_value = mock_response
+
+                    response = client.post(
+                        '/git/owner/repo.git/git-receive-pack',
+                        data=pktline,
+                        content_type='application/x-git-receive-pack-request',
+                        headers={'Authorization': f"Bearer {session_data['token']}:{session_data['secret']}"},
+                        environ_base={'REMOTE_ADDR': '10.0.0.1'}
+                    )
+
+                    assert response.status_code == 200
+
+
 if __name__ == '__main__':
     pytest.main([__file__, '-v'])

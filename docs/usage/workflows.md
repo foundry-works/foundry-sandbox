@@ -232,13 +232,6 @@ codexdsp    # alias for: codex --dangerously-bypass-approvals-and-sandbox
 opencode
 ```
 
-### Cursor Agent
-
-```bash
-# Requires CURSOR_API_KEY
-cursor
-```
-
 ### Setting API Keys
 
 On your host (before creating sandbox):
@@ -257,7 +250,6 @@ API keys are passed via environment variables. Set them in your shell profile or
 
 ```bash
 export CLAUDE_CODE_OAUTH_TOKEN="..."   # Get via: claude setup-token
-export CURSOR_API_KEY="key-..."
 export TAVILY_API_KEY="..."
 # Note: Gemini uses OAuth via ~/.gemini/ (run `gemini auth` on host)
 ```
@@ -388,21 +380,17 @@ curl https://anything.com  # fails
 ### Runtime Network Switching
 
 ```bash
-# Start with full network
-cast new owner/repo feature --network=full
+# Start with limited network (default)
+cast new owner/repo feature --network=limited
 
-# Inside container, restrict later
-sudo network-mode limited
-
-# Check current status
+# Inside container, check current status
 sudo network-mode status
 
-# Add a custom domain if needed
-sudo network-mode allow custom-api.example.com
-
-# Switch back to full when needed
-sudo network-mode full
+# Switch to host-only for local testing
+sudo network-mode host-only
 ```
+
+Note: To allow additional domains beyond the default whitelist, set `SANDBOX_ALLOWED_DOMAINS` on the host before creating the sandbox (runtime additions are disabled for security).
 
 ### Host-Only for Local Services
 

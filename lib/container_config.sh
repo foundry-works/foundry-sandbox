@@ -1522,7 +1522,6 @@ copy_configs_to_container() {
         "$CONTAINER_HOME/.gemini" \
         "$CONTAINER_HOME/.config/opencode" \
         "$CONTAINER_HOME/.local/share/opencode" \
-        "$CONTAINER_HOME/.cursor" \
         "$CONTAINER_HOME/.codex" \
         "$CONTAINER_HOME/.ssh" \
         "$CONTAINER_HOME/.ssh/sockets"
@@ -1532,12 +1531,18 @@ copy_configs_to_container() {
         copy_file_to_container "$container_id" ~/.claude.json "$CONTAINER_HOME/.claude.json"
         copy_file_to_container "$container_id" ~/.claude.json "$CONTAINER_HOME/.claude/.claude.json"
     fi
+    # Fix ownership immediately (docker exec may run as root in credential isolation mode)
+    docker exec "$container_id" chown -R "$CONTAINER_USER:$CONTAINER_USER" "$CONTAINER_HOME/.claude" "$CONTAINER_HOME/.claude.json" 2>/dev/null || true
     ensure_claude_onboarding "$container_id"
     ensure_foundry_mcp_config "$container_id"
     if file_exists ~/.claude/settings.json; then
         copy_file_to_container "$container_id" ~/.claude/settings.json "$CONTAINER_HOME/.claude/settings.json"
     fi
-    file_exists ~/.claude/statusline.conf && copy_file_to_container "$container_id" ~/.claude/statusline.conf "$CONTAINER_HOME/.claude/statusline.conf"
+    if file_exists ~/.claude/statusline.conf; then
+        copy_file_to_container "$container_id" ~/.claude/statusline.conf "$CONTAINER_HOME/.claude/statusline.conf"
+    elif file_exists "$SCRIPT_DIR/statusline.conf"; then
+        copy_file_to_container "$container_id" "$SCRIPT_DIR/statusline.conf" "$CONTAINER_HOME/.claude/statusline.conf"
+    fi
     ensure_claude_statusline "$container_id"
     dir_exists ~/.config/gh && copy_dir_to_container "$container_id" ~/.config/gh "$CONTAINER_HOME/.config/gh"
     # Skip auth file copies when credential isolation is enabled (they're mounted as stubs)
@@ -1556,7 +1561,6 @@ copy_configs_to_container() {
     elif file_exists "$SCRIPT_DIR/opencode.json"; then
         copy_file_to_container "$container_id" "$SCRIPT_DIR/opencode.json" "$CONTAINER_HOME/.config/opencode/opencode.json"
     fi
-    file_exists ~/.cursor/cli-config.json && copy_file_to_container "$container_id" ~/.cursor/cli-config.json "$CONTAINER_HOME/.cursor/cli-config.json"
     # Skip settings writes when credential isolation is enabled (dirs may be read-only)
     if [ "$isolate_credentials" != "true" ]; then
         ensure_gemini_settings "$container_id"
@@ -1605,7 +1609,6 @@ copy_configs_to_container() {
             $CONTAINER_HOME/.claude \
             $CONTAINER_HOME/.config \
             $CONTAINER_HOME/.gemini \
-            $CONTAINER_HOME/.cursor \
             $CONTAINER_HOME/.codex \
             $CONTAINER_HOME/.ssh \
             $CONTAINER_HOME/.sandboxes \
@@ -1658,7 +1661,11 @@ sync_runtime_credentials() {
     if file_exists ~/.claude/settings.json; then
         copy_file_to_container_quiet "$container_id" ~/.claude/settings.json "$CONTAINER_HOME/.claude/settings.json"
     fi
-    file_exists ~/.claude/statusline.conf && copy_file_to_container_quiet "$container_id" ~/.claude/statusline.conf "$CONTAINER_HOME/.claude/statusline.conf"
+    if file_exists ~/.claude/statusline.conf; then
+        copy_file_to_container_quiet "$container_id" ~/.claude/statusline.conf "$CONTAINER_HOME/.claude/statusline.conf"
+    elif file_exists "$SCRIPT_DIR/statusline.conf"; then
+        copy_file_to_container_quiet "$container_id" "$SCRIPT_DIR/statusline.conf" "$CONTAINER_HOME/.claude/statusline.conf"
+    fi
     ensure_claude_foundry_mcp "$container_id" "1"
     ensure_claude_statusline "$container_id" "1"
     dir_exists ~/.config/gh && copy_dir_to_container_quiet "$container_id" ~/.config/gh "$CONTAINER_HOME/.config/gh"
@@ -1669,7 +1676,6 @@ sync_runtime_credentials() {
         copy_file_to_container_quiet "$container_id" "$SCRIPT_DIR/opencode.json" "$CONTAINER_HOME/.config/opencode/opencode.json"
     fi
     file_exists ~/.local/share/opencode/auth.json && copy_file_to_container_quiet "$container_id" ~/.local/share/opencode/auth.json "$CONTAINER_HOME/.local/share/opencode/auth.json"
-    file_exists ~/.cursor/cli-config.json && copy_file_to_container_quiet "$container_id" ~/.cursor/cli-config.json "$CONTAINER_HOME/.cursor/cli-config.json"
     sync_opencode_foundry "$container_id" "1"
     ensure_opencode_default_model "$container_id" "1"
     ensure_gemini_settings "$container_id" "1"

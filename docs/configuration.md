@@ -25,7 +25,6 @@ API keys are passed to containers via environment variables. Set them in your sh
 ```bash
 # AI Provider Keys (at least one required)
 export CLAUDE_CODE_OAUTH_TOKEN="..."   # Get via: claude setup-token
-export CURSOR_API_KEY="key-..."
 
 # Search Provider Keys (optional - for deep research features)
 export TAVILY_API_KEY="..."

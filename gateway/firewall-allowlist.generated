@@ -1,9 +1,9 @@
 #!/bin/bash
 #
 # Firewall allowlist configuration (auto-generated)
-# Generated from: /home/tyler/GitHub/foundry-sandbox/gateway/allowlist.conf
+# Generated from: gateway/allowlist.conf
 # DO NOT EDIT MANUALLY - use build-configs.sh to regenerate
-# Generated: Sun 01 Feb 2026 09:21:47 AM EST
+# Generated: Sat 01 Feb 2026
 #
 # This file is sourced by safety/network-firewall.sh
 # Provides domain, rotating domain, and CIDR allowlists
@@ -19,14 +19,6 @@ declare -a ALLOWLIST_DOMAINS=(
     "gist.github.com"
     "gist.api.github.com"
     "gist.githubusercontent.com"
-    "registry.npmjs.org"
-    "pypi.org"
-    "files.pythonhosted.org"
-    "proxy.golang.org"
-    "sum.golang.org"
-    "crates.io"
-    "static.crates.io"
-    "production.cloudflare.docker.com"
     "api.anthropic.com"
     "console.anthropic.com"
     "claude.ai"
@@ -34,28 +26,13 @@ declare -a ALLOWLIST_DOMAINS=(
     "cloudcode-pa.googleapis.com"
     "accounts.google.com"
     "oauth2.googleapis.com"
-    "api.groq.com"
-    "api.mistral.ai"
-    "api.deepseek.com"
-    "api.together.xyz"
-    "api.cohere.com"
-    "api.fireworks.ai"
-    "openrouter.ai"
     "api.z.ai"
     "open.bigmodel.cn"
-    "marketplace.cursorapi.com"
-    "cursor-cdn.com"
-    "download.todesktop.com"
     "opencode.ai"
     "opncd.ai"
-    "models.dev"
-    "api.githubcopilot.com"
     "api.tavily.com"
     "api.perplexity.ai"
     "api.semanticscholar.org"
-    "www.googleapis.com"
-    "registry-1.docker.io"
-    "auth.docker.io"
 )
 
 # Rotating IP domains (resolved multiple times to capture IP pool)
@@ -64,46 +41,21 @@ declare -a ROTATING_IP_DOMAINS=(
 
 # CIDR blocks (from allowlist.conf comments)
 declare -a CIDR_BLOCKS=(
-    "140.82.112.0/20"
-    "192.30.252.0/22"
-    "185.199.108.0/22"
-    "143.55.64.0/20"
-    "173.245.48.0/20"
-    "103.21.244.0/22"
-    "103.22.200.0/22"
-    "103.31.4.0/22"
-    "141.101.64.0/18"
-    "108.162.192.0/18"
-    "190.93.240.0/20"
-    "188.114.96.0/20"
-    "197.234.240.0/22"
-    "198.41.128.0/17"
-    "162.158.0.0/15"
-    "104.16.0.0/13"
-    "104.24.0.0/14"
-    "172.64.0.0/13"
-    "131.0.72.0/22"
 )
 
 # Known IPs that don't resolve via public DNS
 declare -a KNOWN_IPS=(
-    "44.197.141.31"   # api5.cursor.sh
-    "184.73.249.78"   # api2.cursor.sh
+    # (No hardcoded IPs currently needed)
 )
 
 # Wildcard domains (for pattern matching)
 declare -a WILDCARD_DOMAINS=(
-    "*.cloudfront.net"
-    "*.fastly.net"
     "*.openai.com"
     "*.chatgpt.com"
-    "*.cursor.com"
-    "*.cursor.sh"
 )
 
 # Statistics
-# Total domains: 51
+# Total domains: 24
 # Rotating IP domains: 0
-# Wildcard domains: 6
-# CIDR blocks: 19
-
+# Wildcard domains: 2
+# CIDR blocks: 0

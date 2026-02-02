@@ -285,7 +285,6 @@ Then: `cast build`
 
 | Mode | Description |
 |------|-------------|
-| `full` | Unrestricted network access |
 | `limited` | Whitelist only (github, npm, pypi, AI APIs) **(default)** |
 | `host-only` | Local network only (Docker gateway, private subnets) |
 | `none` | Complete block (loopback only) |
@@ -295,9 +294,6 @@ Then: `cast build`
 ```bash
 # Limited to whitelist (default)
 cast new owner/repo feature
-
-# Full network
-cast new owner/repo feature --network=full
 
 # Local network only
 cast new owner/repo feature --network=host-only
@@ -317,12 +313,11 @@ sudo network-mode status
 # Switch to limited
 sudo network-mode limited
 
-# Switch back to full
-sudo network-mode full
-
-# Add a domain to whitelist (in limited mode)
-sudo network-mode allow custom-domain.com
+# Switch to host-only
+sudo network-mode host-only
 ```
+
+Note: Runtime domain additions are disabled for security. To allow additional domains, set `SANDBOX_ALLOWED_DOMAINS` on the host before creating the sandbox.
 
 ### Default Whitelist (Limited Mode)
 

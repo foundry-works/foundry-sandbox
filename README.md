@@ -12,7 +12,7 @@ Foundry Sandbox solves this by providing isolated Docker environments with defen
 
 - **Ephemeral Workspaces** - Git worktrees per sandbox; destroy when done with no trace
 - **Defense in Depth** - 6 safety layers from shell overrides to read-only root filesystem
-- **Multiple AI Tools** - Claude Code, Gemini CLI, Codex CLI, OpenCode, and Cursor Agent pre-installed
+- **Multiple AI Tools** - Claude Code, Gemini CLI, Codex CLI, and OpenCode pre-installed
 - **Fast Creation** - Worktrees share git objects; new sandboxes spin up in seconds
 - **Network Control** - Full, limited (whitelist), host-only, or no network access
 - **Credential Isolation** - Optional proxy mode keeps API keys out of sandboxes entirely
@@ -61,7 +61,6 @@ claude              # Claude Code
 gemini              # Gemini CLI
 codex               # Codex CLI
 opencode            # OpenCode
-cursor              # Cursor Agent
 ```
 
 **3. Commit and push your changes**

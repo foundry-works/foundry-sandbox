@@ -119,14 +119,11 @@ The real security comes from Layers 2 and 3, plus the read-only filesystem.
 
 ### Network Access
 
-By default, sandboxes use limited network access. You can change the mode using the `--network` flag:
+By default, sandboxes use limited network access (whitelist only). You can change the mode using the `--network` flag:
 
 ```bash
 # Limited to whitelist (default)
 cast new owner/repo feature
-
-# Full network access
-cast new owner/repo feature --network=full
 
 # Local network only (Docker gateway, private subnets)
 cast new owner/repo feature --network=host-only
@@ -135,12 +132,9 @@ cast new owner/repo feature --network=host-only
 cast new owner/repo feature --network=none
 ```
 
-With full network access, an AI could:
-- Exfiltrate code to external servers
-- Make API calls with your credentials
-- Download and execute arbitrary code
+The limited mode restricts network access to essential services (github, npm, pypi, AI APIs) while blocking all other outbound connections. To allow additional domains, set `SANDBOX_ALLOWED_DOMAINS` on the host before creating the sandbox.
 
-**Recommendation:** For sensitive codebases, use `--network=limited` to restrict access to only necessary services while still allowing git push, npm install, and AI API calls.
+**Recommendation:** Use the default `--network=limited` mode for all development to restrict access to only necessary services while still allowing git push, npm install, and AI API calls.
 
 ### Malicious Users
 

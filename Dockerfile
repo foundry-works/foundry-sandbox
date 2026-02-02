@@ -15,6 +15,7 @@ RUN apt-get update && apt-get install -y \
     ca-certificates \
     gnupg \
     sudo \
+    gosu \
     ripgrep \
     fd-find \
     fzf \
@@ -103,18 +104,12 @@ RUN PROVIDERS_DIR=$(python3 -c "import foundry_mcp.core.providers as p; print(p.
     mkdir -p "$PROVIDERS_DIR/node_modules" && \
     ln -sf /usr/local/lib/node_modules/@opencode-ai "$PROVIDERS_DIR/node_modules/@opencode-ai"
 
-# Install Cursor Agent to /opt (survives tmpfs on /home)
-RUN mkdir -p /opt/cursor && \
-    curl https://cursor.com/install -fsS | HOME=/opt/cursor bash && \
-    ln -sf /opt/cursor/.local/bin/agent /usr/local/bin/agent && \
-    ln -sf /opt/cursor/.local/bin/cursor-agent /usr/local/bin/cursor-agent
-
 # Add useful aliases to system bashrc (before switching to non-root user)
 # Home directory is tmpfs at runtime, so user .bashrc won't persist
 # API keys are passed via environment variables (docker-compose), not sourced from files
 RUN echo "alias claudedsp='claude --dangerously-skip-permissions'" >> /etc/bash.bashrc && \
     echo "alias codexdsp='codex --dangerously-bypass-approvals-and-sandbox'" >> /etc/bash.bashrc && \
-    echo "alias reinstall-foundry='sudo network-mode full && claude plugin marketplace add foundry-works/claude-foundry && claude plugin install foundry@claude-foundry && claude plugin enable foundry@claude-foundry && sudo network-mode limited'" >> /etc/bash.bashrc
+    echo "alias reinstall-foundry='claude plugin marketplace add foundry-works/claude-foundry && claude plugin install foundry@claude-foundry && claude plugin enable foundry@claude-foundry'" >> /etc/bash.bashrc
 
 # Install bash completions for sandbox aliases
 COPY safety/sandbox-completions.bash /etc/bash_completion.d/sandbox-completions
@@ -139,9 +134,10 @@ RUN chmod 644 /etc/gitconfig.gateway
 COPY safety/gateway-credential-helper /usr/local/bin/gateway-credential-helper
 RUN chmod 755 /usr/local/bin/gateway-credential-helper
 
-# Copy entrypoint to system path (not /home which is tmpfs)
+# Copy entrypoints to system path (not /home which is tmpfs)
 COPY entrypoint.sh /usr/local/bin/entrypoint.sh
-RUN chmod +x /usr/local/bin/entrypoint.sh
+COPY entrypoint-root.sh /usr/local/bin/entrypoint-root.sh
+RUN chmod +x /usr/local/bin/entrypoint.sh /usr/local/bin/entrypoint-root.sh
 
 USER $USERNAME
 WORKDIR /workspace

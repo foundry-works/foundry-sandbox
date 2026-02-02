@@ -13,7 +13,7 @@ parse_new_args() {
     NEW_WORKING_DIR=""
     NEW_SPARSE_CHECKOUT=false
     NEW_PIP_REQUIREMENTS=""
-    NEW_ISOLATE_CREDENTIALS=false
+    NEW_ISOLATE_CREDENTIALS=true
     NEW_ALLOW_DANGEROUS_MOUNT=false
 
     while [ $# -gt 0 ]; do
@@ -65,8 +65,8 @@ parse_new_args() {
             --sparse)
                 NEW_SPARSE_CHECKOUT=true
                 ;;
-            --isolate-credentials|--isolate)
-                NEW_ISOLATE_CREDENTIALS=true
+            --no-isolate-credentials|--no-isolate)
+                NEW_ISOLATE_CREDENTIALS=false
                 ;;
             --allow-dangerous-mount)
                 NEW_ALLOW_DANGEROUS_MOUNT=true

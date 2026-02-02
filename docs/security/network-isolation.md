@@ -95,7 +95,8 @@ Additional iptables rules in `safety/network-firewall.sh`:
 **Container-level (OUTPUT chain):**
 - Allow traffic to gateway and api-proxy
 - Allow DNS only to configured resolvers
-- Allow traffic to allowlisted domains/CIDRs
+- Allow traffic to allowlisted domains (resolved at startup)
+- Wildcard mode: open ports 80/443 (security via DNS filtering)
 - Drop all other outbound traffic
 
 **Host-level (DOCKER-USER chain):**

@@ -7,7 +7,6 @@ mkdir -p "$HOME/.claude" \
          "$HOME/.gemini" \
          "$HOME/.config/opencode" \
          "$HOME/.local/share/opencode" \
-         "$HOME/.cursor" \
          "$HOME/.codex" \
          "$HOME/.ssh" \
          "$HOME/.local/bin" \
@@ -34,6 +33,9 @@ fi
 # Set up npm prefix for user-local installs
 npm config set prefix "$HOME/.local" 2>/dev/null || true
 
+# Suppress Ubuntu's "To run a command as administrator" hint
+touch ~/.sudo_as_admin_successful
+
 # Add foundry-upgrade alias for easy MCP plugin updates
 echo "alias foundry-upgrade='pip install --pre --upgrade foundry-mcp'" >> ~/.bashrc
 
@@ -45,10 +47,10 @@ claude-zai() {
     GLOBAL_AGENT_HTTP_PROXY="http://api-proxy:8080" \
     GLOBAL_AGENT_HTTPS_PROXY="http://api-proxy:8080" \
     GLOBAL_AGENT_NO_PROXY="localhost,127.0.0.1" \
-    NODE_OPTIONS="--require $(npm root -g)/global-agent/bootstrap.js" \
+    NODE_OPTIONS="--require /usr/lib/node_modules/global-agent/bootstrap.js" \
     CLAUDE_CODE_OAUTH_TOKEN= \
     ANTHROPIC_BASE_URL="https://api.z.ai/api/anthropic" \
-    ANTHROPIC_API_KEY="${ZHIPU_API_KEY:-CREDENTIAL_PROXY_PLACEHOLDER}" \
+    ANTHROPIC_API_KEY="${ZHIPU_API_KEY:-PROXY_PLACEHOLDER_OPENCODE}" \
     API_TIMEOUT_MS=3000000 \
     ANTHROPIC_DEFAULT_OPUS_MODEL="GLM-4.7" \
     ANTHROPIC_DEFAULT_SONNET_MODEL="GLM-4.7" \
@@ -124,18 +126,26 @@ fi
 
 # Configure DNS to use gateway's dnsmasq when in gateway mode
 # This enables domain allowlisting - only approved domains can be resolved
-# We resolve the gateway IP dynamically to avoid static IP conflicts between sandboxes
+# Note: In credential-isolation mode, DNS is configured by entrypoint-root.sh (as root)
+# before this script runs. This block handles non-credential-isolation gateway mode.
 if [ "$SANDBOX_GATEWAY_ENABLED" = "true" ]; then
-    echo "Configuring DNS to use gateway..."
-    # Resolve gateway hostname using Docker's internal DNS (127.0.0.11)
-    GATEWAY_IP=$(getent hosts gateway | awk '{print $1}' | head -1)
-    if [ -n "$GATEWAY_IP" ]; then
-        echo "Gateway IP: $GATEWAY_IP"
-        # Configure resolv.conf to use gateway as DNS server
-        echo "nameserver $GATEWAY_IP" | sudo tee /etc/resolv.conf > /dev/null
-        echo "DNS configured to use gateway at $GATEWAY_IP"
+    # Check if DNS is already configured (by root wrapper)
+    if grep -q "gateway" /etc/resolv.conf 2>/dev/null || grep -q "172\." /etc/resolv.conf 2>/dev/null; then
+        echo "DNS already configured for gateway"
     else
-        echo "Warning: Could not resolve gateway hostname, using default DNS"
+        echo "Configuring DNS to use gateway..."
+        # Resolve gateway hostname using Docker's internal DNS (127.0.0.11)
+        GATEWAY_IP=$(getent hosts gateway | awk '{print $1}' | head -1)
+        if [ -n "$GATEWAY_IP" ]; then
+            echo "Gateway IP: $GATEWAY_IP"
+            # Configure resolv.conf to use gateway as DNS server
+            # This requires sudo permission (see safety/sudoers-allowlist)
+            echo "nameserver $GATEWAY_IP" | sudo tee /etc/resolv.conf > /dev/null 2>&1 || \
+                echo "Warning: Could not write to /etc/resolv.conf (read-only?)"
+            echo "DNS configured to use gateway at $GATEWAY_IP"
+        else
+            echo "Warning: Could not resolve gateway hostname, using default DNS"
+        fi
     fi
 fi
 

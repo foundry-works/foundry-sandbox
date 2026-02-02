@@ -7,7 +7,6 @@ Credentials are read from environment variables and injected as headers.
 Provider Credential Map:
 - api.anthropic.com: Authorization Bearer from CLAUDE_CODE_OAUTH_TOKEN,
                      or x-api-key from ANTHROPIC_API_KEY
-- api2.cursor.sh: Authorization Bearer from CURSOR_API_KEY
 - api.openai.com: Authorization Bearer from OPENAI_API_KEY
 - generativelanguage.googleapis.com: x-goog-api-key from GOOGLE_API_KEY (or GEMINI_API_KEY)
 - api.tavily.com: Authorization Bearer from TAVILY_API_KEY
@@ -44,7 +43,7 @@ except ImportError:
 
 # Import OpenCode API key manager (available when OPENCODE_AUTH_FILE is set)
 try:
-    from opencode_key_manager import OpenCodeKeyManager
+    from opencode_token_manager import OpenCodeKeyManager
 except ImportError:
     OpenCodeKeyManager = None  # type: ignore[misc, assignment]
 
@@ -87,11 +86,6 @@ PROVIDER_MAP = {
         "alt_env_var": "CLAUDE_CODE_OAUTH_TOKEN",
         "alt_header": "Authorization",
         "alt_format": "bearer",
-    },
-    "api2.cursor.sh": {
-        "header": "Authorization",
-        "env_var": "CURSOR_API_KEY",
-        "format": "bearer",
     },
     "api.openai.com": {
         "header": "Authorization",
@@ -343,11 +337,9 @@ class CredentialInjector:
 
         Checks if request is to Zhipu API hosts (open.bigmodel.cn, api.z.ai)
         and injects the API key from the zai-coding-plan provider.
+        Falls back to ZHIPU_API_KEY env var if auth file not available.
         Returns True if API key was injected, False otherwise.
         """
-        if not self.opencode_manager:
-            return False
-
         auth_header = flow.request.headers.get("Authorization", "")
         if OPENCODE_PLACEHOLDER not in auth_header:
             return False
@@ -356,24 +348,38 @@ class CredentialInjector:
         if host not in ZHIPU_API_HOSTS:
             return False
 
-        # Get API key for zai-coding-plan provider
-        if not self.opencode_manager.has_provider("zai-coding-plan"):
-            ctx.log.warn("OpenCode zai-coding-plan provider not configured in auth file")
-            return False
+        api_key = None
 
-        try:
-            api_key = self.opencode_manager.get_api_key("zai-coding-plan")
-            flow.request.headers["Authorization"] = f"Bearer {api_key}"
-            ctx.log.info(f"Injected API key for OpenCode zai-coding-plan ({host})")
-            return True
-        except Exception as e:
-            ctx.log.error(f"Failed to get OpenCode API key for zai-coding-plan: {e}")
-            flow.response = http.Response.make(
-                500,
-                json.dumps({"error": f"OpenCode API key error: {e}"}).encode(),
-                {"Content-Type": "application/json"},
-            )
-            return True
+        # Try to get API key from OpenCode auth file first
+        if self.opencode_manager:
+            if self.opencode_manager.has_provider("zai-coding-plan"):
+                try:
+                    api_key = self.opencode_manager.get_api_key("zai-coding-plan")
+                    ctx.log.info(f"Got API key from OpenCode auth file for zai-coding-plan")
+                except Exception as e:
+                    ctx.log.warn(f"Failed to get API key from OpenCode auth file: {e}")
+            else:
+                ctx.log.warn("OpenCode zai-coding-plan provider not configured in auth file")
+        else:
+            ctx.log.info("OpenCode manager not available, trying ZHIPU_API_KEY env var")
+
+        # Fall back to ZHIPU_API_KEY env var if auth file didn't work
+        if not api_key:
+            api_key = os.environ.get("ZHIPU_API_KEY")
+            if api_key:
+                ctx.log.info(f"Got API key from ZHIPU_API_KEY env var for OpenCode")
+            else:
+                ctx.log.error("No API key available: neither OpenCode auth file nor ZHIPU_API_KEY env var")
+                flow.response = http.Response.make(
+                    500,
+                    json.dumps({"error": "Credential not configured: ZHIPU_API_KEY not set and OpenCode auth file not available"}).encode(),
+                    {"Content-Type": "application/json"},
+                )
+                return True
+
+        flow.request.headers["Authorization"] = f"Bearer {api_key}"
+        ctx.log.info(f"Injected API key for OpenCode zai-coding-plan ({host})")
+        return True
 
     def _handle_gemini_oauth_injection(self, flow: http.HTTPFlow) -> bool:
         """

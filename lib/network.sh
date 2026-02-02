@@ -3,8 +3,7 @@
 # Network mode management for sandbox containers
 #
 # Supported modes:
-#   full       - Unrestricted network access (default)
-#   limited    - Whitelist only (github, npm, pypi, AI APIs, deep research APIs)
+#   limited    - Whitelist only (github, npm, pypi, AI APIs, deep research APIs) - default
 #   host-only  - Local network only (Docker gateway, private subnets)
 #   none       - Complete block (loopback only)
 #
@@ -13,11 +12,17 @@
 validate_network_mode() {
     local mode="$1"
     case "$mode" in
-        full|limited|host-only|none)
+        limited|host-only|none)
             return 0
             ;;
+        full)
+            die "Network mode 'full' has been removed for security reasons.
+Available modes: limited (default), host-only, none
+
+To allow additional domains, set SANDBOX_ALLOWED_DOMAINS before creating the sandbox."
+            ;;
         *)
-            die "Invalid network mode: $mode (use: full, limited, host-only, none)"
+            die "Invalid network mode: $mode (use: limited, host-only, none)"
             ;;
     esac
 }
@@ -33,20 +38,9 @@ generate_network_config() {
             # True Docker network isolation - no network interface at all
             echo "    network_mode: \"none\"" >> "$override_file"
             ;;
-        full)
-            # Full mode: still need capabilities for runtime switching
-            # SYS_ADMIN needed for cursor-agent's internal namespace sandbox
-            cat >> "$override_file" <<EOF
-    cap_add:
-      - NET_ADMIN
-      - SYS_ADMIN
-    environment:
-      - SANDBOX_NETWORK_MODE=full
-EOF
-            ;;
         limited|host-only)
             # Limited/host-only: use bridge network + iptables
-            # Add capabilities for iptables and cursor-agent's namespace sandbox
+            # Add capabilities for iptables
             cat >> "$override_file" <<EOF
     cap_add:
       - NET_ADMIN

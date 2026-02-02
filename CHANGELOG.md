@@ -35,7 +35,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Hostname allowlist validation tests
 
 ### Changed
-- Cursor domain configuration simplified from individual domains to wildcards (`*.cursor.com`, `*.cursor.sh`)
 - Removed rotating IP domain handling (replaced by wildcard mode)
 
 ## [0.5.8] - 2026-01-29
@@ -256,7 +255,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Network modes: full, limited (whitelist), host-only, none
 - Volume mount support (`--mount`, `--copy`)
 - SSH agent forwarding (`--with-ssh`)
-- Pre-installed AI tools: Claude Code, Gemini CLI, Codex CLI, OpenCode, Cursor Agent
+- Pre-installed AI tools: Claude Code, Gemini CLI, Codex CLI, OpenCode
 - Pre-installed claude-foundry plugin with MCP server
 - JSON output for all commands (`--json`)
 - Tab completion for bash

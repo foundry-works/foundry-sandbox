@@ -11,6 +11,7 @@ MITMPROXY_CA_DIR="${HOME}/.mitmproxy"
 MITMPROXY_CA_CERT="${MITMPROXY_CA_DIR}/mitmproxy-ca-cert.pem"
 SHARED_CERTS_DIR="/etc/proxy/certs"
 ADDON_PATH="/opt/proxy/inject-credentials.py"
+GITHUB_FILTER_PATH="/opt/proxy/github-api-filter.py"
 
 log() {
     echo "[$(date -Iseconds)] $*"
@@ -55,6 +56,12 @@ verify_addon() {
         return 1
     fi
     log "Credential injection addon found"
+
+    if [[ ! -f "${GITHUB_FILTER_PATH}" ]]; then
+        log "ERROR: GitHub API filter addon not found at ${GITHUB_FILTER_PATH}"
+        return 1
+    fi
+    log "GitHub API filter addon found"
 }
 
 disable_missing_auth_file() {
@@ -78,6 +85,7 @@ start_mitmproxy() {
         --set confdir="${MITMPROXY_CA_DIR}"
         --set block_global=false
         --set connection_strategy=lazy
+        -s "${GITHUB_FILTER_PATH}"
         -s "${ADDON_PATH}"
     )
 

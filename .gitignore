@@ -10,3 +10,4 @@ specs/.research
 __pycache__/
 .claude-tmp/
 *.coverage
+.env

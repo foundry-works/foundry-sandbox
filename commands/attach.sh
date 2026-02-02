@@ -43,11 +43,7 @@ cmd_attach() {
             log_debug "Skipping credential sync on attach (SANDBOX_SYNC_ON_ATTACH=0)"
         fi
 
-        # Refresh firewall IPs for rotating domains (if limited mode)
-        if [ "${SANDBOX_NETWORK_MODE:-}" = "limited" ]; then
-            log_debug "Refreshing firewall IPs for rotating domains..."
-            docker exec "$container_id" sudo /usr/local/bin/network-firewall.sh refresh 2>/dev/null || true
-        fi
+        # Note: Firewall IP refresh removed - wildcard mode handles rotating IPs via DNS filtering
     fi
 
     # Ensure metadata is loaded for working_dir (may not be loaded if container was started above)

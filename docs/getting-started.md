@@ -28,7 +28,7 @@ curl -fsSL https://raw.githubusercontent.com/foundry-works/foundry-sandbox/main/
 This installs to `~/.foundry-sandbox` and:
 - Adds the `cast` alias to your shell
 - Enables tab completion
-- Builds the Docker image (Ubuntu 24.04-based with Node.js, Go, Python, Claude Code, Gemini CLI, Codex CLI, OpenCode, Cursor Agent, and safety guardrails)
+- Builds the Docker image (Ubuntu 24.04-based with Node.js, Go, Python, Claude Code, Gemini CLI, Codex CLI, OpenCode, and safety guardrails)
 
 After installation, reload your shell:
 
@@ -115,9 +115,6 @@ codexdsp     # alias for: codex --dangerously-bypass-approvals-and-sandbox
 
 # OpenCode
 opencode
-
-# Cursor Agent
-cursor
 ```
 
 ### Navigate and Edit

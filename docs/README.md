@@ -1,6 +1,6 @@
 # Foundry Sandbox Documentation
 
-Foundry Sandbox provides ephemeral, isolated development environments for AI-assisted coding. Each sandbox runs in a Docker container with security guardrails that protect your host system and git history from accidental damage, while still giving AI coding assistants (Claude Code, Gemini CLI, Codex CLI, OpenCode, Cursor Agent) the tools they need to be productive.
+Foundry Sandbox provides ephemeral, isolated development environments for AI-assisted coding. Each sandbox runs in a Docker container with security guardrails that protect your host system and git history from accidental damage, while still giving AI coding assistants (Claude Code, Gemini CLI, Codex CLI, OpenCode) the tools they need to be productive.
 
 The key insight: AI assistants can hallucinate dangerous commands or act without full context. Sandboxes let them work freely while limiting blast radius.
 
@@ -8,7 +8,7 @@ The key insight: AI assistants can hallucinate dangerous commands or act without
 
 - **Ephemeral workspaces** - Each sandbox gets a fresh git worktree; destroy it when done
 - **Security guardrails** - Defense in depth with multiple safety layers
-- **Pre-installed AI tools** - Claude Code, Gemini CLI, Codex CLI, OpenCode, Cursor Agent ready to use
+- **Pre-installed AI tools** - Claude Code, Gemini CLI, Codex CLI, OpenCode ready to use
 - **Read-only root** - Container filesystem prevents `rm -rf /` even via bypass attempts
 - **Tmpfs isolation** - Home directory resets on container restart
 

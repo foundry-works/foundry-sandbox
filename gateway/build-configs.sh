@@ -213,8 +213,7 @@ generate_firewall_allowlist() {
     # Export hardcoded known IPs
     content+="# Known IPs that don't resolve via public DNS\n"
     content+="declare -a KNOWN_IPS=(\n"
-    content+="    \"44.197.141.31\"   # api5.cursor.sh\n"
-    content+="    \"184.73.249.78\"   # api2.cursor.sh\n"
+    content+="    # (No hardcoded IPs currently needed)\n"
     content+=")\n\n"
 
     # Export wildcard domains

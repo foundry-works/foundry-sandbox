@@ -25,6 +25,8 @@ COPY inject-credentials.py /opt/proxy/inject-credentials.py
 COPY codex-token-manager.py /opt/proxy/codex_token_manager.py
 COPY opencode-token-manager.py /opt/proxy/opencode_token_manager.py
 COPY gemini-token-manager.py /opt/proxy/gemini_token_manager.py
+# Copy the GitHub API security filter
+COPY github-api-filter.py /opt/proxy/github-api-filter.py
 
 # Copy the entrypoint script
 COPY entrypoint.sh /opt/proxy/entrypoint.sh

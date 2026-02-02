@@ -85,15 +85,15 @@ cmd_new() {
         echo "  --mount, -v host:container[:ro]  Mount host path into container"
         echo "  --copy, -c  host:container       Copy host path into container (once at creation)"
         echo "  --network, -n <mode>             Network isolation mode (default: limited)"
-        echo "                                   Modes: full, limited, host-only, none"
+        echo "                                   Modes: limited, host-only, none"
         echo "  --with-ssh                       Enable SSH agent forwarding (opt-in, agent-only)"
         echo "  --skip-key-check                 Skip API key validation"
         echo "  --wd <path>                      Working directory within repo (relative path)"
         echo "  --sparse                         Enable sparse checkout (requires --wd)"
         echo "  --pip-requirements, -r <path>    Install Python packages from requirements.txt"
         echo "                                   Use 'auto' to detect /workspace/requirements.txt"
-        echo "  --isolate-credentials, --isolate Isolate API keys in a proxy container"
-        echo "                                   Keys never enter sandbox; injected by proxy"
+        echo "  --no-isolate-credentials         Disable credential isolation (enabled by default)"
+        echo "                                   Pass API keys directly to sandbox"
         echo "  --allow-dangerous-mount          Bypass credential directory protection blocklist"
         echo "                                   (dangerous - use only with caution)"
         echo ""
@@ -107,7 +107,7 @@ cmd_new() {
         echo "  $0 new user/repo feature --network=limited  # restrict network to whitelist"
         echo "  $0 new user/monorepo feature --wd packages/backend"
         echo "  $0 new user/monorepo feature --wd packages/backend --sparse"
-        echo "  $0 new user/repo feature --isolate-credentials  # credentials in proxy"
+        echo "  $0 new user/repo feature --no-isolate-credentials  # pass keys directly"
         exit 1
     fi
 
@@ -271,12 +271,9 @@ OVERRIDES
     fi
 
     # Add network mode configuration
-    if [ -n "$network_mode" ] && [ "$network_mode" != "full" ]; then
+    if [ -n "$network_mode" ]; then
         echo "Setting network mode: $network_mode"
         add_network_to_override "$network_mode" "$override_file"
-    elif [ "$network_mode" = "full" ]; then
-        # Full mode: still add capabilities for runtime switching
-        add_network_to_override "full" "$override_file"
     fi
 
     claude_home_path=$(path_claude_home "$name")
@@ -338,7 +335,7 @@ OVERRIDES
             compose_down "$worktree_dir" "$claude_config_path" "$container" "$override_file" "true" "$isolate_credentials"
             echo ""
             echo "Gateway session creation failed. See error messages above for remediation."
-            echo "To create sandbox without credential isolation, omit --isolate-credentials flag."
+            echo "To create sandbox without credential isolation, use --no-isolate-credentials flag."
             exit 1
         fi
         # Export gateway enabled flag for container_config.sh
@@ -375,7 +372,7 @@ OVERRIDES
     fi
 
     # Apply network restrictions AFTER plugin/MCP registration completes
-    if [ -n "$network_mode" ] && [ "$network_mode" != "full" ]; then
+    if [ -n "$network_mode" ]; then
         echo "Applying network mode: $network_mode"
         if [ "$network_mode" = "limited" ]; then
             run_cmd docker exec "$container_id" sudo /usr/local/bin/network-firewall.sh

@@ -17,8 +17,9 @@ tmux_create_session() {
     local scrollback="${SANDBOX_TMUX_SCROLLBACK:-200000}"
     local mouse="${SANDBOX_TMUX_MOUSE:-1}"
 
+    # Use -u to run as the sandbox user (not root, even though container starts as root for DNS setup)
     tmux new-session -d -s "$session" -c "$worktree_path" \
-        "docker exec -it ${container}-dev-1 $exec_cmd; echo 'Container exited. Press enter to close.'; read"
+        "docker exec -u ${CONTAINER_USER:-ubuntu} -it ${container}-dev-1 $exec_cmd; echo 'Container exited. Press enter to close.'; read"
     tmux set-option -t "$session" history-limit "$scrollback" 2>/dev/null || true
     if [ "$mouse" = "1" ]; then
         tmux set-option -t "$session" mouse on 2>/dev/null || true

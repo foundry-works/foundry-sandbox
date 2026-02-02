@@ -9,28 +9,21 @@
 # - GitHub: github.com, api.github.com, gist.github.com, etc.
 # - Package registries: npm, pypi, go, cargo
 # - AI APIs: Anthropic, OpenAI, Google (Gemini)
-# - AI Tools: Cursor
+# - AI Tools: OpenCode, GitHub Copilot
 # - Research: Tavily, Perplexity, Semantic Scholar, Google CSE
 # - Docker Hub
 #
 # Add custom domains via: SANDBOX_ALLOWED_DOMAINS="domain1.com,domain2.com"
 #
-# DNS Resolution Behavior:
-# ========================
-# Domains are resolved to IP addresses ONCE at startup. If external services
-# change their IPs (e.g., load balancer rotation, DNS failover), connections
-# will fail until the firewall rules are refreshed.
+# Wildcard Mode:
+# ==============
+# When wildcard domains (*.openai.com, etc.) are configured, the firewall
+# opens ports 80/443 to any destination. Security is maintained through:
+# 1. DNS filtering (dnsmasq only resolves allowlisted domains)
+# 2. Gateway hostname validation (blocks requests to non-allowlisted hosts)
 #
-# For domains known to use rotating IPs (Cursor API endpoints), multiple
-# DNS lookups are performed to capture more IPs from the rotation pool.
-# However, this is still a snapshot in time.
-#
-# To refresh IPs without full restart, use:
-#   ./network-firewall.sh refresh
-#
-# For long-running sandboxes or if you notice connectivity issues:
-# - Restart the sandbox to re-resolve all domains
-# - Or run the refresh command to update rotating domain IPs
+# For non-wildcard domains, IPs are resolved ONCE at startup. If external
+# services change their IPs, restart the sandbox to re-resolve.
 #
 
 set -e
@@ -40,173 +33,32 @@ log_verbose() {
     [ "$SANDBOX_DEBUG" = "1" ] && echo "$@" || true
 }
 
-# Domains that use load balancer IP rotation (resolve multiple times)
-# NOTE: This array is defined early so it's available for refresh_rotating_ips()
-ROTATING_IP_DOMAINS=(
-    "api2.cursor.sh"
-    "api3.cursor.sh"
-    "api4.cursor.sh"
-    "api5.cursor.sh"
-    "api6.cursor.sh"
-    "api7.cursor.sh"
-    "api8.cursor.sh"
-)
-
-# Function to refresh rotating domain IPs (can be called separately)
-# NOTE: Defined early so we can exit early when called with "refresh"
-refresh_rotating_ips() {
-    log_verbose "Refreshing IPs for rotating domains..."
-    for domain in "${ROTATING_IP_DOMAINS[@]}"; do
-        log_verbose "  Refreshing: $domain"
-        for i in {1..5}; do
-            local ips_raw ip
-            ips_raw=$(dig +short "$domain" A 2>/dev/null | grep -E '^[0-9]+\.' || true)
-            # Use read loop to safely iterate over IPs without word splitting issues
-            while IFS= read -r ip; do
-                [ -z "$ip" ] && continue
-                if command -v ipset &>/dev/null && ipset list sandbox_allow_v4 &>/dev/null; then
-                    ipset add -exist sandbox_allow_v4 "$ip" 2>/dev/null || true
-                else
-                    # Add rule if not already present (iptables will just fail silently on duplicate)
-                    iptables -C OUTPUT -d "$ip" -j ACCEPT 2>/dev/null || \
-                        iptables -I OUTPUT -d "$ip" -j ACCEPT 2>/dev/null || true
-                fi
-            done <<< "$ips_raw"
-            sleep 0.2
-        done
-    done
-    log_verbose "Refresh complete."
-}
-
-# Handle refresh-only mode (must come before full setup)
-# This avoids resolving rotating domains twice when called from attach.sh
-if [ "${1:-}" = "refresh" ]; then
-    refresh_rotating_ips
-    exit 0
-fi
-
 # Use ipset for efficient allowlists when available.
 IPSET_V4="sandbox_allow_v4"
 IPSET_V6="sandbox_allow_v6"
 USE_IPSET=false
 
-# Default whitelisted domains for AI development workflows
-DEFAULT_DOMAINS=(
-    # GitHub
-    "github.com"
-    "api.github.com"
-    "raw.githubusercontent.com"
-    "objects.githubusercontent.com"
-    "codeload.github.com"
-    "gist.github.com"
-    "gist.githubusercontent.com"
-
-    # NPM Registry
-    "registry.npmjs.org"
-
-    # PyPI
-    "pypi.org"
-    "files.pythonhosted.org"
-
-    # Go modules
-    "proxy.golang.org"
-    "sum.golang.org"
-
-    # Rust/Cargo
-    "crates.io"
-    "static.crates.io"
-
-    # AI Provider APIs (major)
-    "api.anthropic.com"
-    "generativelanguage.googleapis.com"
-    "api.openai.com"
-
-    # OpenAI OAuth (needed for Codex CLI)
-    "auth.openai.com"
-    "platform.openai.com"
-    "chatgpt.com"
-
-    # Claude Code OAuth
-    "claude.ai"
-    "console.anthropic.com"
-
-    # Google OAuth (needed for Gemini CLI auth)
-    "accounts.google.com"
-    "oauth2.googleapis.com"
-
-    # AI Provider APIs (alternative)
-    "api.groq.com"
-    "api.mistral.ai"
-    "api.deepseek.com"
-    "api.together.xyz"
-    "api.cohere.com"
-    "api.fireworks.ai"
-    "openrouter.ai"
-
-    # Z.AI / Zhipu (GLM models)
-    "api.z.ai"
-    "open.bigmodel.cn"
-
-    # AI Coding Tools - Cursor (expanded)
-    "cursor.com"
-    "www.cursor.com"
-    "api.cursor.com"
-    "api2.cursor.sh"
-    "api3.cursor.sh"
-    "api4.cursor.sh"
-    "api5.cursor.sh"
-    "api6.cursor.sh"
-    "api7.cursor.sh"
-    "api8.cursor.sh"
-    "agent.api5.cursor.sh"
-    "www2.cursor.sh"
-    "authenticate.cursor.sh"
-    "authenticator.cursor.sh"
-    "prod.authentication.cursor.sh"
-    "us-asia.gcpp.cursor.sh"
-    "us-eu.gcpp.cursor.sh"
-    "us-only.gcpp.cursor.sh"
-    "repo42.cursor.sh"
-    "marketplace.cursorapi.com"
-    "cursor-cdn.com"
-    "downloads.cursor.com"
-    "download.todesktop.com"
-    "opencode.ai"
-    "models.dev"
-    "opncd.ai"
-    "api.githubcopilot.com"
-
-    # Deep Research APIs (content extraction handled server-side)
-    "api.tavily.com"
-    "api.perplexity.ai"
-    "api.semanticscholar.org"
-    "www.googleapis.com"
-
-    # Docker Hub (for pulling images if needed)
-    "registry-1.docker.io"
-    "auth.docker.io"
-    "production.cloudflare.docker.com"
-)
-
 # Parse additional domains from environment variable
 EXTRA_DOMAINS=()
-if [ -n "$SANDBOX_ALLOWED_DOMAINS" ]; then
+if [ -n "${SANDBOX_ALLOWED_DOMAINS:-}" ]; then
     IFS=',' read -ra EXTRA_DOMAINS <<< "$SANDBOX_ALLOWED_DOMAINS"
 fi
 
-# Combine default and extra domains
-ALL_DOMAINS=("${DEFAULT_DOMAINS[@]}" "${EXTRA_DOMAINS[@]}")
+# Initialize domain arrays (will be populated from generated file)
+ALLOWLIST_DOMAINS=()
+ALL_DOMAINS=()
 
 # ============================================================================
-# Wildcard Domain Support
+# Domain Allowlist Configuration
 # ============================================================================
+# Domains are loaded from the generated allowlist file (gateway/firewall-allowlist.generated)
+# which is the single source of truth derived from gateway/allowlist.conf.
+#
 # When wildcard domains (*.example.com) are configured, we cannot pre-resolve
 # IPs at firewall setup time. Instead, we:
 # 1. Open egress on ports 80/443 (HTTP/HTTPS)
 # 2. Rely on DNS filtering (dnsmasq) to restrict domain resolution
 # 3. Rely on gateway hostname validation to enforce allowlist
-#
-# Source the generated allowlist to get WILDCARD_DOMAINS
 # ============================================================================
 WILDCARD_DOMAINS=()
 FIREWALL_ALLOWLIST_FILE="${SCRIPT_DIR:-/workspace/gateway}/firewall-allowlist.generated"
@@ -217,11 +69,17 @@ if [ -z "${SCRIPT_DIR:-}" ]; then
 fi
 
 if [ -f "$FIREWALL_ALLOWLIST_FILE" ]; then
-    # Source the file to get WILDCARD_DOMAINS array
+    # Source the file to get ALLOWLIST_DOMAINS and WILDCARD_DOMAINS arrays
     # shellcheck source=/dev/null
     source "$FIREWALL_ALLOWLIST_FILE"
-    log_verbose "Loaded firewall allowlist: ${#WILDCARD_DOMAINS[@]} wildcard domains"
+    log_verbose "Loaded firewall allowlist: ${#ALLOWLIST_DOMAINS[@]} domains, ${#WILDCARD_DOMAINS[@]} wildcards"
+else
+    log_verbose "Warning: Firewall allowlist not found at $FIREWALL_ALLOWLIST_FILE"
+    log_verbose "         Using empty allowlist - only DNS and gateway traffic will be allowed"
 fi
+
+# Combine allowlist domains with any extra domains from environment
+ALL_DOMAINS=("${ALLOWLIST_DOMAINS[@]}" "${EXTRA_DOMAINS[@]}")
 
 # Check if wildcard mode should be enabled
 WILDCARD_MODE=false
@@ -231,7 +89,7 @@ if [ ${#WILDCARD_DOMAINS[@]} -gt 0 ]; then
 fi
 
 log_verbose "Setting up firewall for limited network mode..."
-log_verbose "Whitelisted domains: ${ALL_DOMAINS[*]}"
+log_verbose "Whitelisted domains: ${#ALL_DOMAINS[@]} explicit + ${#WILDCARD_DOMAINS[@]} wildcards"
 
 # Initialize ipset allowlists if available
 if command -v ipset &>/dev/null; then
@@ -339,59 +197,6 @@ else
     iptables -A OUTPUT -p tcp --dport 53 -j ACCEPT
 fi
 
-# Known IPs for domains that don't resolve via public DNS
-# (e.g., api5.cursor.sh uses hardcoded IPs in the agent binary)
-KNOWN_IPS=(
-    # Cursor Agent backends (AWS us-east-1)
-    "44.197.141.31"   # api5.cursor.sh
-    "184.73.249.78"   # api2.cursor.sh
-)
-
-# Cloudflare IP ranges (Cursor uses CF as proxy)
-# Source: https://www.cloudflare.com/ips-v4
-CLOUDFLARE_CIDRS=(
-    "173.245.48.0/20"
-    "103.21.244.0/22"
-    "103.22.200.0/22"
-    "103.31.4.0/22"
-    "141.101.64.0/18"
-    "108.162.192.0/18"
-    "190.93.240.0/20"
-    "188.114.96.0/20"
-    "197.234.240.0/22"
-    "198.41.128.0/17"
-    "162.158.0.0/15"
-    "104.16.0.0/13"
-    "104.24.0.0/14"
-    "172.64.0.0/13"
-    "131.0.72.0/22"
-)
-
-# GitHub IP ranges (from https://api.github.com/meta)
-# Covers web, api, git, and pages endpoints
-GITHUB_CIDRS=(
-    "140.82.112.0/20"    # Primary GitHub servers
-    "192.30.252.0/22"    # Legacy GitHub
-    "185.199.108.0/22"   # GitHub Pages / raw content
-    "143.55.64.0/20"     # Additional infrastructure
-)
-
-# Cloudflare IPv6 ranges (source: https://www.cloudflare.com/ips-v6)
-CLOUDFLARE_CIDRS_V6=(
-    "2400:cb00::/32"
-    "2606:4700::/32"
-    "2803:f800::/32"
-    "2405:b500::/32"
-    "2405:8100::/32"
-    "2a06:98c0::/29"
-    "2c0f:f248::/32"
-)
-
-# GitHub IPv6 ranges (from https://api.github.com/meta)
-GITHUB_CIDRS_V6=(
-    "2a0a:a440::/29"     # GitHub IPv6 range
-)
-
 # Track already-added IPs to avoid duplicates
 declare -A ADDED_IPS
 
@@ -421,123 +226,42 @@ add_ipv6_rule() {
     fi
 }
 
-# Function to add CIDR range to firewall (IPv4)
-add_cidr_rule() {
-    local cidr="$1"
-    iptables -A OUTPUT -d "$cidr" -j ACCEPT 2>/dev/null || true
-}
-
-# Function to add CIDR range to firewall (IPv6)
-add_cidr_rule_v6() {
-    local cidr="$1"
-    if command -v ip6tables &>/dev/null; then
-        ip6tables -A OUTPUT -d "$cidr" -j ACCEPT 2>/dev/null || true
-    fi
-}
-
 # Function to resolve domain and add rules
 allow_domain() {
     local domain="$1"
     log_verbose "  Allowing: $domain"
 
-    # Check if this domain uses rotating IPs
-    local is_rotating=false
-    for rotating in "${ROTATING_IP_DOMAINS[@]}"; do
-        if [ "$domain" = "$rotating" ]; then
-            is_rotating=true
-            break
-        fi
-    done
+    # Resolve domain to IPv4 addresses
+    local ips_raw ip
+    ips_raw=$(dig +short "$domain" A 2>/dev/null | grep -E '^[0-9]+\.' || true)
 
-    if [ "$is_rotating" = true ]; then
-        # Resolve multiple times to capture more IPs from the rotation pool
-        log_verbose "    (rotating IP domain - resolving multiple times)"
-        local all_ips=""
-        for i in {1..5}; do
-            local ips_raw
-            ips_raw=$(dig +short "$domain" A 2>/dev/null | grep -E '^[0-9]+\.' || true)
-            all_ips="$all_ips"$'\n'"$ips_raw"
-            sleep 0.2
-        done
-        # Deduplicate and add using safe read loop
-        local unique_ips ip
-        unique_ips=$(echo "$all_ips" | sort -u | grep -E '^[0-9]+\.' || true)
-        local ip_count=0
-        while IFS= read -r ip; do
-            [ -z "$ip" ] && continue
-            add_ip_rule "$ip"
-            ((ip_count++)) || true
-        done <<< "$unique_ips"
-        log_verbose "    Added $ip_count unique IPs"
-    else
-        # Standard single resolution
-        local ips_raw ip
-        ips_raw=$(dig +short "$domain" A 2>/dev/null | grep -E '^[0-9]+\.' || true)
+    # Also try AAAA records for IPv6
+    local ipv6s_raw
+    ipv6s_raw=$(dig +short "$domain" AAAA 2>/dev/null | grep -E '^[0-9a-f:]+' || true)
 
-        # Also try AAAA records for IPv6
-        local ipv6s_raw
-        ipv6s_raw=$(dig +short "$domain" AAAA 2>/dev/null | grep -E '^[0-9a-f:]+' || true)
-
-        if [ -z "$ips_raw" ] && [ -z "$ipv6s_raw" ]; then
-            log_verbose "    Warning: Could not resolve $domain"
-            return
-        fi
-
-        # Add rules for each resolved IP using safe read loop
-        while IFS= read -r ip; do
-            [ -z "$ip" ] && continue
-            add_ip_rule "$ip"
-        done <<< "$ips_raw"
-
-        # Add rules for IPv6 using safe read loop
-        while IFS= read -r ip; do
-            [ -z "$ip" ] && continue
-            add_ipv6_rule "$ip"
-        done <<< "$ipv6s_raw"
+    if [ -z "$ips_raw" ] && [ -z "$ipv6s_raw" ]; then
+        log_verbose "    Warning: Could not resolve $domain"
+        return
     fi
+
+    # Add rules for each resolved IP using safe read loop
+    while IFS= read -r ip; do
+        [ -z "$ip" ] && continue
+        add_ip_rule "$ip"
+    done <<< "$ips_raw"
+
+    # Add rules for IPv6 using safe read loop
+    while IFS= read -r ip; do
+        [ -z "$ip" ] && continue
+        add_ipv6_rule "$ip"
+    done <<< "$ipv6s_raw"
 }
 
-# Allow traffic to whitelisted domains
+# Allow traffic to whitelisted domains (non-wildcard domains only)
+# Wildcard domains are handled by opening ports 80/443 in wildcard mode
 for domain in "${ALL_DOMAINS[@]}"; do
     allow_domain "$domain"
 done
-
-# Add known IPs that don't resolve via public DNS
-log_verbose "  Adding known IPs (non-DNS resolved)..."
-for ip in "${KNOWN_IPS[@]}"; do
-    add_ip_rule "$ip"
-    log_verbose "    Added: $ip"
-done
-
-# Allow Cloudflare IP ranges (Cursor uses CF as proxy)
-log_verbose "  Adding Cloudflare CIDR ranges..."
-for cidr in "${CLOUDFLARE_CIDRS[@]}"; do
-    add_cidr_rule "$cidr"
-done
-log_verbose "    Added ${#CLOUDFLARE_CIDRS[@]} Cloudflare CIDR blocks"
-
-# Allow GitHub IP ranges
-log_verbose "  Adding GitHub CIDR ranges..."
-for cidr in "${GITHUB_CIDRS[@]}"; do
-    add_cidr_rule "$cidr"
-done
-log_verbose "    Added ${#GITHUB_CIDRS[@]} GitHub CIDR blocks"
-
-# Allow Cloudflare IPv6 ranges
-if command -v ip6tables &>/dev/null; then
-    log_verbose "  Adding Cloudflare IPv6 CIDR ranges..."
-    for cidr in "${CLOUDFLARE_CIDRS_V6[@]}"; do
-        add_cidr_rule_v6 "$cidr"
-    done
-    log_verbose "    Added ${#CLOUDFLARE_CIDRS_V6[@]} Cloudflare IPv6 CIDR blocks"
-
-    # Allow GitHub IPv6 ranges
-    log_verbose "  Adding GitHub IPv6 CIDR ranges..."
-    for cidr in "${GITHUB_CIDRS_V6[@]}"; do
-        add_cidr_rule_v6 "$cidr"
-    done
-    log_verbose "    Added ${#GITHUB_CIDRS_V6[@]} GitHub IPv6 CIDR blocks"
-fi
 
 # Allow Docker gateway (for host communication)
 # Note: GATEWAY was already resolved earlier for DNS rules
@@ -831,5 +555,9 @@ if [ "${SETUP_DOCKER_USER:-}" = "1" ] && command -v docker &>/dev/null; then
 fi
 
 log_verbose "Firewall rules applied successfully."
-log_verbose "Allowed: ${#ALL_DOMAINS[@]} domains + ${#CLOUDFLARE_CIDRS[@]} Cloudflare CIDRs + ${#GITHUB_CIDRS[@]} GitHub CIDRs + Docker gateway + DNS (resolvers/gateway) + loopback"
+if [ "$WILDCARD_MODE" = "true" ]; then
+    log_verbose "Allowed: ${#ALL_DOMAINS[@]} explicit domains + ${#WILDCARD_DOMAINS[@]} wildcard patterns + ports 80/443 (wildcard mode) + Docker gateway + DNS + loopback"
+else
+    log_verbose "Allowed: ${#ALL_DOMAINS[@]} domains + Docker gateway + DNS (resolvers/gateway) + loopback"
+fi
 log_verbose "All other outbound traffic is blocked."

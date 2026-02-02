@@ -147,7 +147,7 @@ else
         local has_search_key=false
 
         # Check AI provider keys (Gemini uses OAuth via ~/.gemini/, not an API key)
-        for key in CLAUDE_CODE_OAUTH_TOKEN CURSOR_API_KEY; do
+        for key in CLAUDE_CODE_OAUTH_TOKEN; do
             if [ -n "${!key:-}" ]; then
                 has_ai_key=true
                 break
@@ -184,7 +184,6 @@ else
         echo ""
         echo "Expected at least one of:"
         echo "  - CLAUDE_CODE_OAUTH_TOKEN (Claude Code)"
-        echo "  - CURSOR_API_KEY (Cursor)"
         echo "  - ~/.gemini/oauth_creds.json (Gemini CLI via 'gemini auth')"
         echo ""
         if [ "$has_search_key" = "false" ]; then

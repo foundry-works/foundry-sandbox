@@ -100,7 +100,7 @@ cmd_start() {
     fi
 
     # Apply network restrictions AFTER plugin/MCP registration completes
-    if [ -n "${SANDBOX_NETWORK_MODE:-}" ] && [ "$SANDBOX_NETWORK_MODE" != "full" ]; then
+    if [ -n "${SANDBOX_NETWORK_MODE:-}" ]; then
         echo "Applying network mode: $SANDBOX_NETWORK_MODE"
         if [ "$SANDBOX_NETWORK_MODE" = "limited" ]; then
             run_cmd docker exec "$container_id" sudo /usr/local/bin/network-firewall.sh
