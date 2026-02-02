@@ -1,9 +1,9 @@
 #!/bin/bash
 #
 # Firewall allowlist configuration (auto-generated)
-# Generated from: gateway/allowlist.conf
+# Generated from: /gateway/allowlist.conf
 # DO NOT EDIT MANUALLY - use build-configs.sh to regenerate
-# Generated: Sat 01 Feb 2026
+# Generated: Mon Feb  2 01:30:32 UTC 2026
 #
 # This file is sourced by safety/network-firewall.sh
 # Provides domain, rotating domain, and CIDR allowlists
@@ -59,3 +59,4 @@ declare -a WILDCARD_DOMAINS=(
 # Rotating IP domains: 0
 # Wildcard domains: 2
 # CIDR blocks: 0
+

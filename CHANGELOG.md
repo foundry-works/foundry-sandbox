@@ -15,8 +15,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `*.openai.com` and `*.chatgpt.com` wildcards to firewall allowlist
 - `chatgpt.com` and `cloudcode-pa.googleapis.com` to OAuth injection
 - Multi-sandbox support with dynamic DNS configuration
+- **Dual-layer egress filtering**: Defense-in-depth security for credential isolation
+  - API proxy hostname validation: Blocks HTTP requests to non-allowlisted hosts before proxying
+  - DNS default-deny mode: dnsmasq blocks all domains by default, only forwards allowlisted domains
+  - Both layers share the same `firewall-allowlist.generated` configuration
+  - Prevents data exfiltration to arbitrary external services
 
 ### Changed
+- **DNS security hardening**: dnsmasq now uses `no-resolv` and `address=/#/` to block all unallowlisted domains
+- DNS queries forwarded to Docker's internal DNS (127.0.0.11) instead of upstream resolvers
+- Added DNS query logging for security auditing
 - **Default credential isolation**: `--isolate-credentials` is now the default behavior
   - API keys are held in a proxy container and never enter the sandbox
   - Use `--no-isolate-credentials` to opt out (not recommended)

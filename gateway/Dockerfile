@@ -24,6 +24,10 @@ COPY entrypoint.sh .
 # Generate configuration files at build time
 RUN chmod +x build-configs.sh && ./build-configs.sh
 
+# Copy generated dnsmasq config to system location
+# dnsmasq reads from /etc/dnsmasq.conf by default
+RUN cp /app/dnsmasq.conf /etc/dnsmasq.conf
+
 # Make entrypoint executable
 RUN chmod +x entrypoint.sh
 

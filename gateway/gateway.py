@@ -25,40 +25,60 @@ import hmac
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# Wildcard domain allowlist (loaded from config at startup)
-WILDCARD_DOMAINS = []
+# Domain allowlists (loaded from config at startup)
+ALLOWLIST_DOMAINS = []  # Exact domain matches (e.g., "github.com")
+WILDCARD_DOMAINS = []   # Wildcard patterns (e.g., "*.openai.com")
 
-def load_wildcard_config():
+def load_domain_allowlist():
     """
-    Load wildcard domain patterns from firewall-allowlist.generated.
+    Load domain allowlist from firewall-allowlist.generated.
 
-    Parses the WILDCARD_DOMAINS array from the generated config file.
-    Called at module initialization to populate the allowlist.
+    Parses both ALLOWLIST_DOMAINS (exact matches) and WILDCARD_DOMAINS (patterns)
+    from the generated config file. Called at module initialization.
     """
-    global WILDCARD_DOMAINS
+    global ALLOWLIST_DOMAINS, WILDCARD_DOMAINS
     config_path = os.path.join(os.path.dirname(__file__), 'firewall-allowlist.generated')
 
     if not os.path.exists(config_path):
-        logger.warning(f'Wildcard config not found: {config_path}')
+        logger.warning(f'Domain allowlist config not found: {config_path}')
         return
 
     try:
         with open(config_path, 'r') as f:
             content = f.read()
 
+        import re
+
+        # Parse ALLOWLIST_DOMAINS array from bash syntax
+        # Looking for: "domain.com" entries (non-wildcard)
+        allowlist_pattern = r'ALLOWLIST_DOMAINS=\(\s*(.*?)\s*\)'
+        allowlist_match = re.search(allowlist_pattern, content, re.DOTALL)
+        if allowlist_match:
+            # Extract quoted domain strings
+            domains = re.findall(r'"([^"*][^"]*)"', allowlist_match.group(1))
+            ALLOWLIST_DOMAINS = [d.lower() for d in domains]
+            logger.info(f'Loaded {len(ALLOWLIST_DOMAINS)} exact domain patterns')
+
         # Parse WILDCARD_DOMAINS array from bash syntax
         # Looking for: "*.domain.com" entries
-        import re
-        pattern = r'"(\*\.[^"]+)"'
-        matches = re.findall(pattern, content)
-        WILDCARD_DOMAINS = matches
-        logger.info(f'Loaded {len(WILDCARD_DOMAINS)} wildcard domain patterns')
-    except Exception as e:
-        logger.error(f'Failed to load wildcard config: {e}')
+        wildcard_pattern = r'WILDCARD_DOMAINS=\(\s*(.*?)\s*\)'
+        wildcard_match = re.search(wildcard_pattern, content, re.DOTALL)
+        if wildcard_match:
+            wildcards = re.findall(r'"(\*\.[^"]+)"', wildcard_match.group(1))
+            WILDCARD_DOMAINS = [w.lower() for w in wildcards]
+            logger.info(f'Loaded {len(WILDCARD_DOMAINS)} wildcard domain patterns')
 
-def matches_domain_allowlist(hostname: str, wildcards: list = None) -> bool:
+        total = len(ALLOWLIST_DOMAINS) + len(WILDCARD_DOMAINS)
+        logger.info(f'Total domain allowlist: {total} entries')
+
+    except Exception as e:
+        logger.error(f'Failed to load domain allowlist config: {e}')
+
+def matches_domain_allowlist(hostname: str, allowlist: list = None, wildcards: list = None) -> bool:
     """
-    Check if hostname matches any wildcard pattern in the allowlist.
+    Check if hostname matches the domain allowlist.
+
+    Checks against both exact domain matches and wildcard patterns.
 
     Supports suffix wildcards: *.example.com matches:
     - foo.example.com
@@ -71,19 +91,29 @@ def matches_domain_allowlist(hostname: str, wildcards: list = None) -> bool:
 
     Args:
         hostname: The hostname to check (e.g., "api.example.com")
+        allowlist: Optional list of exact domains. Uses ALLOWLIST_DOMAINS if None.
         wildcards: Optional list of wildcard patterns. Uses WILDCARD_DOMAINS if None.
 
     Returns:
-        bool: True if hostname matches any wildcard pattern, False otherwise
+        bool: True if hostname matches any pattern in the allowlist, False otherwise
     """
+    if allowlist is None:
+        allowlist = ALLOWLIST_DOMAINS
     if wildcards is None:
         wildcards = WILDCARD_DOMAINS
 
-    if not wildcards:
-        return True  # No wildcards configured = allow all (legacy behavior)
+    # SECURITY: If no allowlist is configured, deny all (fail-safe)
+    if not allowlist and not wildcards:
+        logger.warning('No domain allowlist configured - denying all hostnames')
+        return False
 
     hostname = hostname.lower().rstrip('.')
 
+    # Check exact domain matches first (fast path)
+    if hostname in allowlist:
+        return True
+
+    # Check wildcard patterns
     for pattern in wildcards:
         pattern = pattern.lower().rstrip('.')
         if pattern.startswith('*.'):
@@ -92,13 +122,13 @@ def matches_domain_allowlist(hostname: str, wildcards: list = None) -> bool:
             if hostname == suffix or hostname.endswith('.' + suffix):
                 return True
         elif hostname == pattern:
-            # Exact match
+            # Exact match (shouldn't happen if wildcards list is correct)
             return True
 
     return False
 
-# Load wildcard config at module initialization
-load_wildcard_config()
+# Load domain allowlist at module initialization
+load_domain_allowlist()
 
 app = Flask(__name__)
 

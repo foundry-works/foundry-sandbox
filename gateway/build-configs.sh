@@ -118,48 +118,65 @@ generate_dnsmasq() {
     content+="# Generated from: $ALLOWLIST_FILE\n"
     content+="# DO NOT EDIT MANUALLY - use build-configs.sh to regenerate\n"
     content+="# Generated: $(date)\n"
+    content+="#\n"
+    content+="# SECURITY: This config implements DNS-based egress filtering.\n"
+    content+="# All domains are blocked by default, only allowlisted domains resolve.\n"
     content+="#\n\n"
-
-    # Enable DNS forwarding for non-matching domains
-    content+="# Default upstream DNS servers (uses /etc/resolv.conf)\n"
-    content+="# port=53 is the default\n\n"
 
     # Privilege dropping - dnsmasq binds port 53 as root, then drops to appuser
     content+="# Privilege dropping: run as appuser after binding port 53\n"
     content+="user=appuser\n"
     content+="group=appuser\n\n"
 
-    # Add address records for whitelisted domains
-    content+="# Whitelisted domains - allow resolution\n"
+    # Log DNS queries for debugging (optional, can be commented out in production)
+    content+="# Log DNS queries for security auditing\n"
+    content+="log-queries\n"
+    content+="log-facility=/dev/stdout\n\n"
+
+    # CRITICAL: Block ALL domains by default
+    content+="# ============================================================================\n"
+    content+="# BLOCK ALL DOMAINS BY DEFAULT\n"
+    content+="# ============================================================================\n"
+    content+="# no-resolv: Don't read /etc/resolv.conf - prevents fallback to upstream DNS\n"
+    content+="# address=/#/: Returns NXDOMAIN for any domain not explicitly allowed\n"
+    content+="# Together these ensure ONLY allowlisted domains can resolve.\n"
+    content+="no-resolv\n"
+    content+="address=/#/\n\n"
+
+    # Add server= directives for each allowed domain
+    # IMPORTANT: Must specify upstream DNS server explicitly (127.0.0.11 is Docker's internal DNS)
+    # If no IP is specified, dnsmasq won't forward and domain gets NXDOMAIN from address=/#/
+    content+="# ============================================================================\n"
+    content+="# ALLOWLISTED DOMAINS\n"
+    content+="# ============================================================================\n"
+    content+="# These domains are forwarded to Docker's internal DNS (127.0.0.11) for resolution.\n"
+    content+="# Format: server=/<domain>/127.0.0.11 forwards to Docker DNS\n\n"
 
     local domain_count=0
     for domain in "${ALL_DOMAINS[@]}"; do
-        # Skip wildcard domains in dnsmasq (they need special handling)
+        # Skip wildcard domains (handled separately below)
         if [[ "$domain" != \** ]]; then
-            content+="# $domain\n"
+            content+="server=/$domain/127.0.0.11\n"
             ((domain_count++)) || true
         fi
     done
 
     # Add wildcard handling using server= directive to forward to upstream DNS
-    # This allows subdomains to resolve while blocking non-allowlisted domains
-    content+="\n# Wildcard domains - forward to upstream DNS for resolution\n"
-    content+="# server=/*.domain.com/ syntax forwards matching queries to upstream\n"
+    content+="\n# ============================================================================\n"
+    content+="# WILDCARD DOMAINS\n"
+    content+="# ============================================================================\n"
+    content+="# These patterns allow all subdomains (e.g., *.openai.com allows api.openai.com)\n\n"
     for domain in "${WILDCARD_DOMAINS[@]}"; do
-        # Convert *.example.com to server=/example.com/ (forward to upstream)
+        # Convert *.example.com to server=/example.com/127.0.0.11 (forward to Docker DNS)
         local base_domain="${domain#\*.}"
-        # server=/<domain>/ (empty address) means forward to upstream DNS
-        content+="server=/$base_domain/\n"
+        content+="server=/$base_domain/127.0.0.11\n"
         ((domain_count++)) || true
     done
 
-    content+="\n# Total domains: $domain_count\n"
-    content+="\n# For restricted DNS, you can add:\n"
-    content+="# rebind-domain-ok=example.com (to allow private IP responses)\n"
-    content+="# address=/blocked.com/\n"
+    content+="\n# Total allowlisted domains: $domain_count\n"
 
     if [ "$DRY_RUN" = true ]; then
-        echo -e "$content" | head -50
+        echo -e "$content" | head -80
         log_info "[DRY-RUN] Would write dnsmasq.conf (${#content} bytes)"
     else
         echo -e "$content" > "$output_file"

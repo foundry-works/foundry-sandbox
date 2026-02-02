@@ -53,6 +53,97 @@ try:
 except ImportError:
     GeminiTokenManager = None  # type: ignore[misc, assignment]
 
+# ============================================================================
+# HOSTNAME ALLOWLIST (Egress Filtering)
+# ============================================================================
+# SECURITY: Only allow connections to explicitly allowlisted domains.
+# This prevents data exfiltration to arbitrary external services.
+
+ALLOWLIST_DOMAINS: list = []  # Exact domain matches
+WILDCARD_DOMAINS: list = []   # Wildcard patterns (e.g., "*.openai.com")
+
+
+def load_hostname_allowlist():
+    """
+    Load hostname allowlist from gateway's firewall-allowlist.generated.
+
+    The same allowlist is used by both the gateway and the API proxy.
+    """
+    global ALLOWLIST_DOMAINS, WILDCARD_DOMAINS
+
+    # Try multiple paths (inside container vs development)
+    config_paths = [
+        "/gateway/firewall-allowlist.generated",  # Docker volume mount
+        "/app/firewall-allowlist.generated",      # Alternative mount
+        os.path.join(os.path.dirname(__file__), "..", "gateway", "firewall-allowlist.generated"),  # Development
+    ]
+
+    config_path = None
+    for path in config_paths:
+        if os.path.exists(path):
+            config_path = path
+            break
+
+    if not config_path:
+        ctx.log.warn("Hostname allowlist not found - blocking all non-provider hosts")
+        return
+
+    try:
+        import re
+        with open(config_path, 'r') as f:
+            content = f.read()
+
+        # Parse ALLOWLIST_DOMAINS array from bash syntax
+        allowlist_match = re.search(r'ALLOWLIST_DOMAINS=\(\s*(.*?)\s*\)', content, re.DOTALL)
+        if allowlist_match:
+            domains = re.findall(r'"([^"*][^"]*)"', allowlist_match.group(1))
+            ALLOWLIST_DOMAINS = [d.lower() for d in domains]
+            ctx.log.info(f"Loaded {len(ALLOWLIST_DOMAINS)} exact domain patterns")
+
+        # Parse WILDCARD_DOMAINS array from bash syntax
+        wildcard_match = re.search(r'WILDCARD_DOMAINS=\(\s*(.*?)\s*\)', content, re.DOTALL)
+        if wildcard_match:
+            wildcards = re.findall(r'"(\*\.[^"]+)"', wildcard_match.group(1))
+            WILDCARD_DOMAINS = [w.lower() for w in wildcards]
+            ctx.log.info(f"Loaded {len(WILDCARD_DOMAINS)} wildcard domain patterns")
+
+        total = len(ALLOWLIST_DOMAINS) + len(WILDCARD_DOMAINS)
+        ctx.log.info(f"Hostname allowlist loaded: {total} entries from {config_path}")
+
+    except Exception as e:
+        ctx.log.error(f"Failed to load hostname allowlist: {e}")
+
+
+def is_hostname_allowed(hostname: str) -> bool:
+    """
+    Check if hostname is allowed by the egress allowlist.
+
+    Args:
+        hostname: The target hostname (e.g., "api.anthropic.com")
+
+    Returns:
+        bool: True if allowed, False if blocked
+    """
+    hostname = hostname.lower().rstrip('.')
+
+    # Check exact domain matches
+    if hostname in ALLOWLIST_DOMAINS:
+        return True
+
+    # Check wildcard patterns
+    for pattern in WILDCARD_DOMAINS:
+        pattern = pattern.lower().rstrip('.')
+        if pattern.startswith('*.'):
+            suffix = pattern[2:]  # "*.example.com" -> "example.com"
+            if hostname == suffix or hostname.endswith('.' + suffix):
+                return True
+
+    return False
+
+
+# Load allowlist at module initialization
+load_hostname_allowlist()
+
 # OAuth placeholder tokens that sandbox sees
 OAUTH_PLACEHOLDER = "CREDENTIAL_PROXY_PLACEHOLDER"
 OPENCODE_PLACEHOLDER = "PROXY_PLACEHOLDER_OPENCODE"
@@ -416,6 +507,23 @@ class CredentialInjector:
 
     def request(self, flow: http.HTTPFlow) -> None:
         """Process outbound request and inject credentials if applicable."""
+        host = flow.request.host
+
+        # 0. SECURITY: Validate hostname against allowlist (egress filtering)
+        # Block connections to non-allowlisted domains to prevent data exfiltration
+        if not is_hostname_allowed(host):
+            ctx.log.warn(f"BLOCKED: Request to non-allowlisted host: {host}")
+            flow.response = http.Response.make(
+                403,
+                json.dumps({
+                    "error": "Hostname not in allowlist",
+                    "message": f"The destination host '{host}' is not permitted by the egress policy",
+                    "host": host,
+                }).encode(),
+                {"Content-Type": "application/json"},
+            )
+            return
+
         # 1. Intercept OAuth refresh endpoints (return placeholder tokens)
         if self._handle_refresh_intercept(flow):
             return
@@ -435,8 +543,6 @@ class CredentialInjector:
             return
 
         # 5. Host-based API key injection (existing behavior)
-        host = flow.request.host
-
         if host not in PROVIDER_MAP:
             return
 
