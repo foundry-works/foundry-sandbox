@@ -21,7 +21,7 @@ SANDBOX_DEBUG="${SANDBOX_DEBUG:-0}"
 SANDBOX_VERBOSE="${SANDBOX_VERBOSE:-0}"
 SANDBOX_ASSUME_YES="${SANDBOX_ASSUME_YES:-0}"
 
-# Network mode: full, limited, host-only, none
+# Network mode: limited, host-only, none (full mode removed for security)
 SANDBOX_NETWORK_MODE="${SANDBOX_NETWORK_MODE:-limited}"
 
 # Credential sync toggles (0 = disabled, 1 = enabled)

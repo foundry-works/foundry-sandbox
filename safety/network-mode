@@ -353,15 +353,13 @@ list_whitelist() {
             fi
             ;;
         full)
-            echo "Full mode - no restrictions applied."
+            echo -e "${YELLOW}Warning:${NC} Full mode has been removed for security reasons."
+            echo "Current sandbox is running with unrestricted network access."
             echo ""
-            echo "Default whitelist domains (applied in limited mode):"
-            echo "  github.com, api.github.com, raw.githubusercontent.com"
-            echo "  registry.npmjs.org"
-            echo "  pypi.org, files.pythonhosted.org"
-            echo "  proxy.golang.org, sum.golang.org"
-            echo "  api.anthropic.com, api.openai.com"
-            echo "  generativelanguage.googleapis.com"
+            echo "Switch to a supported mode:"
+            echo "  sudo network-mode limited    # Whitelist only (recommended)"
+            echo "  sudo network-mode host-only  # Local network only"
+            echo "  sudo network-mode none       # Block all"
             ;;
         limited)
             echo "Limited mode - current rules:"

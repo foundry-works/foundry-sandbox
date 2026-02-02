@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- **Default credential isolation**: `--isolate-credentials` is now the default behavior
+  - API keys are held in a proxy container and never enter the sandbox
+  - Use `--no-isolate-credentials` to opt out (not recommended)
+
+### Removed
+- **Full network mode**: `--network=full` has been removed for security reasons
+  - Available modes: `limited` (default), `host-only`, `none`
+  - Attempting to use `full` mode shows a helpful error message
+- **Runtime domain additions**: `sudo network-mode allow <domain>` has been disabled
+  - To allow additional domains, set `SANDBOX_ALLOWED_DOMAINS` on the host before creating the sandbox
+
 ## [0.6.0] - 2026-02-01
 
 ### Added
