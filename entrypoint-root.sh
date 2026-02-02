@@ -54,5 +54,13 @@ if [ "$SANDBOX_GATEWAY_ENABLED" = "true" ]; then
     fi
 fi
 
+# Add mitmproxy CA to system trust store (must run as root)
+# This is needed for git (which uses GnuTLS and the system CA bundle)
+if [ -f "/certs/mitmproxy-ca.pem" ]; then
+    echo "Adding mitmproxy CA to system trust store..."
+    cp "/certs/mitmproxy-ca.pem" "/usr/local/share/ca-certificates/mitmproxy-ca.crt" 2>/dev/null || true
+    update-ca-certificates >/dev/null 2>&1 || true
+fi
+
 # Drop privileges and run the regular entrypoint
 exec gosu "$TARGET_USER" /usr/local/bin/entrypoint.sh "$@"

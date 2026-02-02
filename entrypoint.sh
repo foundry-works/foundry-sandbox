@@ -157,7 +157,11 @@ if [ -f "/certs/mitmproxy-ca.pem" ]; then
     export SSL_CERT_FILE="/certs/mitmproxy-ca.pem"
     export CURL_CA_BUNDLE="/certs/mitmproxy-ca.pem"
     if command -v update-ca-certificates >/dev/null 2>&1; then
-        if command -v sudo >/dev/null 2>&1 && sudo -n true 2>/dev/null; then
+        if [ "$(id -u)" = "0" ]; then
+            # Running as root, no sudo needed
+            cp "/certs/mitmproxy-ca.pem" "/usr/local/share/ca-certificates/mitmproxy-ca.crt" 2>/dev/null || true
+            update-ca-certificates >/dev/null 2>&1 || true
+        elif command -v sudo >/dev/null 2>&1 && sudo -n true 2>/dev/null; then
             sudo cp "/certs/mitmproxy-ca.pem" "/usr/local/share/ca-certificates/mitmproxy-ca.crt" 2>/dev/null || true
             sudo update-ca-certificates >/dev/null 2>&1 || true
         elif [ -w "/usr/local/share/ca-certificates" ]; then
