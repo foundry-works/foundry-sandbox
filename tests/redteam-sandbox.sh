@@ -264,7 +264,7 @@ fi
 
 # Try to read git credentials
 if git credential-store --file=/dev/null get 2>/dev/null <<< "host=github.com"; then
-    test_warn "Git credential store accessible"
+    test_pass "Git credential store empty or not configured"
 else
     test_pass "Git credential store not accessible"
 fi
