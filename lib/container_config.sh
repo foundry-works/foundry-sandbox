@@ -631,13 +631,18 @@ PY
     fi
 }
 
-# Add tavily-mcp to OpenCode's MCP configuration
+# Add tavily-mcp to OpenCode's MCP configuration (only if TAVILY_API_KEY is set)
 ensure_opencode_tavily_mcp() {
     local container_id="$1"
     local quiet="${2:-0}"
     local run_fn="run_cmd"
     if [ "$quiet" = "1" ]; then
         run_fn="run_cmd_quiet"
+    fi
+
+    # Skip if TAVILY_API_KEY is not set or is the credential proxy placeholder
+    if [ -z "${TAVILY_API_KEY:-}" ] || [ "${TAVILY_API_KEY}" = "CREDENTIAL_PROXY_PLACEHOLDER" ]; then
+        return 0
     fi
 
     $run_fn docker exec -u "$CONTAINER_USER" -i "$container_id" python3 - <<'PY'
@@ -1315,12 +1320,15 @@ for path in paths:
         }
         changed = True
 
-    if "tavily-mcp" not in data["mcpServers"]:
-        data["mcpServers"]["tavily-mcp"] = {
-            "command": "tavily-mcp",
-            "args": []
-        }
-        changed = True
+    # Only add tavily-mcp if TAVILY_API_KEY is available (and not the placeholder)
+    tavily_key = os.environ.get("TAVILY_API_KEY", "")
+    if tavily_key and tavily_key != "CREDENTIAL_PROXY_PLACEHOLDER":
+        if "tavily-mcp" not in data["mcpServers"]:
+            data["mcpServers"]["tavily-mcp"] = {
+                "command": "tavily-mcp",
+                "args": []
+            }
+            changed = True
 
     if changed:
         os.makedirs(os.path.dirname(path), exist_ok=True)
@@ -1360,6 +1368,10 @@ default_update_line = "check_for_update_on_startup = false"
 default_analytics_lines = ["[analytics]", "enabled = false"]
 default_tavily_mcp_lines = ["[mcp_servers.tavily-mcp]", 'command = "tavily-mcp"', "args = []"]
 
+# Only include tavily-mcp if API key is available (and not the placeholder)
+tavily_key = os.environ.get("TAVILY_API_KEY", "")
+include_tavily = tavily_key and tavily_key != "CREDENTIAL_PROXY_PLACEHOLDER"
+
 if not os.path.exists(path):
     with open(path, "w") as f:
         root_lines = [
@@ -1367,7 +1379,10 @@ if not os.path.exists(path):
             default_sandbox_mode_line,
             default_update_line,
         ]
-        f.write("\n".join(root_lines) + "\n\n" + "\n".join(default_analytics_lines) + "\n\n" + "\n".join(default_tavily_mcp_lines) + "\n")
+        content = "\n".join(root_lines) + "\n\n" + "\n".join(default_analytics_lines)
+        if include_tavily:
+            content += "\n\n" + "\n".join(default_tavily_mcp_lines)
+        f.write(content + "\n")
     raise SystemExit(0)
 
 with open(path, "r") as f:
@@ -1395,13 +1410,15 @@ if missing_sandbox_mode:
 analytics = data.get("analytics") if isinstance(data, dict) else None
 missing_analytics_enabled = not (isinstance(analytics, dict) and "enabled" in analytics)
 
-# Check if tavily-mcp MCP server is configured
+# Check if tavily-mcp MCP server is configured (only if API key is available)
 mcp_servers = data.get("mcp_servers") if isinstance(data, dict) else None
-missing_tavily_mcp = not (isinstance(mcp_servers, dict) and "tavily-mcp" in mcp_servers)
-if missing_tavily_mcp:
-    # Also check raw text for section header
-    if re.search(r"(?m)^\s*\[mcp_servers\.tavily-mcp\]", text):
-        missing_tavily_mcp = False
+missing_tavily_mcp = False
+if include_tavily:
+    missing_tavily_mcp = not (isinstance(mcp_servers, dict) and "tavily-mcp" in mcp_servers)
+    if missing_tavily_mcp:
+        # Also check raw text for section header
+        if re.search(r"(?m)^\s*\[mcp_servers\.tavily-mcp\]", text):
+            missing_tavily_mcp = False
 
 inline_changed = False
 if missing_analytics_enabled:
@@ -1517,18 +1534,20 @@ if "usageStatisticsEnabled" not in privacy:
 if privacy:
     data["privacy"] = privacy
 
-# Add tavily-mcp to mcpServers
-mcp_servers = data.get("mcpServers")
-if not isinstance(mcp_servers, dict):
-    mcp_servers = {}
-if "tavily-mcp" not in mcp_servers:
-    mcp_servers["tavily-mcp"] = {
-        "command": "tavily-mcp",
-        "args": []
-    }
-    changed = True
-if mcp_servers:
-    data["mcpServers"] = mcp_servers
+# Add tavily-mcp to mcpServers (only if TAVILY_API_KEY is available and not placeholder)
+tavily_key = os.environ.get("TAVILY_API_KEY", "")
+if tavily_key and tavily_key != "CREDENTIAL_PROXY_PLACEHOLDER":
+    mcp_servers = data.get("mcpServers")
+    if not isinstance(mcp_servers, dict):
+        mcp_servers = {}
+    if "tavily-mcp" not in mcp_servers:
+        mcp_servers["tavily-mcp"] = {
+            "command": "tavily-mcp",
+            "args": []
+        }
+        changed = True
+    if mcp_servers:
+        data["mcpServers"] = mcp_servers
 
 if changed or not os.path.exists(path):
     with open(path, "w") as f:

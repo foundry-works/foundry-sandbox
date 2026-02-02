@@ -64,6 +64,15 @@ CLAUDE_ZAI_ALIAS
 # CLI tools are pre-installed in the image
 # To update manually: npm update -g @anthropic-ai/claude-code @google/gemini-cli @openai/codex opencode-ai
 
+# Install tavily-mcp only if API key is configured (not baked into image)
+# Skip if key is the credential-isolation placeholder (proxy provides credentials)
+if [ -n "${TAVILY_API_KEY:-}" ] && [ "${TAVILY_API_KEY}" != "CREDENTIAL_PROXY_PLACEHOLDER" ]; then
+    if ! command -v tavily-mcp >/dev/null 2>&1; then
+        echo "Installing tavily-mcp (TAVILY_API_KEY detected)..."
+        npm install -g tavily-mcp >/dev/null 2>&1 || echo "Warning: tavily-mcp install failed"
+    fi
+fi
+
 # Ensure Claude onboarding is marked complete (required for auth to work)
 CLAUDE_JSON="$HOME/.claude.json"
 if [ -f "$CLAUDE_JSON" ]; then
