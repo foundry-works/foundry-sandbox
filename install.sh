@@ -130,12 +130,12 @@ install_tmux() {
         return 0
     fi
 
-    echo -ne "  Installing tmux..."
+    echo -e "  Installing tmux..."
     if [[ "$(uname)" == "Darwin" ]]; then
         if command -v brew &>/dev/null; then
-            brew install tmux &>/dev/null
+            brew install tmux
         else
-            echo -e "\r  ${RED}✗${NC} tmux (Homebrew required)"
+            echo -e "  ${RED}✗${NC} tmux (Homebrew required)"
             echo -e "${RED}Error: Install Homebrew first, then run installer again.${NC}"
             exit 1
         fi
@@ -146,15 +146,15 @@ install_tmux() {
     elif command -v yum &>/dev/null; then
         sudo yum install -y tmux &>/dev/null
     else
-        echo -e "\r  ${RED}✗${NC} tmux (unknown package manager)"
+        echo -e "  ${RED}✗${NC} tmux (unknown package manager)"
         echo -e "${RED}Error: Install tmux manually and run installer again.${NC}"
         exit 1
     fi
 
     if command -v tmux &>/dev/null; then
-        echo -e "\r  ${GREEN}✓${NC} tmux (installed)              "
+        echo -e "  ${GREEN}✓${NC} tmux installed"
     else
-        echo -e "\r  ${RED}✗${NC} tmux (installation failed)"
+        echo -e "  ${RED}✗${NC} tmux (installation failed)"
         exit 1
     fi
 }
@@ -165,12 +165,12 @@ install_gum() {
         return 0
     fi
 
-    echo -ne "  Installing gum..."
+    echo -e "  Installing gum..."
     if [[ "$(uname)" == "Darwin" ]]; then
         if command -v brew &>/dev/null; then
-            brew install gum &>/dev/null
+            brew install gum
         else
-            echo -e "\r  ${YELLOW}⚠${NC} gum (skipped - no brew)"
+            echo -e "  ${YELLOW}⚠${NC} gum (skipped - no brew)"
             return 0
         fi
     elif command -v apt-get &>/dev/null; then
@@ -190,14 +190,14 @@ install_gum() {
         [[ "$arch" == "aarch64" ]] && arch="arm64"
         curl -fsSL "https://github.com/charmbracelet/gum/releases/latest/download/gum_linux_${arch}.tar.gz" 2>/dev/null | sudo tar -xzf - -C /usr/local/bin gum 2>/dev/null
     else
-        echo -e "\r  ${YELLOW}⚠${NC} gum (skipped - unknown package manager)"
+        echo -e "  ${YELLOW}⚠${NC} gum (skipped - unknown package manager)"
         return 0
     fi
 
     if command -v gum &>/dev/null; then
-        echo -e "\r  ${GREEN}✓${NC} gum (installed)              "
+        echo -e "  ${GREEN}✓${NC} gum installed"
     else
-        echo -e "\r  ${YELLOW}⚠${NC} gum (install failed - optional)"
+        echo -e "  ${YELLOW}⚠${NC} gum (install failed - optional)"
     fi
 }
 
