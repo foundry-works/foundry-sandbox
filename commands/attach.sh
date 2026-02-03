@@ -5,7 +5,34 @@ source "${SCRIPT_DIR}/commands/list.sh"
 source "${SCRIPT_DIR}/commands/start.sh"
 
 cmd_attach() {
-    local name="$1"
+    parse_attach_args "$@"
+
+    local name="$ATTACH_NAME"
+
+    # Handle --last flag
+    if [ "$ATTACH_USE_LAST" = true ]; then
+        if ! load_last_attach; then
+            exit 1
+        fi
+        name="$LAST_ATTACH_NAME"
+        echo "Reattaching to: $name"
+    fi
+
+    if [ -z "$name" ]; then
+        # Try to auto-detect sandbox from current directory
+        local cwd
+        cwd=$(pwd -P 2>/dev/null || pwd)
+        if [[ "$cwd" == "$WORKTREES_DIR/"* ]]; then
+            # Extract sandbox name from path (first component after WORKTREES_DIR)
+            local relative_path="${cwd#$WORKTREES_DIR/}"
+            name="${relative_path%%/*}"
+            if [ -n "$name" ] && [ -d "$WORKTREES_DIR/$name" ]; then
+                echo "Auto-detected sandbox: $name"
+            else
+                name=""
+            fi
+        fi
+    fi
 
     if [ -z "$name" ]; then
         if command -v fzf &>/dev/null && [ -d "$WORKTREES_DIR" ]; then
@@ -55,5 +82,42 @@ cmd_attach() {
 
     sync_opencode_local_plugins_on_first_attach "$name" "$container_id"
 
-    tmux_attach "$name" "$SANDBOX_WORKING_DIR"
+    # Save this sandbox as the last attached for --last flag
+    save_last_attach "$name"
+
+    # IDE launch logic
+    local with_ide="$ATTACH_WITH_IDE"
+    local ide_only="$ATTACH_IDE_ONLY"
+    local skip_terminal=false
+
+    if [ -t 0 ]; then
+        if [ "$with_ide" = "none" ]; then
+            # --no-ide: skip IDE prompt entirely
+            :
+        elif [ -n "$with_ide" ] && [ "$with_ide" != "auto" ]; then
+            # Specific IDE requested via --with-ide=<name> or --ide-only=<name>
+            if auto_launch_ide "$with_ide" "$worktree_path"; then
+                if [ "$ide_only" = "true" ]; then
+                    skip_terminal=true
+                    echo "IDE launched. Run 'cast attach $name' for terminal."
+                fi
+            fi
+        elif [ -n "$with_ide" ]; then
+            # --with-ide or --ide-only without specific name: prompt for selection
+            prompt_ide_selection "$worktree_path" "$name"
+            if [ "$ide_only" = "true" ] || [ "$IDE_WAS_LAUNCHED" = "true" ]; then
+                skip_terminal=true
+                echo ""
+                echo "  Run this in your IDE's terminal to connect:"
+                echo ""
+                echo "    cast attach $name"
+                echo ""
+            fi
+        fi
+        # Default for attach: go directly to terminal (no IDE prompt)
+    fi
+
+    if [ "$skip_terminal" = "false" ]; then
+        tmux_attach "$name" "$SANDBOX_WORKING_DIR"
+    fi
 }

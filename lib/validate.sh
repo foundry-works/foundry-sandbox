@@ -85,6 +85,54 @@ check_docker_running() {
     docker info >/dev/null 2>&1 || die "Docker is not running or not accessible"
 }
 
+check_docker_network_capacity() {
+    local isolate_credentials="${1:-true}"
+
+    # Only check if credential isolation is enabled (creates networks)
+    if [ "$isolate_credentials" != "true" ]; then
+        return 0
+    fi
+
+    # Count existing sandbox networks as a warning indicator
+    local sandbox_network_count
+    sandbox_network_count=$(docker network ls --format '{{.Name}}' 2>/dev/null | grep -cE '^sandbox-' || true)
+    sandbox_network_count="${sandbox_network_count:-0}"
+
+    # Try to create a test network to verify capacity
+    local test_network_name="sandbox-network-capacity-test-$$"
+
+    if ! docker network create "$test_network_name" >/dev/null 2>&1; then
+        log_error "Docker network address pool exhausted"
+        log_error ""
+        log_error "Docker cannot create new networks. This typically happens when:"
+        log_error "  - Many sandboxes have been created without cleanup"
+        log_error "  - Orphaned networks remain from destroyed sandboxes"
+        log_error ""
+        log_error "Current sandbox networks: $sandbox_network_count"
+        log_error ""
+        log_error "Remediation steps:"
+        log_error "  1. Clean up orphaned sandbox networks:"
+        log_error "     cast prune --networks"
+        log_error ""
+        log_error "  2. If that doesn't help, remove ALL unused Docker networks:"
+        log_error "     docker network prune"
+        log_error ""
+        log_error "  3. If problems persist, restart Docker Desktop"
+        return 1
+    fi
+
+    # Clean up test network
+    docker network rm "$test_network_name" >/dev/null 2>&1 || true
+
+    # Warn if many sandbox networks exist (potential future issue)
+    if [ "$sandbox_network_count" -gt 20 ]; then
+        log_warn "Found $sandbox_network_count sandbox networks"
+        log_warn "Consider running 'cast prune --networks' to clean up orphaned networks"
+    fi
+
+    return 0
+}
+
 validate_git_url() {
     local url="$1"
     [ -n "$url" ] || die "Repository URL required"

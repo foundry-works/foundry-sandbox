@@ -262,8 +262,8 @@ else
         local has_ai_key=false
         local has_search_key=false
 
-        # Check AI provider keys (Gemini uses OAuth via ~/.gemini/, not an API key)
-        for key in CLAUDE_CODE_OAUTH_TOKEN; do
+        # Check Claude authentication (OAuth token or API key)
+        for key in CLAUDE_CODE_OAUTH_TOKEN ANTHROPIC_API_KEY; do
             if [ -n "${!key:-}" ]; then
                 has_ai_key=true
                 break
@@ -296,11 +296,11 @@ else
         fi
 
         # No AI key - prompt to continue
-        echo -e "${YELLOW}Warning: No AI provider API keys found.${NC}"
+        echo -e "${YELLOW}Warning: Claude authentication not found.${NC}"
         echo ""
-        echo "Expected at least one of:"
-        echo "  - CLAUDE_CODE_OAUTH_TOKEN (Claude Code)"
-        echo "  - ~/.gemini/oauth_creds.json (Gemini CLI via 'gemini auth')"
+        echo "Expected one of:"
+        echo "  - CLAUDE_CODE_OAUTH_TOKEN (run: claude setup-token)"
+        echo "  - ANTHROPIC_API_KEY"
         echo ""
         if [ "$has_search_key" = "false" ]; then
             echo -e "${YELLOW}Warning: No search provider API keys found.${NC}"

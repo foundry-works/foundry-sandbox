@@ -197,9 +197,9 @@ cache_ttl = 3600
 priority = [
     "[cli]codex:gpt-5.2-codex",
     "[cli]gemini:pro",
-    "[cli]opencode:zai-coding-plan/glm-4.7",
-    "[cli]claude-zai:opus",
     "[cli]claude:opus",
+    "[cli]opencode:zai-coding-plan/glm-4.7",
+    "[cli]claude-zai:opus"
 ]
 
 # Per-provider overrides (optional)
@@ -241,9 +241,9 @@ default_provider = "[cli]gemini:pro"
 consensus_providers = [
     "[cli]gemini:pro",
     "[cli]codex:gpt-5.2-codex",
+    "[cli]claude:opus",
     "[cli]opencode:zai-coding-plan/glm-4.7",
-    "[cli]claude-zai:opus",
-    "[cli]claude:opus"
+    "[cli]claude-zai:opus"
 ]
 
 # State TTL in hours before cleanup
@@ -335,36 +335,36 @@ deep_research_refinement_provider = "[cli]gemini:pro"
 deep_research_planning_providers = [
     "[cli]gemini:flash",
     "[cli]codex:gpt-5.1-codex-mini",
+    "[cli]claude:sonnet",
     "[cli]opencode:zai-coding-plan/glm-4.7",
     "[cli]claude-zai:sonnet"
-    "[cli]claude:sonnet"
 ]
 
 # Analysis phase: finding extraction
 deep_research_analysis_providers = [
     "[cli]gemini:pro",
     "[cli]codex:gpt-4.1",
+    "[cli]claude:opus",
     "[cli]opencode:zai-coding-plan/glm-4.7",
-    "[cli]claude-zai:opus",
-    "[cli]claude:opus"
+    "[cli]claude-zai:opus"
 ]
 
 # Synthesis phase: report generation (may benefit from stronger models)
 deep_research_synthesis_providers = [
     "[cli]gemini:pro",
     "[cli]codex:gpt-5.2-codex",
+    "[cli]claude:opus",
     "[cli]opencode:zai-coding-plan/glm-4.7",
-    "[cli]claude-zai:opus",
-    "[cli]claude:opus"
+    "[cli]claude-zai:opus"
 ]
 
 # Refinement phase: gap identification
 deep_research_refinement_providers = [
     "[cli]gemini:pro",
     "[cli]codex:gpt-5.2-codex",
+    "[cli]claude:opus",
     "[cli]opencode:zai-coding-plan/glm-4.7",
-    "[cli]claude-zai:opus",
-    "[cli]claude:opus"
+    "[cli]claude-zai:opus"
 ]
 
 deep_research_max_retries = 2
@@ -487,9 +487,9 @@ deep_research_digest_provider = "[cli]gemini:flash"
 deep_research_digest_providers = [
     "[cli]gemini:flash",
     "[cli]codex:gpt-5.1-codex-mini",
+    "[cli]claude:haiku",
     "[cli]opencode:zai-coding-plan/glm-4.7",
-    "[cli]claude-zai:sonnet",
-    "[cli]claude:haiku"
+    "[cli]claude-zai:sonnet"
 ]
 
 # -----------------------------------------------------------------------------

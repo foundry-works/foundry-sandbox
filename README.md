@@ -27,6 +27,7 @@ Finally, in addition to providing tight security guardrails, this sandbox is des
 - **Fast Creation** - Worktrees share git objects; new sandboxes spin up in seconds
 - **Network Control** - Limited (allowlist), host-only, or no network access
 - **Credential Isolation** - API keys stay outside sandboxes via proxy (enabled by default)
+- **Presets & History** - Save configurations as presets; repeat last command with `cast repeat`
 - **Volume Mounts** - Mount host directories read-write or read-only
 - **JSON Output** - All commands support `--json` for scripting and automation
 
@@ -89,6 +90,14 @@ git push origin HEAD
 
 ```bash
 cast destroy sandbox-name --yes
+```
+
+**Tip: Save configurations for reuse**
+
+```bash
+cast new owner/repo feature --wd packages/app --save-as myproject  # save preset
+cast new --preset myproject                                         # reuse later
+cast repeat                                                         # repeat last command
 ```
 
 ## Limitations

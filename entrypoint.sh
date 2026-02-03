@@ -39,9 +39,21 @@ touch ~/.sudo_as_admin_successful
 # Add foundry-upgrade alias for easy MCP plugin updates
 echo "alias foundry-upgrade='pip install --pre --upgrade foundry-mcp'" >> ~/.bashrc
 
-# Claude Code with ZAI GLM models (uses ZHIPU_API_KEY from environment)
+# Claude Code with ZAI GLM models (opt-in; requires ZHIPU_API_KEY on host)
 # Requires global-agent for Node.js proxy support (installed in Dockerfile)
 # Unset CLAUDE_CODE_OAUTH_TOKEN to avoid auth conflict with ANTHROPIC_API_KEY
+# In credential isolation, ZHIPU_API_KEY is a placeholder and the proxy injects
+# the real key. Only guard on explicit enablement + non-empty value.
+if [ "${SANDBOX_ENABLE_ZAI:-0}" = "1" ]; then
+    if [ -z "${ZHIPU_API_KEY:-}" ]; then
+        echo "Warning: SANDBOX_ENABLE_ZAI=1 but ZHIPU_API_KEY is not set; claude-zai disabled."
+    elif [ "${ZHIPU_API_KEY}" = "CREDENTIAL_PROXY_PLACEHOLDER" ] || [ "${ZHIPU_API_KEY}" = "PROXY_PLACEHOLDER_OPENCODE" ]; then
+        if [ "${SANDBOX_GATEWAY_ENABLED:-}" != "true" ]; then
+            echo "Warning: SANDBOX_ENABLE_ZAI=1 but gateway is not enabled; placeholder key cannot be injected."
+        fi
+    fi
+fi
+if [ "${SANDBOX_ENABLE_ZAI:-0}" = "1" ] && [ -n "${ZHIPU_API_KEY:-}" ]; then
 cat >> ~/.bashrc << 'CLAUDE_ZAI_ALIAS'
 claude-zai() {
     GLOBAL_AGENT_HTTP_PROXY="http://api-proxy:8080" \
@@ -58,6 +70,7 @@ claude-zai() {
     claude "$@"
 }
 CLAUDE_ZAI_ALIAS
+fi
 
 # Wrapper for gh CLI to handle auth status in credential isolation mode
 # Shows helpful message instead of "invalid token" error (expected with proxy architecture)
@@ -117,8 +130,10 @@ if [ "$SANDBOX_GATEWAY_ENABLED" = "true" ]; then
     if [ -f "/etc/proxy-stubs/stub-auth-codex.json" ]; then
         cp /etc/proxy-stubs/stub-auth-codex.json "$HOME/.codex/auth.json"
     fi
-    if [ -f "/etc/proxy-stubs/stub-auth-opencode.json" ]; then
-        cp /etc/proxy-stubs/stub-auth-opencode.json "$HOME/.local/share/opencode/auth.json"
+    if [ "${SANDBOX_ENABLE_OPENCODE:-0}" = "1" ]; then
+        if [ -f "/etc/proxy-stubs/stub-auth-opencode.json" ]; then
+            cp /etc/proxy-stubs/stub-auth-opencode.json "$HOME/.local/share/opencode/auth.json"
+        fi
     fi
     if [ -f "/etc/proxy-stubs/stub-auth-gemini.json" ]; then
         cp /etc/proxy-stubs/stub-auth-gemini.json "$HOME/.gemini/oauth_creds.json"
@@ -129,8 +144,10 @@ if [ "$SANDBOX_GATEWAY_ENABLED" = "true" ]; then
     if [ -f "/etc/proxy-stubs/stub-gemini-settings.json" ]; then
         cp /etc/proxy-stubs/stub-gemini-settings.json "$HOME/.gemini/settings.json"
     fi
-    if [ -f "/etc/proxy-stubs/stub-opencode-config.json" ]; then
-        cp /etc/proxy-stubs/stub-opencode-config.json "$HOME/.config/opencode/opencode.json"
+    if [ "${SANDBOX_ENABLE_OPENCODE:-0}" = "1" ]; then
+        if [ -f "/etc/proxy-stubs/stub-opencode-config.json" ]; then
+            cp /etc/proxy-stubs/stub-opencode-config.json "$HOME/.config/opencode/opencode.json"
+        fi
     fi
     if [ -f "/etc/proxy-stubs/stub-gh-hosts.yml" ]; then
         cp /etc/proxy-stubs/stub-gh-hosts.yml "$HOME/.config/gh/hosts.yml"

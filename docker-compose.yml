@@ -63,8 +63,13 @@ services:
       - SEMANTIC_SCHOLAR_API_KEY
       # Gemini API key (alternative to OAuth in ~/.gemini/)
       - GEMINI_API_KEY
+      # ZAI (Zhipu) API key (for optional claude-zai alias)
+      - ZHIPU_API_KEY
       # GitHub CLI token (extracted from keychain on macOS)
       - GH_TOKEN
+      # Opt-in tools
+      - SANDBOX_ENABLE_OPENCODE
+      - SANDBOX_ENABLE_ZAI
       - TERM=xterm-256color
       # Enable Claude Code LSP tool
       - ENABLE_LSP_TOOL=${ENABLE_LSP_TOOL:-1}

@@ -21,6 +21,49 @@ cmd_start() {
 
     check_image_freshness
     load_sandbox_metadata "$name" || true
+    export SANDBOX_ENABLE_OPENCODE SANDBOX_ENABLE_ZAI
+    if [ "${SANDBOX_ENABLE_ZAI:-0}" != "1" ]; then
+        export ZHIPU_API_KEY=
+    fi
+
+    local uses_credential_isolation="0"
+    if docker ps -a --format '{{.Names}}' | grep -q "^${container}-api-proxy-"; then
+        uses_credential_isolation="1"
+    fi
+
+    if [ "$uses_credential_isolation" = "1" ]; then
+        if [ ! -f "$HOME/.codex/auth.json" ]; then
+            log_warn "Credential isolation: ~/.codex/auth.json not found; Codex CLI will not work."
+            log_warn "Run 'codex auth' to create it if you plan to use Codex."
+        fi
+        if [ ! -f "$HOME/.local/share/opencode/auth.json" ]; then
+            if [ "${SANDBOX_ENABLE_OPENCODE:-0}" = "1" ]; then
+                if has_zai_key; then
+                    log_warn "OpenCode enabled but auth file not found; relying on ZHIPU_API_KEY fallback (credential isolation)."
+                else
+                    log_warn "OpenCode enabled but auth file not found; OpenCode CLI will not work in credential isolation."
+                fi
+            else
+                log_warn "Credential isolation: ~/.local/share/opencode/auth.json not found; OpenCode CLI will not work."
+                log_warn "Run 'opencode auth login' to create it if you plan to use OpenCode."
+            fi
+        fi
+        if [ ! -f "$HOME/.gemini/oauth_creds.json" ] && [ -z "${GEMINI_API_KEY:-}" ]; then
+            log_warn "Credential isolation: ~/.gemini/oauth_creds.json not found and GEMINI_API_KEY not set; Gemini CLI will not work."
+            log_warn "Run 'gemini auth' or set GEMINI_API_KEY if you plan to use Gemini."
+        fi
+    fi
+
+    warn_claude_auth_conflict
+
+    if [ "${SANDBOX_ENABLE_ZAI:-0}" = "1" ] && ! has_zai_key; then
+        log_warn "ZAI enabled but ZHIPU_API_KEY not set on host; claude-zai will not work."
+    fi
+
+    if [ "${SANDBOX_ENABLE_OPENCODE:-0}" = "1" ] && ! has_opencode_key && [ "$uses_credential_isolation" != "1" ]; then
+        log_warn "OpenCode enabled but auth file not found; OpenCode setup will be skipped."
+        log_warn "Run 'opencode auth login' or re-run with --with-opencode after configuring ~/.local/share/opencode/auth.json."
+    fi
 
     echo "Starting sandbox: $name..."
     ensure_override_from_metadata "$name" "$override_file"

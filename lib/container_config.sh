@@ -62,8 +62,6 @@ prepopulate_foundry_global() {
         return 0
     fi
 
-    log_info "Pre-populating foundry global install..."
-
     # Ensure directories exist
     mkdir -p "$skills_dir"
     mkdir -p "$hooks_dir"
@@ -77,7 +75,7 @@ prepopulate_foundry_global() {
             log_warn "Failed to update foundry cache, using existing version"
         fi
     else
-        log_info "Cloning foundry repo to cache..."
+        log_debug "Cloning foundry repo to cache..."
         if ! git clone --depth 1 -q \
             "https://github.com/foundry-works/claude-foundry.git" \
             "$foundry_cache" 2>&1; then
@@ -92,8 +90,6 @@ prepopulate_foundry_global() {
     if [ -f "$plugin_json" ]; then
         version=$(python3 -c "import json; print(json.load(open('$plugin_json'))['version'])" 2>/dev/null || echo "unknown")
     fi
-
-    log_info "Installing foundry v$version as global install..."
 
     # Copy skills to ~/.claude/skills/
     if [ -d "$foundry_cache/skills" ]; then
@@ -165,7 +161,7 @@ with open(path, "w") as f:
     f.write("\n")
 PY
 
-    log_info "Foundry global install completed successfully"
+    log_step "Foundry v$version installed"
     return 0
 }
 
@@ -925,6 +921,10 @@ sync_opencode_local_plugins_on_first_attach() {
     local container_id="$2"
     local quiet="${3:-0}"
 
+    if ! opencode_enabled; then
+        return 0
+    fi
+
     local host_dir="${SANDBOX_OPENCODE_PLUGIN_DIR:-}"
     if [ -z "$host_dir" ]; then
         return 0
@@ -1115,14 +1115,14 @@ PY
             >/dev/null 2>&1; then
             log_debug "pyright-lsp already cached"
             docker exec -u "$CONTAINER_USER" "$container_id" \
-                claude plugin enable pyright-lsp@claude-plugins-official 2>/dev/null || true
+                claude plugin enable pyright-lsp@claude-plugins-official >/dev/null 2>&1 || true
         else
             log_debug "Attempting pyright-lsp install (optional)..."
             docker exec -u "$CONTAINER_USER" "$container_id" sh -c "
-                claude plugin marketplace add anthropics/claude-plugins-official 2>/dev/null && \
-                claude plugin install pyright-lsp@claude-plugins-official 2>/dev/null && \
-                claude plugin enable pyright-lsp@claude-plugins-official 2>/dev/null
-            " || log_debug "pyright-lsp not installed (optional)"
+                claude plugin marketplace add anthropics/claude-plugins-official && \
+                claude plugin install pyright-lsp@claude-plugins-official && \
+                claude plugin enable pyright-lsp@claude-plugins-official
+            " >/dev/null 2>&1 || log_debug "pyright-lsp not installed (optional)"
         fi
     fi
 }
@@ -1140,9 +1140,7 @@ ensure_github_https_git() {
         return 0
     fi
 
-    if [ "$quiet" != "1" ]; then
-        log_info "Forcing HTTPS for GitHub Git remotes (SSH disabled)..."
-    fi
+    log_debug "Forcing HTTPS for GitHub Git remotes (SSH disabled)..."
 
     $run_fn docker exec -u "$CONTAINER_USER" "$container_id" sh -c "
         export HOME='$CONTAINER_HOME'
@@ -1615,9 +1613,7 @@ ensure_foundry_mcp_workspace_dirs() {
     local working_dir="${2:-}"
     local quiet="${3:-0}"
 
-    if [ "$quiet" != "1" ]; then
-        log_info "Creating foundry-mcp workspace directories..."
-    fi
+    log_debug "Creating foundry-mcp workspace directories..."
 
     # Calculate specs base path (includes working_dir if set)
     local specs_base="/workspace${working_dir:+/$working_dir}"
@@ -1660,7 +1656,7 @@ copy_configs_to_container() {
     # Create container user if using host user matching
     ensure_container_user "$container_id"
 
-    log_info "Copying config files into container..."
+    log_debug "Copying config files into container..."
 
     # Home is tmpfs; wait briefly for it to be ready before copying.
     local attempts=0
@@ -1708,24 +1704,29 @@ copy_configs_to_container() {
             docker exec -u "$CONTAINER_USER" "$container_id" mkdir -p "$CONTAINER_HOME/.gemini" 2>/dev/null || true
             copy_file_to_container "$container_id" ~/.gemini/oauth_creds.json "$CONTAINER_HOME/.gemini/oauth_creds.json"
         fi
-        file_exists ~/.local/share/opencode/auth.json && copy_file_to_container "$container_id" ~/.local/share/opencode/auth.json "$CONTAINER_HOME/.local/share/opencode/auth.json"
+        if opencode_enabled; then
+            file_exists ~/.local/share/opencode/auth.json && copy_file_to_container "$container_id" ~/.local/share/opencode/auth.json "$CONTAINER_HOME/.local/share/opencode/auth.json"
+        fi
         dir_exists ~/.codex && copy_dir_to_container "$container_id" ~/.codex "$CONTAINER_HOME/.codex" "${CODEX_COPY_EXCLUDES[@]}"
     fi
     # OpenCode config (not credentials)
-    if file_exists ~/.config/opencode/opencode.json; then
-        copy_file_to_container "$container_id" ~/.config/opencode/opencode.json "$CONTAINER_HOME/.config/opencode/opencode.json"
-    elif file_exists "$SCRIPT_DIR/opencode.json"; then
-        copy_file_to_container "$container_id" "$SCRIPT_DIR/opencode.json" "$CONTAINER_HOME/.config/opencode/opencode.json"
+    if opencode_enabled; then
+        if file_exists ~/.config/opencode/opencode.json; then
+            copy_file_to_container "$container_id" ~/.config/opencode/opencode.json "$CONTAINER_HOME/.config/opencode/opencode.json"
+        elif file_exists "$SCRIPT_DIR/opencode.json"; then
+            copy_file_to_container "$container_id" "$SCRIPT_DIR/opencode.json" "$CONTAINER_HOME/.config/opencode/opencode.json"
+        fi
     fi
     # Skip settings writes when credential isolation is enabled (dirs may be read-only)
+    # Also skip configuration for CLIs without valid authentication keys
     if [ "$isolate_credentials" != "true" ]; then
-        ensure_gemini_settings "$container_id"
-        ensure_codex_config "$container_id"
+        has_gemini_key && ensure_gemini_settings "$container_id"
+        has_codex_key && ensure_codex_config "$container_id"
     fi
-    sync_opencode_foundry "$container_id"
-    ensure_opencode_tavily_mcp "$container_id"
-    ensure_opencode_default_model "$container_id" "$skip_plugins"
-    if [ "$skip_plugins" != "1" ]; then
+    opencode_enabled && sync_opencode_foundry "$container_id"
+    opencode_enabled && ensure_opencode_tavily_mcp "$container_id"
+    opencode_enabled && ensure_opencode_default_model "$container_id" "$skip_plugins"
+    if [ "$skip_plugins" != "1" ] && opencode_enabled; then
         prefetch_opencode_npm_plugins "$container_id"
     fi
     file_exists ~/.gitconfig && copy_file_to_container "$container_id" ~/.gitconfig "$CONTAINER_HOME/.gitconfig"
@@ -1760,7 +1761,7 @@ copy_configs_to_container() {
     fix_worktree_paths "$container_id" "$(whoami)"
     detect_nested_git_repos "$container_id"
 
-    log_info "Fixing ownership..."
+    log_debug "Fixing ownership..."
     run_cmd docker exec "$container_id" sh -c "
         chown -R $CONTAINER_USER:$CONTAINER_USER \
             $CONTAINER_HOME/.claude \
@@ -1789,18 +1790,20 @@ copy_configs_to_container() {
     # Install foundry workspace documentation
     install_foundry_workspace_docs "$container_id"
 
-    # Debug: show what ended up in the container
-    log_info "=== Claude Config Debug ==="
-    docker exec "$container_id" sh -c "
-        echo 'Settings (key fields):'
-        python3 -c \"import json; d=json.load(open('$CONTAINER_HOME/.claude/settings.json')); print('  model:', d.get('model', 'NOT SET')); print('  hooks:', 'configured' if d.get('hooks') else 'NOT SET')\" 2>/dev/null || echo '  settings.json missing or invalid'
-        echo 'Skills:'
-        ls -1 $CONTAINER_HOME/.claude/skills/ 2>/dev/null | head -5 || echo '  no skills found'
-        echo 'Hooks:'
-        ls -1 $CONTAINER_HOME/.claude/hooks/ 2>/dev/null || echo '  no hooks found'
-        echo 'MCP servers:'
-        python3 -c \"import json; d=json.load(open('$CONTAINER_HOME/.claude.json')); print('  ', list(d.get('mcpServers', {}).keys()))\" 2>/dev/null || echo '  .claude.json missing or invalid'
-    " || true
+    # Debug: show what ended up in the container (only if SANDBOX_DEBUG is set)
+    if [ "$SANDBOX_DEBUG" = "1" ]; then
+        log_info "=== Claude Config Debug ==="
+        docker exec "$container_id" sh -c "
+            echo 'Settings (key fields):'
+            python3 -c \"import json; d=json.load(open('$CONTAINER_HOME/.claude/settings.json')); print('  model:', d.get('model', 'NOT SET')); print('  hooks:', 'configured' if d.get('hooks') else 'NOT SET')\" 2>/dev/null || echo '  settings.json missing or invalid'
+            echo 'Skills:'
+            ls -1 $CONTAINER_HOME/.claude/skills/ 2>/dev/null | head -5 || echo '  no skills found'
+            echo 'Hooks:'
+            ls -1 $CONTAINER_HOME/.claude/hooks/ 2>/dev/null || echo '  no hooks found'
+            echo 'MCP servers:'
+            python3 -c \"import json; d=json.load(open('$CONTAINER_HOME/.claude.json')); print('  ', list(d.get('mcpServers', {}).keys()))\" 2>/dev/null || echo '  .claude.json missing or invalid'
+        " || true
+    fi
 }
 
 sync_runtime_credentials() {
@@ -1827,17 +1830,19 @@ sync_runtime_credentials() {
     ensure_claude_statusline "$container_id" "1"
     dir_exists ~/.config/gh && copy_dir_to_container_quiet "$container_id" ~/.config/gh "$CONTAINER_HOME/.config/gh"
     dir_exists ~/.gemini && copy_dir_to_container_quiet "$container_id" ~/.gemini "$CONTAINER_HOME/.gemini" "antigravity"
-    if file_exists ~/.config/opencode/opencode.json; then
-        copy_file_to_container_quiet "$container_id" ~/.config/opencode/opencode.json "$CONTAINER_HOME/.config/opencode/opencode.json"
-    elif file_exists "$SCRIPT_DIR/opencode.json"; then
-        copy_file_to_container_quiet "$container_id" "$SCRIPT_DIR/opencode.json" "$CONTAINER_HOME/.config/opencode/opencode.json"
+    if opencode_enabled; then
+        if file_exists ~/.config/opencode/opencode.json; then
+            copy_file_to_container_quiet "$container_id" ~/.config/opencode/opencode.json "$CONTAINER_HOME/.config/opencode/opencode.json"
+        elif file_exists "$SCRIPT_DIR/opencode.json"; then
+            copy_file_to_container_quiet "$container_id" "$SCRIPT_DIR/opencode.json" "$CONTAINER_HOME/.config/opencode/opencode.json"
+        fi
+        file_exists ~/.local/share/opencode/auth.json && copy_file_to_container_quiet "$container_id" ~/.local/share/opencode/auth.json "$CONTAINER_HOME/.local/share/opencode/auth.json"
     fi
-    file_exists ~/.local/share/opencode/auth.json && copy_file_to_container_quiet "$container_id" ~/.local/share/opencode/auth.json "$CONTAINER_HOME/.local/share/opencode/auth.json"
-    sync_opencode_foundry "$container_id" "1"
-    ensure_opencode_tavily_mcp "$container_id" "1"
-    ensure_opencode_default_model "$container_id" "1"
-    ensure_gemini_settings "$container_id" "1"
-    ensure_codex_config "$container_id" "1"
+    opencode_enabled && sync_opencode_foundry "$container_id" "1"
+    opencode_enabled && ensure_opencode_tavily_mcp "$container_id" "1"
+    opencode_enabled && ensure_opencode_default_model "$container_id" "1"
+    has_gemini_key && ensure_gemini_settings "$container_id" "1"
+    has_codex_key && ensure_codex_config "$container_id" "1"
     if file_exists ~/.foundry-mcp.toml; then
         docker exec -u "$CONTAINER_USER" "$container_id" mkdir -p "$CONTAINER_HOME/.config/foundry-mcp" 2>/dev/null || true
         copy_file_to_container_quiet "$container_id" ~/.foundry-mcp.toml "$CONTAINER_HOME/.config/foundry-mcp/config.toml"

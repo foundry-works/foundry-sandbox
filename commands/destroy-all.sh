@@ -75,11 +75,29 @@ cmd_destroy_all() {
             fi
         fi
 
+        # Remove credential isolation networks for this sandbox
+        for network_suffix in credential-isolation proxy-egress; do
+            local network_name="${container}_${network_suffix}"
+            if docker network inspect "$network_name" >/dev/null 2>&1; then
+                docker network rm "$network_name" 2>/dev/null || true
+            fi
+        done
+
         echo "Sandbox '$name' destroyed."
     done
 
+    # Final cleanup: remove any remaining orphaned sandbox networks
+    local orphaned_networks=0
+    while IFS= read -r network_name; do
+        [ -z "$network_name" ] && continue
+        if docker network rm "$network_name" 2>/dev/null; then
+            ((orphaned_networks++))
+        fi
+    done < <(docker network ls --format '{{.Name}}' | grep -E '^sandbox-.*_(credential-isolation|proxy-egress)$')
+
     echo ""
     echo "Destroyed ${#sandboxes[@]} sandbox(es)."
+    [ "$orphaned_networks" -gt 0 ] && echo "Cleaned up $orphaned_networks orphaned network(s)."
 
     if [ ${#failed[@]} -gt 0 ]; then
         echo "Failed to fully remove worktrees for: ${failed[*]}"

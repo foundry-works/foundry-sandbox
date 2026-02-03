@@ -222,7 +222,7 @@ setup_gateway_session() {
     local container_id="$1"
     local repos="${2:-}"
 
-    log_info "Setting up gateway session for container $container_id..."
+    log_debug "Setting up gateway session for container $container_id..."
 
     # Wait for gateway to be healthy
     if ! wait_for_gateway_health 30; then
@@ -261,7 +261,7 @@ setup_gateway_session() {
         return 1
     fi
 
-    log_info "Gateway session created successfully"
+    log_debug "Gateway session created successfully"
     return 0
 }
 

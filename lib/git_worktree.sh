@@ -70,41 +70,41 @@ create_worktree() {
             git_with_retry -C "$bare_path" fetch origin "$from_branch:$from_branch" 2>/dev/null || true
             # Check if branch already exists (e.g., from a previous destroyed sandbox)
             if git -C "$bare_path" show-ref --verify --quiet "refs/heads/$branch"; then
-                log_info "Using existing branch '$branch'..."
+                log_step "Using existing branch: $branch"
                 # For sparse checkout: create worktree without checking out files
                 if [ "$sparse_checkout" = "1" ] && [ -n "$working_dir" ]; then
-                    git -C "$bare_path" worktree add --no-checkout "$worktree_path" "$branch"
+                    git -C "$bare_path" worktree add --no-checkout "$worktree_path" "$branch" >/dev/null 2>&1
                     configure_sparse_checkout "$bare_path" "$worktree_path" "$working_dir"
                 else
-                    git -C "$bare_path" worktree add "$worktree_path" "$branch"
+                    git -C "$bare_path" worktree add "$worktree_path" "$branch" >/dev/null 2>&1
                 fi
             else
-                log_info "Creating new branch '$branch' from '$from_branch'..."
+                log_step "Creating branch: $branch (from $from_branch)"
                 # For sparse checkout: create worktree without checking out files
                 if [ "$sparse_checkout" = "1" ] && [ -n "$working_dir" ]; then
-                    git -C "$bare_path" worktree add --no-checkout -b "$branch" "$worktree_path" "$from_branch"
+                    git -C "$bare_path" worktree add --no-checkout -b "$branch" "$worktree_path" "$from_branch" >/dev/null 2>&1
                     configure_sparse_checkout "$bare_path" "$worktree_path" "$working_dir"
                 else
-                    git -C "$bare_path" worktree add -b "$branch" "$worktree_path" "$from_branch"
+                    git -C "$bare_path" worktree add -b "$branch" "$worktree_path" "$from_branch" >/dev/null 2>&1
                 fi
             fi
         else
-            log_info "Creating worktree for branch: $branch..."
+            log_step "Creating worktree for branch: $branch"
             # For sparse checkout: create worktree without checking out files
             if [ "$sparse_checkout" = "1" ] && [ -n "$working_dir" ]; then
-                if ! git -C "$bare_path" worktree add --no-checkout "$worktree_path" "$branch" 2>/dev/null; then
-                    log_info "Branch not found locally, fetching..."
-                    git_with_retry -C "$bare_path" fetch origin "$branch:$branch" 2>/dev/null || \
-                    git_with_retry -C "$bare_path" fetch origin "refs/heads/$branch:refs/heads/$branch"
-                    git -C "$bare_path" worktree add --no-checkout "$worktree_path" "$branch"
+                if ! git -C "$bare_path" worktree add --no-checkout "$worktree_path" "$branch" >/dev/null 2>&1; then
+                    log_step "Branch not found locally, fetching..."
+                    git_with_retry -C "$bare_path" fetch origin "$branch:$branch" >/dev/null 2>&1 || \
+                    git_with_retry -C "$bare_path" fetch origin "refs/heads/$branch:refs/heads/$branch" >/dev/null 2>&1
+                    git -C "$bare_path" worktree add --no-checkout "$worktree_path" "$branch" >/dev/null 2>&1
                 fi
                 configure_sparse_checkout "$bare_path" "$worktree_path" "$working_dir"
             else
-                if ! git -C "$bare_path" worktree add "$worktree_path" "$branch" 2>/dev/null; then
-                    log_info "Branch not found locally, fetching..."
-                    git_with_retry -C "$bare_path" fetch origin "$branch:$branch" 2>/dev/null || \
-                    git_with_retry -C "$bare_path" fetch origin "refs/heads/$branch:refs/heads/$branch"
-                    git -C "$bare_path" worktree add "$worktree_path" "$branch"
+                if ! git -C "$bare_path" worktree add "$worktree_path" "$branch" >/dev/null 2>&1; then
+                    log_step "Branch not found locally, fetching..."
+                    git_with_retry -C "$bare_path" fetch origin "$branch:$branch" >/dev/null 2>&1 || \
+                    git_with_retry -C "$bare_path" fetch origin "refs/heads/$branch:refs/heads/$branch" >/dev/null 2>&1
+                    git -C "$bare_path" worktree add "$worktree_path" "$branch" >/dev/null 2>&1
                 fi
             fi
         fi

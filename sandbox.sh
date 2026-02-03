@@ -24,6 +24,7 @@ source "$SCRIPT_DIR/lib/tmux.sh"
 source "$SCRIPT_DIR/lib/paths.sh"
 source "$SCRIPT_DIR/lib/state.sh"
 source "$SCRIPT_DIR/lib/runtime.sh"
+source "$SCRIPT_DIR/lib/ide.sh"
 source "$SCRIPT_DIR/lib/json.sh"
 source "$SCRIPT_DIR/lib/inspect.sh"
 source "$SCRIPT_DIR/lib/network.sh"
@@ -38,13 +39,23 @@ cmd="${1:-help}"
 shift 2>/dev/null || true
 
 case "$cmd" in
-    new|list|attach|start|stop|destroy|build|help|status|config|prune|info|upgrade)
+    new|list|attach|start|stop|destroy|build|help|status|config|prune|info|upgrade|preset)
         source "$SCRIPT_DIR/commands/$cmd.sh"
         "cmd_$cmd" "$@"
         ;;
     destroy-all)
         source "$SCRIPT_DIR/commands/destroy-all.sh"
         cmd_destroy_all "$@"
+        ;;
+    repeat)
+        # Alias for cast new --last
+        source "$SCRIPT_DIR/commands/new.sh"
+        cmd_new --last "$@"
+        ;;
+    reattach)
+        # Alias for cast attach --last
+        source "$SCRIPT_DIR/commands/attach.sh"
+        cmd_attach --last "$@"
         ;;
     --help|-h)
         source "$SCRIPT_DIR/commands/help.sh"

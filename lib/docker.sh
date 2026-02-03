@@ -59,7 +59,7 @@ compose_up() {
 
     local compose_cmd
     compose_cmd=$(get_compose_command "$override_file" "$isolate_credentials")
-    run_cmd $compose_cmd -p "$container" up -d
+    run_cmd_quiet $compose_cmd -p "$container" up -d
 }
 
 compose_down() {

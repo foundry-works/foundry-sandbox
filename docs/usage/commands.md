@@ -10,6 +10,8 @@ Create a new sandbox from a repository.
 
 ```
 cast new <repo> [branch] [from-branch] [options]
+cast new --last
+cast new --preset <name>
 ```
 
 ### Arguments
@@ -24,10 +26,15 @@ cast new <repo> [branch] [from-branch] [options]
 
 | Option | Description |
 |--------|-------------|
+| `--last` | Repeat the previous `cast new` command |
+| `--preset <name>` | Use a saved preset configuration |
+| `--save-as <name>` | Save this configuration as a named preset |
 | `--mount`, `-v` | Mount host path: `host:container[:ro]` |
 | `--copy`, `-c` | Copy host path once: `host:container` |
 | `--network`, `-n` | Network isolation mode: `limited` (default), `host-only`, `none` |
 | `--with-ssh` | Enable SSH agent forwarding (opt-in, agent-only) |
+| `--with-opencode` | Enable OpenCode setup (requires host auth file) |
+| `--with-zai` | Enable ZAI Claude alias (requires `ZHIPU_API_KEY`) |
 | `--no-isolate-credentials`, `--no-isolate` | Disable credential isolation (pass API keys directly) |
 | `--skip-key-check` | Skip API key validation |
 | `--wd <path>` | Working directory within repo (relative path) |
@@ -74,6 +81,20 @@ cast new owner/monorepo feature --wd packages/backend
 
 # Sparse checkout (only checkout the working directory + root configs)
 cast new owner/monorepo feature --wd packages/backend --sparse
+
+# Save configuration as a preset for reuse
+cast new owner/repo feature --wd packages/app --save-as myproject
+
+# Use a saved preset
+cast new --preset myproject
+
+# Repeat the last cast new command
+cast new --last
+cast repeat  # shorthand alias
+
+# Enable optional tools
+cast new owner/repo feature --with-opencode  # requires ~/.local/share/opencode/auth.json
+cast new owner/repo feature --with-zai       # requires ZHIPU_API_KEY
 ```
 
 Note: SSH forwarding is disabled by default and agent-only (no key copy); use `--with-ssh` or set `SANDBOX_SYNC_SSH=1` to enable. API keys are passed via environment variables (see `.env.example`).
@@ -91,6 +112,73 @@ Note: SSH forwarding is disabled by default and agent-only (no key copy); use `-
 If `repo` is `.` and no branch is provided, the sandbox branch is created from your current branch.
 
 Running `cast new` with no arguments launches the guided wizard (gum if available, read-based fallback).
+
+---
+
+## cast repeat
+
+Alias for `cast new --last`. Repeats the previous `cast new` command.
+
+### Synopsis
+
+```
+cast repeat
+```
+
+### Examples
+
+```bash
+# Create a sandbox
+cast new owner/repo feature --wd packages/app
+
+# Later, repeat the same setup
+cast repeat
+```
+
+---
+
+## cast preset
+
+Manage saved presets for `cast new`.
+
+### Synopsis
+
+```
+cast preset list
+cast preset show <name>
+cast preset delete <name>
+```
+
+### Commands
+
+| Command | Description |
+|---------|-------------|
+| `list` | List all saved presets |
+| `show <name>` | Show preset details (JSON) |
+| `delete <name>` | Delete a preset |
+
+### Examples
+
+```bash
+# Save a preset when creating a sandbox
+cast new owner/repo feature --wd packages/app --save-as myproject
+
+# List all presets
+cast preset list
+
+# Show preset details
+cast preset show myproject
+
+# Use a preset
+cast new --preset myproject
+
+# Delete a preset
+cast preset delete myproject
+```
+
+### Notes
+
+Presets are stored in `~/.sandboxes/presets/` as JSON files. The last `cast new` command is stored in `~/.sandboxes/.last-cast-new.json` for the `--last` flag.
 
 ---
 
@@ -522,6 +610,7 @@ These environment variables affect `cast` behavior:
 | `PERPLEXITY_API_KEY` | Passed to containers | - |
 | `GOOGLE_API_KEY` | Passed to containers | - |
 | `GOOGLE_CSE_ID` | Passed to containers | - |
+| `ZHIPU_API_KEY` | Required for `--with-zai` (ZAI Claude alias) | - |
 
 Gemini CLI uses OAuth credentials stored under `~/.gemini/` (from `gemini auth`). Large Gemini CLI artifacts (e.g. `~/.gemini/antigravity`) are skipped to keep sandboxes lightweight. Sandboxes default to disabling Gemini auto-updates, update nags, telemetry, and usage stats via `~/.gemini/settings.json`, and Codex update checks/analytics via `~/.codex/config.toml`. If your host Codex config does not set them, sandboxes also default to `approval_policy = "on-failure"` and `sandbox_mode = "danger-full-access"` inside the container.
 

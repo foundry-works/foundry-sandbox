@@ -7,6 +7,48 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.9.0] - 2026-02-03
+
+### Added
+- **Presets and command history** for `cast new`
+  - `cast new --last` or `cast repeat` to repeat the previous `cast new` command
+  - `cast new --save-as <name>` to save current configuration as a named preset
+  - `cast new --preset <name>` to create a sandbox from a saved preset
+  - `cast preset list|show|delete` commands for preset management
+  - Auto-increment sandbox names (`-2`, `-3`, etc.) when repeating to allow multiple sandboxes
+- **IDE launch integration** for `cast new` and `cast attach`
+  - `--with-ide[=name]` flag to launch an IDE (cursor, zed, code) then terminal
+  - `--ide-only[=name]` flag to launch IDE only, skip terminal
+  - `--no-ide` flag to skip IDE selection prompt
+  - Interactive IDE selection prompt when multiple IDEs are available
+  - Supports Cursor, Zed, and VS Code
+- **`cast reattach` command** - auto-reattach to last sandbox or detect from current directory
+  - `cast attach --last` to reattach to the previously attached sandbox
+  - `cast attach` (no args) auto-detects sandbox when run from a worktree directory
+- **Opt-in tool enablement** for OpenCode and ZAI
+  - `--with-opencode` flag to enable OpenCode setup (requires host auth file)
+  - `--with-zai` flag to enable ZAI Claude alias (requires `ZHIPU_API_KEY`)
+  - Tools are disabled by default; explicitly enable to use them
+- **Docker network capacity check** before sandbox creation
+  - Proactive detection of exhausted Docker network address pools
+  - Helpful error messages with remediation steps
+  - Warning when sandbox network count exceeds 20
+- **Guided mode command echo** shows the equivalent CLI command after interactive setup
+- Network cleanup on destroy: credential isolation networks (`credential-isolation`, `proxy-egress`) are now explicitly removed
+
+### Changed
+- **Claude authentication is now mandatory**
+  - Requires `CLAUDE_CODE_OAUTH_TOKEN` or `ANTHROPIC_API_KEY`
+  - Other AI tools (Gemini, Codex, OpenCode) are optional with helpful warnings when unconfigured
+- **OpenCode and ZAI configuration** only applied when explicitly enabled
+  - Reduces container startup noise and avoids copying unnecessary config files
+  - Auth files, config stubs, and plugin syncing skipped unless tool is enabled
+- Improved authentication warnings on `cast start` for missing CLI credentials
+
+### Fixed
+- Orphaned Docker networks now cleaned up during `cast destroy` and `cast destroy-all`
+- TOML syntax error in `.foundry-mcp.toml` provider lists (missing comma)
+
 ## [0.8.0] - 2026-02-02
 
 ### Added
@@ -366,7 +408,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Tab completion for bash
 - macOS and Linux support
 
-[Unreleased]: https://github.com/foundry-works/foundry-sandbox/compare/v0.8.0...HEAD
+[Unreleased]: https://github.com/foundry-works/foundry-sandbox/compare/v0.9.0...HEAD
+[0.9.0]: https://github.com/foundry-works/foundry-sandbox/compare/v0.8.0...v0.9.0
 [0.8.0]: https://github.com/foundry-works/foundry-sandbox/compare/v0.7.0...v0.8.0
 [0.7.0]: https://github.com/foundry-works/foundry-sandbox/compare/v0.6.0...v0.7.0
 [0.6.0]: https://github.com/foundry-works/foundry-sandbox/compare/v0.5.9...v0.6.0

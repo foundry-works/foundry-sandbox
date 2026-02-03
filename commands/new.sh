@@ -12,11 +12,6 @@ NC='\033[0m' # No Color
 # TUI Wrapper Functions (gum with read fallback)
 # ============================================================================
 
-# Check if gum is available
-has_gum() {
-    command -v gum &>/dev/null
-}
-
 # Text input with placeholder
 tui_input() {
     local placeholder="$1"
@@ -121,6 +116,35 @@ tui_header() {
         printf "╭%s╮\n" "$(printf '─%.0s' $(seq 1 $((width - 2))))"
         printf "│  ${CYAN}${BOLD}%s${NC}%*s│\n" "$title" "$padding" ""
         printf "╰%s╯\n" "$(printf '─%.0s' $(seq 1 $((width - 2))))"
+    fi
+}
+
+# Choose from options (single select)
+tui_choose() {
+    local prompt="$1"
+    shift
+    local options=("$@")
+
+    if has_gum; then
+        printf '%s\n' "${options[@]}" | gum choose --cursor "  > " --cursor-prefix "" --selected-prefix "  > " --unselected-prefix "    "
+    else
+        # Numbered fallback
+        local i=1
+        for opt in "${options[@]}"; do
+            echo "  $i) $opt"
+            ((i++))
+        done
+        echo ""
+        local choice
+        read -p "  Select [1]: " choice
+        choice="${choice:-1}"
+
+        # Validate input
+        if ! [[ "$choice" =~ ^[0-9]+$ ]] || [ "$choice" -lt 1 ] || [ "$choice" -gt ${#options[@]} ]; then
+            choice=1
+        fi
+
+        echo "${options[$((choice-1))]}"
     fi
 }
 
@@ -664,6 +688,26 @@ guided_new() {
         esac
     done
 
+    # Build the equivalent command line for future use
+    local cmd_line="cast new $repo"
+    if [[ "$create_branch" == true ]]; then
+        # New branch: cast new repo [branch] [from_branch]
+        [[ -n "$branch" ]] && cmd_line+=" $branch"
+        [[ -n "$from_branch" ]] && cmd_line+=" $from_branch"
+    else
+        # Existing branch: cast new repo branch
+        [[ -n "$branch" ]] && cmd_line+=" $branch"
+    fi
+    [[ -n "$working_dir" ]] && cmd_line+=" --wd $working_dir"
+    [[ "$sparse" == true ]] && cmd_line+=" --sparse"
+    [[ -n "$pip_req" ]] && cmd_line+=" --pip-requirements $pip_req"
+    [[ "$allow_pr" == true ]] && cmd_line+=" --allow-pr"
+
+    echo ""
+    echo -e "  ${DIM}To repeat this setup:${NC}"
+    echo -e "  ${DIM}cast new --last${NC}"
+    echo -e "  ${DIM}or: $cmd_line${NC}"
+
     # Build arguments array
     local args=("$WIZ_REPO_INPUT")
     [[ -n "$WIZ_BRANCH" ]] && args+=("$WIZ_BRANCH")
@@ -685,6 +729,31 @@ cmd_new() {
         return
     fi
     parse_new_args "$@"
+
+    # Handle --last flag: load last cast new args
+    if [ "$NEW_USE_LAST" = "true" ]; then
+        if ! load_last_cast_new; then
+            exit 1
+        fi
+        echo ""
+        echo "Repeating last command:"
+        echo "  $LAST_COMMAND_LINE"
+        echo ""
+    fi
+
+    # Handle --preset flag: load named preset
+    if [ -n "$NEW_USE_PRESET" ]; then
+        if ! load_cast_preset "$NEW_USE_PRESET"; then
+            exit 1
+        fi
+        echo ""
+        echo "Using preset '$NEW_USE_PRESET':"
+        echo "  $LAST_COMMAND_LINE"
+        echo ""
+    fi
+
+    # Store save-as name before it gets overwritten
+    local save_as_preset="$NEW_SAVE_AS"
     local repo_url="$NEW_REPO_URL"
     local branch="$NEW_BRANCH"
     local from_branch="$NEW_FROM_BRANCH"
@@ -700,6 +769,8 @@ cmd_new() {
     local isolate_credentials="$NEW_ISOLATE_CREDENTIALS"
     local allow_dangerous_mount="$NEW_ALLOW_DANGEROUS_MOUNT"
     local allow_pr="$NEW_ALLOW_PR"
+    local enable_opencode="$NEW_ENABLE_OPENCODE"
+    local enable_zai="$NEW_ENABLE_ZAI"
     local ssh_agent_sock=""
     local repo_root=""
     local current_branch=""
@@ -772,6 +843,8 @@ cmd_new() {
         echo "  --network, -n <mode>             Network isolation mode (default: limited)"
         echo "                                   Modes: limited, host-only, none"
         echo "  --with-ssh                       Enable SSH agent forwarding (opt-in, agent-only)"
+        echo "  --with-opencode                  Enable OpenCode setup (requires host auth file)"
+        echo "  --with-zai                       Enable ZAI Claude alias (requires ZHIPU_API_KEY)"
         echo "  --skip-key-check                 Skip API key validation"
         echo "  --wd <path>                      Working directory within repo (relative path)"
         echo "  --sparse                         Enable sparse checkout (requires --wd)"
@@ -795,20 +868,41 @@ cmd_new() {
         echo "  $0 new user/monorepo feature --wd packages/backend"
         echo "  $0 new user/monorepo feature --wd packages/backend --sparse"
         echo "  $0 new user/repo feature --no-isolate-credentials  # pass keys directly"
+        echo "  $0 new user/repo feature --with-opencode  # enable OpenCode setup"
+        echo "  $0 new user/repo feature --with-zai  # enable ZAI Claude alias"
         exit 1
+    fi
+
+    # Opt-in tool enablement (default off)
+    SANDBOX_ENABLE_OPENCODE="0"
+    SANDBOX_ENABLE_ZAI="0"
+    if [ "$enable_opencode" = "true" ]; then
+        if has_opencode_key; then
+            SANDBOX_ENABLE_OPENCODE="1"
+        else
+            log_warn "OpenCode requested but auth file not found; skipping OpenCode setup."
+            log_warn "Run 'opencode auth login' or re-run with --with-opencode after configuring ~/.local/share/opencode/auth.json."
+        fi
+    fi
+    if [ "$enable_zai" = "true" ]; then
+        if has_zai_key; then
+            SANDBOX_ENABLE_ZAI="1"
+        else
+            log_warn "ZAI requested but ZHIPU_API_KEY not set; skipping ZAI setup."
+        fi
+    fi
+    export SANDBOX_ENABLE_OPENCODE SANDBOX_ENABLE_ZAI
+    if [ "${SANDBOX_ENABLE_ZAI}" != "1" ]; then
+        export ZHIPU_API_KEY=
     fi
 
     # Check API keys unless skipped (keys are expected in the environment)
     if [ "$skip_key_check" != "true" ]; then
-        if ! check_any_ai_key; then
-            # No AI key - prompt to continue
-            if ! prompt_missing_keys; then
-                die "Sandbox creation cancelled."
-            fi
-        elif ! check_any_search_key; then
-            # AI key present but no search key - just warn
-            show_missing_search_keys_warning
+        # Claude is mandatory
+        if ! check_claude_key_required; then
+            die "Sandbox creation cancelled - Claude authentication required."
         fi
+        # All CLI status shown in Configuration section via show_cli_status()
     fi
 
     # Validate --copy source paths exist before creating anything
@@ -842,6 +936,11 @@ cmd_new() {
     validate_git_url "$repo_url"
     check_image_freshness
 
+    # Check network capacity before creating resources
+    if ! check_docker_network_capacity "$isolate_credentials"; then
+        exit 1
+    fi
+
     SANDBOX_NETWORK_MODE="$network_mode"
     SANDBOX_SYNC_SSH="$sync_ssh"
     SANDBOX_SSH_MODE=""
@@ -864,6 +963,19 @@ cmd_new() {
     bare_path=$(repo_to_path "$repo_url")
     local name
     name=$(sandbox_name "$bare_path" "$branch")
+
+    # Auto-generate unique name for cast repeat to allow multiple sandboxes
+    if [ "$NEW_USE_LAST" = "true" ] || [ -n "$NEW_USE_PRESET" ]; then
+        local original_name="$name"
+        name=$(find_next_sandbox_name "$name")
+
+        # If sandbox name got a suffix, apply the same suffix to the branch
+        if [ "$name" != "$original_name" ]; then
+            local suffix="${name#$original_name}"
+            branch="${branch}${suffix}"
+        fi
+    fi
+
     local worktree_dir
     worktree_dir=$(path_worktree "$name")
     local metadata_path
@@ -909,6 +1021,7 @@ cmd_new() {
 
     echo ""
     echo "Setting up your sandbox: $name"
+    log_section "Repository"
 
     ensure_bare_repo "$repo_url" "$bare_path"
     local sparse_flag="0"
@@ -943,8 +1056,10 @@ cmd_new() {
         done
     fi
 
+    log_section "Configuration"
+
     if [ ${#mounts[@]} -gt 0 ]; then
-        echo "Adding custom mounts..."
+        log_step "Custom mounts added"
         if [ "$allow_dangerous_mount" = "true" ]; then
             echo "WARNING: --allow-dangerous-mount bypasses credential directory protection. Use with caution."
         fi
@@ -960,7 +1075,7 @@ OVERRIDES
 
     # Add network mode configuration
     if [ -n "$network_mode" ]; then
-        echo "Setting network mode: $network_mode"
+        log_step "Network mode: $network_mode"
         add_network_to_override "$network_mode" "$override_file"
     fi
 
@@ -972,10 +1087,13 @@ OVERRIDES
     # Pre-populate foundry skills and hooks on host before container starts (no network needed inside)
     prepopulate_foundry_global "$claude_home_path" "0"
 
+    # Show detected CLI configurations
+    show_cli_status
+
     local runtime_enable_ssh="0"
     if [ "$SANDBOX_SYNC_SSH" = "1" ]; then
         if [ -n "$ssh_agent_sock" ]; then
-            echo "Enabling SSH agent forwarding..."
+            log_step "SSH agent forwarding: enabled"
             add_ssh_agent_to_override "$override_file" "$ssh_agent_sock"
             runtime_enable_ssh="1"
         else
@@ -991,13 +1109,24 @@ OVERRIDES
     local container_id="${container}-dev-1"
 
     # Export gh token if available (needed for macOS keychain)
-    if export_gh_token; then
-        log_info "GitHub CLI token exported for container"
-    fi
+    export_gh_token
 
-    echo "Starting your container..."
+    log_section "Container"
+    log_step "Starting container..."
     if [ "$isolate_credentials" = "true" ]; then
-        echo "Credential isolation enabled - API keys will be held in proxy container"
+        log_step "Credential isolation: enabled"
+        if [ ! -f "$HOME/.codex/auth.json" ]; then
+            log_warn "Credential isolation: ~/.codex/auth.json not found; Codex CLI will not work."
+            log_warn "Run 'codex auth' to create it if you plan to use Codex."
+        fi
+        if [ "$enable_opencode" != "true" ] && [ ! -f "$HOME/.local/share/opencode/auth.json" ]; then
+            log_warn "Credential isolation: ~/.local/share/opencode/auth.json not found; OpenCode CLI will not work."
+            log_warn "Run 'opencode auth login' to create it if you plan to use OpenCode."
+        fi
+        if [ ! -f "$HOME/.gemini/oauth_creds.json" ] && [ -z "${GEMINI_API_KEY:-}" ]; then
+            log_warn "Credential isolation: ~/.gemini/oauth_creds.json not found and GEMINI_API_KEY not set; Gemini CLI will not work."
+            log_warn "Run 'gemini auth' or set GEMINI_API_KEY if you plan to use Gemini."
+        fi
         # Validate git remotes don't contain embedded credentials
         # This is critical for credential isolation - credentials must go through the gateway
         if ! validate_git_remotes "$worktree_dir/.git"; then
@@ -1006,10 +1135,10 @@ OVERRIDES
         # Export ALLOW_PR_OPERATIONS for api-proxy
         if [ "$allow_pr" = "true" ]; then
             export ALLOW_PR_OPERATIONS=true
-            echo "PR operations: allowed"
+            log_step "PR operations: allowed"
         else
             export ALLOW_PR_OPERATIONS=
-            echo "PR operations: blocked (default)"
+            log_step "PR operations: blocked (default)"
         fi
     fi
     compose_up "$worktree_dir" "$claude_config_path" "$container" "$override_file" "$isolate_credentials"
@@ -1069,7 +1198,6 @@ OVERRIDES
 
     # Apply network restrictions AFTER plugin/MCP registration completes
     if [ -n "$network_mode" ]; then
-        echo "Applying network mode: $network_mode"
         if [ "$network_mode" = "limited" ]; then
             run_cmd docker exec "$container_id" sudo /usr/local/bin/network-firewall.sh
         else
@@ -1077,20 +1205,102 @@ OVERRIDES
         fi
     fi
 
+    # Save last cast new args for --last flag
+    local sparse_for_save="false"
+    [ "$sparse_checkout" = "true" ] && sparse_for_save="true"
+    local allow_pr_for_save="false"
+    [ "$allow_pr" = "true" ] && allow_pr_for_save="true"
+    local enable_opencode_for_save="false"
+    [ "$enable_opencode" = "true" ] && enable_opencode_for_save="true"
+    local enable_zai_for_save="false"
+    [ "$enable_zai" = "true" ] && enable_zai_for_save="true"
+
+    save_last_cast_new "$repo_url" "$branch" "$from_branch" "$working_dir" \
+        "$sparse_for_save" "$pip_requirements" "$allow_pr_for_save" "$network_mode" \
+        "$sync_ssh" "$enable_opencode_for_save" "$enable_zai_for_save" \
+        "${mounts[@]}" -- "${copies[@]}"
+
+    # Save as last attached for cast reattach
+    save_last_attach "$name"
+
+    # Save as named preset if --save-as was specified
+    if [ -n "$save_as_preset" ]; then
+        save_cast_preset "$save_as_preset" "$repo_url" "$branch" "$from_branch" "$working_dir" \
+            "$sparse_for_save" "$pip_requirements" "$allow_pr_for_save" "$network_mode" \
+            "$sync_ssh" "$enable_opencode_for_save" "$enable_zai_for_save" \
+            "${mounts[@]}" -- "${copies[@]}"
+    fi
+
     echo ""
-    echo -e "${CYAN}${BOLD}Your sandbox is ready!${NC}"
+    echo -e "${GREEN}✓${NC} ${BOLD}Your sandbox is ready!${NC}"
     echo ""
     echo "  Sandbox    $name"
     echo "  Worktree   $worktree_dir"
     echo ""
     echo "  Commands:"
     echo "    cast attach $name   - reconnect later"
+    echo "    cast reattach       - reconnect (auto-detects sandbox in worktree)"
     echo "    cast stop $name     - pause the sandbox"
     echo "    cast destroy $name  - remove completely"
+    echo "    cast repeat         - repeat this setup"
     echo ""
+    echo "  This command:"
+    echo "    $LAST_COMMAND_LINE"
+    echo ""
+
+    # IDE launch logic
+    local with_ide="$NEW_WITH_IDE"
+    local ide_only="$NEW_IDE_ONLY"
+    local skip_terminal=false
+
     if [ -t 0 ]; then
-        read -p "Press Enter to launch... "
+        if [ "$with_ide" = "none" ]; then
+            # --no-ide: skip IDE prompt entirely
+            read -p "Press Enter to launch... "
+        elif [ -n "$with_ide" ] && [ "$with_ide" != "auto" ]; then
+            # Specific IDE requested via --with-ide=<name> or --ide-only=<name>
+            if auto_launch_ide "$with_ide" "$worktree_dir"; then
+                if [ "$ide_only" = "true" ]; then
+                    skip_terminal=true
+                    echo ""
+                    echo "IDE launched. Run 'cast attach $name' for terminal."
+                else
+                    read -p "Press Enter to launch terminal... "
+                fi
+            else
+                # IDE launch failed, fall back to terminal
+                read -p "Press Enter to launch... "
+            fi
+        elif [ -n "$with_ide" ]; then
+            # --with-ide or --ide-only without specific name: prompt for selection
+            prompt_ide_selection "$worktree_dir" "$name"
+            if [ "$ide_only" = "true" ] || [ "$IDE_WAS_LAUNCHED" = "true" ]; then
+                skip_terminal=true
+                echo ""
+                echo "  Run this in your IDE's terminal to connect:"
+                echo ""
+                echo "    cast attach $name"
+                echo ""
+            else
+                read -p "Press Enter to launch terminal... "
+            fi
+        else
+            # Default: offer IDE selection if any available
+            prompt_ide_selection "$worktree_dir" "$name"
+            if [ "$IDE_WAS_LAUNCHED" = "true" ]; then
+                echo ""
+                echo "  Run this in your IDE's terminal to connect:"
+                echo ""
+                echo "    cast attach $name"
+                echo ""
+                skip_terminal=true
+            else
+                read -p "Press Enter to launch terminal... "
+            fi
+        fi
     fi
 
-    tmux_attach "$name" "$working_dir"
+    if [ "$skip_terminal" = "false" ]; then
+        tmux_attach "$name" "$working_dir"
+    fi
 }

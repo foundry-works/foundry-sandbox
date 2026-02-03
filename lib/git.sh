@@ -26,12 +26,12 @@ ensure_bare_repo() {
     local bare_path="$2"
 
     if [ ! -d "$bare_path" ]; then
-        log_info "Cloning bare repo to $bare_path..."
+        log_step "Cloning repository..."
         mkdir -p "$(dirname "$bare_path")"
-        git_with_retry clone --bare "$repo_url" "$bare_path"
+        git_with_retry clone --bare "$repo_url" "$bare_path" >/dev/null 2>&1
     else
-        log_info "Bare repo exists, fetching latest..."
-        git_with_retry -C "$bare_path" fetch --all --prune
+        log_step "Fetching latest from origin..."
+        git_with_retry -C "$bare_path" fetch --all --prune >/dev/null 2>&1
     fi
 }
 

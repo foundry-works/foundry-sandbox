@@ -4,7 +4,7 @@
 
 install_workspace_permissions() {
     local container_id="$1"
-    log_info "Installing foundry permissions into workspace..."
+    log_debug "Installing foundry permissions into workspace..."
 
     docker exec -u "$CONTAINER_USER" -i "$container_id" python3 - <<'PY'
 import json
@@ -110,7 +110,6 @@ def main():
         json.dump(settings, f, indent=2, sort_keys=True)
         f.write('\n')
 
-    print(f"  Installed foundry permissions to {SETTINGS_FILE}")
 
 if __name__ == "__main__":
     main()

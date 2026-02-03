@@ -50,6 +50,14 @@ cmd_destroy() {
     # Remove stubs volume (external volume not removed by compose down -v)
     remove_stubs_volume "$container"
 
+    # Remove credential isolation networks (not always removed by compose down)
+    for network_suffix in credential-isolation proxy-egress; do
+        local network_name="${container}_${network_suffix}"
+        if docker network inspect "$network_name" >/dev/null 2>&1; then
+            docker network rm "$network_name" 2>/dev/null || true
+        fi
+    done
+
     if [ "$keep_worktree" = false ] && [ -d "$claude_config_path" ]; then
         echo "Removing Claude config..."
         rm -rf "$claude_config_path"

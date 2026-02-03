@@ -18,6 +18,17 @@ log_error() {
     echo "Error: $*" >&2
 }
 
+# Section header with arrow (bold)
+log_section() {
+    echo ""
+    echo -e "\033[1m▸ $1\033[0m"
+}
+
+# Indented step message (2 spaces)
+log_step() {
+    echo "  $*"
+}
+
 # Cross-platform sed in-place edit (GNU vs BSD)
 sed_inplace() {
     if [[ "$OSTYPE" == "darwin"* ]]; then
@@ -29,6 +40,11 @@ sed_inplace() {
 
 is_macos() {
     [[ "$OSTYPE" == "darwin"* ]]
+}
+
+# Check if gum is available for TUI components
+has_gum() {
+    command -v gum &>/dev/null
 }
 
 detect_host_timezone() {
@@ -135,6 +151,30 @@ sandbox_name() {
     local branch="$2"
     local safe_branch="${branch//\//-}"
     echo "${safe_branch}"
+}
+
+# Check if a sandbox exists (has metadata or worktree)
+sandbox_exists() {
+    local name="$1"
+    local metadata_path worktree_dir
+    metadata_path=$(path_metadata_file "$name")
+    worktree_dir=$(path_worktree "$name")
+
+    [ -f "$metadata_path" ] || dir_exists "$worktree_dir"
+}
+
+# Find next available sandbox name (appends -2, -3, etc. if base exists)
+find_next_sandbox_name() {
+    local base_name="$1"
+    local candidate="$base_name"
+    local counter=2
+
+    while sandbox_exists "$candidate"; do
+        candidate="${base_name}-${counter}"
+        ((counter++))
+    done
+
+    echo "$candidate"
 }
 
 # Get container name
