@@ -169,6 +169,54 @@ PY
     return 0
 }
 
+# Block PyPI access after pip install completes.
+# Resolves PyPI domains and adds iptables DROP rules to prevent future access.
+# This allows pip install to work during setup but blocks it afterward.
+#
+# Arguments:
+#   $1 - container_id: The container to add firewall rules to
+#   $2 - quiet: If "1", suppress non-warning output (default: 0)
+#
+# Note: Rules are inserted at the beginning of OUTPUT chain to take precedence.
+block_pypi_after_install() {
+    local container_id="$1"
+    local quiet="${2:-0}"
+
+    # PyPI domains to block
+    local pypi_domains=("pypi.org" "files.pythonhosted.org")
+
+    [ "$quiet" != "1" ] && log_info "Blocking PyPI access post-install..."
+
+    # Resolve each domain and add DROP rules for all IPs
+    for domain in "${pypi_domains[@]}"; do
+        # Resolve domain to IPs (may return multiple)
+        local ips
+        ips=$(docker exec "$container_id" getent hosts "$domain" 2>/dev/null | awk '{print $1}' | sort -u)
+
+        if [ -z "$ips" ]; then
+            [ "$quiet" != "1" ] && log_debug "Could not resolve $domain (may already be blocked)"
+            continue
+        fi
+
+        for ip in $ips; do
+            # Check if rule already exists to avoid duplicates
+            if docker exec "$container_id" sudo iptables -C OUTPUT -d "$ip" -j DROP 2>/dev/null; then
+                [ "$quiet" != "1" ] && log_debug "DROP rule for $ip already exists"
+                continue
+            fi
+
+            # Insert DROP rule at beginning of OUTPUT chain
+            if docker exec "$container_id" sudo iptables -I OUTPUT 1 -d "$ip" -j DROP 2>/dev/null; then
+                [ "$quiet" != "1" ] && log_debug "Added DROP rule for $domain ($ip)"
+            else
+                [ "$quiet" != "1" ] && log_warn "Failed to add DROP rule for $ip"
+            fi
+        done
+    done
+
+    [ "$quiet" != "1" ] && log_info "PyPI access blocked"
+}
+
 # Install Python packages from requirements.txt into the container.
 # Supports auto-detection, host paths (copied in), and workspace-relative paths.
 #
@@ -178,6 +226,10 @@ PY
 #   $3 - quiet: If "1", suppress non-warning output (default: 0)
 #
 # Returns 0 on success or graceful skip, continues on pip failures
+#
+# Note: PyPI is in the gateway allowlist so pip install works through the proxy.
+# After installation completes, block_pypi_after_install() adds iptables DROP
+# rules to prevent future PyPI access from within the sandbox.
 install_pip_requirements() {
     local container_id="$1"
     local requirements_path="$2"
@@ -218,11 +270,19 @@ install_pip_requirements() {
 
     [ "$quiet" != "1" ] && log_info "Installing Python packages from $container_req_path..."
 
+    # Run pip install (PyPI is in gateway allowlist, so this works through the proxy)
+    local pip_success=true
     if docker exec -u "$CONTAINER_USER" "$container_id" \
         pip install --no-warn-script-location -r "$container_req_path" 2>&1; then
         [ "$quiet" != "1" ] && log_info "Python packages installed successfully"
     else
         [ "$quiet" != "1" ] && log_warn "Some pip packages failed to install (continuing)"
+        pip_success=false
+    fi
+
+    # Block PyPI access after install (only in credential-isolation mode)
+    if docker exec "$container_id" grep -q "gateway\|172\." /etc/resolv.conf 2>/dev/null; then
+        block_pypi_after_install "$container_id" "$quiet"
     fi
 
     # Clean up temp file

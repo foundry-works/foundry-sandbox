@@ -165,147 +165,513 @@ tui_spin() {
     fi
 }
 
+# Choose from a list of options
+tui_choose() {
+    local prompt="$1"
+    local default="$2"
+    shift 2
+    local options=("$@")
+    if has_gum; then
+        if [[ -n "$default" ]]; then
+            gum choose --header "$prompt" --selected "$default" "${options[@]}"
+        else
+            gum choose --header "$prompt" "${options[@]}"
+        fi
+    else
+        echo ""
+        echo -e "  ${BOLD}$prompt${NC}"
+        local i=1
+        for opt in "${options[@]}"; do
+            echo "    [$i] $opt"
+            i=$((i + 1))
+        done
+        local choice=""
+        while [[ -z "$choice" ]]; do
+            read -p "  > " choice
+            if [[ -z "$choice" && -n "$default" ]]; then
+                echo "$default"
+                return
+            fi
+            if [[ "$choice" =~ ^[0-9]+$ ]] && (( choice >= 1 && choice <= ${#options[@]} )); then
+                echo "${options[$((choice - 1))]}"
+                return
+            fi
+            choice=""
+        done
+    fi
+}
+
+# Step indicator
+tui_step() {
+    local step="$1"
+    local title="$2"
+    if has_gum; then
+        gum style --foreground 240 "  Step $step: $title"
+    else
+        echo -e "  ${DIM}Step $step: $title${NC}"
+    fi
+}
+
+# Section header
+tui_section() {
+    local title="$1"
+    if has_gum; then
+        gum style --border rounded --padding "0 1" --margin "1 0" \
+            --foreground 86 --bold "  $title"
+    else
+        echo ""
+        echo -e "  ${CYAN}${BOLD}$title${NC}"
+    fi
+}
+
+# Divider line
+tui_divider() {
+    if has_gum; then
+        gum style --foreground 240 "----------------------------------------"
+    else
+        echo "----------------------------------------"
+    fi
+}
+
+# Summary line formatter
+summary_line() {
+    local label="$1"
+    local value="$2"
+    printf "%-12s %s" "$label" "$value"
+}
+
 # ============================================================================
 # Guided Interactive Mode
 # ============================================================================
 
-# Guided interactive mode for sandbox creation
-guided_new() {
-    tui_header "Let's set up your sandbox"
+# Resolve a repo input to URL and optional local info
+resolve_repo_input() {
+    local input="$1"
+    WIZ_REPO_INPUT="$input"
+    WIZ_REPO_ROOT=""
+    WIZ_REPO_URL=""
+    WIZ_REPO_DISPLAY=""
+    WIZ_CURRENT_BRANCH=""
 
-    # 1. Repository (required)
-    local repo=""
-    while [[ -z "$repo" ]]; do
-        repo=$(tui_question \
+    case "$input" in
+        .|/*|./*|../*|~/*)
+            local repo_root
+            repo_root=$(git -C "$input" rev-parse --show-toplevel 2>/dev/null || true)
+            if [ -z "$repo_root" ]; then
+                return 1
+            fi
+            WIZ_REPO_ROOT="$repo_root"
+            local origin_url
+            origin_url=$(git -C "$repo_root" remote get-url origin 2>/dev/null || true)
+            if [ -n "$origin_url" ]; then
+                WIZ_REPO_URL="$origin_url"
+                WIZ_REPO_DISPLAY="$origin_url"
+            else
+                WIZ_REPO_URL="$repo_root"
+                WIZ_REPO_DISPLAY="$repo_root"
+            fi
+            WIZ_CURRENT_BRANCH=$(git -C "$repo_root" rev-parse --abbrev-ref HEAD 2>/dev/null || true)
+            ;;
+        *)
+            if [[ "$input" == http* || "$input" == git@* || "$input" == *"://"* ]]; then
+                WIZ_REPO_URL="$input"
+            else
+                WIZ_REPO_URL="https://github.com/$input"
+            fi
+            WIZ_REPO_DISPLAY="$WIZ_REPO_URL"
+            ;;
+    esac
+    return 0
+}
+
+relpath() {
+    local base="$1"
+    local target="$2"
+    if command -v realpath &>/dev/null; then
+        realpath --relative-to="$base" "$target"
+    else
+        python - <<'PY' "$base" "$target"
+import os, sys
+base = sys.argv[1]
+target = sys.argv[2]
+print(os.path.relpath(target, base))
+PY
+    fi
+}
+
+get_local_branches() {
+    local repo_root="$1"
+    git -C "$repo_root" for-each-ref --format='%(refname:short)' refs/heads 2>/dev/null
+}
+
+wizard_repo() {
+    tui_step "1/7" "Repository"
+    tui_section "Repository"
+
+    local current_repo_root
+    current_repo_root=$(git -C . rev-parse --show-toplevel 2>/dev/null || true)
+    if [[ -n "$current_repo_root" ]]; then
+        local current_origin
+        current_origin=$(git -C "$current_repo_root" remote get-url origin 2>/dev/null || true)
+        local current_display="$current_origin"
+        [[ -z "$current_display" ]] && current_display="$current_repo_root"
+        if tui_confirm_question "Use current repo?" "Detected: $current_display" "y"; then
+            if resolve_repo_input "$current_repo_root"; then
+                return 0
+            else
+                echo -e "  ${DIM}Not a git repository: $current_repo_root${NC}"
+            fi
+        fi
+    fi
+
+    while true; do
+        local repo_input
+        repo_input=$(tui_question \
             "What repo are you working with?" \
-            "owner/repo, full URL, or '.' for current directory" \
+            "owner/repo, full URL, local path, or '.'" \
             "" "owner/repo")
-        if [[ -z "$repo" ]]; then
+        if [[ -z "$repo_input" ]]; then
             echo -e "  ${DIM}We need a repo to continue.${NC}"
+            continue
+        fi
+        if ! resolve_repo_input "$repo_input"; then
+            echo -e "  ${DIM}Not a git repository: $repo_input${NC}"
+            continue
+        fi
+        if tui_confirm_question "Use this repo?" "We will use: $WIZ_REPO_DISPLAY" "y"; then
+            return 0
         fi
     done
+}
 
-    # 2. Branch selection - ask intent first
-    local branch=""
-    local from_branch=""
-    local create_branch=false
+wizard_branch() {
+    tui_step "2/7" "Branch"
+    tui_section "Branch"
 
-    if tui_confirm_question \
-        "Create a new branch?" \
-        "No = checkout existing, Yes = create new" \
-        "y"; then
-        # Creating a new branch
-        create_branch=true
-        branch=$(tui_question \
-            "Name for new branch?" \
-            "Leave blank to auto-generate" \
-            "" "my-new-branch")
-        from_branch=$(tui_question \
-            "Base it on?" \
-            "The existing branch to start from" \
-            "main" "main")
+    local choice
+    choice=$(tui_choose "Branch strategy" "Create new branch" "Create new branch" "Checkout existing branch")
+    if [[ "$choice" == "Create new branch" ]]; then
+        WIZ_CREATE_BRANCH=true
+        while true; do
+            WIZ_BRANCH=$(tui_question \
+                "Name for new branch?" \
+                "Leave blank to auto-generate" \
+                "" "my-new-branch")
+            if [[ -n "$WIZ_BRANCH" ]]; then
+                if git check-ref-format --branch "$WIZ_BRANCH" >/dev/null 2>&1; then
+                    break
+                fi
+                echo -e "  ${DIM}Invalid branch name. Try again.${NC}"
+            else
+                break
+            fi
+        done
+
+        local default_base="main"
+        [[ -n "$WIZ_CURRENT_BRANCH" && "$WIZ_CURRENT_BRANCH" != "HEAD" ]] && default_base="$WIZ_CURRENT_BRANCH"
+        if [[ -n "$WIZ_REPO_ROOT" ]]; then
+            mapfile -t local_branches < <(get_local_branches "$WIZ_REPO_ROOT")
+            if [[ ${#local_branches[@]} -gt 0 ]]; then
+                local options=("${local_branches[@]}" "Type manually...")
+                local base_choice
+                base_choice=$(tui_choose "Base it on?" "$default_base" "${options[@]}")
+                if [[ "$base_choice" == "Type manually..." ]]; then
+                    WIZ_FROM_BRANCH=$(tui_question \
+                        "Base it on?" \
+                        "The existing branch to start from" \
+                        "$default_base" "$default_base")
+                else
+                    WIZ_FROM_BRANCH="$base_choice"
+                fi
+            else
+                WIZ_FROM_BRANCH=$(tui_question \
+                    "Base it on?" \
+                    "The existing branch to start from" \
+                    "$default_base" "$default_base")
+            fi
+        else
+            WIZ_FROM_BRANCH=$(tui_question \
+                "Base it on?" \
+                "The existing branch to start from" \
+                "$default_base" "$default_base")
+        fi
     else
-        # Checkout existing branch
-        branch=$(tui_question \
-            "Which branch to checkout?" \
-            "Enter the name of an existing branch" \
-            "" "main")
+        WIZ_CREATE_BRANCH=false
+        if [[ -n "$WIZ_REPO_ROOT" ]]; then
+            mapfile -t local_branches < <(get_local_branches "$WIZ_REPO_ROOT")
+            if [[ ${#local_branches[@]} -gt 0 ]]; then
+                local options=("${local_branches[@]}" "Type manually...")
+                local branch_choice
+                branch_choice=$(tui_choose "Which branch to checkout?" "$WIZ_CURRENT_BRANCH" "${options[@]}")
+                if [[ "$branch_choice" == "Type manually..." ]]; then
+                    while true; do
+                        WIZ_BRANCH=$(tui_question \
+                            "Which branch to checkout?" \
+                            "Enter the name of an existing branch" \
+                            "" "main")
+                        [[ -n "$WIZ_BRANCH" ]] && break
+                        echo -e "  ${DIM}Branch name is required.${NC}"
+                    done
+                else
+                    WIZ_BRANCH="$branch_choice"
+                fi
+            else
+                while true; do
+                    WIZ_BRANCH=$(tui_question \
+                        "Which branch to checkout?" \
+                        "Enter the name of an existing branch" \
+                        "" "main")
+                    [[ -n "$WIZ_BRANCH" ]] && break
+                    echo -e "  ${DIM}Branch name is required.${NC}"
+                done
+            fi
+        else
+            while true; do
+                WIZ_BRANCH=$(tui_question \
+                    "Which branch to checkout?" \
+                    "Enter the name of an existing branch" \
+                    "" "main")
+                [[ -n "$WIZ_BRANCH" ]] && break
+                echo -e "  ${DIM}Branch name is required.${NC}"
+            done
+        fi
+        WIZ_FROM_BRANCH=""
     fi
+}
 
-    # 4. Working directory
-    local working_dir
-    working_dir=$(tui_question \
-        "Working directory?" \
-        "For monorepos - leave blank for repo root" \
-        "" "packages/app")
+wizard_working_dir() {
+    tui_step "3/7" "Working directory"
+    tui_section "Working directory"
 
-    # 5. Sparse checkout (only if working_dir set)
-    local sparse=false
-    if [[ -n "$working_dir" ]]; then
-        if tui_confirm_question \
-            "Only clone that directory?" \
-            "Faster for large repos (sparse checkout)" \
-            "n"; then
-            sparse=true
+    WIZ_WORKING_DIR=""
+    if [[ -n "$WIZ_REPO_ROOT" ]]; then
+        local cwd
+        cwd=$(pwd)
+        local rel
+        rel=$(relpath "$WIZ_REPO_ROOT" "$cwd")
+        case "$rel" in
+            ..|../*|/*) rel="" ;;
+        esac
+        if [[ -n "$rel" || "$cwd" == "$WIZ_REPO_ROOT" ]]; then
+            local rel_display="$rel"
+            [[ "$cwd" == "$WIZ_REPO_ROOT" || "$rel" == "." ]] && rel_display="(repo root)"
+            if tui_confirm_question "Use current directory as working directory?" "Detected: $rel_display" "y"; then
+                if [[ "$rel" == "." || "$rel_display" == "(repo root)" ]]; then
+                    WIZ_WORKING_DIR=""
+                else
+                    WIZ_WORKING_DIR="$rel"
+                fi
+                return
+            fi
         fi
     fi
 
-    # 6. Pip requirements
-    local pip_req=""
-    if tui_confirm_question \
-        "Install Python dependencies?" \
-        "From requirements.txt or similar" \
-        "n"; then
-        pip_req=$(tui_question \
-            "Where's your requirements file?" \
-            "'auto' to detect automatically" \
-            "auto" "requirements.txt")
-    fi
+    while true; do
+        local working_dir
+        working_dir=$(tui_question \
+            "Working directory?" \
+            "For monorepos - leave blank for repo root" \
+            "" "packages/app")
+        if [[ -z "$working_dir" ]]; then
+            WIZ_WORKING_DIR=""
+            return
+        fi
+        case "$working_dir" in
+            /*) echo -e "  ${DIM}Working directory must be relative.${NC}";;
+            ../*|*/../*) echo -e "  ${DIM}Working directory cannot include '..'.${NC}";;
+            *)
+                if [[ -n "$WIZ_REPO_ROOT" && ! -d "$WIZ_REPO_ROOT/$working_dir" ]]; then
+                    echo -e "  ${DIM}Path does not exist in repo: $working_dir${NC}"
+                else
+                    WIZ_WORKING_DIR="$working_dir"
+                    return
+                fi
+                ;;
+        esac
+    done
+}
 
-    # 7. PR operations
-    local allow_pr=false
+wizard_sparse() {
+    tui_step "4/7" "Sparse checkout"
+    tui_section "Sparse checkout"
+
+    WIZ_SPARSE=false
+    if [[ -n "$WIZ_WORKING_DIR" ]]; then
+        if tui_confirm_question \
+            "Enable sparse checkout?" \
+            "Faster/leaner checkout, but repo-wide tools and searches may miss files outside this directory." \
+            "n"; then
+            WIZ_SPARSE=true
+        fi
+    fi
+}
+
+wizard_deps() {
+    tui_step "5/7" "Dependencies"
+    tui_section "Dependencies"
+
+    WIZ_PIP_REQ=""
+    local choice
+    choice=$(tui_choose "Python dependencies" "None" "None" "Auto-detect" "Provide path")
+    case "$choice" in
+        "None")
+            WIZ_PIP_REQ=""
+            ;;
+        "Auto-detect")
+            WIZ_PIP_REQ="auto"
+            ;;
+        "Provide path")
+            while true; do
+                local pip_path
+                pip_path=$(tui_question \
+                    "Where's your requirements file?" \
+                    "Host path to requirements.txt or similar" \
+                    "requirements.txt" "requirements.txt")
+                if [[ -z "$pip_path" ]]; then
+                    WIZ_PIP_REQ=""
+                    break
+                fi
+                if [[ "$pip_path" == "~/"* ]]; then
+                    pip_path="$HOME/${pip_path#~/}"
+                elif [[ "$pip_path" == "$HOME/~/"* ]]; then
+                    pip_path="$HOME/${pip_path#"$HOME/~/"}"
+                fi
+                if [[ "$pip_path" == *"/~/"* ]]; then
+                    pip_path="${pip_path//\/~\//\/}"
+                fi
+                if [[ -e "$pip_path" ]]; then
+                    WIZ_PIP_REQ="$pip_path"
+                    break
+                fi
+                echo -e "  ${DIM}File not found: $pip_path${NC}"
+            done
+            ;;
+    esac
+}
+
+wizard_pr() {
+    tui_step "6/7" "PR access"
+    tui_section "PR access"
+
+    WIZ_ALLOW_PR=false
     if tui_confirm_question \
         "Allow PR operations?" \
-        "Create PRs, add comments, request reviews" \
+        "Create PRs, add comments, request reviews. This increases risk; see docs/security/sandbox-threats.md for details." \
         "n"; then
-        allow_pr=true
+        WIZ_ALLOW_PR=true
     fi
+}
 
-    # Build friendly summary
+wizard_summary() {
+    tui_step "7/7" "Review"
+    tui_section "Review"
+
     local action_display
     local branch_display
-    if [[ "$create_branch" == true ]]; then
+    if [[ "$WIZ_CREATE_BRANCH" == true ]]; then
         action_display="Create new branch"
-        if [[ -n "$branch" ]]; then
-            branch_display="$branch"
+        if [[ -n "$WIZ_BRANCH" ]]; then
+            branch_display="$WIZ_BRANCH"
         else
             branch_display="(auto-generated)"
         fi
     else
         action_display="Checkout existing"
-        branch_display="$branch"
+        branch_display="$WIZ_BRANCH"
     fi
 
     local pip_display
-    if [[ -n "$pip_req" ]]; then
-        pip_display="$pip_req"
+    if [[ -n "$WIZ_PIP_REQ" ]]; then
+        pip_display="$WIZ_PIP_REQ"
     else
         pip_display="no"
     fi
 
-    local pr_display
-    if [[ "$allow_pr" == true ]]; then
-        pr_display="yes"
-    else
-        pr_display="no"
-    fi
+    local pr_display="no"
+    [[ "$WIZ_ALLOW_PR" == true ]] && pr_display="yes"
 
-    local summary="Repository    $repo"
-    summary+="\nAction        $action_display"
-    summary+="\nBranch        $branch_display"
-    [[ "$create_branch" == true ]] && summary+="\nBased on      ${from_branch:-main}"
-    [[ -n "$working_dir" ]] && summary+="\nDirectory     $working_dir"
-    [[ "$sparse" == true ]] && summary+="\nSparse clone  yes"
-    summary+="\nPython deps   $pip_display"
-    summary+="\nPR access     $pr_display"
+    local dir_display="(repo root)"
+    [[ -n "$WIZ_WORKING_DIR" ]] && dir_display="$WIZ_WORKING_DIR"
 
-    tui_summary "Here's what we'll create:" "$(echo -e "$summary")"
+    local sparse_display="no"
+    [[ "$WIZ_SPARSE" == true ]] && sparse_display="yes"
 
-    echo ""
-    if ! tui_confirm_question "Ready to go?" "" "y"; then
-        echo ""
-        echo "  Cancelled. Run 'cast new' again when you're ready."
-        return 1
-    fi
+    local lines=()
+    lines+=("$(summary_line "Repository" "$WIZ_REPO_DISPLAY")")
+    lines+=("$(summary_line "Action" "$action_display")")
+    lines+=("$(summary_line "Branch" "$branch_display")")
+    [[ "$WIZ_CREATE_BRANCH" == true ]] && lines+=("$(summary_line "Based on" "${WIZ_FROM_BRANCH:-main}")")
+    lines+=("$(summary_line "Directory" "$dir_display")")
+    lines+=("$(summary_line "Sparse clone" "$sparse_display")")
+    lines+=("$(summary_line "Python deps" "$pip_display")")
+    lines+=("$(summary_line "PR access" "$pr_display")")
+
+    local summary
+    summary=$(printf "%s\n" "${lines[@]}")
+    tui_summary "Here's what we'll create:" "$summary"
+}
+
+# Guided interactive mode for sandbox creation
+guided_new() {
+    tui_header "Let's set up your sandbox"
+
+    wizard_repo
+    wizard_branch
+    wizard_working_dir
+    wizard_sparse
+    wizard_deps
+    wizard_pr
+
+    while true; do
+        wizard_summary
+        local next
+        next=$(tui_choose "Next step" "Create sandbox" "Create sandbox" "Edit answers" "Cancel")
+        case "$next" in
+            "Create sandbox")
+                break
+                ;;
+            "Cancel")
+                echo ""
+                echo "  Cancelled. Run 'cast new' again when you're ready."
+                return 1
+                ;;
+            "Edit answers")
+                local edit
+                edit=$(tui_choose "What do you want to edit?" "" \
+                    "Repository" "Branch" "Working directory" "Dependencies" "PR access")
+                case "$edit" in
+                    "Repository")
+                        wizard_repo
+                        wizard_branch
+                        wizard_working_dir
+                        wizard_sparse
+                        ;;
+                    "Branch")
+                        wizard_branch
+                        ;;
+                    "Working directory")
+                        wizard_working_dir
+                        wizard_sparse
+                        ;;
+                    "Dependencies")
+                        wizard_deps
+                        ;;
+                    "PR access")
+                        wizard_pr
+                        ;;
+                esac
+                ;;
+        esac
+    done
 
     # Build arguments array
-    local args=("$repo")
-    [[ -n "$branch" ]] && args+=("$branch")
-    [[ -n "$from_branch" ]] && args+=("$from_branch")
-    [[ -n "$working_dir" ]] && args+=("--wd" "$working_dir")
-    [[ "$sparse" == true ]] && args+=("--sparse")
-    [[ -n "$pip_req" ]] && args+=("--pip-requirements" "$pip_req")
-    [[ "$allow_pr" == true ]] && args+=("--allow-pr")
+    local args=("$WIZ_REPO_INPUT")
+    [[ -n "$WIZ_BRANCH" ]] && args+=("$WIZ_BRANCH")
+    [[ -n "$WIZ_FROM_BRANCH" ]] && args+=("--from" "$WIZ_FROM_BRANCH")
+    [[ -n "$WIZ_WORKING_DIR" ]] && args+=("--wd" "$WIZ_WORKING_DIR")
+    [[ "$WIZ_SPARSE" == true ]] && args+=("--sparse")
+    [[ -n "$WIZ_PIP_REQ" ]] && args+=("--pip-requirements" "$WIZ_PIP_REQ")
+    [[ "$WIZ_ALLOW_PR" == true ]] && args+=("--allow-pr")
 
     echo ""
     # Call cmd_new with assembled arguments
@@ -400,6 +766,7 @@ cmd_new() {
         echo "Usage: $0 new <repo> [branch] [from-branch] [options]"
         echo ""
         echo "Options:"
+        echo "  --from <branch>                  Base branch for new branch creation"
         echo "  --mount, -v host:container[:ro]  Mount host path into container"
         echo "  --copy, -c  host:container       Copy host path into container (once at creation)"
         echo "  --network, -n <mode>             Network isolation mode (default: limited)"

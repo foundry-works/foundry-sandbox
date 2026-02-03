@@ -32,6 +32,8 @@ cast new <repo> [branch] [from-branch] [options]
 | `--skip-key-check` | Skip API key validation |
 | `--wd <path>` | Working directory within repo (relative path) |
 | `--sparse` | Enable sparse checkout (requires `--wd`) |
+| `--pip-requirements`, `-r` | Install Python packages from requirements.txt (`auto` to detect) |
+| `--allow-pr`, `--with-pr` | Allow PR operations (create/comment/review); blocked by default |
 
 ### Examples
 
@@ -87,6 +89,8 @@ Note: SSH forwarding is disabled by default and agent-only (no key copy); use `-
 5. Attaches to tmux session inside container
 
 If `repo` is `.` and no branch is provided, the sandbox branch is created from your current branch.
+
+Running `cast new` with no arguments launches the guided wizard (gum if available, read-based fallback).
 
 ---
 

@@ -75,6 +75,13 @@ parse_new_args() {
             --allow-pr|--with-pr)
                 NEW_ALLOW_PR=true
                 ;;
+            --from)
+                shift
+                [ -n "$1" ] && NEW_FROM_BRANCH="$1"
+                ;;
+            --from=*)
+                NEW_FROM_BRANCH="${1#*=}"
+                ;;
             --pip-requirements|-r)
                 shift
                 if [ -n "$1" ] && [[ "$1" != -* ]]; then

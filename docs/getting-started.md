@@ -38,6 +38,8 @@ source ~/.bashrc  # or ~/.zshrc
 
 ## Creating Your First Sandbox
 
+Run `cast new` with no arguments to launch the guided setup (gum if available, read-based fallback).
+
 ### From a GitHub Repository
 
 ```bash
