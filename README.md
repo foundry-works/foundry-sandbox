@@ -56,13 +56,17 @@ For manual installation or uninstall instructions, see [Getting Started](docs/ge
 **1. Create a sandbox**
 
 ```bash
-cast new owner/repo
+cast new
 ```
 
-Or from your current repo/branch:
+The guided wizard walks you through repo selection, branch strategy, and options. It detects your current repo and offers smart defaults.
+
+For scripting or quick one-liners:
 
 ```bash
-cast new .
+cast new owner/repo              # From GitHub
+cast new .                       # From current repo/branch
+cast new . feature-branch main   # Create new branch from main
 ```
 
 **2. Run an AI assistant**
