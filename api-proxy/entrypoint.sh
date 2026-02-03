@@ -112,6 +112,13 @@ main() {
     copy_ca_to_shared_volume
 
     verify_addon
+
+    # Disable OpenCode auth if not explicitly enabled
+    if [ "${SANDBOX_ENABLE_OPENCODE:-0}" != "1" ]; then
+        log "SANDBOX_ENABLE_OPENCODE not set; disabling OpenCode auth"
+        unset OPENCODE_AUTH_FILE
+    fi
+
     disable_missing_auth_file CODEX_AUTH_FILE
     disable_missing_auth_file OPENCODE_AUTH_FILE
     disable_missing_auth_file GEMINI_OAUTH_FILE

@@ -19,6 +19,13 @@ setup_credential_placeholders() {
     else
         export SANDBOX_GEMINI_API_KEY="CREDENTIAL_PROXY_PLACEHOLDER"
     fi
+
+    # OpenCode/Zhipu: Only set placeholder if OpenCode is explicitly enabled
+    if [ "${SANDBOX_ENABLE_OPENCODE:-0}" = "1" ]; then
+        export SANDBOX_ZHIPU_API_KEY="PROXY_PLACEHOLDER_OPENCODE"
+    else
+        export SANDBOX_ZHIPU_API_KEY=""
+    fi
 }
 
 get_compose_command() {

@@ -311,10 +311,13 @@ resolve_repo_input() {
 relpath() {
     local base="$1"
     local target="$2"
-    if command -v realpath &>/dev/null; then
-        realpath --relative-to="$base" "$target"
+    # Try GNU realpath first (has --relative-to option, not available on macOS BSD)
+    local result
+    if result=$(realpath --relative-to="$base" "$target" 2>/dev/null); then
+        echo "$result"
     else
-        python - <<'PY' "$base" "$target"
+        # Fallback to Python (use python3 for macOS compatibility)
+        python3 - <<'PY' "$base" "$target"
 import os, sys
 base = sys.argv[1]
 target = sys.argv[2]
@@ -394,7 +397,10 @@ wizard_branch() {
         local default_base="main"
         [[ -n "$WIZ_CURRENT_BRANCH" && "$WIZ_CURRENT_BRANCH" != "HEAD" ]] && default_base="$WIZ_CURRENT_BRANCH"
         if [[ -n "$WIZ_REPO_ROOT" ]]; then
-            mapfile -t local_branches < <(get_local_branches "$WIZ_REPO_ROOT")
+            local_branches=()
+            while IFS= read -r line; do
+                [[ -n "$line" ]] && local_branches+=("$line")
+            done < <(get_local_branches "$WIZ_REPO_ROOT")
             if [[ ${#local_branches[@]} -gt 0 ]]; then
                 local options=("${local_branches[@]}" "Type manually...")
                 local base_choice
@@ -422,7 +428,10 @@ wizard_branch() {
     else
         WIZ_CREATE_BRANCH=false
         if [[ -n "$WIZ_REPO_ROOT" ]]; then
-            mapfile -t local_branches < <(get_local_branches "$WIZ_REPO_ROOT")
+            local_branches=()
+            while IFS= read -r line; do
+                [[ -n "$line" ]] && local_branches+=("$line")
+            done < <(get_local_branches "$WIZ_REPO_ROOT")
             if [[ ${#local_branches[@]} -gt 0 ]]; then
                 local options=("${local_branches[@]}" "Type manually...")
                 local branch_choice

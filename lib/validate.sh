@@ -17,24 +17,48 @@ DANGEROUS_PATHS=(
     "/run/docker.sock"
 )
 
+# Cross-platform realpath that works on both GNU (Linux) and BSD (macOS)
+# Tries GNU realpath options first, falls back to basic realpath or python3
+_realpath_canonical() {
+    local path="$1"
+    local must_exist="${2:-false}"
+
+    # Try GNU realpath -e (path must exist) or -m (no existence required)
+    if [ "$must_exist" = "true" ]; then
+        realpath -e "$path" 2>/dev/null && return 0
+    else
+        realpath -m "$path" 2>/dev/null && return 0
+    fi
+
+    # Try basic realpath (works on macOS for existing paths)
+    realpath "$path" 2>/dev/null && return 0
+
+    # Fallback to python3 for non-existent paths on macOS
+    python3 -c "import os; print(os.path.abspath('$path'))" 2>/dev/null && return 0
+
+    # Last resort: return the path as-is
+    echo "$path"
+}
+
 validate_mount_path() {
     local mount_path="$1"
     local canonical_path
 
-    # Use realpath -e to require the path to exist and resolve all symlinks
+    # Resolve the canonical path, preferring existing paths for security
     # This prevents TOCTOU race conditions where an attacker could swap
     # a symlink target between validation and mount
-    # Fall back to realpath -m for non-existent paths (new directories)
-    if ! canonical_path=$(realpath -e "$mount_path" 2>/dev/null); then
-        # Path doesn't exist yet - use -m but warn about the limitation
-        canonical_path=$(realpath -m "$mount_path" 2>/dev/null) || canonical_path="$mount_path"
+    canonical_path=$(_realpath_canonical "$mount_path" true)
+    if [ -z "$canonical_path" ]; then
+        # Path doesn't exist yet - resolve without existence requirement
+        canonical_path=$(_realpath_canonical "$mount_path" false)
     fi
 
     for dangerous in "${DANGEROUS_PATHS[@]}"; do
         local dangerous_canonical
-        # Use realpath -e for dangerous paths too (they should exist)
-        if ! dangerous_canonical=$(realpath -e "$dangerous" 2>/dev/null); then
-            dangerous_canonical=$(realpath -m "$dangerous" 2>/dev/null) || dangerous_canonical="$dangerous"
+        # Dangerous paths should typically exist
+        dangerous_canonical=$(_realpath_canonical "$dangerous" true)
+        if [ -z "$dangerous_canonical" ]; then
+            dangerous_canonical=$(_realpath_canonical "$dangerous" false)
         fi
 
         # Check exact match
