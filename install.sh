@@ -179,16 +179,26 @@ install_gum() {
         curl -fsSL https://repo.charm.sh/apt/gpg.key | sudo gpg --dearmor -o /etc/apt/keyrings/charm.gpg 2>/dev/null
         echo "deb [signed-by=/etc/apt/keyrings/charm.gpg] https://repo.charm.sh/apt/ * *" | sudo tee /etc/apt/sources.list.d/charm.list >/dev/null
         sudo apt-get update &>/dev/null && sudo apt-get install -y gum &>/dev/null
-    elif command -v dnf &>/dev/null; then
-        sudo dnf install -y 'dnf-command(copr)' &>/dev/null
-        sudo dnf copr enable -y atim/charm-tools &>/dev/null
-        sudo dnf install -y gum &>/dev/null
-    elif command -v yum &>/dev/null; then
-        # Fallback: download binary directly
+    elif command -v dnf &>/dev/null || command -v yum &>/dev/null; then
+        # Download binary directly - more reliable than COPR
         local arch=$(uname -m)
-        [[ "$arch" == "x86_64" ]] && arch="amd64"
-        [[ "$arch" == "aarch64" ]] && arch="arm64"
-        curl -fsSL "https://github.com/charmbracelet/gum/releases/latest/download/gum_linux_${arch}.tar.gz" 2>/dev/null | sudo tar -xzf - -C /usr/local/bin gum 2>/dev/null
+        # Gum uses x86_64/arm64 in filenames, not amd64
+        local tmp_dir=$(mktemp -d)
+        # Get latest version tag
+        local version=$(curl -fsSL "https://api.github.com/repos/charmbracelet/gum/releases/latest" 2>/dev/null | grep '"tag_name"' | sed -E 's/.*"v([^"]+)".*/\1/')
+        version="${version:-0.17.0}"
+        local url="https://github.com/charmbracelet/gum/releases/download/v${version}/gum_${version}_Linux_${arch}.tar.gz"
+        if curl -fsSL "$url" -o "$tmp_dir/gum.tar.gz" 2>/dev/null; then
+            tar -xzf "$tmp_dir/gum.tar.gz" -C "$tmp_dir" 2>/dev/null
+            # Binary is in a subdirectory named gum_VERSION_Linux_ARCH/
+            local gum_bin=$(find "$tmp_dir" -name gum -type f 2>/dev/null | head -1)
+            if [ -n "$gum_bin" ]; then
+                mkdir -p "$HOME/.local/bin"
+                sudo install -m 755 "$gum_bin" /usr/local/bin/gum 2>/dev/null || \
+                    install -m 755 "$gum_bin" "$HOME/.local/bin/gum" 2>/dev/null
+            fi
+        fi
+        rm -rf "$tmp_dir"
     else
         echo -e "  ${YELLOW}⚠${NC} gum (skipped - unknown package manager)"
         return 0
