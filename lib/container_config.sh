@@ -286,7 +286,7 @@ merge_claude_settings() {
     }
 
     # Merge settings in container
-    docker exec "$container_id" python3 - "$container_settings" "$temp_host" <<'PY'
+    docker exec -u "$CONTAINER_USER" "$container_id" python3 - "$container_settings" "$temp_host" <<'PY'
 import json
 import sys
 import os
@@ -926,7 +926,7 @@ ensure_claude_foundry_mcp() {
 
     # Set model defaults and hooks in settings.json
     # Note: Host settings are copied first, so we must restore hooks here
-    $run_fn docker exec -i "$container_id" python3 - <<'PY'
+    $run_fn docker exec -u "$CONTAINER_USER" -i "$container_id" python3 - <<'PY'
 import json
 import os
 
@@ -1157,7 +1157,7 @@ ensure_claude_statusline() {
             # Otherwise, replace with bundled binary (network commands like npx won't work in sandbox)
         fi
         # Set the statusLine configuration to use the bundled binary
-        $run_fn docker exec -i "$container_id" python3 - <<'PY'
+        $run_fn docker exec -u "$CONTAINER_USER" -i "$container_id" python3 - <<'PY'
 import json
 import os
 
@@ -1188,7 +1188,7 @@ PY
         if [ "$statusline_configured" = "0" ]; then
             return 0  # Not configured, nothing to do
         fi
-        $run_fn docker exec -i "$container_id" python3 - <<'PY'
+        $run_fn docker exec -u "$CONTAINER_USER" -i "$container_id" python3 - <<'PY'
 import json
 import os
 
