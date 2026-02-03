@@ -195,7 +195,7 @@ install_pip_requirements() {
             [ "$quiet" != "1" ] && log_debug "No requirements.txt found (auto-detect)"
             return 0
         fi
-    elif [[ "$requirements_path" = /* ]] || [[ "$requirements_path" = ~/* ]]; then
+    elif [[ "$requirements_path" = /* ]] || [[ "$requirements_path" == "~/"* ]]; then
         # Host path - copy into container
         local expanded_path="$requirements_path"
         [[ "$expanded_path" == "~/"* ]] && expanded_path="${expanded_path/#\~/$HOME}"
