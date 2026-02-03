@@ -249,8 +249,8 @@ install_foundry_workspace_docs() {
         # Check if already installed (marker present)
         if ! docker exec "$container_id" grep -qF "$marker" /workspace/CLAUDE.md 2>/dev/null; then
             log_info "Installing CLAUDE.md from stubs..."
-            docker exec "$container_id" sh -c "[ ! -f /workspace/CLAUDE.md ] && touch /workspace/CLAUDE.md"
-            docker exec -i "$container_id" sh -c "echo '' >> /workspace/CLAUDE.md && cat >> /workspace/CLAUDE.md" < "$claude_md_src"
+            docker exec -u "$CONTAINER_USER" "$container_id" sh -c "[ ! -f /workspace/CLAUDE.md ] && touch /workspace/CLAUDE.md"
+            docker exec -u "$CONTAINER_USER" -i "$container_id" sh -c "echo '' >> /workspace/CLAUDE.md && cat >> /workspace/CLAUDE.md" < "$claude_md_src"
         fi
     fi
 
@@ -259,8 +259,8 @@ install_foundry_workspace_docs() {
         # Check if already installed (marker present)
         if ! docker exec "$container_id" grep -qF "$marker" /workspace/AGENTS.md 2>/dev/null; then
             log_info "Installing AGENTS.md from stubs..."
-            docker exec "$container_id" sh -c "[ ! -f /workspace/AGENTS.md ] && touch /workspace/AGENTS.md"
-            docker exec -i "$container_id" sh -c "echo '' >> /workspace/AGENTS.md && cat >> /workspace/AGENTS.md" < "$agents_md_src"
+            docker exec -u "$CONTAINER_USER" "$container_id" sh -c "[ ! -f /workspace/AGENTS.md ] && touch /workspace/AGENTS.md"
+            docker exec -u "$CONTAINER_USER" -i "$container_id" sh -c "echo '' >> /workspace/AGENTS.md && cat >> /workspace/AGENTS.md" < "$agents_md_src"
         fi
     fi
 }
@@ -1676,13 +1676,13 @@ copy_configs_to_container() {
             log_info "SSH agent forwarding enabled; skipping private key copy."
             file_exists ~/.ssh/known_hosts && copy_file_to_container "$container_id" ~/.ssh/known_hosts "$CONTAINER_HOME/.ssh/known_hosts"
             file_exists ~/.ssh/config && copy_file_to_container "$container_id" ~/.ssh/config "$CONTAINER_HOME/.ssh/config"
-            docker exec "$container_id" sh -c "if [ -f /etc/skel/.ssh/known_hosts ]; then touch '$CONTAINER_HOME/.ssh/known_hosts'; cat /etc/skel/.ssh/known_hosts >> '$CONTAINER_HOME/.ssh/known_hosts'; fi" 2>/dev/null || true
-            docker exec "$container_id" sh -c "touch '$CONTAINER_HOME/.ssh/config'; if ! grep -q '^Host github.com' '$CONTAINER_HOME/.ssh/config'; then printf '\nHost github.com\n  IdentityAgent %s\n  IdentitiesOnly no\n' '$SSH_AGENT_CONTAINER_SOCK' >> '$CONTAINER_HOME/.ssh/config'; fi" 2>/dev/null || true
+            docker exec -u "$CONTAINER_USER" "$container_id" sh -c "if [ -f /etc/skel/.ssh/known_hosts ]; then touch '$CONTAINER_HOME/.ssh/known_hosts'; cat /etc/skel/.ssh/known_hosts >> '$CONTAINER_HOME/.ssh/known_hosts'; fi" 2>/dev/null || true
+            docker exec -u "$CONTAINER_USER" "$container_id" sh -c "touch '$CONTAINER_HOME/.ssh/config'; if ! grep -q '^Host github.com' '$CONTAINER_HOME/.ssh/config'; then printf '\nHost github.com\n  IdentityAgent %s\n  IdentitiesOnly no\n' '$SSH_AGENT_CONTAINER_SOCK' >> '$CONTAINER_HOME/.ssh/config'; fi" 2>/dev/null || true
         else
             log_warn "SSH agent not detected; skipping SSH key copy (agent-only mode)."
         fi
         # Remove macOS-specific SSH config options that don't work on Linux
-        docker exec "$container_id" sed -i '/UseKeychain/d; /AddKeysToAgent.*apple/Id' "$CONTAINER_HOME/.ssh/config" 2>/dev/null || true
+        docker exec -u "$CONTAINER_USER" "$container_id" sed -i '/UseKeychain/d; /AddKeysToAgent.*apple/Id' "$CONTAINER_HOME/.ssh/config" 2>/dev/null || true
     fi
     dir_exists ~/.sandboxes/repos && copy_dir_to_container "$container_id" ~/.sandboxes/repos "$CONTAINER_HOME/.sandboxes/repos"
     # Copy foundry-mcp config: user config takes priority, fall back to sandbox bundled config
@@ -1856,12 +1856,12 @@ copy_dir_to_container() {
     fi
 
     while true; do
-        run_cmd docker exec "$container_id" mkdir -p "$dst"
+        run_cmd docker exec -u "$CONTAINER_USER" "$container_id" mkdir -p "$dst"
         if [ "$SANDBOX_VERBOSE" = "1" ]; then
-            echo "+ COPYFILE_DISABLE=1 tar${tar_flags} -C \"$src\" -cf - . | docker exec -i \"$container_id\" tar --warning=no-unknown-keyword -C \"$dst\" -xf -"
+            echo "+ COPYFILE_DISABLE=1 tar${tar_flags} -C \"$src\" -cf - . | docker exec -u \"$CONTAINER_USER\" -i \"$container_id\" tar --warning=no-unknown-keyword -C \"$dst\" -xf -"
         fi
         # COPYFILE_DISABLE=1 and --no-xattrs avoid macOS metadata and xattrs.
-        if COPYFILE_DISABLE=1 tar "${tar_args[@]}" -C "$src" -cf - . | docker exec -i "$container_id" tar --warning=no-unknown-keyword -C "$dst" -xf -; then
+        if COPYFILE_DISABLE=1 tar "${tar_args[@]}" -C "$src" -cf - . | docker exec -u "$CONTAINER_USER" -i "$container_id" tar --warning=no-unknown-keyword -C "$dst" -xf -; then
             return 0
         fi
         attempts=$((attempts + 1))
@@ -1892,31 +1892,31 @@ copy_file_to_container() {
     fi
 
     while true; do
-        run_cmd docker exec "$container_id" mkdir -p "$parent_dir"
+        run_cmd docker exec -u "$CONTAINER_USER" "$container_id" mkdir -p "$parent_dir"
         if [ "$src_base" = "$dst_base" ]; then
             if [ "$SANDBOX_VERBOSE" = "1" ]; then
-                echo "+ COPYFILE_DISABLE=1 tar${tar_flags} -C \"$src_dir\" -cf - \"$src_base\" | docker exec -i \"$container_id\" tar --warning=no-unknown-keyword -C \"$parent_dir\" -xf -"
+                echo "+ COPYFILE_DISABLE=1 tar${tar_flags} -C \"$src_dir\" -cf - \"$src_base\" | docker exec -u \"$CONTAINER_USER\" -i \"$container_id\" tar --warning=no-unknown-keyword -C \"$parent_dir\" -xf -"
             fi
             # COPYFILE_DISABLE=1 and --no-xattrs avoid macOS metadata and xattrs.
-            if COPYFILE_DISABLE=1 tar "${TAR_NO_XATTRS_ARGS[@]}" -C "$src_dir" -cf - "$src_base" | docker exec -i "$container_id" tar --warning=no-unknown-keyword -C "$parent_dir" -xf -; then
+            if COPYFILE_DISABLE=1 tar "${TAR_NO_XATTRS_ARGS[@]}" -C "$src_dir" -cf - "$src_base" | docker exec -u "$CONTAINER_USER" -i "$container_id" tar --warning=no-unknown-keyword -C "$parent_dir" -xf -; then
                 return 0
             fi
         else
             if [ "$SANDBOX_VERBOSE" = "1" ]; then
-                echo "+ COPYFILE_DISABLE=1 tar${tar_flags} -C \"$src_dir\" --transform=\"s|^$src_base\\$|$dst_base|\" -cf - \"$src_base\" | docker exec -i \"$container_id\" tar --warning=no-unknown-keyword -C \"$parent_dir\" -xf -"
+                echo "+ COPYFILE_DISABLE=1 tar${tar_flags} -C \"$src_dir\" --transform=\"s|^$src_base\\$|$dst_base|\" -cf - \"$src_base\" | docker exec -u \"$CONTAINER_USER\" -i \"$container_id\" tar --warning=no-unknown-keyword -C \"$parent_dir\" -xf -"
             fi
             # COPYFILE_DISABLE=1 and --no-xattrs avoid macOS metadata and xattrs.
             if [ "$TAR_TRANSFORM_SUPPORTED" = "1" ]; then
-                if COPYFILE_DISABLE=1 tar "${TAR_NO_XATTRS_ARGS[@]}" -C "$src_dir" --transform="s|^$src_base\$|$dst_base|" -cf - "$src_base" | docker exec -i "$container_id" tar --warning=no-unknown-keyword -C "$parent_dir" -xf -; then
+                if COPYFILE_DISABLE=1 tar "${TAR_NO_XATTRS_ARGS[@]}" -C "$src_dir" --transform="s|^$src_base\$|$dst_base|" -cf - "$src_base" | docker exec -u "$CONTAINER_USER" -i "$container_id" tar --warning=no-unknown-keyword -C "$parent_dir" -xf -; then
                     return 0
                 fi
             else
                 if [ "$SANDBOX_VERBOSE" = "1" ]; then
-                    echo "+ COPYFILE_DISABLE=1 tar${tar_flags} -C \"$src_dir\" -cf - \"$src_base\" | docker exec -i \"$container_id\" tar --warning=no-unknown-keyword -C \"$parent_dir\" -xf -"
-                    echo "+ docker exec \"$container_id\" sh -c \"mv -f '$parent_dir/$src_base' '$dst'\""
+                    echo "+ COPYFILE_DISABLE=1 tar${tar_flags} -C \"$src_dir\" -cf - \"$src_base\" | docker exec -u \"$CONTAINER_USER\" -i \"$container_id\" tar --warning=no-unknown-keyword -C \"$parent_dir\" -xf -"
+                    echo "+ docker exec -u \"$CONTAINER_USER\" \"$container_id\" sh -c \"mv -f '$parent_dir/$src_base' '$dst'\""
                 fi
-                if COPYFILE_DISABLE=1 tar "${TAR_NO_XATTRS_ARGS[@]}" -C "$src_dir" -cf - "$src_base" | docker exec -i "$container_id" tar --warning=no-unknown-keyword -C "$parent_dir" -xf -; then
-                    run_cmd docker exec "$container_id" sh -c "mv -f '$parent_dir/$src_base' '$dst'"
+                if COPYFILE_DISABLE=1 tar "${TAR_NO_XATTRS_ARGS[@]}" -C "$src_dir" -cf - "$src_base" | docker exec -u "$CONTAINER_USER" -i "$container_id" tar --warning=no-unknown-keyword -C "$parent_dir" -xf -; then
+                    run_cmd docker exec -u "$CONTAINER_USER" "$container_id" sh -c "mv -f '$parent_dir/$src_base' '$dst'"
                     return 0
                 fi
             fi
