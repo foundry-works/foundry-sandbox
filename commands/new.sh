@@ -185,27 +185,31 @@ guided_new() {
         fi
     done
 
-    # 2. Branch
-    local branch
-    branch=$(tui_question \
-        "Which branch?" \
-        "Leave blank to auto-generate a sandbox branch" \
-        "" "my-new-branch")
-
-    # 3. From branch (only if creating a new branch)
+    # 2. Branch selection - ask intent first
+    local branch=""
     local from_branch=""
     local create_branch=false
-    if [[ -n "$branch" ]]; then
-        if tui_confirm_question \
-            "Create a new branch?" \
-            "No = checkout existing, Yes = create from a base branch" \
-            "n"; then
-            create_branch=true
-            from_branch=$(tui_question \
-                "What branch should it be based on?" \
-                "The existing branch to branch from" \
-                "main" "main")
-        fi
+
+    if tui_confirm_question \
+        "Create a new branch?" \
+        "No = checkout existing, Yes = create new" \
+        "y"; then
+        # Creating a new branch
+        create_branch=true
+        branch=$(tui_question \
+            "Name for new branch?" \
+            "Leave blank to auto-generate" \
+            "" "my-new-branch")
+        from_branch=$(tui_question \
+            "Base it on?" \
+            "The existing branch to start from" \
+            "main" "main")
+    else
+        # Checkout existing branch
+        branch=$(tui_question \
+            "Which branch to checkout?" \
+            "Enter the name of an existing branch" \
+            "" "main")
     fi
 
     # 4. Working directory
@@ -249,14 +253,14 @@ guided_new() {
 
     # Build friendly summary
     local branch_display
-    if [[ -n "$branch" ]]; then
-        if [[ "$create_branch" == true ]]; then
+    if [[ "$create_branch" == true ]]; then
+        if [[ -n "$branch" ]]; then
             branch_display="$branch (new, from ${from_branch:-main})"
         else
-            branch_display="$branch"
+            branch_display="(auto-generated from ${from_branch:-main})"
         fi
     else
-        branch_display="(auto-generated)"
+        branch_display="$branch (existing)"
     fi
 
     local pip_display
