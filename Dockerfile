@@ -3,6 +3,7 @@ FROM ubuntu:24.04
 ARG UID=1000
 ARG GID=1000
 ARG USERNAME=ubuntu
+ARG INCLUDE_OPENCODE=1
 
 # Avoid prompts during package installation
 ENV DEBIAN_FRONTEND=noninteractive
@@ -37,8 +38,11 @@ RUN curl -fsSL https://deb.nodesource.com/setup_22.x | bash - \
     && apt-get install -y nodejs
 
 # Go 1.23 (for opencode) - auto-detect architecture for Apple Silicon support
-RUN ARCH=$(dpkg --print-architecture) && \
-    curl -fsSL "https://go.dev/dl/go1.23.4.linux-${ARCH}.tar.gz" | tar -C /usr/local -xz
+# Only install if INCLUDE_OPENCODE=1 (Go is only needed for OpenCode)
+RUN if [ "$INCLUDE_OPENCODE" = "1" ]; then \
+        ARCH=$(dpkg --print-architecture) && \
+        curl -fsSL "https://go.dev/dl/go1.23.4.linux-${ARCH}.tar.gz" | tar -C /usr/local -xz; \
+    fi
 
 # GitHub CLI
 RUN curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg \
@@ -88,22 +92,30 @@ RUN rm -f /usr/lib/python*/EXTERNALLY-MANAGED
 
 # Install AI tools globally as root (to /usr/local, survives tmpfs on /home)
 # global-agent is needed for claude-zai to route DNS through the HTTP proxy
-# Note: tavily-mcp is installed at runtime if TAVILY_API_KEY is available (see entrypoint.sh)
 RUN npm install -g @anthropic-ai/claude-code \
     && npm install -g @google/gemini-cli \
     && npm install -g @openai/codex \
-    && npm install -g opencode-ai @opencode-ai/sdk \
     && npm install -g global-agent
+# Install OpenCode conditionally (only if INCLUDE_OPENCODE=1)
+RUN if [ "$INCLUDE_OPENCODE" = "1" ]; then \
+        npm install -g opencode-ai @opencode-ai/sdk; \
+    fi
 
 # Install Python packages globally (to /usr/local/lib/python3)
 RUN pip3 install foundry-mcp pytest-asyncio hypothesis cc-context-stats pyright
 
-# Fix ESM module resolution for OpenCode SDK wrapper
+# Install tavily-mcp globally (npm package for web search MCP server)
+# Baked into image because npm is blocked in credential isolation mode
+RUN npm install -g tavily-mcp
+
+# Fix ESM module resolution for OpenCode SDK wrapper (only if INCLUDE_OPENCODE=1)
 # ESM imports don't respect NODE_PATH, so we create a symlink from foundry-mcp's
 # providers directory to the globally installed SDK
-RUN PROVIDERS_DIR=$(python3 -c "import foundry_mcp.core.providers as p; print(p.__path__[0])") && \
-    mkdir -p "$PROVIDERS_DIR/node_modules" && \
-    ln -sf /usr/local/lib/node_modules/@opencode-ai "$PROVIDERS_DIR/node_modules/@opencode-ai"
+RUN if [ "$INCLUDE_OPENCODE" = "1" ]; then \
+        PROVIDERS_DIR=$(python3 -c "import foundry_mcp.core.providers as p; print(p.__path__[0])") && \
+        mkdir -p "$PROVIDERS_DIR/node_modules" && \
+        ln -sf /usr/local/lib/node_modules/@opencode-ai "$PROVIDERS_DIR/node_modules/@opencode-ai"; \
+    fi
 
 # Add useful aliases to system bashrc (before switching to non-root user)
 # Home directory is tmpfs at runtime, so user .bashrc won't persist

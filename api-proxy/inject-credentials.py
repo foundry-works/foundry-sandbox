@@ -9,7 +9,7 @@ Provider Credential Map:
                      or x-api-key from ANTHROPIC_API_KEY
 - api.openai.com: Authorization Bearer from OPENAI_API_KEY
 - generativelanguage.googleapis.com: x-goog-api-key from GOOGLE_API_KEY (or GEMINI_API_KEY)
-- api.tavily.com: Authorization Bearer from TAVILY_API_KEY
+- api.tavily.com: Authorization Bearer from TAVILY_API_KEY (header + body injection)
 - api.semanticscholar.org: x-api-key from SEMANTIC_SCHOLAR_API_KEY
 - api.perplexity.ai: Authorization Bearer from PERPLEXITY_API_KEY
 - api.z.ai: x-api-key from ZHIPU_API_KEY
@@ -521,6 +521,62 @@ class CredentialInjector:
             )
             return True
 
+    def _handle_tavily_body_injection(self, flow: http.HTTPFlow) -> bool:
+        """
+        Inject Tavily API key into JSON request body.
+
+        The Tavily MCP sends the API key in both the Authorization header AND
+        the request body (api_key field). The header injection is handled by
+        the standard host-based injection, but we also need to replace the
+        placeholder in the body.
+
+        Returns True if body was modified, False otherwise.
+        """
+        host = flow.request.host
+        if host != "api.tavily.com":
+            return False
+
+        # Only process JSON requests
+        content_type = flow.request.headers.get("Content-Type", "")
+        if "application/json" not in content_type:
+            return False
+
+        # Get the real API key from environment
+        tavily_api_key = os.environ.get("TAVILY_API_KEY")
+        if not tavily_api_key:
+            ctx.log.warn("TAVILY_API_KEY not set, cannot inject into body")
+            return False
+
+        # Try to parse and modify the request body
+        try:
+            body = flow.request.get_text()
+            if not body:
+                return False
+
+            data = json.loads(body)
+
+            # Check if api_key field exists and contains placeholder
+            if "api_key" not in data:
+                return False
+
+            current_key = data.get("api_key", "")
+            if current_key == tavily_api_key:
+                # Already has the real key, no modification needed
+                return False
+
+            # Replace placeholder with real API key
+            data["api_key"] = tavily_api_key
+            flow.request.set_text(json.dumps(data))
+            ctx.log.info(f"Injected api_key into request body for {host}")
+            return True
+
+        except json.JSONDecodeError as e:
+            ctx.log.warn(f"Failed to parse Tavily request body as JSON: {e}")
+            return False
+        except Exception as e:
+            ctx.log.error(f"Error injecting Tavily API key into body: {e}")
+            return False
+
     def request(self, flow: http.HTTPFlow) -> None:
         """Process outbound request and inject credentials if applicable."""
         host = flow.request.host
@@ -558,7 +614,13 @@ class CredentialInjector:
         if self._handle_gemini_oauth_injection(flow):
             return
 
-        # 5. Host-based API key injection (existing behavior)
+        # 5. Handle Tavily body-based credential injection
+        # Tavily MCP sends api_key in both header AND body, so we need to
+        # inject into the body as well. This runs before host-based injection
+        # so headers are handled separately below.
+        self._handle_tavily_body_injection(flow)
+
+        # 6. Host-based API key injection (existing behavior)
         if host not in PROVIDER_MAP:
             return
 

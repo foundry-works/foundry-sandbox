@@ -26,6 +26,13 @@ setup_credential_placeholders() {
     else
         export SANDBOX_ZHIPU_API_KEY=""
     fi
+
+    # Tavily: Set flag if API key is available on host
+    if [ -n "${TAVILY_API_KEY:-}" ]; then
+        export SANDBOX_ENABLE_TAVILY="1"
+    else
+        export SANDBOX_ENABLE_TAVILY="0"
+    fi
 }
 
 get_compose_command() {

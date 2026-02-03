@@ -7,6 +7,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.9.1] - 2026-02-03
+
+### Added
+- **`--without-opencode` build flag** for smaller Docker images
+  - `cast build --without-opencode` skips Go and OpenCode installation
+  - `install.sh --without-opencode` propagates to build step
+  - Reduces image size when OpenCode is not needed
+- **`SANDBOX_ENABLE_TAVILY` flag** for explicit Tavily enablement tracking
+  - Replaces checking for placeholder values in container
+
+### Changed
+- **Tavily MCP baked into Docker image** instead of runtime installation
+  - Required for credential isolation mode (npm blocked by firewall)
+  - Falls back to runtime install for older images
+- OpenCode directories only created when `SANDBOX_ENABLE_OPENCODE=1`
+- Improved log messages for CLI tool setup (cleaner formatting)
+
+### Fixed
+- **Tavily MCP credential injection** in credential isolation mode
+  - Tavily API sends `api_key` in both header AND request body
+  - Proxy now injects credentials into JSON body, not just Authorization header
+- **Network warning accuracy**: Distinguishes orphaned vs active sandbox networks
+  - Shows count of orphaned networks that can be cleaned up
+  - Provides appropriate cleanup command based on network state
+
 ## [0.9.0] - 2026-02-03
 
 ### Added
@@ -408,7 +433,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Tab completion for bash
 - macOS and Linux support
 
-[Unreleased]: https://github.com/foundry-works/foundry-sandbox/compare/v0.9.0...HEAD
+[Unreleased]: https://github.com/foundry-works/foundry-sandbox/compare/v0.9.1...HEAD
+[0.9.1]: https://github.com/foundry-works/foundry-sandbox/compare/v0.9.0...v0.9.1
 [0.9.0]: https://github.com/foundry-works/foundry-sandbox/compare/v0.8.0...v0.9.0
 [0.8.0]: https://github.com/foundry-works/foundry-sandbox/compare/v0.7.0...v0.8.0
 [0.7.0]: https://github.com/foundry-works/foundry-sandbox/compare/v0.6.0...v0.7.0

@@ -5,8 +5,6 @@
 mkdir -p "$HOME/.claude" \
          "$HOME/.config/gh" \
          "$HOME/.gemini" \
-         "$HOME/.config/opencode" \
-         "$HOME/.local/share/opencode" \
          "$HOME/.codex" \
          "$HOME/.ssh" \
          "$HOME/.local/bin" \
@@ -16,14 +14,28 @@ mkdir -p "$HOME/.claude" \
          "$HOME/.foundry-mcp/errors" \
          "$HOME/.foundry-mcp/metrics"
 
+# Only create OpenCode directories if enabled
+if [ "${SANDBOX_ENABLE_OPENCODE:-0}" = "1" ]; then
+    mkdir -p "$HOME/.config/opencode" \
+             "$HOME/.local/share/opencode"
+fi
+
 # Fix ownership of directories that Docker may have created as root
 # Note: credential-isolation now mounts stubs to /etc/proxy-stubs/ and symlinks them,
 # avoiding the root ownership issue. This loop is kept as a safety net for other mounts.
-for dir in "$HOME/.codex" "$HOME/.local" "$HOME/.local/share" "$HOME/.local/share/opencode" "$HOME/.gemini"; do
+for dir in "$HOME/.codex" "$HOME/.local" "$HOME/.local/share" "$HOME/.gemini"; do
     if [ -d "$dir" ] && [ "$(stat -c '%U' "$dir" 2>/dev/null)" = "root" ]; then
         sudo chown "$(id -u):$(id -g)" "$dir" 2>/dev/null || true
     fi
 done
+# Fix OpenCode directory ownership only if enabled
+if [ "${SANDBOX_ENABLE_OPENCODE:-0}" = "1" ]; then
+    for dir in "$HOME/.local/share/opencode" "$HOME/.config/opencode"; do
+        if [ -d "$dir" ] && [ "$(stat -c '%U' "$dir" 2>/dev/null)" = "root" ]; then
+            sudo chown "$(id -u):$(id -g)" "$dir" 2>/dev/null || true
+        fi
+    done
+fi
 
 # Ensure Claude Code temp dir exists (defaulted via docker-compose)
 if [ -n "${CLAUDE_CODE_TMPDIR:-}" ]; then
@@ -93,12 +105,12 @@ GH_WRAPPER
 # CLI tools are pre-installed in the image
 # To update manually: npm update -g @anthropic-ai/claude-code @google/gemini-cli @openai/codex opencode-ai
 
-# Install tavily-mcp only if API key is configured (not baked into image)
-# Skip if key is the credential-isolation placeholder (proxy provides credentials)
-if [ -n "${TAVILY_API_KEY:-}" ] && [ "${TAVILY_API_KEY}" != "CREDENTIAL_PROXY_PLACEHOLDER" ]; then
+# tavily-mcp is now baked into the Docker image (npm blocked in credential isolation)
+# This is a fallback for older images - use SANDBOX_ENABLE_TAVILY flag from host
+if [ "${SANDBOX_ENABLE_TAVILY:-0}" = "1" ] || { [ -n "${TAVILY_API_KEY:-}" ] && [ "${TAVILY_API_KEY}" != "CREDENTIAL_PROXY_PLACEHOLDER" ]; }; then
     if ! command -v tavily-mcp >/dev/null 2>&1; then
-        echo "Installing tavily-mcp (TAVILY_API_KEY detected)..."
-        npm install -g tavily-mcp >/dev/null 2>&1 || echo "Warning: tavily-mcp install failed"
+        echo "Installing tavily-mcp (Tavily enabled)..."
+        npm install -g tavily-mcp >/dev/null 2>&1 || echo "Warning: tavily-mcp install failed (may be blocked by firewall)"
     fi
 fi
 

@@ -150,8 +150,24 @@ check_docker_network_capacity() {
 
     # Warn if many sandbox networks exist (potential future issue)
     if [ "$sandbox_network_count" -gt 20 ]; then
-        log_warn "Found $sandbox_network_count sandbox networks"
-        log_warn "Consider running 'cast prune --networks' to clean up orphaned networks"
+        # Count orphaned networks (no running containers)
+        local orphaned_count=0
+        while IFS= read -r net; do
+            [ -z "$net" ] && continue
+            local sandbox_name="${net%_credential-isolation}"
+            sandbox_name="${sandbox_name%_proxy-egress}"
+            if ! docker ps -q --filter "name=^${sandbox_name}-" 2>/dev/null | grep -q .; then
+                ((orphaned_count++))
+            fi
+        done < <(docker network ls --format '{{.Name}}' | grep -E '^sandbox-')
+
+        if [ "$orphaned_count" -gt 0 ]; then
+            log_warn "Found $orphaned_count orphaned sandbox networks (of $sandbox_network_count total)"
+            log_warn "Run 'cast prune --networks' to clean up"
+        else
+            log_warn "Found $sandbox_network_count active sandbox networks"
+            log_warn "Consider destroying unused sandboxes with 'cast destroy <name>'"
+        fi
     fi
 
     return 0

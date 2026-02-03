@@ -200,9 +200,11 @@ parse_destroy_args() {
 
 parse_build_args() {
     BUILD_NO_CACHE=""
+    BUILD_WITHOUT_OPENCODE="0"
     while [ $# -gt 0 ]; do
         case "$1" in
             --no-cache) BUILD_NO_CACHE="--no-cache" ;;
+            --without-opencode) BUILD_WITHOUT_OPENCODE="1" ;;
         esac
         shift
     done

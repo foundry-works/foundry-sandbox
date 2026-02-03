@@ -28,6 +28,7 @@ NC='\033[0m'
 # Options
 BUILD_IMAGE=true
 NO_CACHE=""
+WITHOUT_OPENCODE=""
 
 # Parse arguments
 while [[ $# -gt 0 ]]; do
@@ -38,6 +39,10 @@ while [[ $# -gt 0 ]]; do
             ;;
         --no-cache)
             NO_CACHE="--no-cache"
+            shift
+            ;;
+        --without-opencode)
+            WITHOUT_OPENCODE="--without-opencode"
             shift
             ;;
         --dir)
@@ -458,7 +463,7 @@ if [[ "$BUILD_IMAGE" == true ]]; then
     echo ""
 
     cd "$INSTALL_DIR"
-    if ./sandbox.sh build $NO_CACHE; then
+    if ./sandbox.sh build $NO_CACHE $WITHOUT_OPENCODE; then
         echo ""
         echo -e "${GREEN}Docker image built successfully.${NC}"
     else
