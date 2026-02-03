@@ -1612,7 +1612,7 @@ copy_configs_to_container() {
         sleep 0.2
     done
 
-    run_cmd docker exec "$container_id" mkdir -p \
+    run_cmd docker exec -u "$CONTAINER_USER" "$container_id" mkdir -p \
         "$CONTAINER_HOME/.claude" \
         "$CONTAINER_HOME/.config/gh" \
         "$CONTAINER_HOME/.gemini" \
@@ -1645,7 +1645,7 @@ copy_configs_to_container() {
     if [ "$isolate_credentials" != "true" ]; then
         # Gemini CLI OAuth credentials (created via `gemini auth` on host)
         if file_exists ~/.gemini/oauth_creds.json; then
-            docker exec "$container_id" mkdir -p "$CONTAINER_HOME/.gemini" 2>/dev/null || true
+            docker exec -u "$CONTAINER_USER" "$container_id" mkdir -p "$CONTAINER_HOME/.gemini" 2>/dev/null || true
             copy_file_to_container "$container_id" ~/.gemini/oauth_creds.json "$CONTAINER_HOME/.gemini/oauth_creds.json"
         fi
         file_exists ~/.local/share/opencode/auth.json && copy_file_to_container "$container_id" ~/.local/share/opencode/auth.json "$CONTAINER_HOME/.local/share/opencode/auth.json"
@@ -1693,7 +1693,7 @@ copy_configs_to_container() {
         foundry_config_source="${FOUNDRY_SANDBOX_HOME:-$HOME/.foundry-sandbox}/.foundry-mcp.toml"
     fi
     if [[ -n "$foundry_config_source" ]]; then
-        docker exec "$container_id" mkdir -p "$CONTAINER_HOME/.config/foundry-mcp" 2>/dev/null || true
+        docker exec -u "$CONTAINER_USER" "$container_id" mkdir -p "$CONTAINER_HOME/.config/foundry-mcp" 2>/dev/null || true
         copy_file_to_container "$container_id" "$foundry_config_source" "$CONTAINER_HOME/.config/foundry-mcp/config.toml"
         configure_foundry_research_providers "$container_id"
     fi
@@ -1779,7 +1779,7 @@ sync_runtime_credentials() {
     ensure_gemini_settings "$container_id" "1"
     ensure_codex_config "$container_id" "1"
     if file_exists ~/.foundry-mcp.toml; then
-        docker exec "$container_id" mkdir -p "$CONTAINER_HOME/.config/foundry-mcp" 2>/dev/null || true
+        docker exec -u "$CONTAINER_USER" "$container_id" mkdir -p "$CONTAINER_HOME/.config/foundry-mcp" 2>/dev/null || true
         copy_file_to_container_quiet "$container_id" ~/.foundry-mcp.toml "$CONTAINER_HOME/.config/foundry-mcp/config.toml"
         docker exec "$container_id" chown -R $CONTAINER_USER:$CONTAINER_USER "$CONTAINER_HOME/.config/foundry-mcp" 2>/dev/null || true
         configure_foundry_research_providers "$container_id"
