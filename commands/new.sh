@@ -252,15 +252,18 @@ guided_new() {
     fi
 
     # Build friendly summary
+    local action_display
     local branch_display
     if [[ "$create_branch" == true ]]; then
+        action_display="Create new branch"
         if [[ -n "$branch" ]]; then
-            branch_display="$branch (new, from ${from_branch:-main})"
+            branch_display="$branch"
         else
-            branch_display="(auto-generated from ${from_branch:-main})"
+            branch_display="(auto-generated)"
         fi
     else
-        branch_display="$branch (existing)"
+        action_display="Checkout existing"
+        branch_display="$branch"
     fi
 
     local pip_display
@@ -278,7 +281,9 @@ guided_new() {
     fi
 
     local summary="Repository    $repo"
+    summary+="\nAction        $action_display"
     summary+="\nBranch        $branch_display"
+    [[ "$create_branch" == true ]] && summary+="\nBased on      ${from_branch:-main}"
     [[ -n "$working_dir" ]] && summary+="\nDirectory     $working_dir"
     [[ "$sparse" == true ]] && summary+="\nSparse clone  yes"
     summary+="\nPython deps   $pip_display"
