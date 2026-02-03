@@ -731,6 +731,51 @@ if "tavily-mcp" not in mcp:
 PY
 }
 
+# Ensure OpenCode settings defaults (disable autoupdate)
+ensure_opencode_settings() {
+    local container_id="$1"
+    local quiet="${2:-0}"
+    local run_fn="run_cmd"
+    if [ "$quiet" = "1" ]; then
+        run_fn="run_cmd_quiet"
+    fi
+
+    if [ "$quiet" != "1" ]; then
+        log_info "Ensuring OpenCode settings defaults (no autoupdate)..."
+    fi
+
+    $run_fn docker exec -u "$CONTAINER_USER" -i "$container_id" python3 - <<'PY'
+import json
+import os
+
+config_path = "/home/ubuntu/.config/opencode/opencode.json"
+os.makedirs(os.path.dirname(config_path), exist_ok=True)
+
+def load_json(path):
+    try:
+        with open(path, "r") as f:
+            return json.load(f)
+    except (FileNotFoundError, json.JSONDecodeError):
+        return {}
+
+data = load_json(config_path)
+if not isinstance(data, dict):
+    data = {}
+
+changed = False
+
+# Disable autoupdate (can be "on", "off", or "notify")
+if data.get("autoupdate") != "off":
+    data["autoupdate"] = "off"
+    changed = True
+
+if changed or not os.path.exists(config_path):
+    with open(config_path, "w") as f:
+        json.dump(data, f, indent=2)
+        f.write("\n")
+PY
+}
+
 ensure_opencode_default_model() {
     local container_id="$1"
     local quiet="${2:-0}"
@@ -1717,13 +1762,10 @@ copy_configs_to_container() {
             copy_file_to_container "$container_id" "$SCRIPT_DIR/opencode.json" "$CONTAINER_HOME/.config/opencode/opencode.json"
         fi
     fi
-    # Skip settings writes when credential isolation is enabled (dirs may be read-only)
-    # Also skip configuration for CLIs without valid authentication keys
-    if [ "$isolate_credentials" != "true" ]; then
-        has_gemini_key && ensure_gemini_settings "$container_id"
-    fi
-    # Always ensure codex config for update/analytics disabling, even in isolation mode
+    # Always ensure CLI configs for update/analytics disabling, even in isolation mode
     ensure_codex_config "$container_id"
+    ensure_gemini_settings "$container_id"
+    opencode_enabled && ensure_opencode_settings "$container_id"
     opencode_enabled && sync_opencode_foundry "$container_id"
     opencode_enabled && ensure_opencode_tavily_mcp "$container_id"
     opencode_enabled && ensure_opencode_default_model "$container_id" "$skip_plugins"
@@ -1840,10 +1882,11 @@ sync_runtime_credentials() {
         file_exists ~/.local/share/opencode/auth.json && copy_file_to_container_quiet "$container_id" ~/.local/share/opencode/auth.json "$CONTAINER_HOME/.local/share/opencode/auth.json"
     fi
     opencode_enabled && sync_opencode_foundry "$container_id" "1"
+    opencode_enabled && ensure_opencode_settings "$container_id" "1"
     opencode_enabled && ensure_opencode_tavily_mcp "$container_id" "1"
     opencode_enabled && ensure_opencode_default_model "$container_id" "1"
-    has_gemini_key && ensure_gemini_settings "$container_id" "1"
-    # Always ensure codex config for update/analytics disabling, even without auth
+    # Always ensure CLI configs for update/analytics disabling, even without auth
+    ensure_gemini_settings "$container_id" "1"
     ensure_codex_config "$container_id" "1"
     if file_exists ~/.foundry-mcp.toml; then
         docker exec -u "$CONTAINER_USER" "$container_id" mkdir -p "$CONTAINER_HOME/.config/foundry-mcp" 2>/dev/null || true
