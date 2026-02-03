@@ -1721,8 +1721,9 @@ copy_configs_to_container() {
     # Also skip configuration for CLIs without valid authentication keys
     if [ "$isolate_credentials" != "true" ]; then
         has_gemini_key && ensure_gemini_settings "$container_id"
-        has_codex_key && ensure_codex_config "$container_id"
     fi
+    # Always ensure codex config for update/analytics disabling, even in isolation mode
+    ensure_codex_config "$container_id"
     opencode_enabled && sync_opencode_foundry "$container_id"
     opencode_enabled && ensure_opencode_tavily_mcp "$container_id"
     opencode_enabled && ensure_opencode_default_model "$container_id" "$skip_plugins"
@@ -1842,7 +1843,8 @@ sync_runtime_credentials() {
     opencode_enabled && ensure_opencode_tavily_mcp "$container_id" "1"
     opencode_enabled && ensure_opencode_default_model "$container_id" "1"
     has_gemini_key && ensure_gemini_settings "$container_id" "1"
-    has_codex_key && ensure_codex_config "$container_id" "1"
+    # Always ensure codex config for update/analytics disabling, even without auth
+    ensure_codex_config "$container_id" "1"
     if file_exists ~/.foundry-mcp.toml; then
         docker exec -u "$CONTAINER_USER" "$container_id" mkdir -p "$CONTAINER_HOME/.config/foundry-mcp" 2>/dev/null || true
         copy_file_to_container_quiet "$container_id" ~/.foundry-mcp.toml "$CONTAINER_HOME/.config/foundry-mcp/config.toml"
