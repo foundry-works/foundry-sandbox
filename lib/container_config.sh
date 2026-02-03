@@ -459,7 +459,7 @@ sync_opencode_foundry() {
             fi
             return 0
         fi
-        if ! $run_fn docker exec -i \
+        if ! $run_fn docker exec -i -u "$CONTAINER_USER" \
             -e SANDBOX_OPENCODE_DISABLE_NPM_PLUGINS="$disable_npm_plugins" \
             -e SANDBOX_OPENCODE_LOCAL_PLUGIN_DIR="$local_plugin_dir_env" \
             "$container_id" python3 - "$template_dst" "$CONTAINER_HOME/.config/opencode/opencode.json" <<'PY'
