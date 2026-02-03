@@ -1,5 +1,9 @@
 #!/bin/bash
 
+# Source dependent commands
+source "${SCRIPT_DIR}/commands/list.sh"
+source "${SCRIPT_DIR}/commands/start.sh"
+
 cmd_attach() {
     local name="$1"
 

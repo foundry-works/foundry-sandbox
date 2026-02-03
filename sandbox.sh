@@ -38,7 +38,7 @@ cmd="${1:-help}"
 shift 2>/dev/null || true
 
 case "$cmd" in
-    new|list|attach|start|stop|destroy|build|help|status|config|prune|info)
+    new|list|attach|start|stop|destroy|build|help|status|config|prune|info|upgrade)
         source "$SCRIPT_DIR/commands/$cmd.sh"
         "cmd_$cmd" "$@"
         ;;
