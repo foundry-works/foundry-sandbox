@@ -259,3 +259,23 @@ parse_attach_args() {
         shift
     done
 }
+
+parse_refresh_credentials_args() {
+    REFRESH_CREDS_NAME=""
+    REFRESH_CREDS_USE_LAST=false
+
+    while [ $# -gt 0 ]; do
+        case "$1" in
+            --last|-l)
+                REFRESH_CREDS_USE_LAST=true
+                ;;
+            -*)
+                die "Unknown option: $1"
+                ;;
+            *)
+                [ -z "$REFRESH_CREDS_NAME" ] && REFRESH_CREDS_NAME="$1"
+                ;;
+        esac
+        shift
+    done
+}

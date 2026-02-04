@@ -43,6 +43,10 @@ case "$cmd" in
         source "$SCRIPT_DIR/commands/$cmd.sh"
         "cmd_$cmd" "$@"
         ;;
+    refresh-credentials)
+        source "$SCRIPT_DIR/commands/refresh-credentials.sh"
+        cmd_refresh_credentials "$@"
+        ;;
     destroy-all)
         source "$SCRIPT_DIR/commands/destroy-all.sh"
         cmd_destroy_all "$@"

@@ -24,6 +24,7 @@ cmd_help() {
     echo "  prune [-f] [--json]                   Remove orphaned configs"
     echo "  status [name] [--json]                Show sandbox status"
     echo "  info [--json]                         Show config + status"
+    echo "  refresh-credentials [name]            Refresh credentials in running sandbox"
     echo "  upgrade [--local]                     Upgrade to latest version"
     echo "  help                                  Show this help"
     echo ""
