@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.9.2] - 2026-02-03
+
+### Added
+- **`cast refresh-credentials` command** to reload credentials in running sandboxes
+  - Direct mode: Syncs credentials from host to container
+  - Credential isolation mode: Restarts api-proxy to reload credentials
+  - `--last` flag to refresh the last attached sandbox
+  - Auto-detects sandbox when run from a worktree directory
+  - Interactive fzf selection when no sandbox specified
+
 ## [0.9.1] - 2026-02-03
 
 ### Added
@@ -433,7 +443,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Tab completion for bash
 - macOS and Linux support
 
-[Unreleased]: https://github.com/foundry-works/foundry-sandbox/compare/v0.9.1...HEAD
+[Unreleased]: https://github.com/foundry-works/foundry-sandbox/compare/v0.9.2...HEAD
+[0.9.2]: https://github.com/foundry-works/foundry-sandbox/compare/v0.9.1...v0.9.2
 [0.9.1]: https://github.com/foundry-works/foundry-sandbox/compare/v0.9.0...v0.9.1
 [0.9.0]: https://github.com/foundry-works/foundry-sandbox/compare/v0.8.0...v0.9.0
 [0.8.0]: https://github.com/foundry-works/foundry-sandbox/compare/v0.7.0...v0.8.0
