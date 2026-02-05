@@ -187,6 +187,32 @@ docker logs unified-proxy 2>&1 | grep "DNS filtering enabled"
 
 **Security note:** DNS fallback reduces defense in depth. Use only when necessary.
 
+### DNS Filtering (Enabled by Default)
+
+DNS filtering is **enabled by default** for full defense-in-depth security. When enabled:
+
+1. **NXDOMAIN for blocked domains** - Prevents DNS-level reconnaissance
+2. **DNS bypass protection** - Containers cannot query external DNS servers (iptables rules block port 53 to non-proxy destinations)
+3. **Complete domain isolation** - Domain names cannot leak to external resolvers
+
+To disable DNS filtering for debugging:
+
+```yaml
+# docker-compose.override.yml
+services:
+  unified-proxy:
+    environment:
+      - PROXY_ENABLE_DNS=false
+```
+
+Or set the environment variable when starting the sandbox:
+
+```bash
+PROXY_ENABLE_DNS=false ./sandbox.sh new myproject
+```
+
+**Note:** Disabling DNS filtering reduces defense in depth. Use only when necessary for debugging.
+
 ## Troubleshooting
 
 ### Proxy Won't Start

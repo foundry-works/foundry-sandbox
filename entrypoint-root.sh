@@ -25,7 +25,7 @@ if [ "$SANDBOX_GATEWAY_ENABLED" = "true" ]; then
         # Add internal service to /etc/hosts so it resolves correctly
         # /etc/hosts takes precedence over DNS, ensuring we use the right network IP
         echo "Adding internal services to /etc/hosts..."
-        echo "$PROXY_IP unified-proxy" >> /etc/hosts
+        printf '%s\t%s\n' "$PROXY_IP" "unified-proxy" >> /etc/hosts
 
         # Configure resolv.conf to use unified-proxy DNS filter
         # External domains will be filtered by the allowlist

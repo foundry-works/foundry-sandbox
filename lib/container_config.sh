@@ -2054,6 +2054,13 @@ fix_worktree_paths() {
         return 0
     fi
 
+    # Validate host_user contains only safe characters (alphanumeric, dash, underscore, dot)
+    # This prevents sed injection if username contains special characters like | or &
+    if ! printf '%s' "$host_user" | grep -qE '^[a-zA-Z0-9._-]+$'; then
+        log_warn "Skipping worktree path fix: username contains unsafe characters"
+        return 0
+    fi
+
     docker exec "$container_id" sh -c "
         if [ -f /workspace/.git ]; then
             # Fix the worktree's .git reference

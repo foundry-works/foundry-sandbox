@@ -75,7 +75,7 @@ services:
 **How it works:**
 - Internal Docker network (`internal: true`) - no default gateway
 - ICC (inter-container communication) disabled
-- DNS routed through gateway's dnsmasq
+- DNS routed through unified-proxy (enabled by default)
 - iptables rules for defense-in-depth
 
 **Network Modes:**

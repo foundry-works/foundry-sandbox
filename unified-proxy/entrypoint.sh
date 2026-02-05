@@ -221,7 +221,7 @@ mark_ready() {
 start_mitmproxy() {
     local mode="${PROXY_MODE:-regular}"
     local log_level="${PROXY_LOG_LEVEL:-info}"
-    local enable_dns="${PROXY_ENABLE_DNS:-false}"
+    local enable_dns="${PROXY_ENABLE_DNS:-true}"
 
     log "Starting mitmproxy (HTTP mode: ${mode}, DNS: ${enable_dns})..."
 
