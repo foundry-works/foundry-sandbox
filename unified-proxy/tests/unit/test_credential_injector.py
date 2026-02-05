@@ -82,7 +82,11 @@ if "addons.credential_injector" in sys.modules:
     del sys.modules["addons.credential_injector"]
 
 # Patch sys.modules BEFORE import
-sys.modules["mitmproxy"] = mock.MagicMock()
+# Create a mock mitmproxy module that returns our mock modules when accessed as attributes
+mock_mitmproxy = mock.MagicMock()
+mock_mitmproxy.http = mock_http_module
+mock_mitmproxy.ctx = mock_ctx
+sys.modules["mitmproxy"] = mock_mitmproxy
 sys.modules["mitmproxy.http"] = mock_http_module
 sys.modules["mitmproxy.ctx"] = mock_ctx
 sys.modules["addons.container_identity"] = mock_container_identity

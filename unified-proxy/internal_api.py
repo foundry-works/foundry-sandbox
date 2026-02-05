@@ -36,7 +36,7 @@ logger = logging.getLogger(__name__)
 # Configuration
 UNIX_SOCKET_PATH = os.environ.get(
     "INTERNAL_API_SOCKET",
-    "/var/run/unified-proxy/internal.sock",
+    "/var/run/proxy/internal.sock",
 )
 REGISTRY_DB_PATH = os.environ.get(
     "REGISTRY_DB_PATH",

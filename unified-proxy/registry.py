@@ -138,6 +138,66 @@ class ContainerRegistry:
         finally:
             conn.close()
 
+    def _load_by_ip(self, ip_address: str) -> Optional[ContainerConfig]:
+        """Load a container config by IP address from the database."""
+        conn = self._get_connection()
+        try:
+            cursor = conn.execute(
+                """
+                SELECT container_id, ip_address, registered_at, last_seen,
+                       ttl_seconds, metadata
+                FROM containers
+                WHERE ip_address = ?
+                """,
+                (ip_address,),
+            )
+            row = cursor.fetchone()
+        finally:
+            conn.close()
+
+        if not row:
+            return None
+
+        config = ContainerConfig.from_row(row)
+        if config.is_expired:
+            self._remove_from_db(config.container_id)
+            return None
+
+        with self._cache_lock:
+            self._cache[ip_address] = config
+
+        return config
+
+    def _load_by_container_id(self, container_id: str) -> Optional[ContainerConfig]:
+        """Load a container config by container ID from the database."""
+        conn = self._get_connection()
+        try:
+            cursor = conn.execute(
+                """
+                SELECT container_id, ip_address, registered_at, last_seen,
+                       ttl_seconds, metadata
+                FROM containers
+                WHERE container_id = ?
+                """,
+                (container_id,),
+            )
+            row = cursor.fetchone()
+        finally:
+            conn.close()
+
+        if not row:
+            return None
+
+        config = ContainerConfig.from_row(row)
+        if config.is_expired:
+            self._remove_from_db(config.container_id)
+            return None
+
+        with self._cache_lock:
+            self._cache[config.ip_address] = config
+
+        return config
+
     def get_by_ip(self, ip_address: str) -> Optional[ContainerConfig]:
         """Look up container configuration by IP address.
 
@@ -149,14 +209,16 @@ class ContainerRegistry:
         """
         with self._cache_lock:
             config = self._cache.get(ip_address)
-            if config is None:
-                return None
-            if config.is_expired:
-                # Auto-cleanup expired entry
-                self._remove_from_db(config.container_id)
-                del self._cache[ip_address]
-                return None
-            return config
+            if config is not None:
+                if config.is_expired:
+                    # Auto-cleanup expired entry
+                    self._remove_from_db(config.container_id)
+                    del self._cache[ip_address]
+                    return None
+                return config
+
+        # Cache miss: load from DB (handles cross-process updates)
+        return self._load_by_ip(ip_address)
 
     def get_by_container_id(self, container_id: str) -> Optional[ContainerConfig]:
         """Look up container configuration by container ID.
@@ -175,7 +237,9 @@ class ContainerRegistry:
                         del self._cache[config.ip_address]
                         return None
                     return config
-            return None
+
+        # Cache miss: load from DB (handles cross-process updates)
+        return self._load_by_container_id(container_id)
 
     def register(
         self,

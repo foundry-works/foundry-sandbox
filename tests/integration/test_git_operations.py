@@ -40,6 +40,15 @@ class MockContainerConfig:
         }
 
 
+class MockResponse:
+    """Mock HTTP response with status_code attribute."""
+
+    def __init__(self, status_code: int, body: bytes = b"", headers: Optional[dict] = None):
+        self.status_code = status_code
+        self.content = body
+        self.headers = headers or {}
+
+
 class MockFlow:
     """Mock mitmproxy flow for testing."""
 
@@ -61,6 +70,7 @@ class MockFlow:
 
         self.response = None
         self.metadata = {}
+        self.killed = False
 
     def kill(self):
         """Mark flow as killed."""
@@ -148,7 +158,8 @@ class TestGitCloneThoughProxy:
             addon.request(flow)
 
         # Flow should not be killed for allowed repo
-        assert not hasattr(flow, "killed") or not flow.killed
+        assert not flow.killed
+        assert flow.response is None
 
     def test_clone_denied_repo(self, addon, container_config):
         """Test clone is denied for repos not in container's allowlist."""
@@ -164,11 +175,18 @@ class TestGitCloneThoughProxy:
         ):
             addon.request(flow)
 
-        # Flow should be killed or have error response
-        assert flow.response is not None or hasattr(flow, "killed")
+        # Flow should have error response (403 Forbidden)
+        assert flow.response is not None
+        assert flow.response.status_code == 403
 
     def test_clone_no_container_config(self, addon):
-        """Test clone is denied when no container config exists."""
+        """Test clone passes through when no container config exists.
+
+        Note: The git_proxy addon logs and returns early when there's no
+        container config. It relies on the container_identity addon to have
+        already denied the request. This test verifies that git_proxy doesn't
+        crash and doesn't create a duplicate response.
+        """
         flow = MockFlow(
             host="github.com",
             path="/owner/repo.git/info/refs",
@@ -181,8 +199,9 @@ class TestGitCloneThoughProxy:
         ):
             addon.request(flow)
 
-        # Should deny access without container config
-        assert flow.response is not None or hasattr(flow, "killed")
+        # Addon returns early - no response set (container_identity handles it)
+        # Just verify no crash and no duplicate response
+        assert not flow.killed
 
 
 class TestGitPushThroughProxy:
@@ -218,7 +237,8 @@ class TestGitPushThroughProxy:
             addon.request(flow)
 
         # Flow should not be killed for valid push
-        assert not hasattr(flow, "killed") or not flow.killed
+        assert not flow.killed
+        assert flow.response is None
 
     def test_push_denied_repo(self, addon, container_config):
         """Test push is denied for repos not in allowlist."""
@@ -239,7 +259,8 @@ class TestGitPushThroughProxy:
             addon.request(flow)
 
         # Should deny push to unauthorized repo
-        assert flow.response is not None or hasattr(flow, "killed")
+        assert flow.response is not None
+        assert flow.response.status_code == 403
 
 
 class TestBranchDeletionBlocked:
@@ -276,8 +297,7 @@ class TestBranchDeletionBlocked:
 
         # Deletion should be blocked
         assert flow.response is not None
-        if flow.response:
-            assert flow.response.status_code == 403
+        assert flow.response.status_code == 403
 
     def test_tag_deletion_blocked(self, addon, container_config):
         """Test tag deletion is blocked."""
@@ -299,8 +319,7 @@ class TestBranchDeletionBlocked:
 
         # Tag deletion should be blocked
         assert flow.response is not None
-        if flow.response:
-            assert flow.response.status_code == 403
+        assert flow.response.status_code == 403
 
     def test_force_push_allowed(self, addon, container_config):
         """Test force push (non-deletion) is allowed."""
@@ -322,7 +341,8 @@ class TestBranchDeletionBlocked:
             addon.request(flow)
 
         # Force push should be allowed (not a deletion)
-        assert not hasattr(flow, "killed") or not flow.killed
+        assert not flow.killed
+        assert flow.response is None
 
 
 class TestAuthModeEnforcement:
@@ -356,7 +376,8 @@ class TestAuthModeEnforcement:
             addon.request(flow)
 
         # sandbox/* branch should be allowed in bot mode
-        assert not hasattr(flow, "killed") or not flow.killed
+        assert not flow.killed
+        assert flow.response is None
 
     def test_bot_mode_main_branch_blocked(self, addon):
         """Test bot mode blocks push to non-sandbox branches."""
@@ -382,8 +403,7 @@ class TestAuthModeEnforcement:
 
         # main branch should be blocked in bot mode
         assert flow.response is not None
-        if flow.response:
-            assert flow.response.status_code == 403
+        assert flow.response.status_code == 403
 
     def test_user_mode_any_branch_allowed(self, addon):
         """Test user mode allows push to any branch."""
@@ -408,7 +428,8 @@ class TestAuthModeEnforcement:
             addon.request(flow)
 
         # User mode should allow any branch
-        assert not hasattr(flow, "killed") or not flow.killed
+        assert not flow.killed
+        assert flow.response is None
 
 
 class TestPushSizeLimit:
@@ -421,8 +442,12 @@ class TestPushSizeLimit:
 
         container_config = MockContainerConfig(repos=["owner/repo"])
 
-        # Create large content
-        large_content = b"x" * 2048  # 2KB, exceeds 1KB limit
+        # Create large content (exceeds 1KB limit)
+        # Need valid pktline header first, then large payload
+        refs = create_pktline_refs(
+            ("0" * 40, "a" * 40, "refs/heads/feature")
+        )
+        large_content = refs + b"x" * 2048  # Total exceeds 1KB
 
         flow = MockFlow(
             host="github.com",
@@ -438,8 +463,7 @@ class TestPushSizeLimit:
 
         # Oversized push should be rejected with 413
         assert flow.response is not None
-        if flow.response:
-            assert flow.response.status_code == 413
+        assert flow.response.status_code == 413
 
 
 class TestNonGitRequests:
@@ -462,7 +486,7 @@ class TestNonGitRequests:
 
         # Non-git requests should pass through
         assert flow.response is None
-        assert not hasattr(flow, "killed") or not flow.killed
+        assert not flow.killed
 
     def test_web_request_passes_through(self, addon):
         """Test web requests pass through unmodified."""
@@ -476,7 +500,7 @@ class TestNonGitRequests:
 
         # Non-git requests should pass through
         assert flow.response is None
-        assert not hasattr(flow, "killed") or not flow.killed
+        assert not flow.killed
 
 
 if __name__ == "__main__":

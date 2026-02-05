@@ -31,6 +31,24 @@ class MockContainerConfig:
         self.metadata = {}
 
 
+class MockHeaders(dict):
+    """Mock headers that behave like a dict but track modifications."""
+
+    def __init__(self, initial: Optional[dict] = None):
+        super().__init__(initial or {})
+        self.set_calls = []
+        self.del_calls = []
+
+    def __setitem__(self, key, value):
+        self.set_calls.append((key, value))
+        super().__setitem__(key, value)
+
+    def __delitem__(self, key):
+        self.del_calls.append(key)
+        if key in self:
+            super().__delitem__(key)
+
+
 class MockFlow:
     """Mock mitmproxy flow for testing."""
 
@@ -43,13 +61,10 @@ class MockFlow:
     ):
         self.request = mock.MagicMock()
         self.request.host = host
+        self.request.pretty_host = host  # Used by rate limiter
         self.request.path = path
         self.request.method = method
-        self.request.headers = mock.MagicMock()
-        self.request.headers.get = lambda k, d=None: (headers or {}).get(k, d)
-        self.request.headers.__setitem__ = mock.MagicMock()
-        self.request.headers.__contains__ = lambda k: k in (headers or {})
-        self._headers = headers or {}
+        self.request.headers = MockHeaders(headers)
 
         self.response = None
         self.metadata = {}
@@ -67,7 +82,7 @@ class TestCredentialInjection:
             "ANTHROPIC_API_KEY": "sk-ant-test-key",
             "OPENAI_API_KEY": "sk-openai-test-key",
             "GITHUB_TOKEN": "ghp_testtoken",
-        }):
+        }, clear=True):
             yield CredentialInjector()
 
     def test_anthropic_api_key_injected(self, injector):
@@ -78,7 +93,7 @@ class TestCredentialInjection:
         injector.request(flow)
 
         # Should inject x-api-key header
-        flow.request.headers.__setitem__.assert_called()
+        assert ("x-api-key", "sk-ant-test-key") in flow.request.headers.set_calls
 
     def test_github_token_injected(self, injector):
         """Test GitHub token injection."""
@@ -87,8 +102,8 @@ class TestCredentialInjection:
         flow.metadata["container"] = MockContainerConfig()
         injector.request(flow)
 
-        # Should inject Authorization header
-        flow.request.headers.__setitem__.assert_called()
+        # Should inject Authorization header with Bearer token
+        assert ("Authorization", "Bearer ghp_testtoken") in flow.request.headers.set_calls
 
     def test_placeholder_replaced(self, injector):
         """Test placeholder token is replaced with real credential."""
@@ -101,8 +116,9 @@ class TestCredentialInjection:
         flow.metadata["container"] = MockContainerConfig()
         injector.request(flow)
 
-        # Placeholder should be replaced
-        flow.request.headers.__setitem__.assert_called()
+        # Placeholder should be removed and real key injected
+        assert "x-api-key" in flow.request.headers.del_calls
+        assert ("x-api-key", "sk-ant-test-key") in flow.request.headers.set_calls
 
 
 class TestBlockedEndpoints:
@@ -111,7 +127,10 @@ class TestBlockedEndpoints:
     @pytest.fixture
     def injector(self):
         """Create credential injector."""
-        return CredentialInjector()
+        with mock.patch.dict(os.environ, {
+            "ANTHROPIC_API_KEY": "sk-ant-test-key",
+        }, clear=True):
+            return CredentialInjector()
 
     def test_unknown_host_passes_through(self, injector):
         """Test requests to unknown hosts pass through."""
@@ -130,9 +149,10 @@ class TestRateLimiting:
     @pytest.fixture
     def rate_limiter(self):
         """Create rate limiter with low limits for testing."""
+        # RateLimiterAddon uses capacity and refill_rate, not requests_per_minute
         return RateLimiterAddon(
-            requests_per_minute=2,
-            requests_per_hour=10,
+            capacity=2,       # Only 2 tokens
+            refill_rate=0.1,  # Very slow refill for testing
         )
 
     def test_under_limit_allowed(self, rate_limiter):
@@ -149,16 +169,18 @@ class TestRateLimiting:
         container_config = MockContainerConfig()
 
         with mock.patch("addons.rate_limiter.get_container_config", return_value=container_config):
-            # Send requests to exceed limit
+            # Send requests to exceed limit (capacity=2)
+            blocked = False
             for i in range(5):
                 flow = MockFlow(host="api.anthropic.com")
                 rate_limiter.request(flow)
 
                 if flow.response and flow.response.status_code == 429:
-                    return  # Test passed
+                    blocked = True
+                    break
 
-        # If we get here without 429, check last response
-        # (implementation may vary)
+            # Should have been rate limited
+            assert blocked, "Expected to be rate limited after exceeding capacity"
 
 
 class TestCircuitBreaker:

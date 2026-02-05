@@ -20,10 +20,20 @@ USER root
 COPY requirements.txt /opt/proxy/requirements.txt
 RUN pip install --no-cache-dir -r /opt/proxy/requirements.txt
 
+# Ensure curl and gosu are available (curl for host-driven registration via docker exec,
+# gosu for privilege dropping at runtime)
+RUN if command -v apt-get >/dev/null 2>&1; then \
+        apt-get update && apt-get install -y curl gosu && rm -rf /var/lib/apt/lists/*; \
+    elif command -v apk >/dev/null 2>&1; then \
+        apk add --no-cache curl gosu; \
+    else \
+        echo "ERROR: No supported package manager (apt-get or apk) found" >&2 && exit 1; \
+    fi
+
 # Create directories for configuration, certificates, and runtime
 # Owned by mitmproxy user so the container can write to mounted volumes
-RUN mkdir -p /etc/proxy/credentials /etc/proxy/certs /var/run/proxy \
-    && chown -R mitmproxy:mitmproxy /etc/proxy /var/run/proxy
+RUN mkdir -p /etc/proxy/credentials /etc/proxy/certs /var/run/proxy /var/lib/unified-proxy \
+    && chown -R mitmproxy:mitmproxy /etc/proxy /var/run/proxy /var/lib/unified-proxy
 
 # Copy core modules
 COPY __init__.py /opt/proxy/__init__.py
@@ -52,9 +62,6 @@ RUN chmod +x /opt/proxy/entrypoint.sh
 
 # Set PYTHONPATH so addons can import core modules
 ENV PYTHONPATH=/opt/proxy
-
-# Switch back to mitmproxy user for runtime
-USER mitmproxy
 
 # Expose mitmproxy ports
 # 8080: HTTP/HTTPS proxy port

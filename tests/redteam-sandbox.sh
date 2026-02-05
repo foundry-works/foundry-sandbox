@@ -543,6 +543,7 @@ done
 # Test Unix socket path (should not exist in sandbox)
 SOCKET_PATHS=(
     "/var/run/unified-proxy/internal.sock"
+    "/var/run/proxy/internal.sock"
     "/run/unified-proxy/internal.sock"
     "/tmp/unified-proxy.sock"
 )

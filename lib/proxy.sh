@@ -10,13 +10,66 @@
 # - Not exposed to containers themselves
 #
 # Environment:
-# - PROXY_SOCKET_PATH: Path to proxy internal API socket
-#     Default: /var/run/unified-proxy/internal.sock
+# - PROXY_SOCKET_PATH: Full path to proxy internal API socket (host-side)
+# - PROXY_CONTAINER_NAME: Explicit unified-proxy container name
 # - PROXY_URL: Alternative HTTP URL for proxy (for development/testing)
 #     If set, uses HTTP instead of Unix socket
 
-# Default socket path for proxy internal API
-PROXY_SOCKET_PATH="${PROXY_SOCKET_PATH:-/var/run/unified-proxy/internal.sock}"
+proxy_container_name() {
+    if [ -n "${PROXY_CONTAINER_NAME:-}" ]; then
+        echo "$PROXY_CONTAINER_NAME"
+        return
+    fi
+    if [ -n "${CONTAINER_NAME:-}" ]; then
+        echo "${CONTAINER_NAME}-unified-proxy-1"
+        return
+    fi
+}
+
+proxy_curl() {
+    local method="$1"
+    local path="$2"
+    local data="${3:-}"
+
+    if [ -n "${PROXY_URL:-}" ]; then
+        if [ -n "$data" ]; then
+            curl -s -X "$method" -H "Content-Type: application/json" -d "$data" "${PROXY_URL}${path}"
+        else
+            curl -s -X "$method" "${PROXY_URL}${path}"
+        fi
+        return $?
+    fi
+
+    # Prefer host socket if explicitly provided
+    if [ -n "${PROXY_SOCKET_PATH:-}" ]; then
+        if [ -n "$data" ]; then
+            curl -s --unix-socket "$PROXY_SOCKET_PATH" -X "$method" -H "Content-Type: application/json" -d "$data" "http://localhost${path}"
+        else
+            curl -s --unix-socket "$PROXY_SOCKET_PATH" -X "$method" "http://localhost${path}"
+        fi
+        return $?
+    fi
+
+    # Fallback: exec into unified-proxy container and use its Unix socket
+    local proxy_container
+    proxy_container="$(proxy_container_name)"
+    if [ -z "$proxy_container" ]; then
+        log_error "proxy_curl: PROXY_CONTAINER_NAME or CONTAINER_NAME required"
+        return 1
+    fi
+
+    if [ -n "$data" ]; then
+        docker exec "$proxy_container" curl -s \
+            --unix-socket /var/run/proxy/internal.sock \
+            -X "$method" -H "Content-Type: application/json" -d "$data" \
+            "http://localhost${path}"
+    else
+        docker exec "$proxy_container" curl -s \
+            --unix-socket /var/run/proxy/internal.sock \
+            -X "$method" \
+            "http://localhost${path}"
+    fi
+}
 
 # Register a container with the proxy
 # Args:
@@ -58,26 +111,8 @@ proxy_register() {
     local response
     local curl_exit
 
-    # Use Unix socket if PROXY_URL is not set
-    if [ -z "${PROXY_URL:-}" ]; then
-        if [ ! -S "$PROXY_SOCKET_PATH" ]; then
-            log_error "proxy_register: Socket not found at $PROXY_SOCKET_PATH"
-            return 1
-        fi
-        response=$(curl -s --unix-socket "$PROXY_SOCKET_PATH" \
-            -X POST \
-            -H "Content-Type: application/json" \
-            -d "$json_body" \
-            "http://localhost/internal/containers" 2>&1)
-        curl_exit=$?
-    else
-        response=$(curl -s \
-            -X POST \
-            -H "Content-Type: application/json" \
-            -d "$json_body" \
-            "${PROXY_URL}/internal/containers" 2>&1)
-        curl_exit=$?
-    fi
+    response=$(proxy_curl "POST" "/internal/containers" "$json_body" 2>&1)
+    curl_exit=$?
 
     if [ $curl_exit -ne 0 ]; then
         log_error "proxy_register: curl error $curl_exit"
@@ -119,20 +154,28 @@ proxy_unregister() {
     local curl_exit
     local http_code
 
-    # Use Unix socket if PROXY_URL is not set
-    if [ -z "${PROXY_URL:-}" ]; then
-        if [ ! -S "$PROXY_SOCKET_PATH" ]; then
-            log_debug "proxy_unregister: Socket not found, assuming proxy not running"
-            return 0
-        fi
-        response=$(curl -s -w "\n%{http_code}" --unix-socket "$PROXY_SOCKET_PATH" \
+    if [ -n "${PROXY_URL:-}" ]; then
+        response=$(curl -s -w "\n%{http_code}" \
+            -X DELETE \
+            "${PROXY_URL}/internal/containers/$container_id" 2>&1)
+        curl_exit=$?
+    elif [ -n "${PROXY_SOCKET_PATH:-}" ]; then
+        response=$(curl -s -w "\n%{http_code}" \
+            --unix-socket "$PROXY_SOCKET_PATH" \
             -X DELETE \
             "http://localhost/internal/containers/$container_id" 2>&1)
         curl_exit=$?
     else
-        response=$(curl -s -w "\n%{http_code}" \
+        local proxy_container
+        proxy_container="$(proxy_container_name)"
+        if [ -z "$proxy_container" ]; then
+            log_debug "proxy_unregister: proxy container not available"
+            return 0
+        fi
+        response=$(docker exec "$proxy_container" curl -s -w "\n%{http_code}" \
+            --unix-socket /var/run/proxy/internal.sock \
             -X DELETE \
-            "${PROXY_URL}/internal/containers/$container_id" 2>&1)
+            "http://localhost/internal/containers/$container_id" 2>&1)
         curl_exit=$?
     fi
 
@@ -182,18 +225,25 @@ proxy_wait_ready() {
         local http_code
         local curl_exit
 
-        # Use Unix socket if PROXY_URL is not set
-        if [ -z "${PROXY_URL:-}" ]; then
-            if [ -S "$PROXY_SOCKET_PATH" ]; then
-                response=$(curl -s -w "\n%{http_code}" --unix-socket "$PROXY_SOCKET_PATH" \
-                    "http://localhost/internal/health" 2>&1)
-                curl_exit=$?
-            else
-                curl_exit=1  # Socket doesn't exist yet
-            fi
-        else
+        if [ -n "${PROXY_URL:-}" ]; then
             response=$(curl -s -w "\n%{http_code}" "${PROXY_URL}/internal/health" 2>&1)
             curl_exit=$?
+        elif [ -n "${PROXY_SOCKET_PATH:-}" ]; then
+            response=$(curl -s -w "\n%{http_code}" \
+                --unix-socket "$PROXY_SOCKET_PATH" \
+                "http://localhost/internal/health" 2>&1)
+            curl_exit=$?
+        else
+            local proxy_container
+            proxy_container="$(proxy_container_name)"
+            if [ -z "$proxy_container" ]; then
+                curl_exit=1
+            else
+                response=$(docker exec "$proxy_container" curl -s -w "\n%{http_code}" \
+                    --unix-socket /var/run/proxy/internal.sock \
+                    "http://localhost/internal/health" 2>&1)
+                curl_exit=$?
+            fi
         fi
 
         if [ $curl_exit -eq 0 ]; then
@@ -231,7 +281,7 @@ proxy_wait_ready() {
     log_error "Remediation steps:"
     log_error "  1. Check if proxy container is running: docker ps | grep unified-proxy"
     log_error "  2. View proxy logs: docker logs <proxy-container>"
-    log_error "  3. Verify socket path: ls -la $PROXY_SOCKET_PATH"
+    log_error "  3. Check internal API: docker exec <proxy-container> curl --unix-socket /var/run/proxy/internal.sock http://localhost/internal/health"
     return 1
 }
 
@@ -335,17 +385,24 @@ proxy_is_registered() {
     local http_code
     local curl_exit
 
-    # Use Unix socket if PROXY_URL is not set
-    if [ -z "${PROXY_URL:-}" ]; then
-        if [ ! -S "$PROXY_SOCKET_PATH" ]; then
-            return 1
-        fi
-        response=$(curl -s -w "\n%{http_code}" --unix-socket "$PROXY_SOCKET_PATH" \
+    if [ -n "${PROXY_URL:-}" ]; then
+        response=$(curl -s -w "\n%{http_code}" \
+            "${PROXY_URL}/internal/containers/$container_id" 2>&1)
+        curl_exit=$?
+    elif [ -n "${PROXY_SOCKET_PATH:-}" ]; then
+        response=$(curl -s -w "\n%{http_code}" \
+            --unix-socket "$PROXY_SOCKET_PATH" \
             "http://localhost/internal/containers/$container_id" 2>&1)
         curl_exit=$?
     else
-        response=$(curl -s -w "\n%{http_code}" \
-            "${PROXY_URL}/internal/containers/$container_id" 2>&1)
+        local proxy_container
+        proxy_container="$(proxy_container_name)"
+        if [ -z "$proxy_container" ]; then
+            return 1
+        fi
+        response=$(docker exec "$proxy_container" curl -s -w "\n%{http_code}" \
+            --unix-socket /var/run/proxy/internal.sock \
+            "http://localhost/internal/containers/$container_id" 2>&1)
         curl_exit=$?
     fi
 

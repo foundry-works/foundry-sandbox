@@ -24,10 +24,10 @@ PID_FILE="/var/run/proxy/mitmproxy.pid"
 
 # Legacy addon paths (still used alongside new addons)
 GITHUB_FILTER_PATH="${LEGACY_ADDON_DIR}/github-api-filter.py"
-INJECT_CREDENTIALS_PATH="${LEGACY_ADDON_DIR}/inject-credentials.py"
 
 # Track child process for graceful shutdown
 MITM_PID=""
+INTERNAL_API_PID=""
 
 log() {
     echo "[$(date -Iseconds)] $*"
@@ -37,12 +37,47 @@ log_error() {
     echo "[$(date -Iseconds)] ERROR: $*" >&2
 }
 
+drop_privileges_if_needed() {
+    if [[ "$(id -u)" -ne 0 ]]; then
+        return 0
+    fi
+
+    local user="mitmproxy"
+    local group="mitmproxy"
+    local runtime_dirs=(
+        "/var/run/proxy"
+        "/var/lib/unified-proxy"
+        "/etc/proxy/certs"
+        "/etc/proxy/credentials"
+    )
+
+    for dir in "${runtime_dirs[@]}"; do
+        if [[ -e "${dir}" ]]; then
+            chown -R "${user}:${group}" "${dir}" 2>/dev/null || true
+        fi
+    done
+
+    if command -v gosu >/dev/null 2>&1; then
+        log "Dropping privileges to ${user}"
+        exec gosu "${user}" "$0" "$@"
+    else
+        log_error "gosu not found; continuing as root"
+    fi
+}
+
 # Graceful shutdown handler
 cleanup() {
     log "Received shutdown signal, cleaning up..."
 
     # Remove readiness marker
     rm -f "${READINESS_FILE}"
+
+    # Stop internal API if running
+    if [[ -n "${INTERNAL_API_PID}" ]] && kill -0 "${INTERNAL_API_PID}" 2>/dev/null; then
+        log "Stopping internal API (PID ${INTERNAL_API_PID})..."
+        kill -TERM "${INTERNAL_API_PID}" 2>/dev/null || true
+        wait "${INTERNAL_API_PID}" 2>/dev/null || true
+    fi
 
     # Stop mitmproxy gracefully
     if [[ -n "${MITM_PID}" ]] && kill -0 "${MITM_PID}" 2>/dev/null; then
@@ -124,11 +159,6 @@ validate_config() {
         return 1
     fi
 
-    if [[ ! -f "${INJECT_CREDENTIALS_PATH}" ]]; then
-        log_error "Credential injection addon not found at ${INJECT_CREDENTIALS_PATH}"
-        return 1
-    fi
-
     # Check new addons exist
     local required_addons=(
         "container_identity.py"
@@ -150,6 +180,26 @@ validate_config() {
 
     log "Configuration validated successfully"
     return 0
+}
+
+start_internal_api() {
+    local socket_path="${INTERNAL_API_SOCKET:-/var/run/proxy/internal.sock}"
+
+    log "Starting internal API (socket: ${socket_path})..."
+    python3 /opt/proxy/internal_api.py &
+    INTERNAL_API_PID=$!
+
+    # Wait briefly for socket to appear
+    for i in {1..20}; do
+        if [[ -S "${socket_path}" ]]; then
+            log "Internal API socket ready"
+            return 0
+        fi
+        sleep 0.25
+    done
+
+    log_error "Internal API socket not ready after 5 seconds"
+    return 1
 }
 
 disable_missing_auth_file() {
@@ -217,7 +267,6 @@ start_mitmproxy() {
 
     # Also load legacy addons for backward compatibility
     args+=(-s "${GITHUB_FILTER_PATH}")
-    args+=(-s "${INJECT_CREDENTIALS_PATH}")
 
     # Debug logging if requested
     if [[ "${log_level}" == "debug" ]]; then
@@ -246,6 +295,8 @@ start_mitmproxy() {
 }
 
 main() {
+    drop_privileges_if_needed "$@"
+
     log "Unified Proxy starting..."
 
     # Generate CA certificate if needed
@@ -259,6 +310,12 @@ main() {
 
     # Validate configuration
     validate_config
+
+    # Start internal API for container registration
+    if ! start_internal_api; then
+        log_error "Failed to start internal API"
+        exit 1
+    fi
 
     # Disable OpenCode auth if not explicitly enabled
     if [[ "${SANDBOX_ENABLE_OPENCODE:-0}" != "1" ]]; then

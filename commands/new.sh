@@ -1152,28 +1152,31 @@ OVERRIDES
     fi
     compose_up "$worktree_dir" "$claude_config_path" "$container" "$override_file" "$isolate_credentials"
 
-    # Setup gateway session for credential isolation
+    # Register container with unified-proxy for credential isolation
     if [ "$isolate_credentials" = "true" ]; then
-        # Get the gateway's host port and set GATEWAY_URL
-        if ! setup_gateway_url "$container"; then
-            log_error "Failed to get gateway port - gateway container may not be running"
-            compose_down "$worktree_dir" "$claude_config_path" "$container" "$override_file" "true" "$isolate_credentials"
-            exit 1
-        fi
+        # Export gateway enabled flag for container_config.sh (credential isolation mode)
+        export SANDBOX_GATEWAY_ENABLED=true
 
-        # Extract repo owner/name from repo_url for session authorization
+        # Extract repo owner/name from repo_url for metadata
         local repo_spec
         repo_spec=$(echo "$repo_url" | sed -E 's#^(https?://)?github\.com/##; s#^git@github\.com:##; s#\.git$##')
-        if ! setup_gateway_session "$container_id" "$repo_spec"; then
-            log_error "Failed to create gateway session - destroying sandbox"
+
+        local metadata_json=""
+        if command -v jq >/dev/null 2>&1; then
+            metadata_json=$(jq -n \
+                --arg repo "$repo_spec" \
+                --arg allow_pr "$allow_pr" \
+                '{repo: $repo, allow_pr: ($allow_pr == "true")}')
+        fi
+
+        if ! setup_proxy_registration "$container_id" "$metadata_json"; then
+            log_error "Failed to register container with unified-proxy"
             compose_down "$worktree_dir" "$claude_config_path" "$container" "$override_file" "true" "$isolate_credentials"
             echo ""
-            echo "Gateway session creation failed. See error messages above for remediation."
+            echo "Container registration failed. See error messages above for remediation."
             echo "To create sandbox without credential isolation, use --no-isolate-credentials flag."
             exit 1
         fi
-        # Export gateway enabled flag for container_config.sh
-        export SANDBOX_GATEWAY_ENABLED=true
     fi
 
     copy_configs_to_container "$container_id" "0" "$runtime_enable_ssh" "$working_dir" "$isolate_credentials"

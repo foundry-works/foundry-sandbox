@@ -228,8 +228,9 @@ clear_context()
 
 1. **Check registration**:
    ```bash
-   curl -s --unix-socket /var/run/unified-proxy/internal.sock \
-     http://localhost/internal/containers
+PROXY_CONTAINER="sandbox-<sandbox-name>-unified-proxy-1"
+docker exec "$PROXY_CONTAINER" curl -s --unix-socket /var/run/proxy/internal.sock \
+  http://localhost/internal/containers
    ```
 2. **Review identity logs**:
    ```bash
