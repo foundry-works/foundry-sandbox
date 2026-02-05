@@ -6,7 +6,7 @@ Safe, ephemeral workspaces for AI-assisted coding—isolate mistakes, not produc
 
 Your API keys and tokens are exposed to everything running on your machine—including malicious dependencies, compromised tools, and AI assistants that might leak them. Supply chain attacks are increasingly common, and a single `npm install` can run arbitrary code with access to your credentials.
 
-Foundry Sandbox provides ephemeral Docker workspaces where credentials never enter the container. A gateway proxy holds your real API keys and tokens on the host, injecting them into outbound requests only after validation. Code running inside the sandbox—whether it's an AI assistant, a build script, or a malicious package—never sees the actual credentials.
+Foundry Sandbox provides ephemeral Docker workspaces where credentials never enter the container. A unified proxy holds your real API keys and tokens on the host, injecting them into outbound requests only after validation. Code running inside the sandbox—whether it's an AI assistant, a build script, or a malicious package—never sees the actual credentials.
 
 Beyond credential isolation, sandboxes provide defense in depth:
 

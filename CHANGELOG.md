@@ -7,6 +7,45 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.9.5] - 2026-02-05
+
+### Added
+- **Unified Proxy Architecture**: Consolidated separate api-proxy and credential-isolation gateway into a single `unified-proxy/` component
+  - mitmproxy-based addons for credential injection, DNS filtering, policy enforcement, rate limiting, circuit breaking, and Git proxy support
+  - Single container replaces two, simplifying deployment and reducing resource usage
+  - Internal API for health checks, metrics, and container registration
+  - Structured JSON logging with configurable log levels
+- **DNS filtering enabled by default** with allowlist-based domain control
+  - Security hardening to block non-allowlisted domains at the DNS level
+  - Integrated into unified-proxy instead of separate dnsmasq container
+- **Expanded allowlist** with additional AI providers and services
+  - ChatGPT/Codex endpoints (`chatgpt.com`, `auth.openai.com`)
+  - Tavily, Perplexity, and Semantic Scholar APIs
+  - Google Auth endpoints for Gemini OAuth flows
+  - Additional GitHub domains (`release-assets`, `codeload`, `uploads`)
+  - Expanded package registries (npm, crates.io, Go proxy, Homebrew)
+- **Comprehensive test suite** for unified-proxy
+  - Unit tests: circuit breaker, container identity, DNS filter, Git proxy, pktline, policy engine, rate limiter, registry, credential injector, metrics
+  - Integration tests: API proxy, container lifecycle, Git operations, DNS registration flow
+  - Performance tests: latency benchmarks, throughput testing
+- **Architecture Decision Records** (ADRs) for key design decisions
+  - ADR-001: Consolidation of api-proxy and gateway
+  - ADR-002: Container identity model
+  - ADR-003: Policy engine design
+  - ADR-004: DNS integration approach
+  - ADR-005: Failure modes and circuit breaker strategy
+
+### Changed
+- **Documentation overhaul**: Restructured security docs, added operational guides, updated all references from gateway/api-proxy to unified-proxy
+- **Defense-in-depth renumbering**: Updated security layer numbering after shell overrides removal
+- `docker-compose.credential-isolation.yml` updated for unified-proxy architecture
+
+### Removed
+- **Shell overrides layer** (`safety/shell-overrides.sh`): Replaced by proxy-level controls in the unified-proxy
+  - Command blocking now handled at the network/policy layer instead of shell interception
+  - Reduces attack surface and eliminates shell escape vectors
+- **Separate api-proxy and gateway containers**: Replaced by single unified-proxy
+
 ## [0.9.2] - 2026-02-03
 
 ### Added
@@ -442,7 +481,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Tab completion for bash
 - macOS and Linux support
 
-[Unreleased]: https://github.com/foundry-works/foundry-sandbox/compare/v0.9.2...HEAD
+[Unreleased]: https://github.com/foundry-works/foundry-sandbox/compare/v0.9.5...HEAD
+[0.9.5]: https://github.com/foundry-works/foundry-sandbox/compare/v0.9.2...v0.9.5
 [0.9.2]: https://github.com/foundry-works/foundry-sandbox/compare/v0.9.1...v0.9.2
 [0.9.1]: https://github.com/foundry-works/foundry-sandbox/compare/v0.9.0...v0.9.1
 [0.9.0]: https://github.com/foundry-works/foundry-sandbox/compare/v0.8.0...v0.9.0
