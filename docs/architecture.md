@@ -20,7 +20,7 @@ This document explains the technical design of Foundry Sandbox: how components f
 │  │  │                                               │   │   │
 │  │  │  • Read-only filesystem    (Docker)           │   │   │
 │  │  │  • Network isolation       (Docker/dns/ipt)   │   │   │
-│  │  │  • Credential isolation    (gateway)          │   │   │
+│  │  │  • Credential isolation    (unified-proxy)          │   │   │
 │  │  └──────────────────────────────────────────────┘   │   │
 │  │                                                      │   │
 │  │  /workspace ◄─── volume mount (git worktree)        │   │
@@ -102,7 +102,7 @@ services:
     read_only: true
 ```
 
-Even if an AI bypasses shell overrides with `/bin/rm -rf /`, the operation fails because the filesystem is immutable.
+Even if an AI runs `/bin/rm -rf /`, the operation fails because the filesystem is immutable.
 
 ### Tmpfs Mounts (Ephemeral Storage)
 
@@ -174,7 +174,7 @@ Container Start
       │ (credential isolation enabled)      │ (standard mode)
       ▼                                     │
 entrypoint-root.sh (as root)                │
-  • Configure DNS → gateway                 │
+  • Configure DNS → unified-proxy                 │
   • Add internal services to /etc/hosts     │
   • Set up DNS firewall (iptables)          │
   • Mask /proc/kcore                         │
@@ -186,8 +186,8 @@ entrypoint.sh (as ubuntu) ◄─────────────────
   • Fix ownership of root-created dirs
   • Set up npm prefix for local installs
   • Configure Claude onboarding
-  • Copy proxy stubs (gateway mode)
-  • Apply gateway gitconfig (gateway mode)
+  • Copy proxy stubs (credential isolation mode)
+  • Apply proxy gitconfig (credential isolation mode)
   • Trust mitmproxy CA (if mounted)
       │
       ▼
@@ -217,7 +217,7 @@ foundry-sandbox/
 │   ├── git_worktree.sh     # Worktree management
 │   ├── docker.sh           # Docker/compose helpers
 │   ├── state.sh            # Sandbox state management
-│   ├── gateway.sh          # Gateway/credential isolation
+│   ├── proxy.sh            # Unified proxy registration
 │   ├── container_config.sh # Container setup (git path fixes)
 │   └── ...                 # Other modules
 │
@@ -228,13 +228,26 @@ foundry-sandbox/
 │   ├── destroy.sh          # cast destroy
 │   └── ...                 # Other commands
 │
+├── unified-proxy/              # Credential isolation proxy
+│   ├── addons/                 # mitmproxy addons
+│   │   ├── container_identity.py   # Container identification
+│   │   ├── credential_injector.py  # API credential injection
+│   │   ├── git_proxy.py            # Git protocol handling
+│   │   ├── rate_limiter.py         # Rate limiting
+│   │   ├── circuit_breaker.py      # Resilience
+│   │   ├── policy_engine.py        # Access policies
+│   │   ├── dns_filter.py           # DNS filtering
+│   │   └── metrics.py              # Observability
+│   ├── registry.py             # Container registry (SQLite)
+│   ├── internal_api.py         # Flask API for registration
+│   └── entrypoint.sh           # Proxy startup script
+│
 └── safety/                         # Security controls
     ├── sudoers-allowlist           # Sudo command restrictions
     ├── network-firewall.sh         # iptables rules
     ├── network-mode                # Network mode switcher
-    ├── gateway-credential-helper   # Git credential helper (gateway)
-    ├── gateway-gitconfig           # Git URL rewriting (gateway)
-    ├── shell-overrides.sh          # UX warnings (not security)
+    ├── proxy-credential-helper     # Git credential helper (proxy)
+    ├── proxy-gitconfig             # Git URL rewriting (proxy)
     ├── credential-redaction.sh     # Output masking (not security)
     └── operator-approve            # TTY-based human approval
 ```
@@ -267,14 +280,14 @@ User runs: cast new owner/repo
               ▼
 ┌─────────────────────────────────┐
 │ Docker Container (starting)     │
-│  - entrypoint-root.sh (gateway) │
+│  - entrypoint-root.sh (unified-proxy) │
 │  - entrypoint.sh runs           │
 └─────────────────────────────────┘
               │
               ▼
 ┌─────────────────────────────────┐
 │ commands/new.sh (continued)     │
-│  - setup gateway session        │
+│  - setup unified-proxy session        │
 │    (if credential isolation)    │
 │  - copy configs to container    │
 │  - install workspace perms      │
@@ -289,6 +302,65 @@ User runs: cast new owner/repo
 │  - user shell ready             │
 └─────────────────────────────────┘
 ```
+
+## Unified Proxy Architecture
+
+The unified-proxy handles all credential isolation and API proxying for sandboxed containers:
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                        UNIFIED PROXY                             │
+│                                                                 │
+│  ┌─────────────┐    ┌─────────────────────────────────────┐    │
+│  │  Internal   │    │           mitmproxy Core             │    │
+│  │  API (Flask)│    │                                      │    │
+│  │  /containers│    │  ┌─────────────────────────────────┐ │    │
+│  │  (Unix sock)│    │  │          Addon Chain            │ │    │
+│  └──────┬──────┘    │  │                                 │ │    │
+│         │           │  │  container_identity (identify)  │ │    │
+│         ▼           │  │  credential_injector (inject)   │ │    │
+│  ┌─────────────┐    │  │  git_proxy (rewrite URLs)       │ │    │
+│  │  Container  │    │  │  rate_limiter (throttle)        │ │    │
+│  │  Registry   │────┼──│  circuit_breaker (resilience)   │ │    │
+│  │  (SQLite)   │    │  │  policy_engine (rules)          │ │    │
+│  └─────────────┘    │  │  metrics (observability)        │ │    │
+│                     │  └─────────────────────────────────┘ │    │
+│                     └─────────────────────────────────────┘    │
+│                                                                 │
+│  ┌─────────────┐                                                │
+│  │ DNS Filter  │  Allowlist-based DNS filtering                 │
+│  │  (dnsmasq)  │  Returns NXDOMAIN for blocked domains          │
+│  └─────────────┘                                                │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+### Addon Chain
+
+Each request flows through the addon chain in order:
+
+1. **container_identity** - Identifies container by source IP, attaches config to request
+2. **credential_injector** - Injects API credentials (Anthropic, GitHub, etc.)
+3. **git_proxy** - Rewrites Git URLs, handles smart HTTP protocol
+4. **rate_limiter** - Per-container, per-upstream rate limiting
+5. **circuit_breaker** - Protects against upstream failures
+6. **policy_engine** - Enforces access policies
+7. **metrics** - Records request/response metrics
+
+### Container Registration
+
+Containers register with the proxy via the internal API:
+
+```
+POST /internal/containers
+{
+  "container_id": "sandbox-abc123",
+  "ip_address": "172.17.0.2",
+  "ttl_seconds": 86400,
+  "metadata": {"sandbox_name": "my-project"}
+}
+```
+
+Registrations persist in SQLite with TTL-based expiration.
 
 ## Next Steps
 

@@ -27,7 +27,7 @@ AI Command ────────►│  ┌───────────�
                     │                                     │
                     │  ┌─────────────────────────────┐   │
                     │  │   Credential Isolation      │   │
-                    │  │   (gateway architecture)    │   │
+                    │  │   (unified-proxy)           │   │
                     │  └─────────────────────────────┘   │
                     │                                     │
                     └─────────────────────────────────────┘
@@ -75,7 +75,7 @@ services:
 **How it works:**
 - Internal Docker network (`internal: true`) - no default gateway
 - ICC (inter-container communication) disabled
-- DNS routed through gateway's dnsmasq
+- DNS routed through unified-proxy (enabled by default)
 - iptables rules for defense-in-depth
 
 **Network Modes:**
@@ -125,7 +125,7 @@ Then rebuild: `cast build`
 
 ### Credential Isolation
 
-**Enforced by:** Gateway architecture (when enabled)
+**Enforced by:** Unified-proxy architecture (when enabled)
 
 **Implementation:** `docker-compose.credential-isolation.yml`
 
@@ -135,14 +135,14 @@ The sandbox contains **zero real credentials**:
 
 | Credential | Where it lives | What sandbox sees |
 |------------|----------------|-------------------|
-| GITHUB_TOKEN | Gateway container (git), API Proxy container (GitHub API, optional) | Nothing (session token for auth) |
-| ANTHROPIC_API_KEY | API Proxy container | `CREDENTIAL_PROXY_PLACEHOLDER` |
-| OPENAI_API_KEY | API Proxy container | `CREDENTIAL_PROXY_PLACEHOLDER` |
-| Other API keys | API Proxy container | `CREDENTIAL_PROXY_PLACEHOLDER` |
+| GITHUB_TOKEN / GH_TOKEN | Unified Proxy container | Nothing (empty) |
+| ANTHROPIC_API_KEY | Unified Proxy container | `CREDENTIAL_PROXY_PLACEHOLDER` |
+| OPENAI_API_KEY | Unified Proxy container | `CREDENTIAL_PROXY_PLACEHOLDER` |
+| Other API keys | Unified Proxy container | `CREDENTIAL_PROXY_PLACEHOLDER` |
 
 - Real credentials never enter sandbox containers
-- Sandboxes authenticate to gateway using session tokens
-- Gateway/proxy inject real credentials into outbound requests
+- Sandboxes are registered with the proxy via container registration
+- Unified proxy injects real credentials into outbound requests
 - AI cannot exfiltrate credentials that don't exist in its environment
 
 **What this means:**
@@ -150,7 +150,7 @@ The sandbox contains **zero real credentials**:
 - Memory scraping yields nothing useful
 - Exfiltration attempts get placeholder values, not real secrets
 
-**Bypass:** Cannot be bypassed without compromising the gateway container itself (which runs outside the sandbox).
+**Bypass:** Cannot be bypassed without compromising the unified-proxy container itself (which runs outside the sandbox).
 
 **Reference:** [Credential Isolation](credential-isolation.md)
 
@@ -180,36 +180,6 @@ The sandbox contains **zero real credentials**:
 
 > **Note:** These features provide helpful warnings but are **not security controls**. They can be trivially bypassed and should not be relied upon for security.
 
-### Shell Overrides
-
-**Purpose:** Help non-adversarial AI avoid accidental destructive commands by providing friendly "BLOCKED" messages.
-
-**Implementation:** `/etc/profile.d/shell-overrides.sh`
-
-**Blocked patterns:**
-
-| Command | What's blocked |
-|---------|----------------|
-| `rm` | All `rm` operations blocked unconditionally |
-| `git reset --hard` | Discards uncommitted changes |
-| `git clean -f` | Deletes untracked files |
-| `git checkout -b` | Branch switching disabled in worktrees |
-| `git checkout -- <file>` | Discards file changes |
-| `git restore` | Except `--staged` only |
-| `git branch -D` | Force delete without merge check |
-| `git stash drop/clear` | Permanently deletes stashes |
-| `git filter-branch` | Rewrites history |
-
-**Bypass methods:**
-```bash
-/bin/rm file.txt          # Direct path
-command rm file.txt       # Builtin bypass
-\rm file.txt              # Escape character
-env rm file.txt           # Environment bypass
-```
-
-**Why keep it:** Catches accidental use, provides helpful error messages to AI, and AI is unlikely to intentionally bypass it. The real security comes from the read-only filesystem.
-
 ### Credential Redaction
 
 **Purpose:** Defense in depth. Masks secrets and sensitive values in command output to prevent accidental exposure.
@@ -238,9 +208,8 @@ python -c "import os; print(os.environ)"  # Different interpreter
 | Read-only filesystem | Docker/kernel | No (from container) | Prevent filesystem writes |
 | Network isolation | Docker/dnsmasq/iptables | No (from container) | Control network egress |
 | Sudoers allowlist | Linux kernel | No (from userspace) | Restrict sudo commands |
-| Credential isolation | Gateway architecture | No (without gateway compromise) | Protect credentials |
+| Credential isolation | Unified-proxy architecture | No (without proxy compromise) | Protect credentials |
 | Operator approval | TTY check | No (from non-interactive) | Human-in-the-loop |
-| Shell overrides | Shell functions | **Yes** | UX warnings |
 | Credential redaction | Shell functions | **Yes** | Defense in depth |
 
 ---
@@ -250,7 +219,7 @@ python -c "import os; print(os.environ)"  # Different interpreter
 ### Read-only Filesystem
 
 ```bash
-# Attempt direct write (bypasses shell overrides)
+# Attempt direct write
 /bin/rm -rf /usr
 # Expected: "Read-only file system" error
 
@@ -298,6 +267,6 @@ echo "test" | /opt/operator/bin/operator-approve echo "test"
 ## Next Steps
 
 - [Sandbox Threats](sandbox-threats.md) - What we're protecting against
-- [Credential Isolation](credential-isolation.md) - Gateway threat model
+- [Credential Isolation](credential-isolation.md) - Credential isolation threat model
 - [Network Isolation](network-isolation.md) - Detailed network architecture
 - [Security Overview](index.md) - Quick reference

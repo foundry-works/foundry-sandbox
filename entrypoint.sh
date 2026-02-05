@@ -61,15 +61,15 @@ if [ "${SANDBOX_ENABLE_ZAI:-0}" = "1" ]; then
         echo "Warning: SANDBOX_ENABLE_ZAI=1 but ZHIPU_API_KEY is not set; claude-zai disabled."
     elif [ "${ZHIPU_API_KEY}" = "CREDENTIAL_PROXY_PLACEHOLDER" ] || [ "${ZHIPU_API_KEY}" = "PROXY_PLACEHOLDER_OPENCODE" ]; then
         if [ "${SANDBOX_GATEWAY_ENABLED:-}" != "true" ]; then
-            echo "Warning: SANDBOX_ENABLE_ZAI=1 but gateway is not enabled; placeholder key cannot be injected."
+            echo "Warning: SANDBOX_ENABLE_ZAI=1 but proxy is not enabled; placeholder key cannot be injected."
         fi
     fi
 fi
 if [ "${SANDBOX_ENABLE_ZAI:-0}" = "1" ] && [ -n "${ZHIPU_API_KEY:-}" ]; then
 cat >> ~/.bashrc << 'CLAUDE_ZAI_ALIAS'
 claude-zai() {
-    GLOBAL_AGENT_HTTP_PROXY="http://api-proxy:8080" \
-    GLOBAL_AGENT_HTTPS_PROXY="http://api-proxy:8080" \
+    GLOBAL_AGENT_HTTP_PROXY="http://unified-proxy:8080" \
+    GLOBAL_AGENT_HTTPS_PROXY="http://unified-proxy:8080" \
     GLOBAL_AGENT_NO_PROXY="localhost,127.0.0.1" \
     NODE_OPTIONS="--require /usr/lib/node_modules/global-agent/bootstrap.js" \
     CLAUDE_CODE_OAUTH_TOKEN= \
@@ -135,7 +135,7 @@ fi
 # To apply network mode manually: sudo network-mode <limited|host-only|none>
 # The host script will call this after copy_configs_to_container completes.
 
-# Copy proxy stub files when in gateway mode
+# Copy proxy stub files when in credential isolation mode
 # Stubs are in a named volume (populated by populate_stubs_volume) with original filenames
 # Volume mount avoids Docker Desktop VirtioFS/gRPC-FUSE staleness issues
 if [ "$SANDBOX_GATEWAY_ENABLED" = "true" ]; then
@@ -166,57 +166,33 @@ if [ "$SANDBOX_GATEWAY_ENABLED" = "true" ]; then
     fi
 fi
 
-# Apply gateway gitconfig conditionally
-# When SANDBOX_GATEWAY_ENABLED=true, route GitHub URLs through the gateway
-# Otherwise, use direct GitHub access
-if [ "$SANDBOX_GATEWAY_ENABLED" = "true" ] && [ -f "/etc/gitconfig.gateway" ]; then
-    echo "Gateway mode enabled - configuring git URL rewriting..."
-    if sudo cp /etc/gitconfig.gateway /etc/gitconfig 2>&1; then
-        echo "Git URL rewriting configured successfully"
-    elif cp /etc/gitconfig.gateway /etc/gitconfig 2>&1; then
-        echo "Git URL rewriting configured (without sudo)"
-    else
-        echo "ERROR: Failed to copy gitconfig.gateway to /etc/gitconfig"
-    fi
-    # Verify the copy succeeded
-    if [ -f "/etc/gitconfig" ]; then
-        echo "Verified: /etc/gitconfig exists"
-    else
-        echo "WARNING: /etc/gitconfig does not exist after copy attempt"
-    fi
-
-    # Enable automatic remote tracking on first push (Git 2.37+)
-    # This means `git push` will automatically set up tracking without needing `-u`
-    git config --global push.autoSetupRemote true
-else
-    # Remove any gateway gitconfig to allow direct GitHub access
-    if [ -f "/etc/gitconfig" ] && grep -q "gateway:8080" /etc/gitconfig 2>/dev/null; then
-        echo "Gateway mode disabled - removing git URL rewriting..."
-        sudo rm -f /etc/gitconfig 2>/dev/null || rm -f /etc/gitconfig 2>/dev/null || true
-    fi
+# Remove legacy gateway gitconfig (unified-proxy uses HTTP_PROXY for git)
+if [ -f "/etc/gitconfig" ] && grep -q "gateway:8080" /etc/gitconfig 2>/dev/null; then
+    echo "Removing legacy gateway gitconfig..."
+    sudo rm -f /etc/gitconfig 2>/dev/null || rm -f /etc/gitconfig 2>/dev/null || true
 fi
 
-# Configure DNS to use gateway's dnsmasq when in gateway mode
+# Configure DNS to use unified-proxy when in credential isolation mode
 # This enables domain allowlisting - only approved domains can be resolved
 # Note: In credential-isolation mode, DNS is configured by entrypoint-root.sh (as root)
-# before this script runs. This block handles non-credential-isolation gateway mode.
+# before this script runs. This block handles non-credential-isolation proxy mode.
 if [ "$SANDBOX_GATEWAY_ENABLED" = "true" ]; then
     # Check if DNS is already configured (by root wrapper)
-    if grep -q "gateway" /etc/resolv.conf 2>/dev/null || grep -q "172\." /etc/resolv.conf 2>/dev/null; then
-        echo "DNS already configured for gateway"
+    if grep -q "unified-proxy" /etc/resolv.conf 2>/dev/null || grep -q "172\." /etc/resolv.conf 2>/dev/null; then
+        echo "DNS already configured for unified-proxy"
     else
-        echo "Configuring DNS to use gateway..."
-        # Resolve gateway hostname using Docker's internal DNS (127.0.0.11)
-        GATEWAY_IP=$(getent hosts gateway | awk '{print $1}' | head -1)
-        if [ -n "$GATEWAY_IP" ]; then
-            echo "Gateway IP: $GATEWAY_IP"
-            # Configure resolv.conf to use gateway as DNS server
+        echo "Configuring DNS to use unified-proxy..."
+        # Resolve unified-proxy hostname using Docker's internal DNS (127.0.0.11)
+        PROXY_IP=$(getent hosts unified-proxy | awk '{print $1}' | head -1)
+        if [ -n "$PROXY_IP" ]; then
+            echo "Unified proxy IP: $PROXY_IP"
+            # Configure resolv.conf to use unified-proxy as DNS server
             # This requires sudo permission (see safety/sudoers-allowlist)
-            echo "nameserver $GATEWAY_IP" | sudo tee /etc/resolv.conf > /dev/null 2>&1 || \
+            echo "nameserver $PROXY_IP" | sudo tee /etc/resolv.conf > /dev/null 2>&1 || \
                 echo "Warning: Could not write to /etc/resolv.conf (read-only?)"
-            echo "DNS configured to use gateway at $GATEWAY_IP"
+            echo "DNS configured to use unified-proxy at $PROXY_IP"
         else
-            echo "Warning: Could not resolve gateway hostname, using default DNS"
+            echo "Warning: Could not resolve unified-proxy hostname, using default DNS"
         fi
     fi
 fi
@@ -243,5 +219,10 @@ if [ -f "/certs/mitmproxy-ca.pem" ]; then
     fi
 fi
 
-# Execute the command passed to the container
+# Execute the command passed to the container.
+# When no command is provided (e.g., docker-compose overrides entrypoint without a command),
+# default to an interactive bash shell so the container doesn't exit immediately.
+if [ "$#" -eq 0 ]; then
+    set -- /bin/bash
+fi
 exec "$@"

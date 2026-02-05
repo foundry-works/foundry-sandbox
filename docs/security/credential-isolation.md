@@ -1,15 +1,15 @@
-# Credential Isolation Gateway: Threat Model
+# Credential Isolation: Threat Model
 
-This document defines the security scope, trust boundaries, threats, and explicit design decisions for the credential isolation gateway.
+This document defines the security scope, trust boundaries, threats, and explicit design decisions for credential isolation.
 
 ## Scope
 
 ### What This Document Covers
 
-This threat model covers the **credential isolation gateway** - a proxy system that:
+This threat model covers the **credential isolation system** - a proxy that:
 - Isolates real credentials (GitHub tokens, API keys) from AI sandbox containers
-- Injects credentials into outbound requests through controlled proxies
-- Provides session-based authentication for sandbox containers
+- Injects credentials into outbound requests through a unified proxy
+- Provides container-registration-based authentication for sandbox containers
 
 ### What This Document Does NOT Cover
 
@@ -26,9 +26,8 @@ This threat model covers the **credential isolation gateway** - a proxy system t
 | Component | Trust Level | Rationale |
 |-----------|-------------|-----------|
 | Docker Host | Full | Controls all containers, has root access |
-| Orchestrator | High | Creates/destroys sandboxes, manages sessions via localhost/Unix socket |
-| Gateway Container | High | Holds real credentials, validates requests |
-| API Proxy Container | High | Holds real API keys, intercepts HTTPS traffic |
+| Orchestrator | High | Creates/destroys sandboxes, registers containers via Unix socket |
+| Unified Proxy Container | High | Holds all real credentials (GitHub tokens, API keys), injects into requests, filters DNS |
 
 ### Untrusted Components
 
@@ -44,17 +43,12 @@ This threat model covers the **credential isolation gateway** - a proxy system t
 +------------------------------------------------------------------+
 |                         TRUSTED ZONE                             |
 |  +------------------+  +------------------+  +------------------+ |
-|  |  Docker Host     |  |   Orchestrator   |  |    Gateway       | |
-|  |  - root access   |  |  - session mgmt  |  |  - GITHUB_TOKEN  | |
-|  |  - all volumes   |  |  - localhost     |  |  - credential    | |
-|  +------------------+  +------------------+  |    injection     | |
-|                                             +------------------+ |
-|                                             +------------------+ |
-|                                             |    API Proxy     | |
-|                                             |  - API keys      | |
-|                                             |  - GITHUB_TOKEN* | |
-|                                             |  - HTTPS MITM    | |
-|                                             +------------------+ |
+|  |  Docker Host     |  |   Orchestrator   |  |  Unified Proxy   | |
+|  |  - root access   |  |  - container     |  |  - GITHUB_TOKEN  | |
+|  |  - all volumes   |  |    registration  |  |  - API keys      | |
+|  +------------------+  |  - Unix socket   |  |  - HTTPS MITM    | |
+|                        +------------------+  |  - DNS filter     | |
+|                                              +------------------+ |
 +------------------------------------------------------------------+
                               |
           TRUST BOUNDARY (Docker network + iptables)
@@ -64,7 +58,7 @@ This threat model covers the **credential isolation gateway** - a proxy system t
 |  +------------------+  +------------------+  +------------------+ |
 |  |    Sandbox 1     |  |    Sandbox 2     |  |    Sandbox N     | |
 |  |  - AI code       |  |  - AI code       |  |  - AI code       | |
-|  |  - session token |  |  - session token |  |  - session token | |
+|  |  - registered IP |  |  - registered IP |  |  - registered IP | |
 |  |  - placeholder   |  |  - placeholder   |  |  - placeholder   | |
 |  |    API keys      |  |    API keys      |  |    API keys      | |
 |  +------------------+  +------------------+  +------------------+ |
@@ -87,23 +81,23 @@ This threat model covers the **credential isolation gateway** - a proxy system t
 
 **Mitigations:**
 - Credentials never enter sandbox environment (placeholder values only)
-- Session tokens are sandbox-specific, short-lived, IP-bound
+- Container registration binds sandboxes to their IP address
 - Network isolation prevents direct credential interception
-- Proxies run in separate containers with minimal attack surface
+- Proxy runs in a separate container with minimal attack surface
 
 ### Priority 2: Unauthorized Repository Access
 
 **Threat:** A sandbox accesses repositories beyond its authorized scope.
 
 **Attack Vectors:**
-- Forging requests to access other repos via the gateway
-- Session hijacking to use another sandbox's permissions
+- Forging requests to access other repos via the proxy
 - Bypassing repository allowlist validation
+- Exploiting container registration to impersonate another sandbox
 
 **Mitigations:**
-- Session-based repository allowlisting (when configured)
-- Session tokens bound to container IP
-- Gateway validates all repository access against session scope
+- Container registration with IP binding
+- Proxy validates all repository access against policy
+- Registration requires orchestrator access (Unix socket only)
 
 ### Priority 3: Lateral Movement Between Sandboxes
 
@@ -111,65 +105,66 @@ This threat model covers the **credential isolation gateway** - a proxy system t
 
 **Attack Vectors:**
 - Direct container-to-container communication
-- Session token theft and reuse
 - Shared network resource exploitation
+- IP spoofing to impersonate another container
 
 **Mitigations:**
-- ICC (Inter-Container Communication) disabled on isolation network
-- Session tokens bound to originating IP
-- Each sandbox has unique session credentials
+- Each sandbox project has its own isolated Docker network
+- Container registration bound to originating IP
+- CAP_NET_RAW dropped prevents IP spoofing and ARP poisoning
 
-### Priority 4: Gateway/Proxy Compromise
+### Priority 4: Unified Proxy Compromise
 
-**Threat:** Attacker gains control of the gateway or API proxy.
+**Threat:** Attacker gains control of the unified proxy.
 
 **Attack Vectors:**
 - Exploiting application vulnerabilities (injection, deserialization)
-- Container escape from sandbox to gateway
-- Privilege escalation within gateway container
+- Container escape from sandbox to proxy
+- Privilege escalation within proxy container
 
 **Mitigations:**
-- Gateway runs as non-root user (when possible)
+- Proxy runs as non-root user (mitmproxy user, via gosu privilege drop)
 - Minimal container image with reduced attack surface
 - Input validation on all external inputs
-- Network segmentation limits blast radius
+- Network segmentation limits blast radius (proxy-egress is separate from credential-isolation)
 
 ---
 
 ## Critical Configuration Requirements
 
-### DNS Routing Must Be Enabled for True Isolation
+### DNS Filtering Must Be Enabled for True Isolation
 
-**⚠️ IMPORTANT:** For complete credential isolation, DNS must be routed through the gateway.
+**DNS filtering is enabled by default** (`PROXY_ENABLE_DNS=true`).
 
-Without DNS routing through the gateway (using dnsmasq), sandboxes can bypass the gateway by:
+Without DNS filtering, sandboxes can bypass the proxy by:
 1. Using hardcoded IP addresses instead of domain names
 2. Using alternative DNS resolvers to resolve github.com directly
 3. Making network requests to IP addresses that bypass credential injection
 
-**Required Configuration:**
+**Configuration:**
 
-In `docker-compose.credential-isolation.yml`, the sandbox must use the gateway as its DNS resolver:
+In `docker-compose.credential-isolation.yml`, the sandbox's DNS is configured by `entrypoint-root.sh` to point to the unified-proxy's DNS filter:
 
 ```yaml
-dev:
-  dns:
-    - gateway  # Route DNS through gateway's dnsmasq
-```
+# unified-proxy runs DNS on port 53
+environment:
+  - PROXY_ENABLE_DNS=true
 
-The gateway's dnsmasq rewrites DNS responses for `github.com` to point to the gateway IP, ensuring all git traffic flows through the credential injection proxy.
+# entrypoint-root.sh resolves unified-proxy IP dynamically and writes /etc/resolv.conf
+# iptables rules restrict DNS to unified-proxy only
+```
 
 **Verification:**
 
 ```bash
 # From sandbox: verify DNS routing
-dig github.com  # Should return gateway IP, not GitHub's actual IP
+dig github.com  # Should return proxy-filtered response
 
-# From sandbox: verify direct IP access is blocked
-curl -v https://140.82.112.4  # Should fail (GitHub IP blocked by network isolation)
+# From sandbox: verify direct DNS is blocked
+dig @8.8.8.8 github.com  # Should fail (blocked by iptables)
 ```
 
-**Impact if not configured:** IP-based network requests bypass credential injection and repository scoping. The gateway becomes security theater rather than actual isolation.
+**Impact if not configured:** IP-based network requests bypass credential injection and repository scoping. The proxy becomes security theater rather than actual isolation.
 
 ---
 
@@ -179,11 +174,11 @@ The following capabilities were evaluated and **explicitly excluded** from the i
 
 ### Rate Limiting on Git Operations - ACCEPTED RISK
 
-**Decision:** Rate limiting on git operations and session creation limits are not implemented.
+**Decision:** Rate limiting on git operations and container registration limits are not implemented.
 
 **Threat Model Rationale:**
 
-1. **Trust Boundary**: The gateway operates within a trusted orchestration environment. Session creation is only accessible from the orchestrator (localhost/Unix socket), not from sandboxed containers. The orchestrator is a trusted component.
+1. **Trust Boundary**: The proxy operates within a trusted orchestration environment. Container registration is only accessible from the orchestrator (Unix socket), not from sandboxed containers. The orchestrator is a trusted component.
 
 2. **Resource Exhaustion is Not Primary Threat**: The primary threats are credential theft and unauthorized repository access. DoS via resource exhaustion:
    - Affects availability, not confidentiality/integrity
@@ -192,14 +187,14 @@ The following capabilities were evaluated and **explicitly excluded** from the i
 
 3. **Operational Complexity**: Rate limiting adds state management, clock dependencies, and configuration complexity that increases attack surface for the primary threats.
 
-4. **GitHub's Own Rate Limits**: Upstream GitHub API already enforces rate limits per token. The gateway doesn't amplify requests beyond what a direct connection would allow.
+4. **GitHub's Own Rate Limits**: Upstream GitHub API already enforces rate limits per token. The proxy doesn't amplify requests beyond what a direct connection would allow.
 
-5. **Single-Tenant Model**: Each sandbox is isolated. A sandbox exhausting sessions only affects itself, not other users.
+5. **Single-Tenant Model**: Each sandbox is isolated. A sandbox exhausting resources only affects itself, not other users.
 
 **Accepted Risks:**
-- A compromised orchestrator could create many sessions (mitigated by: orchestrator is trusted)
+- A compromised orchestrator could register many containers (mitigated by: orchestrator is trusted)
 - A single sandbox could make many git requests (mitigated by: GitHub rate limits, container resource limits)
-- Session table could grow large (mitigated by: session TTL and garbage collection already implemented)
+- Registry could grow large (mitigated by: TTL-based expiration and cleanup in SQLite registry)
 
 ### Custom Seccomp/AppArmor Profiles - NOT IMPLEMENTED
 
@@ -213,7 +208,7 @@ The following capabilities were evaluated and **explicitly excluded** from the i
 
 3. **Host-Level Configuration**: AppArmor profiles must be installed on the Docker host, not just in container images. This is operational/infrastructure configuration outside this codebase's scope.
 
-4. **Not the Primary Threat**: The primary threats are credential theft and unauthorized repository access. These are mitigated by the gateway's authentication, network isolation, and allowlists - not syscall filtering.
+4. **Not the Primary Threat**: The primary threats are credential theft and unauthorized repository access. These are mitigated by the proxy's authentication, network isolation, and allowlists - not syscall filtering.
 
 5. **Complexity vs. Benefit**: Custom profiles require ongoing maintenance as application needs change. The security benefit is marginal given existing controls.
 
@@ -232,12 +227,12 @@ The following capabilities were evaluated and **explicitly excluded** from the i
    - ARP poisoning (redirecting traffic via fake ARP replies)
    - Raw packet sniffing on the Docker bridge network
 
-2. **Defense-in-Depth for ICC=false**: While Docker's ICC=false blocks Layer 3/4 traffic between containers, it does NOT block Layer 2 (Ethernet) traffic. CAP_NET_RAW is required to craft raw packets that could bypass ICC at Layer 2. Dropping this capability closes this gap.
+2. **Defense-in-Depth for Network Isolation**: CAP_NET_RAW is required to craft raw packets that could bypass network controls at Layer 2. Dropping this capability closes this gap.
 
-3. **Session Token Protection**: Without CAP_NET_RAW, an attacker cannot:
-   - Spoof the source IP to bypass session IP binding
-   - Sniff unencrypted session tokens on the bridge network
-   - Perform ARP spoofing to redirect gateway traffic
+3. **Container Registration Protection**: Without CAP_NET_RAW, an attacker cannot:
+   - Spoof the source IP to bypass container IP binding
+   - Sniff unencrypted traffic on the bridge network
+   - Perform ARP spoofing to redirect proxy traffic
 
 4. **Minimal Operational Impact**: The only tools affected are:
    - `ping` / `traceroute` (ICMP requires raw sockets)
@@ -251,17 +246,17 @@ The following capabilities were evaluated and **explicitly excluded** from the i
 | IP Spoofing | CAP_NET_RAW + raw packets | Blocked - cannot create raw sockets |
 | ARP Poisoning | Craft ARP replies | Blocked - cannot create raw sockets |
 | Packet Sniffing | Raw sockets on bridge | Blocked - cannot create raw sockets |
-| Session Hijacking | Spoof container IP | Blocked - IP spoofing prevented |
+| Registration Hijacking | Spoof container IP | Blocked - IP spoofing prevented |
 
 ### Mutual TLS (mTLS) for Internal Traffic - NOT IMPLEMENTED
 
-**Decision:** Gateway-to-sandbox communication uses plaintext HTTP over Docker internal network, not mTLS.
+**Decision:** Proxy-to-sandbox communication uses plaintext HTTP over Docker internal network, not mTLS.
 
 **Threat Model Rationale:**
 
-1. **Network Already Isolated**: ICC=false blocks direct container-to-container traffic. iptables rules restrict egress. Only the gateway is reachable from sandboxes on the internal network.
+1. **Network Already Isolated**: The internal network prevents direct container-to-container traffic. iptables rules restrict egress. Only the unified proxy is reachable from sandboxes on the internal network.
 
-2. **If Attacker Has Network Access, They Already Won**: To intercept Docker bridge traffic, an attacker must have already compromised a container. At that point, they can read credentials directly from `/run/secrets/gateway_token` - mTLS wouldn't prevent this.
+2. **If Attacker Has Network Access, They Already Won**: To intercept Docker bridge traffic, an attacker must have already compromised a container. At that point, they can read environment variables directly - mTLS wouldn't prevent this.
 
 3. **Significant Operational Complexity**: mTLS requires:
    - Certificate generation per sandbox
@@ -270,16 +265,16 @@ The following capabilities were evaluated and **explicitly excluded** from the i
    - Debugging TLS issues in ephemeral containers
 
 4. **Existing Mitigations Are Sufficient**:
-   - Session tokens with IP binding
-   - Short session TTLs (inactive sessions expire)
+   - Container registration with IP binding
+   - TTL-based expiration (24h default, stored in SQLite)
    - Network isolation via Docker bridge + iptables
    - Read-only filesystem prevents persistent attacker presence
 
-5. **Attack Scenario Analysis**: The realistic attack path is: compromise sandbox -> read token from file/memory -> use token. mTLS doesn't prevent in-container credential theft, which is the primary concern.
+5. **Attack Scenario Analysis**: The realistic attack path is: compromise sandbox -> read placeholder values -> attempt exfiltration (blocked by network). mTLS doesn't change this threat model.
 
 **Accepted Risks:**
 - Network-level MITM on Docker bridge (mitigated by: network isolation, attacker would need container escape first)
-- Session token interception in transit (mitigated by: IP binding, short TTLs, network isolation)
+- Registration data interception in transit (mitigated by: IP binding, TTLs, network isolation)
 
 ---
 
@@ -292,46 +287,44 @@ This section documents what IS implemented to address the primary threats.
 | Control | Implementation | Threat Addressed |
 |---------|----------------|------------------|
 | Internal network | `internal: true` on Docker network | Direct external access |
-| ICC disabled | `enable_icc: false` driver option | Container-to-container attacks (L3/L4) |
-| CAP_NET_RAW dropped | `cap_drop: NET_RAW` | L2 attacks, IP spoofing, ARP poisoning |
-| DNS isolation | DNS routed through gateway dnsmasq | DNS exfiltration |
+| CAP_NET_RAW dropped | `cap_drop: NET_RAW` on both sandbox and proxy | L2 attacks, IP spoofing, ARP poisoning |
+| DNS isolation | DNS routed through unified-proxy DNS filter (enabled by default) | DNS exfiltration |
 | iptables rules | `safety/network-firewall.sh` | Defense-in-depth for network controls |
 
-### Layer 2: Session-Based Authentication
+### Layer 2: Container Registration
 
 | Control | Implementation | Threat Addressed |
 |---------|----------------|------------------|
-| Session tokens | Random tokens generated per sandbox | Credential theft |
-| Session secrets | Optional secondary authentication factor | Session hijacking |
-| IP binding | Sessions bound to container IP | Session token reuse |
-| TTL expiration | Sessions expire after inactivity | Stale session abuse |
+| Container registry | SQLite-backed registry (`registry.py`) with TTL | Container identity management |
+| IP binding | Registrations bound to container IP | Registration reuse from other IPs |
+| TTL expiration | Registrations expire after 24h (configurable) | Stale registration abuse |
+| Internal API | Unix socket only (`/var/run/proxy/internal.sock`) | Unauthorized registration |
 
 ### Layer 3: Credential Proxying
 
 | Control | Implementation | Threat Addressed |
 |---------|----------------|------------------|
-| Git credential injection | Gateway injects GITHUB_TOKEN (git) | Token exposure in sandbox |
-| GitHub API credential injection | API proxy injects GITHUB_TOKEN (optional) | Token exposure in sandbox |
-| API credential injection | API proxy injects API keys | API key exposure in sandbox |
+| Git credential injection | Unified proxy injects GITHUB_TOKEN for git operations | Token exposure in sandbox |
+| API credential injection | Unified proxy injects API keys for HTTP/HTTPS requests | API key exposure in sandbox |
 | Placeholder values | Sandbox sees `CREDENTIAL_PROXY_PLACEHOLDER` | Environment variable scraping |
-
-*Optional: The API proxy only uses `GITHUB_TOKEN`/`GH_TOKEN` for GitHub API requests (e.g., PRs, releases). Git operations remain gateway-only.
+| Policy engine | Addon chain enforces per-request policy | Unauthorized API access |
 
 ### Layer 4: Request Validation
 
 | Control | Implementation | Threat Addressed |
 |---------|----------------|------------------|
-| Repository allowlisting | Per-session repo restrictions | Unauthorized repo access |
-| Path validation | Git path sanitization | Path traversal attacks |
-| Domain allowlisting | DNS-level domain restrictions | Data exfiltration |
+| Domain allowlisting | DNS-level + policy engine domain restrictions | Data exfiltration |
+| Git operation filtering | `git_proxy.py` addon blocks dangerous operations | Force push, history rewriting |
+| Rate limiting | `rate_limiter.py` addon | Resource exhaustion |
+| Circuit breaker | `circuit_breaker.py` addon | Cascading failures |
 
 ### Layer 5: Audit and Monitoring
 
 | Control | Implementation | Threat Addressed |
 |---------|----------------|------------------|
-| Request logging | All gateway requests logged | Incident investigation |
+| Request logging | All proxy requests logged via `metrics.py` addon | Incident investigation |
 | Sensitive data filtering | Tokens filtered from logs | Log-based credential exposure |
-| Session lifecycle logging | Session create/destroy logged | Session abuse detection |
+| Container lifecycle logging | Registration create/destroy logged | Registration abuse detection |
 
 ---
 
@@ -344,7 +337,7 @@ This section documents what IS implemented to address the primary threats.
 **Response:**
 1. Package reads `ANTHROPIC_API_KEY` -> gets `CREDENTIAL_PROXY_PLACEHOLDER`
 2. Package attempts direct HTTPS to api.anthropic.com -> blocked by network isolation
-3. Package attempts DNS exfiltration -> blocked by DNS isolation
+3. Package attempts DNS exfiltration -> blocked by DNS filter
 4. Package attempts raw packet crafting to bypass network controls -> blocked by CAP_NET_RAW dropped
 5. Attack fails, credentials remain secure
 
@@ -353,31 +346,31 @@ This section documents what IS implemented to address the primary threats.
 **Attack:** AI generates code that searches filesystem and memory for tokens.
 
 **Response:**
-1. Filesystem search finds `/run/secrets/gateway_token` -> contains session token, not real credentials
-2. Session token is bound to this container's IP, useless elsewhere
-3. Session token only works with gateway, which validates repository access
-4. Attack succeeds at finding session token but cannot escalate to real credentials
+1. Filesystem search finds only placeholder environment variables
+2. No real credentials exist anywhere in the sandbox
+3. Exfiltration attempts get placeholder values, not real secrets
+4. Attack fails - credentials never entered the sandbox
 
 ### Scenario 3: Compromised Container Attempts Lateral Movement
 
 **Attack:** Attacker gains shell in Sandbox A, attempts to attack Sandbox B.
 
 **Response:**
-1. Direct network connection to Sandbox B -> blocked by ICC=false
+1. Direct network connection to Sandbox B -> blocked by separate isolated networks per project
 2. ARP spoofing to intercept Sandbox B traffic -> blocked by CAP_NET_RAW dropped (cannot create raw sockets)
 3. IP spoofing to impersonate Sandbox B -> blocked by CAP_NET_RAW dropped
-4. DNS rebinding to redirect Sandbox B -> blocked by gateway DNS control
+4. DNS rebinding to redirect Sandbox B -> blocked by unified-proxy DNS filter
 5. Attack fails, Sandbox B remains isolated
 
-### Scenario 4: Session Token Theft and Reuse
+### Scenario 4: Container Registration Theft and Reuse
 
-**Attack:** Attacker obtains session token from Sandbox A, attempts to use from different location.
+**Attack:** Attacker obtains container registration details, attempts to use from different location.
 
 **Response:**
-1. Attacker uses token from different IP -> rejected by IP binding
-2. Attacker waits for session to be reused -> session expires via TTL
-3. Attacker attempts to create new session -> requires orchestrator access (localhost only)
-4. Attack fails, session binding prevents token reuse
+1. Attacker uses registration from different IP -> rejected by IP binding
+2. Attacker waits for registration to expire -> registration expires via TTL
+3. Attacker attempts to create new registration -> requires orchestrator access (Unix socket only)
+4. Attack fails, IP binding prevents registration reuse
 
 ---
 
@@ -389,19 +382,16 @@ This section documents what IS implemented to address the primary threats.
 # From sandbox: verify cannot reach external directly
 curl -v https://github.com 2>&1 | grep -E "(Connection refused|timed out)"
 
-# From sandbox: verify cannot reach other containers
-ping -c 1 <other-sandbox-ip>  # Should fail with ICC disabled
-
-# From sandbox: verify DNS only resolves via gateway
+# From sandbox: verify DNS only resolves via unified-proxy
 dig @8.8.8.8 github.com  # Should fail
-dig github.com  # Should work (uses gateway DNS)
+dig github.com  # Should work (uses unified-proxy DNS)
 ```
 
 ### Credential Isolation Verification
 
 ```bash
 # From sandbox: verify real credentials not exposed
-echo $GITHUB_TOKEN  # Should be empty or session token
+echo $GITHUB_TOKEN  # Should be empty
 echo $ANTHROPIC_API_KEY  # Should be CREDENTIAL_PROXY_PLACEHOLDER
 
 # From sandbox: verify credential injection works
@@ -409,14 +399,15 @@ git clone https://github.com/allowed/repo.git  # Should work
 curl -H "Authorization: Bearer $ANTHROPIC_API_KEY" https://api.anthropic.com/v1/messages  # Should work via proxy
 ```
 
-### Session Security Verification
+### Container Registration Verification
 
 ```bash
-# From host: verify session creation requires localhost
-curl http://gateway:8080/api/session -X POST  # Should fail from non-localhost
+# From host: verify registration requires Unix socket
+# Registration is done via orchestrator (lib/proxy.sh) through Unix socket or docker exec
+# Direct HTTP access to internal API is not exposed outside the proxy container
 
-# From different container: verify session token IP binding
-curl -H "Authorization: Bearer <sandbox-a-token>" http://gateway:8080/git/...  # Should fail from sandbox B
+# Verify container is registered:
+docker exec <proxy-container> curl -s --unix-socket /var/run/proxy/internal.sock http://localhost/internal/containers
 ```
 
 ### CAP_NET_RAW Verification (Supply Chain Protection)
@@ -433,7 +424,7 @@ python3 -c "import socket; socket.socket(socket.AF_INET, socket.SOCK_RAW, socket
 # Should raise: PermissionError: [Errno 1] Operation not permitted
 
 # From sandbox: verify ping fails (requires CAP_NET_RAW)
-ping -c 1 gateway
+ping -c 1 unified-proxy
 # Should fail with "Operation not permitted" or similar
 ```
 
@@ -441,48 +432,20 @@ ping -c 1 gateway
 
 ## Known Limitations
 
-### Basic Auth Does Not Validate Session Secret
+### Basic Auth Does Not Validate Container Registration
 
-**Behavior:** When using Basic auth (git credential helper flow), only the session token is validated, not the session secret. The secret is not transmitted in Basic auth.
-
-**Why This Exists:** Git credential helpers use Basic authentication (RFC 7617) which provides a single password field. Our credential helper stores the session token in the password field. The two-factor token:secret model was designed for Bearer auth API calls.
+**Behavior:** When using Basic auth (git credential helper flow), the proxy identifies the container by its source IP address from the container registry, not by a shared secret.
 
 **Security Implications:**
-- An attacker who obtains only the session token (without the secret) could use it from the same IP address
-- The attacker must still pass IP binding validation (session bound to container IP)
-- Docker ICC=false prevents other containers from accessing the sandbox's IP
-- Tokens are stored with 0400 permissions in `/run/secrets/gateway_token`
+- An attacker who can spoof the container's IP could impersonate it
+- CAP_NET_RAW is dropped to prevent IP spoofing
+- Docker network isolation prevents cross-network IP spoofing
 
 **Mitigating Factors:**
-- IP binding provides strong protection within isolated Docker networks
-- Session tokens are cryptographically random (secrets.token_urlsafe(32))
-- Network isolation prevents external access to sandbox network segment
-- Short TTLs limit exposure window
-
-**Alternative Considered:** Encode token:secret in Base64 as the password field. Rejected because:
-- Adds complexity to credential helper
-- May exceed git's maximum credential length on some platforms
-- IP binding already provides sufficient security for threat model
-
-### Session Store Is In-Memory Only
-
-**Behavior:** Sessions are stored in a Python dictionary in the gateway process. If the gateway container restarts, all sessions are lost.
-
-**Operational Impact:**
-- Sandboxes must re-authenticate after gateway restart
-- Re-authentication requires orchestrator intervention (session creation is localhost-only)
-- No automatic session recovery mechanism
-
-**Why Not Persistent Storage:**
-- Sessions are short-lived (24h inactivity, 7d absolute)
-- Adding persistent storage (Redis, filesystem) increases attack surface
-- Gateway restarts should be rare in normal operation
-- Sandboxes are typically short-lived and can be recreated
-
-**Workarounds:**
-- Orchestrator can detect failed git operations and recreate sessions
-- For long-running sandboxes, schedule gateway restarts during maintenance windows
-- Monitor gateway uptime as part of operational health checks
+- IP binding via container registry provides strong protection within isolated Docker networks
+- Container registrations are managed by the orchestrator (trusted component)
+- Network isolation prevents external access to the isolation network
+- TTL-based expiration limits exposure window
 
 ---
 
@@ -499,3 +462,4 @@ ping -c 1 gateway
 | Date | Version | Changes |
 |------|---------|---------|
 | 2026-01-31 | 1.0 | Initial threat model for credential isolation gateway |
+| 2026-02-05 | 2.0 | Updated for unified-proxy consolidation: merged gateway + API proxy into single service, replaced session tokens with container registry (SQLite-backed), updated DNS filtering to use integrated mitmproxy DNS mode |

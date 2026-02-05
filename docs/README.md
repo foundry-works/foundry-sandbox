@@ -40,7 +40,7 @@ claude
 |----------|-------------|
 | [Security Overview](security/index.md) | Security architecture and quick reference |
 | [Sandbox Threats](security/sandbox-threats.md) | AI-as-threat-actor model |
-| [Credential Isolation](security/credential-isolation.md) | Gateway threat model |
+| [Credential Isolation](security/credential-isolation.md) | Credential isolation threat model |
 | [Security Architecture](security/security-architecture.md) | Security pillars and defense layers |
 | [Network Isolation](security/network-isolation.md) | Network architecture |
 

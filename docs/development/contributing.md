@@ -18,6 +18,7 @@ foundry-sandbox/
 │   ├── fs.sh               # Filesystem operations
 │   ├── format.sh           # Output formatting
 │   ├── validate.sh         # Input validation
+│   ├── api_keys.sh         # API key management
 │   ├── args.sh             # Argument parsing
 │   ├── prompt.sh           # User prompts
 │   ├── git.sh              # Git operations
@@ -30,8 +31,12 @@ foundry-sandbox/
 │   ├── paths.sh            # Path derivation
 │   ├── state.sh            # Sandbox state management
 │   ├── runtime.sh          # Runtime operations
+│   ├── ide.sh              # IDE integration (Cursor, Zed, VS Code)
 │   ├── json.sh             # JSON output helpers
-│   └── inspect.sh          # Sandbox inspection
+│   ├── inspect.sh          # Sandbox inspection
+│   ├── network.sh          # Network configuration
+│   ├── permissions.sh      # Permission management
+│   └── proxy.sh            # Unified proxy registration (container lifecycle)
 │
 ├── commands/               # Command implementations
 │   ├── new.sh              # cast new
@@ -40,20 +45,23 @@ foundry-sandbox/
 │   ├── start.sh            # cast start
 │   ├── stop.sh             # cast stop
 │   ├── destroy.sh          # cast destroy
+│   ├── destroy-all.sh      # cast destroy-all
 │   ├── build.sh            # cast build
 │   ├── status.sh           # cast status
 │   ├── config.sh           # cast config
 │   ├── prune.sh            # cast prune
 │   ├── info.sh             # cast info
+│   ├── preset.sh           # cast preset
+│   ├── refresh-credentials.sh # cast refresh-credentials
+│   ├── upgrade.sh          # cast upgrade
 │   └── help.sh             # cast help
 │
 ├── safety/                     # Security guardrails
-│   ├── shell-overrides.sh      # Layer 1: Shell function overrides
-│   ├── credential-redaction.sh # Layer 1b: Credential masking
-│   ├── operator-approve        # Layer 2: Human approval wrapper
-│   ├── sudoers-allowlist       # Layer 3: Sudo restrictions
-│   ├── network-firewall.sh     # Layer 4: Network isolation rules
-│   └── network-mode            # Layer 4: Network mode switcher
+│   ├── credential-redaction.sh # Credential masking
+│   ├── operator-approve        # Human approval wrapper
+│   ├── sudoers-allowlist       # Sudo restrictions
+│   ├── network-firewall.sh     # Network isolation rules
+│   └── network-mode            # Network mode switcher
 │
 ├── tests/                  # Test suite
 │
@@ -99,9 +107,17 @@ Edit `sandbox.sh` to add the command to the case statement:
 
 ```bash
 case "$cmd" in
-    new|list|attach|start|stop|destroy|build|help|status|config|prune|info|mycommand)
+    new|list|attach|start|stop|destroy|build|help|status|config|prune|info|upgrade|preset|mycommand)
         source "$SCRIPT_DIR/commands/$cmd.sh"
         "cmd_$cmd" "$@"
+        ;;
+    refresh-credentials)
+        source "$SCRIPT_DIR/commands/refresh-credentials.sh"
+        cmd_refresh_credentials "$@"
+        ;;
+    destroy-all)
+        source "$SCRIPT_DIR/commands/destroy-all.sh"
+        cmd_destroy_all "$@"
         ;;
     ...
 esac
@@ -120,7 +136,7 @@ echo "  mycommand <arg>        Description of what it does"
 Edit `completion.bash` to add completion for the new command:
 
 ```bash
-local commands="new list attach start stop destroy build help status config prune info mycommand"
+local commands="new list attach start stop destroy destroy-all build help status config prune info preset refresh-credentials upgrade mycommand"
 ```
 
 ## Adding a Library Module
@@ -154,22 +170,7 @@ source "$SCRIPT_DIR/lib/mymodule.sh"
 
 ## Modifying Safety Layers
 
-### Shell Overrides (Layer 1)
-
-Edit `safety/shell-overrides.sh` to add new blocked patterns:
-
-```bash
-# Block dangerous_command
-dangerous_command() {
-    echo "BLOCKED: dangerous_command requires operator approval"
-    return 1
-}
-export -f dangerous_command
-```
-
-Rebuild the image after changes: `cast build`
-
-### Sudoers Allowlist (Layer 3)
+### Sudoers Allowlist
 
 Edit `safety/sudoers-allowlist` to permit new sudo commands:
 
@@ -214,8 +215,8 @@ SANDBOX_VERBOSE=1 ./sandbox.sh mycommand arg
 # Get a shell in the container
 cast attach mybox
 
-# Test shell overrides
-rm -rf /  # Should be blocked
+# Test read-only filesystem
+rm -rf /  # Should fail with "Read-only file system"
 
 # Test sudoers
 sudo apt-get update  # Should work

@@ -21,7 +21,7 @@ This document defines what Foundry Sandbox protects against, why these protectio
 | Asset | Risk Level | Protection |
 |-------|------------|------------|
 | Host filesystem | Critical | Read-only root, container isolation |
-| Git history | High | Read-only filesystem, gateway force-push blocking |
+| Git history | High | Read-only filesystem, unified-proxy force-push blocking |
 | Production credentials | High | Sandboxes don't have access by default |
 | Other projects | Medium | Sandboxes are isolated from each other |
 | System stability | Medium | Resource limits, no root access |
@@ -60,8 +60,8 @@ Each pillar blocks specific threat categories. For implementation details, see [
 | Threat | Primary Defense | Secondary Defense | Details |
 |--------|-----------------|-------------------|---------|
 | Filesystem destruction | Read-only Filesystem | Sudoers Allowlist | [Filesystem Threats](#1-filesystem-destruction) |
-| Local git destruction | Read-only Worktree | Shell Overrides (UX) | [Git Threats](#2-git-operations) |
-| Remote git destruction | Gateway (force-push blocking) | Shell Overrides (UX) | [Git Threats](#2-git-operations) |
+| Local git destruction | Read-only Worktree | — | [Git Threats](#2-git-operations) |
+| Remote git destruction | Unified proxy (force-push blocking) | — | [Git Threats](#2-git-operations) |
 | Credential theft | Credential Isolation | Network Isolation | [Credential Threats](#3-credential-theft) |
 | Supply chain attacks | Credential Isolation | Network + CAP_NET_RAW | [Supply Chain](#4-supply-chain-attacks) |
 | Lateral movement | Network (ICC=false) | CAP_NET_RAW dropped | [Lateral Movement](#5-lateral-movement) |
@@ -86,9 +86,8 @@ AI assistants execute bash commands. Any command the AI runs could potentially d
 |-------|---------|--------|
 | Primary | Read-only Filesystem | All writes fail with "Read-only file system" error |
 | Secondary | Sudoers Allowlist | `sudo rm` is not permitted |
-| UX | Shell Overrides | Friendly "BLOCKED" messages for `rm` commands |
 
-**Why This Works:** Even if the AI bypasses shell overrides (via `/bin/rm` or `command rm`), the read-only filesystem stops all writes. See [Read-only Filesystem](security-architecture.md#read-only-filesystem) for implementation.
+**Why This Works:** The read-only filesystem stops all writes regardless of how the command is invoked. See [Read-only Filesystem](security-architecture.md#read-only-filesystem) for implementation.
 
 ---
 
@@ -112,16 +111,14 @@ Git commands can destroy work that may be unrecoverable. We distinguish between 
 | Layer | Control | Effect |
 |-------|---------|--------|
 | Primary | Read-only Worktree | Worktree files cannot be modified—`git reset --hard` silently fails |
-| UX | Shell Overrides | Intercepts patterns with friendly warnings (bypassable) |
 
 *Remote git destruction:*
 
 | Layer | Control | Effect |
 |-------|---------|--------|
-| Primary | Gateway | Can reject force pushes based on policy |
-| UX | Shell Overrides | Intercepts `git push --force` patterns (bypassable) |
+| Primary | Unified proxy | Can reject force pushes based on policy |
 
-**Why This Works:** For local destruction, the read-only filesystem is the actual security control—even if shell overrides are bypassed (via `/usr/bin/git` or `command git`), writes fail. For remote destruction, the gateway can enforce force-push blocking. Shell overrides are explicitly [not a security boundary](security-architecture.md#shell-overrides)—they provide helpful UX but can be trivially bypassed. See [Read-only Filesystem](security-architecture.md#read-only-filesystem) for implementation details.
+**Why This Works:** For local destruction, the read-only filesystem is the actual security control—writes fail regardless of how commands are invoked. For remote destruction, the unified proxy can enforce force-push blocking. See [Read-only Filesystem](security-architecture.md#read-only-filesystem) for implementation details.
 
 ---
 
@@ -143,7 +140,7 @@ A compromised sandbox could attempt to steal credentials and exfiltrate them.
 | Secondary | Network Isolation | Cannot exfiltrate to unauthorized destinations |
 | UX | Credential Redaction | Masks secrets in command output |
 
-**Why This Works:** Sandboxes receive placeholder values (`CREDENTIAL_PROXY_PLACEHOLDER`) instead of real API keys. The gateway/proxy containers hold real credentials and inject them into outbound requests. Even if code reads the environment, it gets nothing useful. See [Credential Isolation](credential-isolation.md) for the complete architecture.
+**Why This Works:** Sandboxes receive placeholder values (`CREDENTIAL_PROXY_PLACEHOLDER`) instead of real API keys. The unified-proxy container holds real credentials and injects them into outbound requests. Even if code reads the environment, it gets nothing useful. See [Credential Isolation](credential-isolation.md) for the complete architecture.
 
 ---
 
@@ -196,7 +193,7 @@ One compromised sandbox could attempt to attack or access another sandbox runnin
 Attackers could attempt to steal session tokens and use them from other locations.
 
 **Attack Vectors:**
-- Reading session token from `/run/secrets/gateway_token`
+- Reading session token from proxy internal socket
 - Network sniffing to capture tokens in transit
 - IP spoofing to bypass session IP binding
 - Waiting for session reuse from different context
@@ -227,11 +224,11 @@ Data can be encoded in DNS queries and sent to attacker-controlled nameservers.
 
 | Layer | Control | Effect |
 |-------|---------|--------|
-| Primary | dnsmasq | All DNS routed through gateway |
+| Primary | DNS filter | All DNS routed through unified-proxy |
 | Secondary | Domain allowlist | Only allowed domains resolve |
 | Tertiary | Internal network | No direct access to external DNS servers |
 
-**Why This Works:** The gateway runs dnsmasq which intercepts all DNS queries. Only domains on the allowlist resolve. Attempts to query `evil.com` return NXDOMAIN. Direct access to external DNS (8.8.8.8) is blocked by network isolation. See [Network Isolation](network-isolation.md) for configuration.
+**Why This Works:** The unified-proxy runs a DNS filter addon that intercepts all DNS queries. Only domains on the allowlist resolve. Attempts to query `evil.com` return NXDOMAIN. Direct access to external DNS (8.8.8.8) is blocked by network isolation. See [Network Isolation](network-isolation.md) for configuration.
 
 ---
 
@@ -277,21 +274,7 @@ No single control is sufficient. Security comes from multiple overlapping layers
 
 Each layer catches what others might miss. See [Security Architecture](security-architecture.md) for the complete model.
 
-### UX Over Security Theater
-
-Shell overrides (Layer 1) are explicitly **not a security boundary**. They can be bypassed by:
-
-```bash
-/bin/rm -rf /          # Direct path
-command rm -rf /       # Builtin bypass
-\rm -rf /              # Escape character
-env rm -rf /           # Environment bypass
-```
-
-We keep them because:
-1. They catch **accidental** use of dangerous commands
-2. They provide **helpful error messages** to the AI
-3. The AI is unlikely to intentionally bypass them
+### Security Over Theater
 
 The real security comes from the pillars (read-only filesystem, network isolation, credential isolation, sudoers allowlist).
 
@@ -347,6 +330,6 @@ If credential isolation is disabled (`--no-isolate-credentials`), the AI can rea
 ## Next Steps
 
 - [Security Architecture](security-architecture.md) - Security pillars and defense layers
-- [Credential Isolation](credential-isolation.md) - Gateway architecture and threat model
+- [Credential Isolation](credential-isolation.md) - Credential isolation architecture and threat model
 - [Network Isolation](network-isolation.md) - Network modes and configuration
 - [Security Overview](index.md) - Security architecture quick reference

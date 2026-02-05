@@ -41,6 +41,9 @@ cast new --preset <name>
 | `--sparse` | Enable sparse checkout (requires `--wd`) |
 | `--pip-requirements`, `-r` | Install Python packages from requirements.txt (`auto` to detect) |
 | `--allow-pr`, `--with-pr` | Allow PR operations (create/comment/review); blocked by default |
+| `--with-ide[=name]` | Launch IDE (cursor, zed, code) then terminal |
+| `--ide-only[=name]` | Launch IDE only, skip terminal |
+| `--no-ide` | Skip IDE selection prompt |
 
 ### Examples
 
@@ -236,6 +239,7 @@ Attach to a running sandbox.
 
 ```
 cast attach [name]
+cast attach --last
 ```
 
 ### Arguments
@@ -244,11 +248,18 @@ cast attach [name]
 |----------|-------------|
 | `name` | Sandbox name (optional if fzf available) |
 
+### Options
+
+| Option | Description |
+|--------|-------------|
+| `--last` | Reattach to the last attached sandbox |
+
 ### Behavior
 
 - If sandbox is stopped, starts it first
 - Syncs credentials from host to container when `SANDBOX_SYNC_ON_ATTACH=1` (default: `0`)
 - Attaches to tmux session
+- Auto-detects sandbox from current working directory if inside a worktree
 
 ### Examples
 
@@ -258,6 +269,32 @@ cast attach repo-feature-branch
 
 # Use fzf selector (if no name provided)
 cast attach
+
+# Reattach to the last sandbox
+cast attach --last
+cast reattach  # shorthand alias
+```
+
+---
+
+## cast reattach
+
+Alias for `cast attach --last`. Reattaches to the last attached sandbox.
+
+### Synopsis
+
+```
+cast reattach
+```
+
+### Examples
+
+```bash
+# Attach to a sandbox
+cast attach repo-feature-branch
+
+# Later, reattach to the same sandbox
+cast reattach
 ```
 
 ---
@@ -547,6 +584,107 @@ cast info [--json]
 cast info
 
 cast info --json
+```
+
+---
+
+## cast destroy-all
+
+Destroy all sandboxes with double confirmation.
+
+### Synopsis
+
+```
+cast destroy-all [options]
+```
+
+### Options
+
+| Option | Description |
+|--------|-------------|
+| `--keep-worktree` | Remove containers but keep worktrees |
+
+### Behavior
+
+1. Lists all sandboxes that will be destroyed
+2. Requires double confirmation (type "yes" twice)
+3. Destroys each sandbox sequentially
+
+### Examples
+
+```bash
+# Destroy everything
+cast destroy-all
+
+# Remove containers only, keep worktrees
+cast destroy-all --keep-worktree
+```
+
+---
+
+## cast refresh-credentials
+
+Refresh credentials in a running sandbox.
+
+### Synopsis
+
+```
+cast refresh-credentials [name]
+```
+
+### Arguments
+
+| Argument | Description |
+|----------|-------------|
+| `name` | Sandbox name (optional, auto-detects from current directory) |
+
+### Behavior
+
+- In **direct mode** (no credential isolation): syncs credentials from host to container
+- In **credential isolation mode**: restarts the unified proxy to pick up new credentials
+- Supports `--last` flag to target the last attached sandbox
+
+### Examples
+
+```bash
+# Refresh credentials for a specific sandbox
+cast refresh-credentials repo-feature-branch
+
+# Auto-detect from current directory
+cast refresh-credentials
+```
+
+---
+
+## cast upgrade
+
+Upgrade Foundry Sandbox to the latest version.
+
+### Synopsis
+
+```
+cast upgrade [--local]
+```
+
+### Options
+
+| Option | Description |
+|--------|-------------|
+| `--local` | Upgrade from local repo (for development) |
+
+### Behavior
+
+- Pulls the latest version from the remote repository
+- Rebuilds if necessary
+
+### Examples
+
+```bash
+# Upgrade to latest
+cast upgrade
+
+# Upgrade from local changes (development)
+cast upgrade --local
 ```
 
 ---

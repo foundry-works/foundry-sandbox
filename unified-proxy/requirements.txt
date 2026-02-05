@@ -1,0 +1,16 @@
+# Unified Proxy Python Dependencies
+#
+# Core proxy framework (also provides mitmproxy Python API)
+mitmproxy>=11.0.0
+
+# Web framework for internal API (container registration, metrics)
+flask>=3.0.0
+
+# HTTP client for OAuth token refresh and external API calls
+httpx>=0.27.0
+
+# YAML parsing for configuration files
+pyyaml>=6.0
+
+# Prometheus metrics collection and exposition
+prometheus-client>=0.20.0

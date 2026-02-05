@@ -27,7 +27,7 @@ cmd_start() {
     fi
 
     local uses_credential_isolation="0"
-    if docker ps -a --format '{{.Names}}' | grep -q "^${container}-api-proxy-"; then
+    if docker ps -a --format '{{.Names}}' | grep -q "^${container}-unified-proxy-"; then
         uses_credential_isolation="1"
     fi
 
@@ -102,10 +102,10 @@ cmd_start() {
         log_info "GitHub CLI token exported for container"
     fi
 
-    # Check if credential isolation is enabled (api-proxy container exists)
+    # Check if credential isolation is enabled (unified-proxy container exists)
     # and repopulate stubs volume before starting
     local isolate_credentials=""
-    if docker ps -a --format '{{.Names}}' | grep -q "^${container}-api-proxy-"; then
+    if docker ps -a --format '{{.Names}}' | grep -q "^${container}-unified-proxy-"; then
         isolate_credentials="true"
         populate_stubs_volume "$container"
         export STUBS_VOLUME_NAME="${container}_stubs"
@@ -121,18 +121,20 @@ cmd_start() {
 
     local container_id="${container}-dev-1"
 
-    # Refresh gateway session on restart (if credential isolation enabled)
-    # Destroys old token and creates a new one for security
-    if setup_gateway_url "$container" 2>/dev/null; then
-        # Clean up old session first
-        cleanup_gateway_session "$container_id"
-        # Create new session with fresh token
+    # Register container with unified-proxy on restart (credential isolation)
+    if [ "$isolate_credentials" = "true" ]; then
+        export SANDBOX_GATEWAY_ENABLED=true
         local repo_spec="${SANDBOX_REPO_URL:-}"
         repo_spec=$(echo "$repo_spec" | sed -E 's#^(https?://)?github\.com/##; s#^git@github\.com:##; s#\.git$##')
-        if setup_gateway_session "$container_id" "$repo_spec"; then
-            export SANDBOX_GATEWAY_ENABLED=true
-        else
-            log_warn "Gateway session refresh failed - git operations may not work"
+        local metadata_json=""
+        if command -v jq >/dev/null 2>&1; then
+            metadata_json=$(jq -n \
+                --arg repo "$repo_spec" \
+                --arg allow_pr "${SANDBOX_ALLOW_PR:-0}" \
+                '{repo: $repo, allow_pr: ($allow_pr == "1")}')
+        fi
+        if ! setup_proxy_registration "$container_id" "$metadata_json"; then
+            die "Failed to register container with unified-proxy"
         fi
     fi
 

@@ -1,0 +1,65 @@
+# Policy configuration for unified proxy
+# This file documents all available policy options
+#
+# Policy evaluation order:
+# 1. Identity verification
+# 2. Allowlist check
+# 3. Blocklist check
+# 4. Rate limiting
+# 5. Circuit breaker
+
+# Allowlist configuration
+# Specifies allowed API endpoints and domains
+allowlist:
+  # Path to domain allowlist file
+  file: allowlist.yaml
+  # Default action for unmatched requests (allow or deny)
+  default_action: deny
+
+# Blocklist configuration (explicit denies)
+# Blocks specific API patterns that violate security policies
+blocklist:
+  # GitHub security policies
+  github:
+    # Block PR merge operations
+    - pattern: "PUT /repos/*/pulls/*/merge"
+      reason: "PR merge operations blocked by policy"
+    # Block release creation
+    - pattern: "POST /repos/*/releases"
+      reason: "Release creation blocked by policy"
+
+# Rate limiting configuration
+# Controls request rate to prevent abuse and ensure fair resource usage
+rate_limit:
+  enabled: true
+  # Maximum tokens per bucket (requests allowed per time period)
+  capacity: 100
+  # Tokens added per second (refill rate)
+  refill_rate: 10
+  # Cleanup interval for stale buckets in seconds
+  cleanup_interval: 300
+
+# Circuit breaker configuration
+# Prevents cascading failures by stopping requests to failing services
+circuit_breaker:
+  enabled: true
+  # Number of consecutive failures to open circuit and stop requests
+  failure_threshold: 5
+  # Seconds to wait before attempting recovery from open state
+  recovery_timeout: 30
+  # Number of successful requests in half-open state to close circuit
+  success_threshold: 2
+  # Cleanup interval for stale circuit states in seconds
+  cleanup_interval: 300
+  # Seconds before circuit state is considered stale and reset
+  stale_timeout: 600
+
+# Logging configuration
+# Controls policy decision logging and visibility
+logging:
+  # Log level for policy decisions (debug, info, warn, error)
+  level: info
+  # Include detailed request/response information in logs
+  include_request_details: true
+  # Output format for logs (json or text)
+  format: json

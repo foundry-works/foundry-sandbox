@@ -90,7 +90,7 @@ compose_down() {
 
     local compose_cmd
     if [ "$isolate_credentials" != "true" ]; then
-        if docker ps -a --format '{{.Names}}' | grep -q "^${container}-api-proxy-"; then
+        if docker ps -a --format '{{.Names}}' | grep -q "^${container}-unified-proxy-"; then
             isolate_credentials="true"
         fi
     fi
@@ -108,17 +108,17 @@ container_is_running() {
     docker ps --filter "name=^${container}-dev" --format "{{.Names}}" | grep -q .
 }
 
-# Get the gateway host port for a container (credential isolation)
+# Get the unified-proxy host port for a container (credential isolation)
 # Args:
 #   $1 - container: The container project name
 # Returns:
 #   Prints the host port to stdout, or empty if not found
-get_gateway_host_port() {
+get_unified_proxy_host_port() {
     local container="$1"
-    local gateway_container="${container}-gateway-1"
+    local unified_proxy_container="${container}-unified-proxy-1"
 
     # Get the host port mapped to container port 8080
-    docker port "$gateway_container" 8080 2>/dev/null | head -1 | sed 's/.*://'
+    docker port "$unified_proxy_container" 8080 2>/dev/null | head -1 | sed 's/.*://'
 }
 
 # Set up GATEWAY_URL after containers start
@@ -127,11 +127,11 @@ get_gateway_host_port() {
 # Returns:
 #   0 on success, 1 on failure
 #   Sets GATEWAY_URL environment variable
-setup_gateway_url() {
+setup_unified_proxy_url() {
     local container="$1"
     local port
 
-    port=$(get_gateway_host_port "$container")
+    port=$(get_unified_proxy_host_port "$container")
     if [ -z "$port" ]; then
         return 1
     fi
@@ -163,7 +163,7 @@ populate_stubs_volume() {
     docker volume create "$volume_name" >/dev/null 2>&1 || true
 
     docker run --rm \
-        -v "$SCRIPT_DIR/api-proxy:/src:ro" \
+        -v "$SCRIPT_DIR/unified-proxy:/src:ro" \
         -v "${volume_name}:/stubs" \
         alpine:latest \
         sh -c 'cp /src/stub-*.json /src/stub-*.yml /stubs/ 2>/dev/null || cp /src/stub-*.json /stubs/' || return 1

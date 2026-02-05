@@ -63,11 +63,7 @@ RUN if [ "$USERNAME" != "ubuntu" ]; then \
 
 # Install safety guardrails
 
-# Layer 1: Shell function overrides (loaded by all bash sessions)
-COPY safety/shell-overrides.sh /etc/profile.d/shell-overrides.sh
-RUN chmod 644 /etc/profile.d/shell-overrides.sh
-
-# Layer 1b: Credential redaction (automatically redacts API keys in env output)
+# Credential redaction (automatically redacts API keys in env output)
 COPY safety/credential-redaction.sh /etc/profile.d/credential-redaction.sh
 RUN chmod 644 /etc/profile.d/credential-redaction.sh
 
@@ -92,10 +88,11 @@ RUN rm -f /usr/lib/python*/EXTERNALLY-MANAGED
 
 # Install AI tools globally as root (to /usr/local, survives tmpfs on /home)
 # global-agent is needed for claude-zai to route DNS through the HTTP proxy
+# Pin global-agent@3.0.0 - v4+ has packaging issues (missing dist/ in npm package)
 RUN npm install -g @anthropic-ai/claude-code \
     && npm install -g @google/gemini-cli \
     && npm install -g @openai/codex \
-    && npm install -g global-agent
+    && npm install -g global-agent@3.0.0
 # Install OpenCode conditionally (only if INCLUDE_OPENCODE=1)
 RUN if [ "$INCLUDE_OPENCODE" = "1" ]; then \
         npm install -g opencode-ai @opencode-ai/sdk; \

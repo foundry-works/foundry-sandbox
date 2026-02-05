@@ -59,9 +59,9 @@ cmd_refresh_credentials() {
         die "Sandbox '$name' is not running"
     fi
 
-    # Check if credential isolation is enabled (api-proxy container exists)
+    # Check if credential isolation is enabled (unified-proxy container exists)
     local uses_credential_isolation="0"
-    if docker ps -a --format '{{.Names}}' | grep -q "^${container}-api-proxy-"; then
+    if docker ps -a --format '{{.Names}}' | grep -q "^${container}-unified-proxy-"; then
         uses_credential_isolation="1"
     fi
 
@@ -82,13 +82,13 @@ refresh_credentials_direct_mode() {
 refresh_credentials_isolation_mode() {
     local name="$1"
     local container="$2"
-    echo "Restarting api-proxy to reload credentials..."
+    echo "Restarting unified-proxy to reload credentials..."
 
     local override_file="$DERIVED_OVERRIDE_FILE"
     local compose_cmd
     compose_cmd=$(get_compose_command "$override_file" "true")
 
-    $compose_cmd -p "$container" restart api-proxy
+    $compose_cmd -p "$container" restart unified-proxy
 
-    echo "Credentials refreshed (api-proxy restarted)."
+    echo "Credentials refreshed (unified-proxy restarted)."
 }
