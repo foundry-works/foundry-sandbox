@@ -4,7 +4,7 @@ GitHub API Security Filter - mitmproxy Addon
 Blocks dangerous GitHub API operations at the network layer.
 This is a security boundary - cannot be bypassed from within the sandbox.
 
-Blocked operations (matching shell-overrides.sh):
+Blocked operations:
 - gh repo delete    → DELETE /repos/{owner}/{repo}
 - gh release delete → DELETE /repos/{owner}/{repo}/releases/*
 - gh api            → All api.github.com requests (use allowlist for safe ops)

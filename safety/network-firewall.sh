@@ -286,9 +286,9 @@ if [ -n "${GATEWAY_HOST:-}" ]; then
         log_verbose "  Allowing credential gateway: $GATEWAY_HOST ($GATEWAY_IP)"
         iptables -A OUTPUT -d "$GATEWAY_IP" -j ACCEPT
     fi
-elif getent hosts gateway &>/dev/null; then
-    GATEWAY_IP=$(getent hosts gateway | awk '{print $1}')
-    log_verbose "  Allowing credential gateway: gateway ($GATEWAY_IP)"
+elif getent hosts unified-proxy &>/dev/null; then
+    GATEWAY_IP=$(getent hosts unified-proxy | awk '{print $1}')
+    log_verbose "  Allowing credential gateway: unified-proxy ($GATEWAY_IP)"
     iptables -A OUTPUT -d "$GATEWAY_IP" -j ACCEPT
 fi
 
@@ -370,10 +370,10 @@ if command -v ip6tables &>/dev/null; then
             log_verbose "  Allowing credential gateway (IPv6): $GATEWAY_HOST ($GATEWAY_IP6)"
             ip6tables -A OUTPUT -d "$GATEWAY_IP6" -j ACCEPT 2>/dev/null || true
         fi
-    elif getent ahostsv6 gateway &>/dev/null 2>&1; then
-        GATEWAY_IP6=$(getent ahostsv6 gateway 2>/dev/null | awk '{print $1}' | head -1 || true)
+    elif getent ahostsv6 unified-proxy &>/dev/null 2>&1; then
+        GATEWAY_IP6=$(getent ahostsv6 unified-proxy 2>/dev/null | awk '{print $1}' | head -1 || true)
         if [ -n "$GATEWAY_IP6" ]; then
-            log_verbose "  Allowing credential gateway (IPv6): gateway ($GATEWAY_IP6)"
+            log_verbose "  Allowing credential gateway (IPv6): unified-proxy ($GATEWAY_IP6)"
             ip6tables -A OUTPUT -d "$GATEWAY_IP6" -j ACCEPT 2>/dev/null || true
         fi
     fi
@@ -460,10 +460,10 @@ setup_docker_user_rules() {
         SANDBOX_SUBNET=$(docker network inspect credential-isolation --format '{{range .IPAM.Config}}{{.Subnet}}{{end}}' 2>/dev/null || true)
     fi
 
-    # Get gateway container IP
+    # Get unified-proxy container IP (for credential gateway)
     local GATEWAY_CONTAINER_IP=""
     if command -v docker &>/dev/null; then
-        GATEWAY_CONTAINER_IP=$(docker inspect gateway --format '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' 2>/dev/null | head -1 || true)
+        GATEWAY_CONTAINER_IP=$(docker inspect unified-proxy --format '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' 2>/dev/null | head -1 || true)
     fi
 
     # Get unified-proxy container IP

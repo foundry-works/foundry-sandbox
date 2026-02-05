@@ -49,7 +49,6 @@ tests/
 │
 ├── run.sh                   # Shell test runner
 ├── redteam-sandbox.sh       # Security red-team tests (run in sandbox)
-├── test-shell-overrides.sh  # Shell override validation
 ├── test-pip-requirements.sh # Python dependency validation
 ├── test-pip-install-integration.sh  # pip install test
 └── test_validate.sh         # Configuration validation
@@ -185,7 +184,6 @@ Shell tests validate sandbox behavior and CLI functionality.
 |------|---------|
 | `run.sh` | Main test runner (help, list, status, config, info commands) |
 | `redteam-sandbox.sh` | Security red-team tests (run inside sandbox) |
-| `test-shell-overrides.sh` | Shell override behavior validation |
 | `test-pip-requirements.sh` | Python dependency installation |
 | `test-pip-install-integration.sh` | pip install integration test |
 | `test_validate.sh` | Configuration file validation |

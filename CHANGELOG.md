@@ -427,13 +427,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Initial release of Foundry Sandbox
 - Core sandbox creation and management (`cast new`, `cast attach`, `cast destroy`)
 - Git worktree-based ephemeral workspaces
-- 6-layer defense in depth safety system:
-  - Layer 1: Shell overrides (UX warnings)
-  - Layer 2: Credential redaction
-  - Layer 3: Operator approval (TTY-based human-in-loop)
-  - Layer 4: Sudoers allowlist (kernel-enforced)
-  - Layer 5: Network isolation (iptables/Docker)
-  - Layer 6: Read-only root filesystem (Docker-enforced)
+- Defense in depth safety system:
+  - Credential redaction
+  - Operator approval (TTY-based human-in-loop)
+  - Sudoers allowlist (kernel-enforced)
+  - Network isolation (iptables/Docker)
+  - Read-only root filesystem (Docker-enforced)
 - Network modes: full, limited (whitelist), host-only, none
 - Volume mount support (`--mount`, `--copy`)
 - SSH agent forwarding (`--with-ssh`)

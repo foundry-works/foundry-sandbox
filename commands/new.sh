@@ -1137,7 +1137,7 @@ OVERRIDES
             log_warn "Run 'gemini auth' or set GEMINI_API_KEY if you plan to use Gemini."
         fi
         # Validate git remotes don't contain embedded credentials
-        # This is critical for credential isolation - credentials must go through the gateway
+        # This is critical for credential isolation - credentials must go through the unified-proxy
         if ! validate_git_remotes "$worktree_dir/.git"; then
             die "Cannot enable credential isolation with embedded git credentials"
         fi

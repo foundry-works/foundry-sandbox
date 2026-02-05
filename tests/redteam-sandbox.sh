@@ -208,7 +208,7 @@ echo "(Even if DNS resolves, proxy should block non-allowlisted hosts)"
 EXFIL_TARGETS=("pastebin.com" "httpbin.org" "webhook.site" "evil.com")
 for target in "${EXFIL_TARGETS[@]}"; do
     RESPONSE=$(curl -s --connect-timeout 5 --max-time 10 "https://$target/" 2>&1)
-    if echo "$RESPONSE" | grep -q "Hostname not in allowlist"; then
+    if echo "$RESPONSE" | grep -iq "Hostname not in allowlist\|Forbidden\|denied by policy"; then
         test_pass "Proxy blocked exfiltration to: $target"
     elif echo "$RESPONSE" | grep -iq "error\|timeout\|refused"; then
         test_pass "Connection to $target failed (blocked)"
@@ -320,6 +320,92 @@ else
 fi
 
 # ============================================================================
+header "6b. GIT MARKETPLACE ACCESS"
+# ============================================================================
+
+echo ""
+echo "Testing git proxy access for plugin marketplaces..."
+
+# Test 1: Plugin marketplace clone (positive test - should succeed)
+info "Testing plugin marketplace clone (allowed list)..."
+MARKETPLACE_DIR="/tmp/test-marketplace-$$"
+rm -rf "$MARKETPLACE_DIR" 2>/dev/null
+
+CLONE_OUTPUT=$(git clone --depth 1 https://github.com/anthropics/claude-plugins-official.git "$MARKETPLACE_DIR" 2>&1)
+CLONE_EXIT=$?
+
+if [[ $CLONE_EXIT -eq 0 ]] && [[ -d "$MARKETPLACE_DIR/.git" ]]; then
+    test_pass "Plugin marketplace clone succeeded (git proxy allows anthropics repos)"
+    rm -rf "$MARKETPLACE_DIR"
+elif echo "$CLONE_OUTPUT" | grep -qiE "(403|forbidden|blocked|not allowed)"; then
+    test_fail "Plugin marketplace clone blocked (should be in allowed list)"
+    info "Output: $(echo "$CLONE_OUTPUT" | head -c 200)"
+else
+    test_warn "Plugin marketplace clone failed (may be network issue or repo doesn't exist)"
+    info "Exit code: $CLONE_EXIT"
+    info "Output: $(echo "$CLONE_OUTPUT" | head -c 200)"
+fi
+
+# Test 2: Unauthorized repo clone (negative test - should be blocked)
+info "Testing unauthorized repo clone (should be blocked)..."
+BLOCKED_DIR="/tmp/test-blocked-$$"
+rm -rf "$BLOCKED_DIR" 2>/dev/null
+
+BLOCKED_OUTPUT=$(git clone https://github.com/octocat/Hello-World.git "$BLOCKED_DIR" 2>&1)
+BLOCKED_EXIT=$?
+
+if echo "$BLOCKED_OUTPUT" | grep -qiE "(403|forbidden|blocked|not allowed|denied)"; then
+    test_pass "Unauthorized repo clone blocked by git proxy (403)"
+    rm -rf "$BLOCKED_DIR" 2>/dev/null
+elif [[ $BLOCKED_EXIT -eq 0 ]] && [[ -d "$BLOCKED_DIR/.git" ]]; then
+    test_fail "Unauthorized repo clone succeeded (should be blocked by git proxy)"
+    rm -rf "$BLOCKED_DIR"
+else
+    # Could be blocked by other means (network, etc.)
+    test_pass "Unauthorized repo clone failed (exit code: $BLOCKED_EXIT)"
+    info "Output: $(echo "$BLOCKED_OUTPUT" | head -c 200)"
+fi
+
+# Test 3: Node.js proxy integration (global-agent bootstrap)
+info "Testing Node.js proxy integration..."
+if command -v node &>/dev/null; then
+    # Test that Node.js can make HTTPS requests through the proxy
+    NODE_OUTPUT=$(node -e "
+const https = require('https');
+const req = https.get('https://api.github.com/', (res) => {
+    console.log('STATUS:' + res.statusCode);
+    process.exit(0);
+});
+req.on('error', (e) => {
+    console.log('ERROR:' + e.message);
+    process.exit(1);
+});
+req.setTimeout(10000, () => {
+    console.log('TIMEOUT');
+    req.destroy();
+    process.exit(1);
+});
+" 2>&1)
+    NODE_EXIT=$?
+
+    if echo "$NODE_OUTPUT" | grep -q "STATUS:"; then
+        STATUS_CODE=$(echo "$NODE_OUTPUT" | grep "STATUS:" | cut -d: -f2)
+        if [[ "$STATUS_CODE" == "200" ]] || [[ "$STATUS_CODE" == "403" ]]; then
+            test_pass "Node.js routes through proxy (HTTP $STATUS_CODE)"
+        else
+            test_warn "Node.js proxy response: HTTP $STATUS_CODE"
+        fi
+    elif echo "$NODE_OUTPUT" | grep -qiE "(ECONNREFUSED|ETIMEDOUT|certificate)"; then
+        test_warn "Node.js proxy connection issue: $(echo "$NODE_OUTPUT" | head -c 100)"
+    else
+        test_warn "Node.js proxy test inconclusive"
+        info "Output: $(echo "$NODE_OUTPUT" | head -c 150)"
+    fi
+else
+    info "Node.js not available for proxy integration test"
+fi
+
+# ============================================================================
 header "7. CONTAINER ESCAPE / LATERAL MOVEMENT"
 # ============================================================================
 
@@ -344,10 +430,10 @@ fi
 # Check if we can ping other containers (ICC test)
 echo ""
 echo "Testing inter-container communication..."
-if ping -c 1 -W 2 gateway >/dev/null 2>&1; then
-    test_warn "Can ping gateway container (expected for health checks)"
+if ping -c 1 -W 2 unified-proxy >/dev/null 2>&1; then
+    test_warn "Can ping unified-proxy container (expected for proxy)"
 else
-    test_pass "Cannot ping gateway container"
+    test_pass "Cannot ping unified-proxy container"
 fi
 
 if ping -c 1 -W 2 unified-proxy >/dev/null 2>&1; then
@@ -497,8 +583,9 @@ else
     test_pass "Release creation blocked or unauthorized"
 fi
 
-# Test PR comment creation (should be blocked unless ALLOW_PR_OPERATIONS=true)
-info "Testing PR comment creation..."
+# Test issue comment creation (always allowed - issue comments are lower risk)
+# Note: /issues/*/comments is always allowed; /pulls/*/comments (review comments) requires ALLOW_PR_OPERATIONS
+info "Testing issue comment creation (always allowed)..."
 COMMENT_RESP=$(curl -s --max-time 10 \
     -X POST \
     -H "Authorization: token CREDENTIAL_PROXY_PLACEHOLDER" \
@@ -506,17 +593,13 @@ COMMENT_RESP=$(curl -s --max-time 10 \
     -d '{"body":"Test comment from sandbox"}' \
     "https://api.github.com/repos/octocat/Hello-World/issues/1/comments" 2>&1)
 
-if echo "$COMMENT_RESP" | grep -qiE "(blocked|forbidden|not allowed)"; then
-    test_pass "PR comment creation blocked by policy"
-elif echo "$COMMENT_RESP" | grep -qE '"id"'; then
-    if [ "${ALLOW_PR_OPERATIONS:-}" = "true" ]; then
-        test_warn "PR comment created (ALLOW_PR_OPERATIONS=true)"
-    else
-        test_fail "PR comment creation accessible without ALLOW_PR_OPERATIONS!"
-    fi
+if echo "$COMMENT_RESP" | grep -qE '"id"'; then
+    test_pass "Issue comment creation works (allowed by policy)"
+elif echo "$COMMENT_RESP" | grep -qiE "(blocked|forbidden|not allowed)"; then
+    test_fail "Issue comment creation unexpectedly blocked"
 else
     info "Comment response: $(echo "$COMMENT_RESP" | head -c 150)"
-    test_pass "PR comment blocked or unauthorized"
+    test_warn "Issue comment response unclear"
 fi
 
 # ============================================================================
@@ -563,13 +646,13 @@ REGISTER_RESP=$(curl -s --connect-timeout 5 --max-time 10 \
     -d '{"container_id":"evil-container","ip":"172.17.0.100"}' \
     "http://unified-proxy:8080/internal/containers" 2>&1)
 
-if echo "$REGISTER_RESP" | grep -qE "(registered|success|id)"; then
+if echo "$REGISTER_RESP" | grep -qiE "(forbidden|denied|not found|404|blocked)"; then
+    test_pass "Container registration endpoint blocked"
+elif echo "$REGISTER_RESP" | grep -qE '"(registered|status|container_id)"'; then
     test_fail "Container registration endpoint accessible via HTTP!"
-elif echo "$REGISTER_RESP" | grep -qiE "(not found|404|blocked)"; then
-    test_pass "Container registration endpoint not exposed via HTTP"
 else
     info "Registration response: $(echo "$REGISTER_RESP" | head -c 100)"
-    test_pass "Container registration blocked"
+    test_pass "Container registration not accessible"
 fi
 
 # ============================================================================
@@ -684,50 +767,7 @@ else
 fi
 
 # ============================================================================
-header "12. SHELL SAFETY OVERRIDES"
-# ============================================================================
-
-echo ""
-echo "Testing Layer 1 shell override protections..."
-echo "(These are UX-level protections, bypassable by design)"
-
-# Source shell overrides if available
-if [[ -f /etc/profile.d/shell-overrides.sh ]]; then
-    source /etc/profile.d/shell-overrides.sh 2>/dev/null
-    info "Shell overrides loaded from /etc/profile.d/shell-overrides.sh"
-else
-    test_warn "Shell overrides not found at /etc/profile.d/shell-overrides.sh"
-fi
-
-# Test dangerous command overrides (these should be blocked by shell functions)
-# We test by checking if the function exists and captures the pattern
-
-# Check if rm is overridden
-if type rm 2>/dev/null | grep -q "function"; then
-    test_pass "rm command is overridden by shell function"
-else
-    test_warn "rm command not overridden (shell overrides may not be active)"
-fi
-
-# Check if git is overridden
-if type git 2>/dev/null | grep -q "function"; then
-    test_pass "git command is overridden by shell function"
-else
-    test_warn "git command not overridden (shell overrides may not be active)"
-fi
-
-# Verify bypass works (legitimate use via absolute path)
-if [[ -x /bin/rm ]]; then
-    touch /tmp/safe-delete-test 2>/dev/null
-    if /bin/rm /tmp/safe-delete-test 2>/dev/null; then
-        test_pass "Legitimate bypass via /bin/rm works"
-    else
-        test_warn "Could not test /bin/rm bypass"
-    fi
-fi
-
-# ============================================================================
-header "13. CAPABILITY VERIFICATION"
+header "12. CAPABILITY VERIFICATION"
 # ============================================================================
 
 echo ""
@@ -790,7 +830,7 @@ else
 fi
 
 # ============================================================================
-header "14. ADDITIONAL CREDENTIAL PATTERNS"
+header "13. ADDITIONAL CREDENTIAL PATTERNS"
 # ============================================================================
 
 echo ""
@@ -843,7 +883,7 @@ else
 fi
 
 # ============================================================================
-header "15. NETWORK BYPASS ATTEMPTS"
+header "14. NETWORK BYPASS ATTEMPTS"
 # ============================================================================
 
 echo ""
@@ -911,7 +951,7 @@ else
 fi
 
 # ============================================================================
-header "16. SENSITIVE PATH ACCESS"
+header "15. SENSITIVE PATH ACCESS"
 # ============================================================================
 
 echo ""

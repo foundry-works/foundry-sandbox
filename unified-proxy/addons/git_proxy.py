@@ -49,6 +49,13 @@ DEFAULT_MAX_PUSH_SIZE = 100 * 1024 * 1024
 # Sandbox branch pattern for bot mode
 SANDBOX_BRANCH_PATTERN = re.compile(r"^refs/heads/sandbox/")
 
+# Always-allowed repos for Claude plugin marketplaces (read-only)
+# These are needed for installing plugins like pyright-lsp
+ALLOWED_MARKETPLACES = frozenset({
+    "anthropics/claude-plugins-official",
+    "foundry-works/claude-foundry",
+})
+
 
 @dataclass
 class GitOperation:
@@ -142,7 +149,13 @@ class GitProxyAddon:
         metadata = container_config.metadata or {}
 
         # Check repo authorization
+        # Support both "repo" (string) and "repos" (list) in metadata
         allowed_repos = metadata.get("repos", [])
+        if not allowed_repos:
+            # Fallback to singular "repo" field
+            repo = metadata.get("repo")
+            if repo:
+                allowed_repos = [repo]
         if not self._is_repo_authorized(git_op, allowed_repos):
             self._deny_request(
                 flow,
@@ -252,11 +265,16 @@ class GitProxyAddon:
         Returns:
             True if the repo is authorized, False otherwise.
         """
+        repo_path = git_op.repo_path()
+
+        # Always allow read-only access to plugin marketplaces
+        if not git_op.is_write and repo_path in ALLOWED_MARKETPLACES:
+            return True
+
         if not allowed_repos:
             # No repos configured - deny all (default deny)
             return False
 
-        repo_path = git_op.repo_path()
         return repo_path in allowed_repos
 
     def _check_bot_mode_restrictions(self, git_op: GitOperation) -> Optional[str]:

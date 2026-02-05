@@ -223,7 +223,7 @@ block_pypi_after_install() {
 #
 # Returns 0 on success or graceful skip, continues on pip failures
 #
-# Note: PyPI is in the gateway allowlist so pip install works through the proxy.
+# Note: PyPI is in the unified-proxy allowlist so pip install works through the proxy.
 # After installation completes, block_pypi_after_install() adds iptables DROP
 # rules to prevent future PyPI access from within the sandbox.
 install_pip_requirements() {
@@ -266,7 +266,7 @@ install_pip_requirements() {
 
     [ "$quiet" != "1" ] && log_info "Installing Python packages from $container_req_path..."
 
-    # Run pip install (PyPI is in gateway allowlist, so this works through the proxy)
+    # Run pip install (PyPI is in unified-proxy allowlist, so this works through the proxy)
     local pip_success=true
     if docker exec -u "$CONTAINER_USER" "$container_id" \
         pip install --no-warn-script-location -r "$container_req_path" 2>&1; then

@@ -15,10 +15,9 @@ Foundry Sandbox implements **defense in depth** with multiple security layers:
          v                         v                         |
 +--------+-------------------------+-------------------------+----------+
 |                           SANDBOX CONTAINER                           |
-|  +----------------+  +----------------+  +------------------+          |
-|  | Shell Override |  | Read-only Root |  | Network Isolation|          |
-|  | (Layer 1)      |  | (Layer 6)      |  | (Layer 5)        |          |
-|  +----------------+  +----------------+  +------------------+          |
+|  +----------------+  +------------------+                              |
+|  | Read-only Root |  | Network Isolation|                              |
+|  +----------------+  +------------------+                              |
 |                              |                    |                   |
 |                              v                    v                   |
 |                    +-------------------+  +-------------------+        |
@@ -58,13 +57,13 @@ Container filesystem is **read-only** by default:
 - Writable tmpfs mounts for `/tmp`, `/home`
 - Changes do not persist across container restarts
 
-### Command Interception
+### Operator Approval
 
-Dangerous commands are **intercepted with warnings**:
+Sensitive operations require **human approval**:
 
-- Shell function overrides catch accidental destructive commands
-- `git reset --hard`, `git push --force`, `rm -rf /` blocked by default
-- Operator approval required for sensitive operations
+- Operator approval required for sensitive operations (TTY-based check)
+- Read-only filesystem prevents destructive filesystem commands
+- Gateway can block dangerous git operations like force push
 
 ## Security Documentation
 
@@ -103,7 +102,7 @@ Dangerous commands are **intercepted with warnings**:
 | ANTHROPIC_API_KEY | No | Yes | Placeholder |
 | OPENAI_API_KEY | No | Yes | Placeholder |
 
-*Optional: The API proxy only uses `GITHUB_TOKEN`/`GH_TOKEN` for GitHub API requests (e.g., PRs, releases). Git operations still go through the gateway, and the sandbox never receives real GitHub tokens.
+*Optional: The API proxy only uses `GITHUB_TOKEN`/`GH_TOKEN` for GitHub API requests (e.g., PRs, releases). Git operations still go through the unified-proxy, and the sandbox never receives real GitHub tokens.
 
 ## Reporting Security Issues
 

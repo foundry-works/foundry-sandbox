@@ -69,9 +69,9 @@ ENV PYTHONPATH=/opt/proxy
 # 8082: Internal API for container registration
 EXPOSE 8080 8081 8082
 
-# Health check - verify proxy port is listening
+# Health check - verify internal API is responsive
 HEALTHCHECK --interval=5s --timeout=5s --start-period=10s --retries=3 \
-    CMD python3 -c "import socket; s=socket.socket(); s.settimeout(2); s.connect(('localhost', 8080)); s.close()" || exit 1
+    CMD curl -sf http://localhost:8082/internal/health || exit 1
 
 # Volume mount points for runtime configuration
 # /etc/proxy/credentials - credential files mounted at runtime

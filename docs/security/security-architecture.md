@@ -180,36 +180,6 @@ The sandbox contains **zero real credentials**:
 
 > **Note:** These features provide helpful warnings but are **not security controls**. They can be trivially bypassed and should not be relied upon for security.
 
-### Shell Overrides
-
-**Purpose:** Help non-adversarial AI avoid accidental destructive commands by providing friendly "BLOCKED" messages.
-
-**Implementation:** `/etc/profile.d/shell-overrides.sh`
-
-**Blocked patterns:**
-
-| Command | What's blocked |
-|---------|----------------|
-| `rm` | All `rm` operations blocked unconditionally |
-| `git reset --hard` | Discards uncommitted changes |
-| `git clean -f` | Deletes untracked files |
-| `git checkout -b` | Branch switching disabled in worktrees |
-| `git checkout -- <file>` | Discards file changes |
-| `git restore` | Except `--staged` only |
-| `git branch -D` | Force delete without merge check |
-| `git stash drop/clear` | Permanently deletes stashes |
-| `git filter-branch` | Rewrites history |
-
-**Bypass methods:**
-```bash
-/bin/rm file.txt          # Direct path
-command rm file.txt       # Builtin bypass
-\rm file.txt              # Escape character
-env rm file.txt           # Environment bypass
-```
-
-**Why keep it:** Catches accidental use, provides helpful error messages to AI, and AI is unlikely to intentionally bypass it. The real security comes from the read-only filesystem.
-
 ### Credential Redaction
 
 **Purpose:** Defense in depth. Masks secrets and sensitive values in command output to prevent accidental exposure.
@@ -240,7 +210,6 @@ python -c "import os; print(os.environ)"  # Different interpreter
 | Sudoers allowlist | Linux kernel | No (from userspace) | Restrict sudo commands |
 | Credential isolation | Gateway architecture | No (without gateway compromise) | Protect credentials |
 | Operator approval | TTY check | No (from non-interactive) | Human-in-the-loop |
-| Shell overrides | Shell functions | **Yes** | UX warnings |
 | Credential redaction | Shell functions | **Yes** | Defense in depth |
 
 ---
@@ -250,7 +219,7 @@ python -c "import os; print(os.environ)"  # Different interpreter
 ### Read-only Filesystem
 
 ```bash
-# Attempt direct write (bypasses shell overrides)
+# Attempt direct write
 /bin/rm -rf /usr
 # Expected: "Read-only file system" error
 

@@ -102,7 +102,7 @@ services:
     read_only: true
 ```
 
-Even if an AI bypasses shell overrides with `/bin/rm -rf /`, the operation fails because the filesystem is immutable.
+Even if an AI runs `/bin/rm -rf /`, the operation fails because the filesystem is immutable.
 
 ### Tmpfs Mounts (Ephemeral Storage)
 
@@ -248,7 +248,6 @@ foundry-sandbox/
     ├── network-mode                # Network mode switcher
     ├── proxy-credential-helper     # Git credential helper (proxy)
     ├── proxy-gitconfig             # Git URL rewriting (proxy)
-    ├── shell-overrides.sh          # UX warnings (not security)
     ├── credential-redaction.sh     # Output masking (not security)
     └── operator-approve            # TTY-based human approval
 ```

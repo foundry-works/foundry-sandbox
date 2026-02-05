@@ -48,12 +48,11 @@ foundry-sandbox/
 │   └── help.sh             # cast help
 │
 ├── safety/                     # Security guardrails
-│   ├── shell-overrides.sh      # Layer 1: Shell function overrides
-│   ├── credential-redaction.sh # Layer 1b: Credential masking
-│   ├── operator-approve        # Layer 2: Human approval wrapper
-│   ├── sudoers-allowlist       # Layer 3: Sudo restrictions
-│   ├── network-firewall.sh     # Layer 4: Network isolation rules
-│   └── network-mode            # Layer 4: Network mode switcher
+│   ├── credential-redaction.sh # Credential masking
+│   ├── operator-approve        # Human approval wrapper
+│   ├── sudoers-allowlist       # Sudo restrictions
+│   ├── network-firewall.sh     # Network isolation rules
+│   └── network-mode            # Network mode switcher
 │
 ├── tests/                  # Test suite
 │
@@ -154,22 +153,7 @@ source "$SCRIPT_DIR/lib/mymodule.sh"
 
 ## Modifying Safety Layers
 
-### Shell Overrides (Layer 1)
-
-Edit `safety/shell-overrides.sh` to add new blocked patterns:
-
-```bash
-# Block dangerous_command
-dangerous_command() {
-    echo "BLOCKED: dangerous_command requires operator approval"
-    return 1
-}
-export -f dangerous_command
-```
-
-Rebuild the image after changes: `cast build`
-
-### Sudoers Allowlist (Layer 3)
+### Sudoers Allowlist
 
 Edit `safety/sudoers-allowlist` to permit new sudo commands:
 
@@ -214,8 +198,8 @@ SANDBOX_VERBOSE=1 ./sandbox.sh mycommand arg
 # Get a shell in the container
 cast attach mybox
 
-# Test shell overrides
-rm -rf /  # Should be blocked
+# Test read-only filesystem
+rm -rf /  # Should fail with "Read-only file system"
 
 # Test sudoers
 sudo apt-get update  # Should work
