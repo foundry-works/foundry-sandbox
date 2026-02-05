@@ -4,20 +4,15 @@ This document explains the credential isolation network architecture, its securi
 
 ## Overview
 
-The credential isolation system prevents sandbox containers from directly accessing credentials (GitHub tokens, API keys) while still allowing them to perform authenticated operations through controlled proxies.
+The credential isolation system prevents sandbox containers from directly accessing credentials (GitHub tokens, API keys) while still allowing them to perform authenticated operations through a controlled proxy.
 
 ```
 +------------------+     +------------------+     +------------------+
-|    Sandbox       |     |    Gateway       |     |   GitHub.com     |
-|    (dev)         |---->|    (git proxy)   |---->|   (upstream)     |
-|                  |     |    [GH_TOKEN]    |     |                  |
+|    Sandbox       |     |  Unified Proxy   |     |  External APIs   |
+|    (dev)         |---->|  (mitmproxy +    |---->|  (GitHub, Anthro-|
+|                  |     |   DNS filter)    |     |   pic, OpenAI)   |
+|  [placeholders]  |     |  [ALL CREDS]     |     |                  |
 +------------------+     +------------------+     +------------------+
-        |
-        |                +------------------+     +------------------+
-        +--------------->|    API Proxy     |---->|   API Endpoints  |
-                         |    (mitmproxy)   |     |   (Anthropic,    |
-                         |    [API_KEYS]    |     |    OpenAI, etc)  |
-                         +------------------+     +------------------+
 ```
 
 ## Security Layers
@@ -37,50 +32,30 @@ networks:
     internal: true
 ```
 
-### Layer 2: ICC Disabled (Inter-Container Communication)
+### Layer 2: Proxy Routing
 
-ICC is disabled via Docker driver options:
+All outbound traffic from the sandbox is routed through the unified proxy:
 
-```yaml
-driver_opts:
-  com.docker.network.bridge.enable_icc: "false"
-```
-
-This prevents:
-- Sandbox containers from communicating with each other
-- Port scanning or lateral movement between sandboxes
-- Only explicitly allowed container-to-container traffic works
-
-### Layer 3: Proxy Routing
-
-All outbound traffic from sandbox is routed through proxies:
-
-**Git Operations (Gateway):**
-- Sandbox uses session token + secret for authentication
-- Gateway validates session and injects real `GITHUB_TOKEN`
-- Gateway proxies to github.com with real credentials
-- Sandbox never sees the real token
-
-**API Requests (API Proxy):**
-- `HTTP_PROXY` and `HTTPS_PROXY` point to api-proxy
+- `HTTP_PROXY` and `HTTPS_PROXY` point to `unified-proxy:8080`
 - Sandbox uses placeholder API keys (`CREDENTIAL_PROXY_PLACEHOLDER`)
-- API proxy intercepts requests and injects real credentials
+- Unified proxy intercepts requests and injects real credentials
 - mitmproxy CA certificate trusted by sandbox for HTTPS interception
+- Git operations also flow through the proxy, which injects `GITHUB_TOKEN`
 
 ```yaml
 environment:
-  - HTTP_PROXY=http://api-proxy:8080
-  - HTTPS_PROXY=http://api-proxy:8080
-  - NO_PROXY=localhost,127.0.0.1,api-proxy,gateway
+  - HTTP_PROXY=http://unified-proxy:8080
+  - HTTPS_PROXY=http://unified-proxy:8080
+  - NO_PROXY=localhost,127.0.0.1,unified-proxy
 ```
 
-### Layer 4: DNS Isolation
+### Layer 3: DNS Isolation
 
-DNS is routed through the gateway's dnsmasq:
+DNS is routed through the unified proxy's DNS filter (enabled by default via `PROXY_ENABLE_DNS=true`):
 
 ```yaml
-dns:
-  - gateway
+# Sandbox resolv.conf is configured by entrypoint-root.sh to point to unified-proxy
+# iptables rules restrict DNS to unified-proxy only
 ```
 
 This enables:
@@ -88,32 +63,44 @@ This enables:
 - Blocking of unauthorized domains
 - Preventing DNS-based data exfiltration
 
-### Layer 5: iptables Rules (Defense-in-Depth)
+### Layer 4: iptables Rules (Defense-in-Depth)
 
 Additional iptables rules in `safety/network-firewall.sh`:
 
 **Container-level (OUTPUT chain):**
-- Allow traffic to gateway and api-proxy
-- Allow DNS only to configured resolvers
+- Allow traffic to unified-proxy
+- Allow DNS only to unified-proxy
 - Allow traffic to allowlisted domains (resolved at startup)
 - Wildcard mode: open ports 80/443 (security via DNS filtering)
 - Drop all other outbound traffic
 
 **Host-level (DOCKER-USER chain):**
 - Block direct external egress from sandbox subnet
-- Allow DNS only to gateway
+- Allow DNS only to unified-proxy
 - Processed before Docker's own rules
+
+### Layer 5: CAP_NET_RAW Dropped
+
+Both sandbox and unified-proxy containers drop `CAP_NET_RAW`:
+
+```yaml
+cap_drop:
+  - NET_RAW
+```
+
+This prevents IP spoofing, ARP poisoning, and raw packet sniffing on the Docker bridge network.
 
 ## Credential Exposure Matrix
 
-| Credential | Gateway | API Proxy | Sandbox |
-|------------|---------|-----------|---------|
-| GITHUB_TOKEN | Yes | Optional* | No |
-| ANTHROPIC_API_KEY | No | Yes | Placeholder |
-| OPENAI_API_KEY | No | Yes | Placeholder |
-| Other API Keys | No | Yes | Placeholder |
+| Credential | Unified Proxy | Sandbox |
+|------------|---------------|---------|
+| GITHUB_TOKEN / GH_TOKEN | Yes | No (empty) |
+| ANTHROPIC_API_KEY | Yes | Placeholder |
+| OPENAI_API_KEY | Yes | Placeholder |
+| GOOGLE_API_KEY | Yes | Placeholder |
+| Other API Keys | Yes | Placeholder |
 
-*Optional: The API proxy only uses `GITHUB_TOKEN`/`GH_TOKEN` for GitHub API requests (e.g., PRs, releases). Git operations remain gateway-only.
+The unified proxy holds all real credentials. Sandboxes never see real values.
 
 ## Proof of No Bypass Path
 
@@ -122,12 +109,12 @@ Additional iptables rules in `safety/network-firewall.sh`:
 - **Backup:** DOCKER-USER chain drops external egress
 
 ### Container-to-Container Snooping
-- **Blocked by:** ICC disabled (`enable_icc: false`)
-- **Backup:** iptables OUTPUT rules
+- **Blocked by:** Separate Docker networks per sandbox project
+- **Backup:** iptables OUTPUT rules, CAP_NET_RAW dropped
 
 ### DNS Exfiltration
-- **Blocked by:** DNS routed to gateway only
-- **Backup:** DOCKER-USER chain drops port 53 except to gateway
+- **Blocked by:** DNS routed to unified-proxy only
+- **Backup:** DOCKER-USER chain drops port 53 except to unified-proxy
 
 ### Credential Theft from Proxy
 - **Blocked by:** Sandboxes only see placeholder values
@@ -140,19 +127,26 @@ Additional iptables rules in `safety/network-firewall.sh`:
 ## Service Dependencies
 
 ```
-gateway ─────────────┐
-                     ├──> dev (sandbox)
-api-proxy ───────────┘
+unified-proxy ───────> dev (sandbox)
 ```
 
-Both gateway and api-proxy must be healthy before sandbox starts:
+The unified proxy must be healthy before the sandbox starts:
 
 ```yaml
 depends_on:
-  api-proxy:
+  unified-proxy:
     condition: service_healthy
-  gateway:
-    condition: service_healthy
+```
+
+The healthcheck verifies the internal API is responsive via Unix socket:
+
+```yaml
+healthcheck:
+  test: ["CMD", "curl", "-sf", "--unix-socket", "/var/run/proxy/internal.sock", "http://localhost/internal/health"]
+  interval: 5s
+  timeout: 5s
+  retries: 5
+  start_period: 10s
 ```
 
 ## Configuration Files
@@ -173,13 +167,7 @@ To verify isolation is working:
    docker network inspect credential-isolation
    ```
 
-2. **Verify ICC disabled:**
-   ```bash
-   docker network inspect credential-isolation --format '{{.Options}}'
-   # Should show: map[com.docker.network.bridge.enable_icc:false]
-   ```
-
-3. **Test from sandbox:**
+2. **Test from sandbox:**
    ```bash
    # Should fail - direct external access blocked
    curl https://github.com
@@ -188,9 +176,18 @@ To verify isolation is working:
    git clone https://github.com/owner/repo.git
    ```
 
-4. **Verify credentials not exposed:**
+3. **Verify credentials not exposed:**
    ```bash
    # In sandbox - should show placeholder
    echo $ANTHROPIC_API_KEY
    # Output: CREDENTIAL_PROXY_PLACEHOLDER
+   ```
+
+4. **Verify DNS filtering:**
+   ```bash
+   # Should fail - not on allowlist
+   dig @8.8.8.8 example.com
+
+   # Should work - goes through unified-proxy DNS
+   dig github.com
    ```

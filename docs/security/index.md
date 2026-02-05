@@ -18,14 +18,14 @@ Foundry Sandbox implements **defense in depth** with multiple security layers:
 |  +----------------+  +------------------+                              |
 |  | Read-only Root |  | Network Isolation|                              |
 |  +----------------+  +------------------+                              |
-|                              |                    |                   |
-|                              v                    v                   |
-|                    +-------------------+  +-------------------+        |
-|                    |  Credential       |  |   API Proxy      |        |
-|                    |  Gateway          |  |   (mitmproxy)    |        |
-|                    |  [GITHUB_TOKEN]   |  |   [API_KEYS +    |        |
-|                    |                  |  |    GITHUB_TOKEN*]|        |
-|                    +-------------------+  +-------------------+        |
+|                              |                                        |
+|                              v                                        |
+|                    +-------------------+                               |
+|                    |  Unified Proxy    |                               |
+|                    |  [ALL CREDS:      |                               |
+|                    |   GITHUB_TOKEN,   |                               |
+|                    |   API_KEYS]       |                               |
+|                    +-------------------+                               |
 +---------------------------------------------------------------------------+
 ```
 
@@ -36,17 +36,16 @@ Foundry Sandbox implements **defense in depth** with multiple security layers:
 Real credentials (GitHub tokens, API keys) **never enter sandbox containers**:
 
 - Sandboxes receive placeholder values (`CREDENTIAL_PROXY_PLACEHOLDER`)
-- Real credentials are held by gateway and API proxy containers
-- Proxies inject credentials into outbound requests
-- Session tokens authenticate sandboxes to proxies
+- Real credentials are held by the unified-proxy container
+- The proxy intercepts outbound requests and injects credentials
+- Container registration authenticates sandboxes to the proxy
 
 ### Network Isolation
 
 Sandboxes have **restricted network access**:
 
 - Internal Docker network with no default gateway
-- Inter-container communication (ICC) disabled
-- DNS routed through controlled resolver
+- DNS routed through unified-proxy's DNS filter (enabled by default)
 - iptables rules for defense-in-depth
 
 ### Filesystem Protection
@@ -63,7 +62,7 @@ Sensitive operations require **human approval**:
 
 - Operator approval required for sensitive operations (TTY-based check)
 - Read-only filesystem prevents destructive filesystem commands
-- Gateway can block dangerous git operations like force push
+- Unified proxy can block dangerous git operations like force push
 
 ## Security Documentation
 
@@ -90,19 +89,19 @@ Sensitive operations require **human approval**:
 | Mode | Description | Use Case |
 |------|-------------|----------|
 | `limited` | Allowlist only (default) | Normal development |
-| `full` | Unrestricted access | When full internet needed |
 | `host-only` | Local network only | Isolated development |
 | `none` | Loopback only | Maximum isolation |
 
 ### Credential Exposure
 
-| Credential | Gateway | API Proxy | Sandbox |
-|------------|---------|-----------|---------|
-| GITHUB_TOKEN | Yes | Optional* | Session token only |
-| ANTHROPIC_API_KEY | No | Yes | Placeholder |
-| OPENAI_API_KEY | No | Yes | Placeholder |
+| Credential | Unified Proxy | Sandbox |
+|------------|---------------|---------|
+| GITHUB_TOKEN / GH_TOKEN | Yes | No (empty) |
+| ANTHROPIC_API_KEY | Yes | Placeholder |
+| OPENAI_API_KEY | Yes | Placeholder |
+| Other API Keys | Yes | Placeholder |
 
-*Optional: The API proxy only uses `GITHUB_TOKEN`/`GH_TOKEN` for GitHub API requests (e.g., PRs, releases). Git operations still go through the unified-proxy, and the sandbox never receives real GitHub tokens.
+The unified proxy holds all real credentials and injects them into outbound requests. Sandboxes never receive real tokens.
 
 ## Reporting Security Issues
 
@@ -118,7 +117,7 @@ If you discover a security vulnerability:
 This security model assumes:
 
 1. **Docker is trusted** - Container escape vulnerabilities are out of scope
-2. **Orchestrator is trusted** - Session management is a privileged operation
+2. **Orchestrator is trusted** - Container registration is a privileged operation
 3. **Host is secure** - Host-level security is prerequisite
 4. **Network isolation works** - Docker networking and iptables are reliable
 

@@ -268,7 +268,7 @@ start_mitmproxy() {
     # Also load legacy addons for backward compatibility
     args+=(-s "${GITHUB_FILTER_PATH}")
 
-    # Debug logging if requested
+    # Flow detail: debug shows full detail
     if [[ "${log_level}" == "debug" ]]; then
         args+=(--set flow_detail=3)
     fi

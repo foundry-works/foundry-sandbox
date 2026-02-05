@@ -18,6 +18,7 @@ foundry-sandbox/
 │   ├── fs.sh               # Filesystem operations
 │   ├── format.sh           # Output formatting
 │   ├── validate.sh         # Input validation
+│   ├── api_keys.sh         # API key management
 │   ├── args.sh             # Argument parsing
 │   ├── prompt.sh           # User prompts
 │   ├── git.sh              # Git operations
@@ -30,8 +31,12 @@ foundry-sandbox/
 │   ├── paths.sh            # Path derivation
 │   ├── state.sh            # Sandbox state management
 │   ├── runtime.sh          # Runtime operations
+│   ├── ide.sh              # IDE integration (Cursor, Zed, VS Code)
 │   ├── json.sh             # JSON output helpers
-│   └── inspect.sh          # Sandbox inspection
+│   ├── inspect.sh          # Sandbox inspection
+│   ├── network.sh          # Network configuration
+│   ├── permissions.sh      # Permission management
+│   └── proxy.sh            # Unified proxy registration (container lifecycle)
 │
 ├── commands/               # Command implementations
 │   ├── new.sh              # cast new
@@ -40,11 +45,15 @@ foundry-sandbox/
 │   ├── start.sh            # cast start
 │   ├── stop.sh             # cast stop
 │   ├── destroy.sh          # cast destroy
+│   ├── destroy-all.sh      # cast destroy-all
 │   ├── build.sh            # cast build
 │   ├── status.sh           # cast status
 │   ├── config.sh           # cast config
 │   ├── prune.sh            # cast prune
 │   ├── info.sh             # cast info
+│   ├── preset.sh           # cast preset
+│   ├── refresh-credentials.sh # cast refresh-credentials
+│   ├── upgrade.sh          # cast upgrade
 │   └── help.sh             # cast help
 │
 ├── safety/                     # Security guardrails
@@ -98,9 +107,17 @@ Edit `sandbox.sh` to add the command to the case statement:
 
 ```bash
 case "$cmd" in
-    new|list|attach|start|stop|destroy|build|help|status|config|prune|info|mycommand)
+    new|list|attach|start|stop|destroy|build|help|status|config|prune|info|upgrade|preset|mycommand)
         source "$SCRIPT_DIR/commands/$cmd.sh"
         "cmd_$cmd" "$@"
+        ;;
+    refresh-credentials)
+        source "$SCRIPT_DIR/commands/refresh-credentials.sh"
+        cmd_refresh_credentials "$@"
+        ;;
+    destroy-all)
+        source "$SCRIPT_DIR/commands/destroy-all.sh"
+        cmd_destroy_all "$@"
         ;;
     ...
 esac
@@ -119,7 +136,7 @@ echo "  mycommand <arg>        Description of what it does"
 Edit `completion.bash` to add completion for the new command:
 
 ```bash
-local commands="new list attach start stop destroy build help status config prune info mycommand"
+local commands="new list attach start stop destroy destroy-all build help status config prune info preset refresh-credentials upgrade mycommand"
 ```
 
 ## Adding a Library Module

@@ -6,6 +6,18 @@ Accepted
 
 Date: 2026-02-04
 
+### Update (2026-02-05)
+
+The gateway and api-proxy have been consolidated into a single **unified-proxy** service. Key differences from the original two-service model described below:
+
+- **Single service**: One unified-proxy container replaces both gateway and api-proxy. The sandbox depends on one `service_healthy` condition, not two.
+- **Single healthcheck**: The unified-proxy exposes an internal API via Unix socket (`/var/run/proxy/internal.sock`). The healthcheck uses `curl -sf --unix-socket /var/run/proxy/internal.sock http://localhost/internal/health`.
+- **SQLite registry**: Session tokens stored in a Python dictionary have been replaced by a SQLite-backed container registry (`unified-proxy/registry.py`) with WAL mode and TTL-based expiration. Registrations survive proxy restarts.
+- **Integrated DNS filter**: DNS filtering is now built into mitmproxy as an addon (`dns_filter.py`) running on port 53, replacing the separate dnsmasq process.
+- **Startup sequence**: The proxy starts internal API, validates addons, then starts mitmproxy with HTTP (port 8080) and optional DNS (port 53) modes.
+
+The fail-closed principles and error scenarios described below remain valid. References to "gateway" and "api-proxy" as separate services are historical.
+
 ## Context
 
 The unified proxy system (gateway + api-proxy) is a critical security component that enforces credential isolation and network restrictions. If the proxy fails silently or becomes partially available, the sandbox could:
@@ -348,8 +360,10 @@ Store sessions in Redis/database so they survive proxy restarts.
 
 - [docker-compose.credential-isolation.yml](/workspace/docker-compose.credential-isolation.yml) - Healthcheck configuration
 - [Security Architecture](/workspace/docs/security/security-architecture.md) - Security pillars overview
-- [Credential Isolation](/workspace/docs/security/credential-isolation.md) - Gateway threat model and network isolation
+- [Credential Isolation](/workspace/docs/security/credential-isolation.md) - Credential isolation threat model
 - [entrypoint-root.sh](/workspace/entrypoint-root.sh) - DNS firewall and startup initialization
 - [entrypoint.sh](/workspace/entrypoint.sh) - Sandbox user-level startup
-- [gateway.py](/workspace/gateway/gateway.py) - Health endpoint and domain allowlist loading
+- `gateway/gateway.py` - (deleted; migrated to `unified-proxy/`)
+- [unified-proxy/entrypoint.sh](/workspace/unified-proxy/entrypoint.sh) - Proxy startup with internal API, addon validation, and mitmproxy
+- [unified-proxy/registry.py](/workspace/unified-proxy/registry.py) - SQLite-backed container registry (replaces in-memory session store)
 - Docker Compose Documentation: [depends_on with service_healthy condition](https://docs.docker.com/compose/compose-file/compose-file-v3/#depends_on)

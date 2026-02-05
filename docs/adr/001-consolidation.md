@@ -147,9 +147,9 @@ Consolidate both proxy services into a single **unified-proxy** component that:
 
 ## References
 
-- `/workspace/gateway/gateway.py` - Current Flask-based Git gateway (1565 lines)
-- `/workspace/api-proxy/inject-credentials.py` - Current mitmproxy credential injection addon (662 lines)
-- `/workspace/docker-compose.credential-isolation.yml` - Current two-service composition (281 lines)
+- `/workspace/gateway/gateway.py` - (deleted; migrated to `unified-proxy/`)
+- `/workspace/api-proxy/inject-credentials.py` - (deleted; migrated to `unified-proxy/addons/credential_injector.py`)
+- `/workspace/docker-compose.credential-isolation.yml` - Unified single-service composition
 - `/workspace/docs/security/credential-isolation.md` - Credential isolation security model
-- `/workspace/docs/architecture.md` - Current system architecture documentation
+- `/workspace/docs/architecture.md` - System architecture documentation
 - NIST SP 800-12 Rev. 1 - Principles of defense in depth (consolidation reduces complexity for same security)

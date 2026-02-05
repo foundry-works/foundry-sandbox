@@ -438,3 +438,21 @@ def flask_request_middleware(app):
 # Initialize logging when module is imported (with defaults)
 # Applications can call setup_logging() again to customize
 setup_logging()
+
+
+class _ConnectionLifecycleFilter(logging.Filter):
+    """Suppress noisy mitmproxy connection lifecycle log messages."""
+
+    _NOISY_PREFIXES = (
+        "client connect",
+        "client disconnect",
+        "server connect",
+        "server disconnect",
+    )
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        msg = record.getMessage()
+        return not any(msg.startswith(prefix) for prefix in self._NOISY_PREFIXES)
+
+
+logging.getLogger("mitmproxy.proxy.server").addFilter(_ConnectionLifecycleFilter())

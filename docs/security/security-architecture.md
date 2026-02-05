@@ -27,7 +27,7 @@ AI Command ────────►│  ┌───────────�
                     │                                     │
                     │  ┌─────────────────────────────┐   │
                     │  │   Credential Isolation      │   │
-                    │  │   (gateway architecture)    │   │
+                    │  │   (unified-proxy)           │   │
                     │  └─────────────────────────────┘   │
                     │                                     │
                     └─────────────────────────────────────┘
@@ -125,7 +125,7 @@ Then rebuild: `cast build`
 
 ### Credential Isolation
 
-**Enforced by:** Gateway architecture (when enabled)
+**Enforced by:** Unified-proxy architecture (when enabled)
 
 **Implementation:** `docker-compose.credential-isolation.yml`
 
@@ -135,14 +135,14 @@ The sandbox contains **zero real credentials**:
 
 | Credential | Where it lives | What sandbox sees |
 |------------|----------------|-------------------|
-| GITHUB_TOKEN | Gateway container (git), API Proxy container (GitHub API, optional) | Nothing (session token for auth) |
-| ANTHROPIC_API_KEY | API Proxy container | `CREDENTIAL_PROXY_PLACEHOLDER` |
-| OPENAI_API_KEY | API Proxy container | `CREDENTIAL_PROXY_PLACEHOLDER` |
-| Other API keys | API Proxy container | `CREDENTIAL_PROXY_PLACEHOLDER` |
+| GITHUB_TOKEN / GH_TOKEN | Unified Proxy container | Nothing (empty) |
+| ANTHROPIC_API_KEY | Unified Proxy container | `CREDENTIAL_PROXY_PLACEHOLDER` |
+| OPENAI_API_KEY | Unified Proxy container | `CREDENTIAL_PROXY_PLACEHOLDER` |
+| Other API keys | Unified Proxy container | `CREDENTIAL_PROXY_PLACEHOLDER` |
 
 - Real credentials never enter sandbox containers
-- Sandboxes authenticate to gateway using session tokens
-- Gateway/proxy inject real credentials into outbound requests
+- Sandboxes are registered with the proxy via container registration
+- Unified proxy injects real credentials into outbound requests
 - AI cannot exfiltrate credentials that don't exist in its environment
 
 **What this means:**
@@ -150,7 +150,7 @@ The sandbox contains **zero real credentials**:
 - Memory scraping yields nothing useful
 - Exfiltration attempts get placeholder values, not real secrets
 
-**Bypass:** Cannot be bypassed without compromising the gateway container itself (which runs outside the sandbox).
+**Bypass:** Cannot be bypassed without compromising the unified-proxy container itself (which runs outside the sandbox).
 
 **Reference:** [Credential Isolation](credential-isolation.md)
 
@@ -208,7 +208,7 @@ python -c "import os; print(os.environ)"  # Different interpreter
 | Read-only filesystem | Docker/kernel | No (from container) | Prevent filesystem writes |
 | Network isolation | Docker/dnsmasq/iptables | No (from container) | Control network egress |
 | Sudoers allowlist | Linux kernel | No (from userspace) | Restrict sudo commands |
-| Credential isolation | Gateway architecture | No (without gateway compromise) | Protect credentials |
+| Credential isolation | Unified-proxy architecture | No (without proxy compromise) | Protect credentials |
 | Operator approval | TTY check | No (from non-interactive) | Human-in-the-loop |
 | Credential redaction | Shell functions | **Yes** | Defense in depth |
 
@@ -267,6 +267,6 @@ echo "test" | /opt/operator/bin/operator-approve echo "test"
 ## Next Steps
 
 - [Sandbox Threats](sandbox-threats.md) - What we're protecting against
-- [Credential Isolation](credential-isolation.md) - Gateway threat model
+- [Credential Isolation](credential-isolation.md) - Credential isolation threat model
 - [Network Isolation](network-isolation.md) - Detailed network architecture
 - [Security Overview](index.md) - Quick reference

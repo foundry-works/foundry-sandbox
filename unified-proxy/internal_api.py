@@ -30,7 +30,13 @@ from flask import Flask, request, jsonify, Response
 from registry import ContainerRegistry
 
 # Configure logging
+class _HealthCheckFilter(logging.Filter):
+    def filter(self, record: logging.LogRecord) -> bool:
+        msg = record.getMessage()
+        return "/internal/health" not in msg
+
 logging.basicConfig(level=logging.INFO)
+logging.getLogger("werkzeug").addFilter(_HealthCheckFilter())
 logger = logging.getLogger(__name__)
 
 # Configuration

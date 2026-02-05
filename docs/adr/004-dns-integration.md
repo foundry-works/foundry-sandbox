@@ -6,6 +6,20 @@ Accepted
 
 Date: 2026-02-04
 
+### Update (2026-02-05)
+
+The `gateway/` directory has been deleted and all functionality migrated to `unified-proxy/`. Key path and variable changes:
+
+| Original | Current |
+|----------|---------|
+| `gateway/entrypoint.sh` | `unified-proxy/entrypoint.sh` |
+| `gateway/build-configs.sh` | Removed (config generation integrated into proxy startup) |
+| `gateway/allowlist.conf` | `config/allowlist.yaml` (YAML format) |
+| `lib/gateway.sh` | `lib/proxy.sh` (container registration via Unix socket) |
+| `GATEWAY_ENABLE_DNS` | `PROXY_ENABLE_DNS` |
+
+DNS filtering is now enabled by default (`PROXY_ENABLE_DNS=true`) and uses mitmproxy's built-in DNS mode (`--mode dns@53`) with a `dns_filter.py` addon, replacing the separate dnsmasq process. The dual-layer filtering approach (DNS + firewall) described below remains the same in principle.
+
 ## Context
 
 The Foundry Sandbox system needs to enforce network isolation through DNS filtering. Currently, the credential isolation gateway uses dnsmasq to control DNS resolution and restrict egress to allowlisted domains. The unified proxy architecture must decide how to integrate DNS control while maintaining flexibility for deployments that may not require DNS integration.
@@ -178,15 +192,17 @@ entrypoint-root.sh (as root)
 ## References
 
 - [Network Isolation Architecture](../security/network-isolation.md) - How DNS fits into broader network security
-- [Domain Allowlist](../gateway/allowlist.conf) - Allowlisted domains and categories
+- Domain Allowlist - now at `config/allowlist.yaml` (was `gateway/allowlist.conf`)
 - [Credential Isolation](../security/credential-isolation.md) - Gateway architecture and session management
 - [Sandbox Threats](../security/sandbox-threats.md) - Threat model and what we protect against
 - [Security Architecture](../security/security-architecture.md) - Defense in depth overview
 
 ### Implementation Files
 
-- `gateway/entrypoint.sh` - Gateway startup with optional dnsmasq
-- `gateway/build-configs.sh` - Configuration file generation from allowlist
+- `gateway/entrypoint.sh` - (deleted; migrated to `unified-proxy/entrypoint.sh`)
+- `gateway/build-configs.sh` - (deleted; config generation integrated into proxy startup)
+- `unified-proxy/entrypoint.sh` - Proxy startup with integrated DNS filter
+- `unified-proxy/addons/dns_filter.py` - DNS filtering addon for mitmproxy
 - `entrypoint-root.sh` - Root entrypoint that configures DNS before privilege drop
 - `safety/network-firewall.sh` - Firewall rule setup using allowlist
-- `lib/gateway.sh` - Session management (calls gateway URL via TCP)
+- `lib/proxy.sh` - Container registration (calls proxy via Unix socket; replaces `lib/gateway.sh`)

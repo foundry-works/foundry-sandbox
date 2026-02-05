@@ -65,6 +65,22 @@ Sandboxes default to disabling update checks and analytics via `~/.codex/config.
 
 Run `opencode auth login` for zai-coding-plan authentication.
 
+### Python / PyPI Packages
+
+Install Python packages from a requirements file using `--pip-requirements` / `-r`:
+
+```bash
+# Explicit requirements file
+cast new owner/repo feature -r requirements.txt
+
+# Auto-detect: looks for requirements.txt, requirements-dev.txt, etc.
+cast new owner/repo feature -r auto
+```
+
+When `auto` is specified, the sandbox scans the repository root for common requirements file patterns (`requirements*.txt`) and installs them automatically.
+
+Packages are re-installed on `cast start` and `cast attach` (if the sandbox was stopped), ensuring dependencies stay in sync after container restart.
+
 ### Tmux
 
 Sandbox tmux sessions can be tuned via environment variables:
