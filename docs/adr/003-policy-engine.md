@@ -7,6 +7,10 @@ Accepted
 Date: 2026-02-04
 Implemented: 2026-02-05
 
+### Update (2026-02-05)
+
+Gateway consolidated into **unified-proxy** (see [ADR-005](005-unified-proxy.md)). Allowlist moved from `gateway/allowlist.conf` to `config/allowlist.yaml`. Policy paths moved from `/etc/gateway/policies/` to `/etc/proxy/policies/`.
+
 ### Implementation Notes
 
 Policy engine implemented in `unified-proxy/addons/policy_engine.py`:
@@ -19,7 +23,7 @@ Policy engine implemented in `unified-proxy/addons/policy_engine.py`:
 
 ## Context
 
-The unified proxy (gateway) currently implements a simple, flat domain allowlist in `gateway/allowlist.conf` that controls which external domains are accessible from sandbox containers. As the system scales to support multiple policy types (domain allowlisting, rate limiting, content filtering) and complex scenarios (per-container policies, global policies, default behaviors), we need a more sophisticated policy evaluation framework that:
+The unified proxy currently implements a simple, flat domain allowlist in `config/allowlist.yaml` that controls which external domains are accessible from sandbox containers. As the system scales to support multiple policy types (domain allowlisting, rate limiting, content filtering) and complex scenarios (per-container policies, global policies, default behaviors), we need a more sophisticated policy evaluation framework that:
 
 1. **Handles policy complexity**: Moving beyond simple domain allowlists to support rate limits, content filtering, and other policy types
 2. **Supports multiple policy scopes**: Container-specific policies, sandbox-wide policies, and global fallback policies
@@ -29,7 +33,7 @@ The unified proxy (gateway) currently implements a simple, flat domain allowlist
 
 ### Current System
 
-- **Allowlist file**: `gateway/allowlist.conf` - single source of truth for domain allowlists
+- **Allowlist file**: `config/allowlist.yaml` - single source of truth for domain allowlists
 - **Format**: Domains with optional type tags (github, ai, research, etc.)
 - **Wildcards**: Support for wildcard domains (*.example.com) matching any subdomain
 - **Firewall integration**: Allowlist coordinates with DNS and limited-mode firewall rules
@@ -278,10 +282,10 @@ config:
 
 #### File-Based Policy Format
 
-Policies stored in `/etc/gateway/policies/` with clear structure:
+Policies stored in `/etc/proxy/policies/` with clear structure:
 
 ```
-/etc/gateway/policies/
+/etc/proxy/policies/
 ├── global/
 │   ├── 00-allowlist.yaml      # Global allowlist policies
 │   ├── 10-rate-limits.yaml    # Global rate limit policies
@@ -355,7 +359,7 @@ def find_matching_policy(policies, request, scope):
 
 ### 6. Backward Compatibility
 
-The current `gateway/allowlist.conf` format is automatically converted to policy format on startup:
+The current `config/allowlist.yaml` format is automatically converted to policy format on startup:
 
 ```yaml
 # Old format in allowlist.conf
@@ -406,14 +410,14 @@ The allowlist.conf remains the single source of truth for global allowlist polic
    - Mitigation: Provide templating/inheritance mechanisms, policy audit tools
 4. **Priority confusion**: Operators may misunderstand priority semantics (higher number = stronger)
    - Mitigation: Clear documentation, validation tools to warn of unexpected configurations
-5. **Rate limiting state**: Rate limit policies require in-memory state (counters) that doesn't survive gateway restart
+5. **Rate limiting state**: Rate limit policies require in-memory state (counters) that doesn't survive proxy restart
    - Mitigation: Accept per-session rate limit resets as acceptable; monitor for issues
 
 ### Neutral
 
 1. **Memory usage**: Policy cache increases memory footprint (acceptable for typical policy counts)
 2. **Hot reload complexity**: If policies can be hot-reloaded without restart, adds implementation complexity
-   - Decision: Require gateway restart for policy changes (simpler, adequate for most use cases)
+   - Decision: Require proxy restart for policy changes (simpler, adequate for most use cases)
 3. **Separate policy files**: Organization into multiple files adds to deployment package size (negligible)
 
 ## Alternatives Considered
@@ -457,7 +461,7 @@ Instead of strict default-deny, implicitly allow if no policy matches.
 
 ### Alternative 5: Dynamic Policy Evaluation
 
-Support hot-reloading policies without gateway restart.
+Support hot-reloading policies without proxy restart.
 
 **Rejected because:**
 - Adds complexity to policy loading/caching logic
@@ -468,7 +472,7 @@ Support hot-reloading policies without gateway restart.
 ## References
 
 - [Security Architecture](../security/security-architecture.md) - Security design principles
-- [Credential Isolation Gateway Threat Model](../security/credential-isolation.md) - Threat model that informed policy needs
+- [Credential Isolation Threat Model](../security/credential-isolation.md) - Threat model that informed policy needs
 - [Network Isolation](../security/network-isolation.md) - Network architecture that policies control
-- [Current Allowlist Implementation](../../gateway/allowlist.conf) - Existing domain allowlist format
+- [Current Allowlist Implementation](../../config/allowlist.yaml) - Domain allowlist configuration
 - [Architecture Overview](../architecture.md) - System architecture context

@@ -7,6 +7,10 @@ Accepted
 Date: 2026-02-04
 Implemented: 2026-02-05
 
+### Update (2026-02-05)
+
+Gateway consolidated into **unified-proxy** (see [ADR-005](005-unified-proxy.md)). Identity registry uses SQLite (`unified-proxy/registry.py`). Registration via Unix socket (`/var/run/proxy/internal.sock`).
+
 ### Implementation Notes
 
 Container identity implemented in `unified-proxy/addons/container_identity.py`:
@@ -19,7 +23,7 @@ Container identity implemented in `unified-proxy/addons/container_identity.py`:
 
 ## Context
 
-The unified proxy (gateway) needs to reliably identify which sandbox container is making requests. This is crucial for:
+The unified proxy needs to reliably identify which sandbox container is making requests. This is crucial for:
 
 - **Per-container policy enforcement** - Different sandboxes may have different access policies, network allowlists, and credential profiles
 - **Credential isolation** - Each sandbox must authenticate with its own session token, and real credentials must be injected per-container
@@ -44,7 +48,7 @@ Containers are identified by their unique IP address on the Docker network creat
 
 - Each sandbox container receives a unique IP from the docker-compose service's network
 - The IP address is stable within the container's lifetime
-- The IP is registered in a gateway-managed identity registry when the container connects to the gateway
+- The IP is registered in the proxy-managed identity registry when the container connects to the proxy
 - The IP can be discovered from the proxy's perspective via socket inspection or explicit registration
 
 **Advantages:**
@@ -55,7 +59,7 @@ Containers are identified by their unique IP address on the Docker network creat
 
 **Limitations:**
 - IP changes on container restart (fresh container gets new IP)
-- Requires gateway to inspect source IPs on each request
+- Requires proxy to inspect source IPs on each request
 
 ### Layer 2: Optional Header Validation (Secondary)
 
@@ -90,7 +94,7 @@ Structure:
 
 #### 1. Container Registration (Startup)
 
-When a container starts and makes its first request to the gateway:
+When a container starts and makes its first request to the proxy:
 
 ```
 Container starts
@@ -99,7 +103,7 @@ entrypoint.sh generates session token
     ↓
 Container makes initial request with X-Sandbox-ID header
     ↓
-Gateway validates header and registers:
+Proxy validates header and registers:
   {
     "ip": "172.20.0.5",
     "sandbox_name": "repo-feature-branch",
@@ -142,7 +146,7 @@ New IP assigned (likely different from old IP)
     ↓
 Container makes request with NEW session token (generated at startup)
     ↓
-Gateway sees new IP + new token
+Proxy sees new IP + new token
     ↓
 Creates new registration
 Previous registration eventually garbage collected
@@ -151,7 +155,7 @@ Previous registration eventually garbage collected
 This design allows:
 - Clear distinction between "same container after restart" (new IP, new token) vs. "network hiccup" (same IP, same token)
 - Audit trail: Old and new registrations visible in logs before cleanup
-- Policy decisions: Gateway can decide whether restart resets quota, permissions, etc.
+- Policy decisions: Proxy can decide whether restart resets quota, permissions, etc.
 
 #### 4. Container Removal (Graceful)
 
@@ -161,10 +165,10 @@ Option A (Proactive cleanup):
 ```
 cast destroy sandbox-name
     ↓
-Script sends shutdown signal to gateway:
-  DELETE /gateway/containers/{sandbox-name}
+Script sends shutdown signal to proxy:
+  DELETE /proxy/containers/{sandbox-name}
     ↓
-Gateway:
+Proxy:
   - Finds all registrations matching sandbox_name
   - Marks as "removed"
   - Closes any active sessions
@@ -204,15 +208,15 @@ Log orphaned containers and removals for audit trail
 
 ### Migration Path: Container Restart Detection
 
-Using the `container-start-time` field, the gateway can detect when a container restarts:
+Using the `container-start-time` field, the proxy can detect when a container restarts:
 
 ```
 Request 1: X-Sandbox-ID: sandbox-name:2026-02-04T10:30:45.123Z:token123
-  → Gateway registers: start_time = 2026-02-04T10:30:45.123Z
+  → Proxy registers: start_time = 2026-02-04T10:30:45.123Z
 
 Request 2 (5 min later): X-Sandbox-ID: sandbox-name:2026-02-04T10:35:12.456Z:token456
   → start_time CHANGED
-  → Gateway detects restart
+  → Proxy detects restart
   → Actions: reset quota, close old sessions, create new registration
 ```
 
@@ -223,20 +227,20 @@ This explicit signal is more reliable than inferring from IP changes alone.
 ### Positive
 
 - **Simplicity:** IP addresses are assigned by Docker; no manual registration protocol needed
-- **Decoupling:** Gateway doesn't need to know sandbox names; identity works even if names change
+- **Decoupling:** Proxy doesn't need to know sandbox names; identity works even if names change
 - **Defense in depth:** Header-based verification provides additional security layer
 - **Auditability:** Session tokens and start times provide clear audit trail
 - **Graceful restart handling:** Containers can restart and obtain new identity without manual intervention
-- **Passive safety:** TTL ensures registrations eventually clean up even if gateway crashes or containers die unexpectedly
+- **Passive safety:** TTL ensures registrations eventually clean up even if proxy crashes or containers die unexpectedly
 - **Clear signals:** Container restart is explicitly detectable via `container-start-time` change
 
 ### Negative
 
-- **IP dependencies:** Gateway must reliably inspect request source IPs (fails if proxy or load balancer strips this information)
+- **IP dependencies:** Proxy must reliably inspect request source IPs (fails if load balancer strips this information)
 - **Network requirements:** Requires containers to be on a dedicated Docker network or accessible by IP
 - **Token generation:** Requires entrypoint.sh to generate cryptographically secure tokens (adds dependency on `/dev/urandom` or similar)
 - **Registration overhead:** Each new container adds registry entry and requires first request before identity is known
-- **Clock skew:** Verifying `container-start-time` requires gateway and containers to have synchronized clocks (or accept skew tolerance)
+- **Clock skew:** Verifying `container-start-time` requires proxy and containers to have synchronized clocks (or accept skew tolerance)
 - **TTL tuning:** TTL value is configuration-dependent; too short causes false expiration, too long delays cleanup
 - **Restart ambiguity:** Without header validation, cannot distinguish between "container restarted" vs. "network reassigned IP"
 
@@ -254,8 +258,8 @@ This explicit signal is more reliable than inferring from IP changes alone.
 
 **Rejected because:**
 - Container names are user-configurable and may collide
-- Less suitable for API-based identification (container name not visible to gateway without Docker API access)
-- Requires gateway to maintain mapping from container name to IP
+- Less suitable for API-based identification (container name not visible to proxy without Docker API access)
+- Requires proxy to maintain mapping from container name to IP
 - Container names don't change on restart, masking restart events
 
 ### A2: Docker Container ID (SHA256)
@@ -263,10 +267,10 @@ This explicit signal is more reliable than inferring from IP changes alone.
 **Proposal:** Use Docker's immutable container ID as identity (regenerated on restart).
 
 **Rejected because:**
-- Requires gateway to communicate with Docker daemon (increases attack surface)
+- Requires proxy to communicate with Docker daemon (increases attack surface)
 - Docker IDs not accessible from inside containers without socket access
 - Less human-readable for debugging
-- Doesn't work if gateway and containers run on different hosts
+- Doesn't work if proxy and containers run on different hosts
 
 ### A3: DNS Name-Based Identity
 
@@ -284,7 +288,7 @@ This explicit signal is more reliable than inferring from IP changes alone.
 
 **Rejected because:**
 - Header can be spoofed if attacker controls client (malicious AI code in container)
-- No automatic discovery: gateway must wait for header before identity is known
+- No automatic discovery: proxy must wait for header before identity is known
 - Doesn't leverage Docker's built-in network isolation
 - Fails if request path doesn't support custom headers (e.g., some proxies strip headers)
 
