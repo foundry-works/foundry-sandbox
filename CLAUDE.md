@@ -25,3 +25,5 @@ Docker-based sandbox environment for running Claude Code with isolated credentia
 - `docs/security/` - Security model and threat analysis
 
 **Important:** Read `docs/security/sandbox-threats.md` to understand the threat model and security boundaries before making changes to sandbox isolation.
+
+**Important:** Read docs in `docs/adr` for decision records on architecture.

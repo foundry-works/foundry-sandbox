@@ -1,0 +1,517 @@
+"""Unit tests for container identity mitmproxy addon.
+
+Tests the ContainerIdentityAddon class which identifies containers by
+source IP address with optional X-Container-Id header validation.
+
+Note: These tests use mock objects for mitmproxy types since mitmproxy_rs
+cannot be loaded in sandboxed environments. The mocking approach ensures
+we test the actual business logic without requiring the full mitmproxy runtime.
+"""
+
+import os
+import sys
+import tempfile
+import time
+from unittest.mock import MagicMock, patch
+
+import pytest
+
+# Add unified-proxy to path for registry import
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../../unified-proxy"))
+
+
+# Mock mitmproxy before importing container_identity
+class MockHeaders(dict):
+    """Mock mitmproxy Headers class."""
+
+    def get(self, key, default=None):
+        return super().get(key, default)
+
+
+class MockRequest:
+    """Mock mitmproxy Request class."""
+
+    def __init__(self, headers=None):
+        self.headers = MockHeaders(headers or {})
+        self.pretty_host = "example.com"
+
+
+class MockResponse:
+    """Mock mitmproxy Response class."""
+
+    def __init__(self, status_code, content, headers=None):
+        self.status_code = status_code
+        self.content = content
+        self.headers = headers or {}
+
+    @classmethod
+    def make(cls, status_code, content, headers=None):
+        return cls(status_code, content, headers)
+
+
+class MockClientConn:
+    """Mock mitmproxy client connection."""
+
+    def __init__(self, peername):
+        self.peername = peername
+
+
+class MockHTTPFlow:
+    """Mock mitmproxy HTTPFlow class."""
+
+    def __init__(self, source_ip, headers=None):
+        if source_ip is None:
+            self.client_conn = MockClientConn(None)
+        else:
+            self.client_conn = MockClientConn((source_ip, 12345))
+        self.request = MockRequest(headers)
+        self.response = None
+        self.metadata = {}
+
+
+class MockCtxLog:
+    """Mock mitmproxy ctx.log with proper tracking."""
+
+    def __init__(self):
+        self.calls = []
+
+    def info(self, msg):
+        self.calls.append(("info", msg))
+
+    def warn(self, msg):
+        self.calls.append(("warn", msg))
+
+    def debug(self, msg):
+        self.calls.append(("debug", msg))
+
+    def error(self, msg):
+        self.calls.append(("error", msg))
+
+    def reset(self):
+        self.calls.clear()
+
+    def was_called_with_level(self, level):
+        return any(call[0] == level for call in self.calls)
+
+    def get_messages(self, level=None):
+        if level:
+            return [call[1] for call in self.calls if call[0] == level]
+        return [call[1] for call in self.calls]
+
+
+class MockCtx:
+    """Mock mitmproxy ctx module."""
+
+    def __init__(self):
+        self.log = MockCtxLog()
+
+
+# Create mock modules BEFORE any mitmproxy import
+mock_mitmproxy = MagicMock()
+
+# Create http mock with our Response class
+mock_http = MagicMock()
+mock_http.Response = MockResponse
+mock_http.HTTPFlow = MockHTTPFlow
+
+# Create ctx mock
+mock_ctx = MockCtx()
+
+# Create flow mock
+mock_flow = MagicMock()
+mock_flow.Flow = MockHTTPFlow
+
+# Install mocks into sys.modules BEFORE importing container_identity
+sys.modules["mitmproxy"] = mock_mitmproxy
+sys.modules["mitmproxy.http"] = mock_http
+sys.modules["mitmproxy.ctx"] = mock_ctx
+sys.modules["mitmproxy.flow"] = mock_flow
+
+# Now add addons path and import container_identity
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../../unified-proxy/addons"))
+
+# Import the module - it will use our mocked mitmproxy
+import container_identity
+
+# Ensure the module uses our mock ctx (replace the reference it got during import)
+container_identity.ctx = mock_ctx
+container_identity.http = mock_http
+
+# Import registry directly (no mitmproxy dependency)
+from registry import ContainerRegistry
+
+
+# Constants from the module
+CONTAINER_ID_HEADER = "X-Container-Id"
+FLOW_METADATA_KEY = "container_config"
+
+
+@pytest.fixture
+def temp_db():
+    """Create a temporary database for testing."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        db_path = os.path.join(tmpdir, "test_registry.db")
+        yield db_path
+
+
+@pytest.fixture
+def registry(temp_db):
+    """Create a fresh registry for each test."""
+    return ContainerRegistry(db_path=temp_db)
+
+
+@pytest.fixture
+def addon(registry):
+    """Create a ContainerIdentityAddon with a test registry."""
+    addon_instance = container_identity.ContainerIdentityAddon(registry=registry)
+    return addon_instance
+
+
+@pytest.fixture(autouse=True)
+def reset_mock_ctx():
+    """Reset mock ctx before each test."""
+    mock_ctx.log.reset()
+    yield
+
+
+def create_flow(source_ip, headers=None):
+    """Create a test HTTP flow with the specified source IP.
+
+    Args:
+        source_ip: The client IP address (or None for missing address).
+        headers: Optional headers to add to the request.
+
+    Returns:
+        Configured MockHTTPFlow for testing.
+    """
+    return MockHTTPFlow(source_ip, headers)
+
+
+class TestUnknownSourceIP:
+    """Tests for unknown source IP handling."""
+
+    def test_unknown_ip_returns_403(self, addon):
+        """Test that unknown source IP returns 403 Forbidden."""
+        # Create flow with unregistered IP
+        flow = create_flow("192.168.1.100")
+
+        # Process the request
+        addon.request(flow)
+
+        # Verify 403 response was set
+        assert flow.response is not None
+        assert flow.response.status_code == 403
+        assert b"Forbidden" in flow.response.content
+
+    def test_unknown_ip_logs_warning(self, addon):
+        """Test that unknown IP is logged with warning level."""
+        flow = create_flow("10.0.0.99")
+        addon.request(flow)
+
+        # Verify warning was logged
+        assert mock_ctx.log.was_called_with_level("warn")
+        messages = mock_ctx.log.get_messages("warn")
+        assert any("Unknown source IP" in msg for msg in messages)
+
+    def test_unknown_ip_does_not_set_metadata(self, addon):
+        """Test that unknown IP does not set container config in metadata."""
+        flow = create_flow("172.16.0.50")
+        addon.request(flow)
+
+        assert FLOW_METADATA_KEY not in flow.metadata
+
+
+class TestMismatchedHeader:
+    """Tests for X-Container-Id header mismatch handling."""
+
+    def test_mismatched_header_returns_403(self, addon, registry):
+        """Test that mismatched X-Container-Id header returns 403."""
+        # Register container with one ID
+        registry.register(
+            container_id="container-abc",
+            ip_address="172.17.0.2",
+        )
+
+        # Create flow with different container ID in header
+        flow = create_flow(
+            "172.17.0.2",
+            headers={CONTAINER_ID_HEADER: "container-xyz"},
+        )
+
+        addon.request(flow)
+
+        # Verify 403 response
+        assert flow.response is not None
+        assert flow.response.status_code == 403
+
+    def test_mismatched_header_logs_mismatch_details(self, addon, registry):
+        """Test that header mismatch logs both header and registered ID."""
+        registry.register(
+            container_id="registered-id",
+            ip_address="172.17.0.3",
+        )
+
+        flow = create_flow(
+            "172.17.0.3",
+            headers={CONTAINER_ID_HEADER: "header-id"},
+        )
+
+        addon.request(flow)
+
+        assert mock_ctx.log.was_called_with_level("warn")
+        messages = mock_ctx.log.get_messages("warn")
+        assert any("mismatch" in msg.lower() for msg in messages)
+
+
+class TestExpiredRegistration:
+    """Tests for expired registration handling."""
+
+    def test_expired_registration_returns_403(self, addon, registry):
+        """Test that expired registration returns 403 Forbidden."""
+        # Register container with very short TTL
+        registry.register(
+            container_id="expiring-container",
+            ip_address="172.17.0.4",
+            ttl_seconds=1,
+        )
+
+        # Wait for expiration
+        time.sleep(1.5)
+
+        flow = create_flow("172.17.0.4")
+        addon.request(flow)
+
+        # Verify 403 response (registry returns None for expired)
+        assert flow.response is not None
+        assert flow.response.status_code == 403
+
+    def test_expired_registration_logs_expiration(self, addon, registry):
+        """Test that expiration is logged."""
+        registry.register(
+            container_id="old-container",
+            ip_address="172.17.0.5",
+            ttl_seconds=1,
+        )
+
+        time.sleep(1.5)
+
+        flow = create_flow("172.17.0.5")
+        addon.request(flow)
+
+        # Check that warning was logged (either expired or unknown)
+        assert mock_ctx.log.was_called_with_level("warn")
+
+
+class TestValidRegistration:
+    """Tests for valid container registration handling."""
+
+    def test_valid_registration_proceeds(self, addon, registry):
+        """Test that valid registration allows request to proceed."""
+        registry.register(
+            container_id="valid-container",
+            ip_address="172.17.0.6",
+        )
+
+        flow = create_flow("172.17.0.6")
+        addon.request(flow)
+
+        # Verify no response was set (request proceeds)
+        assert flow.response is None
+
+    def test_valid_registration_sets_metadata(self, addon, registry):
+        """Test that valid registration sets container config in flow metadata."""
+        registry.register(
+            container_id="metadata-container",
+            ip_address="172.17.0.7",
+        )
+
+        flow = create_flow("172.17.0.7")
+        addon.request(flow)
+
+        # Verify metadata was set
+        assert FLOW_METADATA_KEY in flow.metadata
+        config = flow.metadata[FLOW_METADATA_KEY]
+        assert config.container_id == "metadata-container"
+        assert config.ip_address == "172.17.0.7"
+
+    def test_valid_registration_with_matching_header(self, addon, registry):
+        """Test that matching X-Container-Id header is accepted."""
+        registry.register(
+            container_id="header-match-container",
+            ip_address="172.17.0.8",
+        )
+
+        flow = create_flow(
+            "172.17.0.8",
+            headers={CONTAINER_ID_HEADER: "header-match-container"},
+        )
+
+        addon.request(flow)
+
+        # Verify request proceeds
+        assert flow.response is None
+        assert FLOW_METADATA_KEY in flow.metadata
+
+    def test_get_container_config_helper(self, addon, registry):
+        """Test the get_container_config helper function."""
+        registry.register(
+            container_id="helper-test-container",
+            ip_address="172.17.0.9",
+        )
+
+        flow = create_flow("172.17.0.9")
+        addon.request(flow)
+
+        # Use helper function
+        config = container_identity.get_container_config(flow)
+        assert config is not None
+        assert config.container_id == "helper-test-container"
+
+    def test_get_container_config_returns_none_for_unidentified(self):
+        """Test that get_container_config returns None for unidentified flows."""
+        flow = create_flow("192.168.1.1")
+        # Don't process with addon - flow has no container config
+
+        config = container_identity.get_container_config(flow)
+        assert config is None
+
+
+class TestHeaderStripping:
+    """Tests for X-Container-Id header stripping."""
+
+    def test_header_stripped_before_forwarding(self, addon, registry):
+        """Test that X-Container-Id header is stripped after validation."""
+        registry.register(
+            container_id="strip-test-container",
+            ip_address="172.17.0.10",
+        )
+
+        flow = create_flow(
+            "172.17.0.10",
+            headers={CONTAINER_ID_HEADER: "strip-test-container"},
+        )
+
+        # Verify header exists before processing
+        assert CONTAINER_ID_HEADER in flow.request.headers
+
+        addon.request(flow)
+
+        # Verify header is stripped
+        assert CONTAINER_ID_HEADER not in flow.request.headers
+        # But request still proceeds
+        assert flow.response is None
+
+    def test_header_not_present_still_works(self, addon, registry):
+        """Test that requests without header still work for registered containers."""
+        registry.register(
+            container_id="no-header-container",
+            ip_address="172.17.0.11",
+        )
+
+        flow = create_flow("172.17.0.11")
+        # No header set
+
+        addon.request(flow)
+
+        # Request should proceed
+        assert flow.response is None
+        assert FLOW_METADATA_KEY in flow.metadata
+
+    def test_other_headers_preserved(self, addon, registry):
+        """Test that other headers are not affected by stripping."""
+        registry.register(
+            container_id="preserve-headers-container",
+            ip_address="172.17.0.12",
+        )
+
+        flow = create_flow(
+            "172.17.0.12",
+            headers={
+                CONTAINER_ID_HEADER: "preserve-headers-container",
+                "Authorization": "Bearer token123",
+                "Content-Type": "application/json",
+            },
+        )
+
+        addon.request(flow)
+
+        # X-Container-Id should be stripped
+        assert CONTAINER_ID_HEADER not in flow.request.headers
+        # Other headers should remain
+        assert flow.request.headers.get("Authorization") == "Bearer token123"
+        assert flow.request.headers.get("Content-Type") == "application/json"
+
+
+class TestEdgeCases:
+    """Tests for edge cases and error conditions."""
+
+    def test_no_client_address_returns_403(self, addon):
+        """Test that missing client address returns 403."""
+        flow = MockHTTPFlow(None)  # No source IP
+
+        addon.request(flow)
+
+        assert flow.response is not None
+        assert flow.response.status_code == 403
+
+    def test_registry_not_initialized_raises(self):
+        """Test that accessing registry without initialization raises."""
+        addon_no_registry = container_identity.ContainerIdentityAddon(registry=None)
+
+        with patch.object(container_identity, "_registry", None):
+            with pytest.raises(RuntimeError, match="not initialized"):
+                _ = addon_no_registry.registry
+
+    def test_container_with_metadata(self, addon, registry):
+        """Test that container metadata is preserved in flow."""
+        registry.register(
+            container_id="metadata-rich-container",
+            ip_address="172.17.0.13",
+            metadata={"purpose": "testing", "owner": "unit-tests"},
+        )
+
+        flow = create_flow("172.17.0.13")
+        addon.request(flow)
+
+        config = container_identity.get_container_config(flow)
+        assert config is not None
+        assert config.metadata == {"purpose": "testing", "owner": "unit-tests"}
+
+    def test_multiple_requests_same_container(self, addon, registry):
+        """Test that multiple requests from same container work."""
+        registry.register(
+            container_id="multi-request-container",
+            ip_address="172.17.0.14",
+        )
+
+        for _ in range(5):
+            flow = create_flow("172.17.0.14")
+            addon.request(flow)
+            assert flow.response is None
+            assert FLOW_METADATA_KEY in flow.metadata
+
+
+class TestResponseContent:
+    """Tests for response content on denial."""
+
+    def test_403_response_content_type(self, addon):
+        """Test that 403 response has correct Content-Type."""
+        flow = create_flow("10.0.0.1")
+        addon.request(flow)
+
+        assert flow.response is not None
+        assert flow.response.headers.get("Content-Type") == "text/plain"
+
+    def test_403_response_body(self, addon):
+        """Test that 403 response has appropriate body text."""
+        flow = create_flow("10.0.0.2")
+        addon.request(flow)
+
+        assert flow.response is not None
+        body = flow.response.content.decode()
+        assert "Forbidden" in body
+        assert "identity" in body.lower() or "verification" in body.lower()
+
+
+if __name__ == "__main__":
+    pytest.main([__file__, "-v"])

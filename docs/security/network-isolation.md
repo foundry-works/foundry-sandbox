@@ -161,8 +161,8 @@ depends_on:
 |------|---------|
 | `docker-compose.credential-isolation.yml` | Service definitions and network config |
 | `safety/network-firewall.sh` | iptables rules for defense-in-depth |
-| `gateway/allowlist.conf` | Domain allowlist (single source of truth) |
-| `gateway/gateway.py` | Git credential injection proxy |
+| `config/allowlist.yaml` | Domain allowlist (single source of truth) |
+| `unified-proxy/` | Unified proxy for all egress traffic |
 
 ## Verification
 

@@ -143,7 +143,7 @@ A compromised sandbox could attempt to steal credentials and exfiltrate them.
 | Secondary | Network Isolation | Cannot exfiltrate to unauthorized destinations |
 | UX | Credential Redaction | Masks secrets in command output |
 
-**Why This Works:** Sandboxes receive placeholder values (`CREDENTIAL_PROXY_PLACEHOLDER`) instead of real API keys. The gateway/proxy containers hold real credentials and inject them into outbound requests. Even if code reads the environment, it gets nothing useful. See [Credential Isolation](credential-isolation.md) for the complete architecture.
+**Why This Works:** Sandboxes receive placeholder values (`CREDENTIAL_PROXY_PLACEHOLDER`) instead of real API keys. The unified-proxy container holds real credentials and injects them into outbound requests. Even if code reads the environment, it gets nothing useful. See [Credential Isolation](credential-isolation.md) for the complete architecture.
 
 ---
 

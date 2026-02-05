@@ -1141,7 +1141,7 @@ OVERRIDES
         if ! validate_git_remotes "$worktree_dir/.git"; then
             die "Cannot enable credential isolation with embedded git credentials"
         fi
-        # Export ALLOW_PR_OPERATIONS for api-proxy
+        # Export ALLOW_PR_OPERATIONS for unified-proxy
         if [ "$allow_pr" = "true" ]; then
             export ALLOW_PR_OPERATIONS=true
             log_step "PR operations: allowed"

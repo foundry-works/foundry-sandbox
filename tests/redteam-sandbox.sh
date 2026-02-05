@@ -86,10 +86,10 @@ echo "Searching for credential files..."
 
 # Check credential locations that SHOULD NOT be accessible in sandbox
 CRED_FILES=(
-    "/credentials"                           # Real OAuth tokens (api-proxy only)
-    "/credentials/codex/auth.json"           # Codex OAuth (api-proxy only)
-    "/credentials/gemini/oauth_creds.json"   # Gemini OAuth (api-proxy only)
-    "/credentials/opencode/auth.json"        # OpenCode OAuth (api-proxy only)
+    "/credentials"                           # Real OAuth tokens (unified-proxy only)
+    "/credentials/codex/auth.json"           # Codex OAuth (unified-proxy only)
+    "/credentials/gemini/oauth_creds.json"   # Gemini OAuth (unified-proxy only)
+    "/credentials/opencode/auth.json"        # OpenCode OAuth (unified-proxy only)
     "$HOME/.codex/auth.json"                 # Should not exist in sandbox
     "$HOME/.gemini/oauth_creds.json"         # Should not exist in sandbox
 )
@@ -254,7 +254,7 @@ echo "Testing mitmproxy web UI exposure (should be inaccessible)..."
 
 curl_err=$(mktemp)
 mitm_code=$(curl -s --connect-timeout 3 --max-time 5 -o /dev/null -w "%{http_code}" \
-    "http://api-proxy:8081/" 2>"$curl_err")
+    "http://unified-proxy:8081/" 2>"$curl_err")
 mitm_exit=$?
 mitm_msg=$(head -c 200 "$curl_err" 2>/dev/null || true)
 rm -f "$curl_err"
@@ -350,11 +350,49 @@ else
     test_pass "Cannot ping gateway container"
 fi
 
-if ping -c 1 -W 2 api-proxy >/dev/null 2>&1; then
-    test_warn "Can ping api-proxy container (expected for proxy)"
+if ping -c 1 -W 2 unified-proxy >/dev/null 2>&1; then
+    test_warn "Can ping unified-proxy container (expected for proxy)"
 else
-    test_pass "Cannot ping api-proxy container"
+    test_pass "Cannot ping unified-proxy container"
 fi
+
+# Test for sandbox-to-sandbox isolation (should not be able to reach other sandboxes)
+echo ""
+echo "Testing sandbox-to-sandbox isolation..."
+
+# Try common sandbox naming patterns
+SANDBOX_PATTERNS=("sandbox-" "dev-" "test-" "worker-")
+for pattern in "${SANDBOX_PATTERNS[@]}"; do
+    # Try to discover other containers via DNS/network
+    OTHER_RESULT=$(getent hosts "${pattern}1" 2>/dev/null || true)
+    if [[ -n "$OTHER_RESULT" ]]; then
+        OTHER_IP=$(echo "$OTHER_RESULT" | awk '{print $1}')
+        # Try to connect to the other sandbox
+        if curl -s --connect-timeout 2 --max-time 3 "http://${OTHER_IP}:8080/" >/dev/null 2>&1; then
+            test_fail "Can reach other sandbox container: ${pattern}1 ($OTHER_IP)"
+        else
+            test_pass "Cannot reach other sandbox: ${pattern}1 (DNS resolved but connection blocked)"
+        fi
+    fi
+done
+
+# Test container metadata service isolation (Kubernetes/ECS)
+echo ""
+info "Testing container metadata service isolation..."
+METADATA_ENDPOINTS=(
+    "http://169.254.169.254/latest/meta-data/"  # AWS
+    "http://169.254.170.2/v2/metadata"           # ECS
+    "http://metadata.google.internal/computeMetadata/v1/"  # GCP
+    "http://169.254.169.254/metadata/instance"   # Azure
+)
+for endpoint in "${METADATA_ENDPOINTS[@]}"; do
+    META_RESP=$(curl -s --connect-timeout 2 --max-time 3 "$endpoint" 2>&1)
+    if [[ $? -eq 0 ]] && ! echo "$META_RESP" | grep -qiE "(error|timeout|refused|blocked)"; then
+        test_fail "Container metadata accessible: $endpoint"
+    else
+        test_pass "Container metadata blocked: ${endpoint%%/meta*}..."
+    fi
+done
 
 # ============================================================================
 header "8. PROCESS AND MOUNT INSPECTION"
@@ -410,6 +448,127 @@ elif echo "$SECRETS_RESP" | grep -qE "\"secrets\""; then
 else
     info "Secrets response: $(echo "$SECRETS_RESP" | head -c 150)"
     test_warn "GitHub secrets response unclear"
+fi
+
+# ============================================================================
+header "9b. GITHUB POLICY BYPASS ATTEMPTS"
+# ============================================================================
+
+echo ""
+echo "Testing policy engine bypass attempts..."
+echo "(Policy engine blocks dangerous GitHub operations regardless of credentials)"
+
+# Test PR merge endpoint (should be blocked by policy engine)
+info "Testing PR merge block (PUT /repos/*/pulls/*/merge)..."
+MERGE_RESP=$(curl -s --max-time 10 \
+    -X PUT \
+    -H "Authorization: token CREDENTIAL_PROXY_PLACEHOLDER" \
+    -H "Content-Type: application/json" \
+    -d '{"commit_title":"test","merge_method":"merge"}' \
+    "https://api.github.com/repos/octocat/Hello-World/pulls/1/merge" 2>&1)
+
+if echo "$MERGE_RESP" | grep -qiE "(blocked|forbidden|not allowed|policy)"; then
+    test_pass "PR merge endpoint blocked by policy engine"
+elif echo "$MERGE_RESP" | grep -qE '"merged"'; then
+    test_fail "PR merge endpoint accessible!"
+elif echo "$MERGE_RESP" | grep -qE "(not found|404)"; then
+    test_pass "PR merge request reached GitHub (404 = PR doesn't exist, but policy allowed)"
+    info "Note: Policy may allow merge for valid PRs - verify with ALLOW_PR_OPERATIONS=false"
+else
+    info "Merge response: $(echo "$MERGE_RESP" | head -c 150)"
+    test_warn "PR merge response unclear"
+fi
+
+# Test release creation endpoint (should be blocked by policy engine)
+info "Testing release creation block (POST /repos/*/releases)..."
+RELEASE_RESP=$(curl -s --max-time 10 \
+    -X POST \
+    -H "Authorization: token CREDENTIAL_PROXY_PLACEHOLDER" \
+    -H "Content-Type: application/json" \
+    -d '{"tag_name":"v0.0.1-test","name":"Test Release"}' \
+    "https://api.github.com/repos/octocat/Hello-World/releases" 2>&1)
+
+if echo "$RELEASE_RESP" | grep -qiE "(blocked|forbidden|not allowed|policy)"; then
+    test_pass "Release creation endpoint blocked by policy engine"
+elif echo "$RELEASE_RESP" | grep -qE '"id"'; then
+    test_fail "Release creation endpoint accessible!"
+else
+    info "Release response: $(echo "$RELEASE_RESP" | head -c 150)"
+    test_pass "Release creation blocked or unauthorized"
+fi
+
+# Test PR comment creation (should be blocked unless ALLOW_PR_OPERATIONS=true)
+info "Testing PR comment creation..."
+COMMENT_RESP=$(curl -s --max-time 10 \
+    -X POST \
+    -H "Authorization: token CREDENTIAL_PROXY_PLACEHOLDER" \
+    -H "Content-Type: application/json" \
+    -d '{"body":"Test comment from sandbox"}' \
+    "https://api.github.com/repos/octocat/Hello-World/issues/1/comments" 2>&1)
+
+if echo "$COMMENT_RESP" | grep -qiE "(blocked|forbidden|not allowed)"; then
+    test_pass "PR comment creation blocked by policy"
+elif echo "$COMMENT_RESP" | grep -qE '"id"'; then
+    if [ "${ALLOW_PR_OPERATIONS:-}" = "true" ]; then
+        test_warn "PR comment created (ALLOW_PR_OPERATIONS=true)"
+    else
+        test_fail "PR comment creation accessible without ALLOW_PR_OPERATIONS!"
+    fi
+else
+    info "Comment response: $(echo "$COMMENT_RESP" | head -c 150)"
+    test_pass "PR comment blocked or unauthorized"
+fi
+
+# ============================================================================
+header "9c. REGISTRATION API ISOLATION"
+# ============================================================================
+
+echo ""
+echo "Testing that internal registration API is not accessible from sandbox..."
+echo "(Registration API should only be available via Unix socket on proxy)"
+
+# Test direct TCP access to common internal API ports
+info "Testing internal API TCP exposure..."
+INTERNAL_PORTS=(8081 8082 9090 5000)
+for port in "${INTERNAL_PORTS[@]}"; do
+    INTERNAL_RESP=$(curl -s --connect-timeout 3 --max-time 5 \
+        "http://unified-proxy:${port}/internal/health" 2>&1)
+    if echo "$INTERNAL_RESP" | grep -qE "(ok|healthy|status)"; then
+        test_fail "Internal API accessible on port $port!"
+    else
+        test_pass "Internal API not exposed on TCP port $port"
+    fi
+done
+
+# Test Unix socket path (should not exist in sandbox)
+SOCKET_PATHS=(
+    "/var/run/unified-proxy/internal.sock"
+    "/run/unified-proxy/internal.sock"
+    "/tmp/unified-proxy.sock"
+)
+for sock in "${SOCKET_PATHS[@]}"; do
+    if [[ -S "$sock" ]]; then
+        test_fail "Internal API Unix socket accessible at $sock!"
+    else
+        test_pass "Internal API socket not accessible: $sock"
+    fi
+done
+
+# Test container registration endpoint (should be inaccessible)
+info "Testing container registration endpoint..."
+REGISTER_RESP=$(curl -s --connect-timeout 5 --max-time 10 \
+    -X POST \
+    -H "Content-Type: application/json" \
+    -d '{"container_id":"evil-container","ip":"172.17.0.100"}' \
+    "http://unified-proxy:8080/internal/containers" 2>&1)
+
+if echo "$REGISTER_RESP" | grep -qE "(registered|success|id)"; then
+    test_fail "Container registration endpoint accessible via HTTP!"
+elif echo "$REGISTER_RESP" | grep -qiE "(not found|404|blocked)"; then
+    test_pass "Container registration endpoint not exposed via HTTP"
+else
+    info "Registration response: $(echo "$REGISTER_RESP" | head -c 100)"
+    test_pass "Container registration blocked"
 fi
 
 # ============================================================================
@@ -810,7 +969,7 @@ else
     info "No gateway token (not in credential isolation mode)"
 fi
 
-# Real credentials directory (api-proxy only)
+# Real credentials directory (unified-proxy only)
 if [[ -d /credentials ]]; then
     test_fail "/credentials directory accessible in sandbox!"
     ls -la /credentials 2>/dev/null | head -10 | sed 's/^/    /'

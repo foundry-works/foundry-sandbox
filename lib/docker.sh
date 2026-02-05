@@ -90,7 +90,7 @@ compose_down() {
 
     local compose_cmd
     if [ "$isolate_credentials" != "true" ]; then
-        if docker ps -a --format '{{.Names}}' | grep -q "^${container}-api-proxy-"; then
+        if docker ps -a --format '{{.Names}}' | grep -q "^${container}-unified-proxy-"; then
             isolate_credentials="true"
         fi
     fi
@@ -163,7 +163,7 @@ populate_stubs_volume() {
     docker volume create "$volume_name" >/dev/null 2>&1 || true
 
     docker run --rm \
-        -v "$SCRIPT_DIR/api-proxy:/src:ro" \
+        -v "$SCRIPT_DIR/unified-proxy:/src:ro" \
         -v "${volume_name}:/stubs" \
         alpine:latest \
         sh -c 'cp /src/stub-*.json /src/stub-*.yml /stubs/ 2>/dev/null || cp /src/stub-*.json /stubs/' || return 1

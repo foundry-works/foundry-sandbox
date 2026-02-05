@@ -5,7 +5,7 @@
 # Sets up iptables rules to whitelist specific domains while blocking all
 # other outbound traffic. Used in "limited" network mode.
 #
-# Whitelisted domains by default (see gateway/allowlist.conf for full list):
+# Whitelisted domains by default (see config/allowlist.yaml for full list):
 # - GitHub: github.com, api.github.com, gist.github.com, etc.
 # - AI APIs: Anthropic, OpenAI, Google (Gemini), Z.AI
 # - AI Tools: OpenCode
@@ -49,8 +49,8 @@ ALL_DOMAINS=()
 # ============================================================================
 # Domain Allowlist Configuration
 # ============================================================================
-# Domains are loaded from the generated allowlist file (gateway/firewall-allowlist.generated)
-# which is the single source of truth derived from gateway/allowlist.conf.
+# Domains are loaded from the generated allowlist file (config/firewall-allowlist.generated)
+# which is the single source of truth derived from config/allowlist.yaml.
 #
 # When wildcard domains (*.example.com) are configured, we cannot pre-resolve
 # IPs at firewall setup time. Instead, we:
@@ -59,11 +59,11 @@ ALL_DOMAINS=()
 # 3. Rely on gateway hostname validation to enforce allowlist
 # ============================================================================
 WILDCARD_DOMAINS=()
-FIREWALL_ALLOWLIST_FILE="${SCRIPT_DIR:-/workspace/gateway}/firewall-allowlist.generated"
+FIREWALL_ALLOWLIST_FILE="${SCRIPT_DIR:-/workspace/config}/firewall-allowlist.generated"
 if [ -z "${SCRIPT_DIR:-}" ]; then
     # Try relative path from this script's location
     SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-    FIREWALL_ALLOWLIST_FILE="$SCRIPT_DIR/../gateway/firewall-allowlist.generated"
+    FIREWALL_ALLOWLIST_FILE="$SCRIPT_DIR/../config/firewall-allowlist.generated"
 fi
 
 if [ -f "$FIREWALL_ALLOWLIST_FILE" ]; then
@@ -272,7 +272,7 @@ fi
 # Sandbox Isolation Rules (defense-in-depth)
 # ============================================================================
 # These rules complement ICC=false on the credential-isolation network.
-# They explicitly allow sandbox -> gateway and sandbox -> api-proxy
+# They explicitly allow sandbox -> gateway and sandbox -> unified-proxy
 # while ensuring sandbox -> sandbox is blocked.
 #
 # Container names are resolved via Docker DNS when running inside the network.
@@ -292,17 +292,17 @@ elif getent hosts gateway &>/dev/null; then
     iptables -A OUTPUT -d "$GATEWAY_IP" -j ACCEPT
 fi
 
-# Allow traffic to api-proxy (for HTTPS API requests)
-# The api-proxy holds API credentials and injects them into requests
+# Allow traffic to unified-proxy (for HTTPS API requests)
+# The unified-proxy holds API credentials and injects them into requests
 if [ -n "${API_PROXY_HOST:-}" ]; then
     API_PROXY_IP=$(getent hosts "$API_PROXY_HOST" 2>/dev/null | awk '{print $1}' || true)
     if [ -n "$API_PROXY_IP" ]; then
         log_verbose "  Allowing API proxy: $API_PROXY_HOST ($API_PROXY_IP)"
         iptables -A OUTPUT -d "$API_PROXY_IP" -j ACCEPT
     fi
-elif getent hosts api-proxy &>/dev/null; then
-    API_PROXY_IP=$(getent hosts api-proxy | awk '{print $1}')
-    log_verbose "  Allowing API proxy: api-proxy ($API_PROXY_IP)"
+elif getent hosts unified-proxy &>/dev/null; then
+    API_PROXY_IP=$(getent hosts unified-proxy | awk '{print $1}')
+    log_verbose "  Allowing API proxy: unified-proxy ($API_PROXY_IP)"
     iptables -A OUTPUT -d "$API_PROXY_IP" -j ACCEPT
 fi
 
@@ -378,17 +378,17 @@ if command -v ip6tables &>/dev/null; then
         fi
     fi
 
-    # Allow traffic to api-proxy (IPv6) - mirrors IPv4 rules
+    # Allow traffic to unified-proxy (IPv6) - mirrors IPv4 rules
     if [ -n "${API_PROXY_HOST:-}" ]; then
         API_PROXY_IP6=$(getent ahostsv6 "$API_PROXY_HOST" 2>/dev/null | awk '{print $1}' | head -1 || true)
         if [ -n "$API_PROXY_IP6" ]; then
             log_verbose "  Allowing API proxy (IPv6): $API_PROXY_HOST ($API_PROXY_IP6)"
             ip6tables -A OUTPUT -d "$API_PROXY_IP6" -j ACCEPT 2>/dev/null || true
         fi
-    elif getent ahostsv6 api-proxy &>/dev/null 2>&1; then
-        API_PROXY_IP6=$(getent ahostsv6 api-proxy 2>/dev/null | awk '{print $1}' | head -1 || true)
+    elif getent ahostsv6 unified-proxy &>/dev/null 2>&1; then
+        API_PROXY_IP6=$(getent ahostsv6 unified-proxy 2>/dev/null | awk '{print $1}' | head -1 || true)
         if [ -n "$API_PROXY_IP6" ]; then
-            log_verbose "  Allowing API proxy (IPv6): api-proxy ($API_PROXY_IP6)"
+            log_verbose "  Allowing API proxy (IPv6): unified-proxy ($API_PROXY_IP6)"
             ip6tables -A OUTPUT -d "$API_PROXY_IP6" -j ACCEPT 2>/dev/null || true
         fi
     fi
@@ -466,10 +466,10 @@ setup_docker_user_rules() {
         GATEWAY_CONTAINER_IP=$(docker inspect gateway --format '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' 2>/dev/null | head -1 || true)
     fi
 
-    # Get api-proxy container IP
+    # Get unified-proxy container IP
     local API_PROXY_CONTAINER_IP=""
     if command -v docker &>/dev/null; then
-        API_PROXY_CONTAINER_IP=$(docker inspect api-proxy --format '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' 2>/dev/null | head -1 || true)
+        API_PROXY_CONTAINER_IP=$(docker inspect unified-proxy --format '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' 2>/dev/null | head -1 || true)
     fi
 
     if [ -z "$SANDBOX_SUBNET" ]; then
@@ -514,22 +514,22 @@ setup_docker_user_rules() {
         log_verbose "  [4] Allowing sandbox -> gateway ($GATEWAY_CONTAINER_IP)"
     fi
 
-    # 5. Allow sandbox -> api-proxy (for HTTPS API requests)
+    # 5. Allow sandbox -> unified-proxy (for HTTPS API requests)
     if [ -n "$API_PROXY_CONTAINER_IP" ]; then
         iptables -A DOCKER-USER -s "$SANDBOX_SUBNET" -d "$API_PROXY_CONTAINER_IP" -j RETURN
-        log_verbose "  [5] Allowing sandbox -> api-proxy ($API_PROXY_CONTAINER_IP)"
+        log_verbose "  [5] Allowing sandbox -> unified-proxy ($API_PROXY_CONTAINER_IP)"
     fi
 
     # 6. Block direct egress from sandbox to external networks
-    # Traffic should go through gateway or api-proxy.
+    # Traffic should go through gateway or unified-proxy.
     # We allow traffic to RFC1918 private ranges (where our services live):
     # - 10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16
     # And block all public (non-private) destinations.
-    # Note: Traffic to gateway/api-proxy is already allowed by rules 4-5 above.
+    # Note: Traffic to unified-proxy is already allowed by rules 4-5 above.
     # This rule catches any remaining traffic to public IPs.
     #
     # Using ipset or multiple rules to match "not RFC1918" is complex.
-    # Instead, we use a simpler approach: since gateway/api-proxy allow rules
+    # Instead, we use a simpler approach: since unified-proxy allow rules
     # come first, this final DROP catches traffic to any other destination.
     # We explicitly allow the Docker bridge network ranges first.
     iptables -A DOCKER-USER -s "$SANDBOX_SUBNET" -d 10.0.0.0/8 -j RETURN

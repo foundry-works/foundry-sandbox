@@ -19,7 +19,7 @@ if [ "$SANDBOX_GATEWAY_ENABLED" = "true" ]; then
     # This is needed because gateway's dnsmasq returns the wrong IP for multi-homed containers
     # (returns proxy-egress network IP instead of credential-isolation network IP)
     GATEWAY_IP=$(getent hosts gateway | awk '{print $1}' | head -1)
-    API_PROXY_IP=$(getent hosts api-proxy | awk '{print $1}' | head -1)
+    API_PROXY_IP=$(getent hosts unified-proxy | awk '{print $1}' | head -1)
 
     if [ -n "$GATEWAY_IP" ]; then
         echo "Gateway IP: $GATEWAY_IP"
@@ -30,7 +30,7 @@ if [ "$SANDBOX_GATEWAY_ENABLED" = "true" ]; then
         echo "$GATEWAY_IP gateway" >> /etc/hosts
         if [ -n "$API_PROXY_IP" ]; then
             echo "API Proxy IP: $API_PROXY_IP"
-            echo "$API_PROXY_IP api-proxy" >> /etc/hosts
+            echo "$API_PROXY_IP unified-proxy" >> /etc/hosts
         fi
 
         # Now configure resolv.conf to use gateway's dnsmasq for external domains

@@ -27,7 +27,7 @@ cmd_start() {
     fi
 
     local uses_credential_isolation="0"
-    if docker ps -a --format '{{.Names}}' | grep -q "^${container}-api-proxy-"; then
+    if docker ps -a --format '{{.Names}}' | grep -q "^${container}-unified-proxy-"; then
         uses_credential_isolation="1"
     fi
 
@@ -102,10 +102,10 @@ cmd_start() {
         log_info "GitHub CLI token exported for container"
     fi
 
-    # Check if credential isolation is enabled (api-proxy container exists)
+    # Check if credential isolation is enabled (unified-proxy container exists)
     # and repopulate stubs volume before starting
     local isolate_credentials=""
-    if docker ps -a --format '{{.Names}}' | grep -q "^${container}-api-proxy-"; then
+    if docker ps -a --format '{{.Names}}' | grep -q "^${container}-unified-proxy-"; then
         isolate_credentials="true"
         populate_stubs_volume "$container"
         export STUBS_VOLUME_NAME="${container}_stubs"

@@ -1,0 +1,90 @@
+# Test infrastructure for unified proxy consolidation
+# Usage: docker compose -f tests/docker-compose.test.yml up -d
+
+networks:
+  test-network:
+    driver: bridge
+    internal: true
+  proxy-egress:
+    driver: bridge
+
+volumes:
+  test-mitm-certs:
+  test-proxy-stubs:
+
+services:
+  unified-proxy:
+    build:
+      context: ../unified-proxy
+      dockerfile: Dockerfile
+    container_name: test-unified-proxy
+    networks:
+      - test-network
+      - proxy-egress
+    ports:
+      - "127.0.0.1:18080:8080"
+    environment:
+      # Test credentials (placeholder values for testing)
+      - ANTHROPIC_API_KEY=${TEST_ANTHROPIC_API_KEY:-test-anthropic-key}
+      - GITHUB_TOKEN=${TEST_GITHUB_TOKEN:-test-github-token}
+      - GOOGLE_API_KEY=${TEST_GOOGLE_API_KEY:-test-google-key}
+      - TAVILY_API_KEY=${TEST_TAVILY_API_KEY:-test-tavily-key}
+      # Proxy configuration
+      - PROXY_MODE=regular
+      - PROXY_LOG_LEVEL=${PROXY_LOG_LEVEL:-info}
+      - ALLOW_PR_OPERATIONS=${ALLOW_PR_OPERATIONS:-}
+    volumes:
+      - test-mitm-certs:/certs:rw
+      - test-proxy-stubs:/stubs:ro
+    cap_drop:
+      - NET_RAW
+      - NET_ADMIN
+    read_only: true
+    tmpfs:
+      - /tmp:size=64m,mode=1777
+      - /run:size=16m,mode=755
+      - /home/mitmproxy/.mitmproxy:size=32m,mode=700
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:8080/health", "||", "exit", "1"]
+      interval: 5s
+      timeout: 3s
+      retries: 3
+      start_period: 10s
+
+  test-sandbox:
+    image: ubuntu:24.04
+    container_name: test-sandbox
+    networks:
+      - test-network
+    depends_on:
+      unified-proxy:
+        condition: service_healthy
+    environment:
+      # Proxy routing
+      - HTTP_PROXY=http://unified-proxy:8080
+      - HTTPS_PROXY=http://unified-proxy:8080
+      - NO_PROXY=localhost,127.0.0.1,unified-proxy
+      # CA certificate trust
+      - NODE_EXTRA_CA_CERTS=/certs/mitmproxy-ca.pem
+      - REQUESTS_CA_BUNDLE=/certs/mitmproxy-ca.pem
+      - SSL_CERT_FILE=/certs/mitmproxy-ca.pem
+      - CURL_CA_BUNDLE=/certs/mitmproxy-ca.pem
+      # Placeholder credentials (should be injected by proxy)
+      - ANTHROPIC_API_KEY=CREDENTIAL_PROXY_PLACEHOLDER
+      - GITHUB_TOKEN=
+      - GH_TOKEN=
+    volumes:
+      - test-mitm-certs:/certs:ro
+    cap_drop:
+      - NET_RAW
+    read_only: true
+    tmpfs:
+      - /tmp:size=64m,mode=1777
+      - /run:size=16m,mode=755
+    command: ["sleep", "infinity"]
+    healthcheck:
+      test: ["CMD-SHELL", "test -f /certs/mitmproxy-ca.pem || exit 1"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+      start_period: 15s

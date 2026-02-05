@@ -82,8 +82,8 @@ Dangerous commands are **intercepted with warnings**:
 | Setting | File | Purpose |
 |---------|------|---------|
 | Network mode | `--network=` flag | Controls network isolation level |
-| Repository allowlist | Gateway session config | Restricts accessible repositories |
-| Domain allowlist | `gateway/allowlist.conf` | Controls allowed outbound domains |
+| Repository allowlist | Container registration | Restricts accessible repositories |
+| Domain allowlist | `config/allowlist.yaml` | Controls allowed outbound domains |
 | Credential injection | `docker-compose.credential-isolation.yml` | Enables credential isolation mode |
 
 ### Network Modes

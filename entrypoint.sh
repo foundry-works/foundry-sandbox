@@ -68,8 +68,8 @@ fi
 if [ "${SANDBOX_ENABLE_ZAI:-0}" = "1" ] && [ -n "${ZHIPU_API_KEY:-}" ]; then
 cat >> ~/.bashrc << 'CLAUDE_ZAI_ALIAS'
 claude-zai() {
-    GLOBAL_AGENT_HTTP_PROXY="http://api-proxy:8080" \
-    GLOBAL_AGENT_HTTPS_PROXY="http://api-proxy:8080" \
+    GLOBAL_AGENT_HTTP_PROXY="http://unified-proxy:8080" \
+    GLOBAL_AGENT_HTTPS_PROXY="http://unified-proxy:8080" \
     GLOBAL_AGENT_NO_PROXY="localhost,127.0.0.1" \
     NODE_OPTIONS="--require /usr/lib/node_modules/global-agent/bootstrap.js" \
     CLAUDE_CODE_OAUTH_TOKEN= \

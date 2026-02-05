@@ -13,5 +13,5 @@ cmd_build() {
     echo "Building sandbox image..."
     run_cmd docker compose -f "$SCRIPT_DIR/docker-compose.yml" build $no_cache $build_args
     echo "Building credential isolation proxy image..."
-    run_cmd docker build $no_cache -t foundry-api-proxy "$SCRIPT_DIR/api-proxy"
+    run_cmd docker build $no_cache -t foundry-unified-proxy "$SCRIPT_DIR/unified-proxy"
 }
