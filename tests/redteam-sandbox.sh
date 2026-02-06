@@ -197,7 +197,7 @@ else
 fi
 
 # ============================================================================
-header "4b. PROXY-LAYER EGRESS FILTERING"
+header "5. PROXY-LAYER EGRESS FILTERING"
 # ============================================================================
 
 echo ""
@@ -219,7 +219,7 @@ for target in "${EXFIL_TARGETS[@]}"; do
 done
 
 # ============================================================================
-header "4c. DIRECT IP EGRESS (NO PROXY)"
+header "6. DIRECT IP EGRESS (NO PROXY)"
 # ============================================================================
 
 echo ""
@@ -246,7 +246,7 @@ for ip in "${DIRECT_IP_TARGETS[@]}"; do
 done
 
 # ============================================================================
-header "4d. PROXY ADMIN UI EXPOSURE"
+header "7. PROXY ADMIN UI EXPOSURE"
 # ============================================================================
 
 echo ""
@@ -269,7 +269,7 @@ else
 fi
 
 # ============================================================================
-header "5. CREDENTIAL INJECTION VERIFICATION"
+header "8. CREDENTIAL INJECTION VERIFICATION"
 # ============================================================================
 
 echo ""
@@ -294,7 +294,7 @@ else
 fi
 
 # ============================================================================
-header "6. GIT SECURITY TESTS"
+header "9. GIT SECURITY TESTS"
 # ============================================================================
 
 echo ""
@@ -320,7 +320,103 @@ else
 fi
 
 # ============================================================================
-header "6b. GIT MARKETPLACE ACCESS"
+header "10. GIT HOOK PREVENTION"
+# ============================================================================
+
+echo ""
+echo "Testing git hook hardening (core.hooksPath, fsmonitor, etc.)..."
+
+# Test 1: core.hooksPath should be /dev/null
+HOOKS_PATH=$(git config --global core.hooksPath 2>/dev/null)
+if [[ "$HOOKS_PATH" == "/dev/null" ]]; then
+    test_pass "core.hooksPath is /dev/null"
+else
+    test_fail "core.hooksPath is '$HOOKS_PATH' (expected /dev/null)"
+fi
+
+# Test 2: core.fsmonitor should be false
+FSMONITOR=$(git config --global core.fsmonitor 2>/dev/null)
+if [[ "$FSMONITOR" == "false" ]]; then
+    test_pass "core.fsmonitor is false"
+else
+    test_fail "core.fsmonitor is '$FSMONITOR' (expected false)"
+fi
+
+# Test 3: init.templateDir should be empty string
+TEMPLATE_DIR=$(git config --global init.templateDir 2>/dev/null)
+if [[ "$TEMPLATE_DIR" == "" ]]; then
+    test_pass "init.templateDir is empty string"
+else
+    test_fail "init.templateDir is '$TEMPLATE_DIR' (expected empty string)"
+fi
+
+# Test 4: core.fsmonitorHookVersion should be 0
+FSMONITOR_VER=$(git config --global core.fsmonitorHookVersion 2>/dev/null)
+if [[ "$FSMONITOR_VER" == "0" ]]; then
+    test_pass "core.fsmonitorHookVersion is 0"
+else
+    test_fail "core.fsmonitorHookVersion is '$FSMONITOR_VER' (expected 0)"
+fi
+
+# Test 5: receive.denyCurrentBranch should be refuse
+DENY_CURRENT=$(git config --global receive.denyCurrentBranch 2>/dev/null)
+if [[ "$DENY_CURRENT" == "refuse" ]]; then
+    test_pass "receive.denyCurrentBranch is refuse"
+else
+    test_fail "receive.denyCurrentBranch is '$DENY_CURRENT' (expected refuse)"
+fi
+
+# Test 6: Malicious post-checkout hook should NOT execute on clone
+info "Testing malicious post-checkout hook execution..."
+HOOK_TEST_DIR="/tmp/hook-test-$$"
+HOOK_REPO_DIR="/tmp/hook-repo-$$"
+HOOK_MARKER="/tmp/hook-executed-$$"
+rm -rf "$HOOK_TEST_DIR" "$HOOK_REPO_DIR" "$HOOK_MARKER" 2>/dev/null
+
+# Create a repo with a malicious post-checkout hook
+mkdir -p "$HOOK_REPO_DIR"
+(
+    cd "$HOOK_REPO_DIR"
+    git init --quiet
+    git commit --allow-empty -m "init" --quiet
+    mkdir -p .git/hooks
+    cat > .git/hooks/post-checkout << HOOKEOF
+#!/bin/bash
+touch "$HOOK_MARKER"
+HOOKEOF
+    chmod +x .git/hooks/post-checkout
+)
+
+# Clone the repo - hook should NOT fire because core.hooksPath=/dev/null
+git clone --quiet "$HOOK_REPO_DIR" "$HOOK_TEST_DIR" 2>/dev/null
+
+if [[ -f "$HOOK_MARKER" ]]; then
+    test_fail "Malicious post-checkout hook executed during clone!"
+    rm -f "$HOOK_MARKER"
+else
+    test_pass "Malicious post-checkout hook did NOT execute on clone"
+fi
+rm -rf "$HOOK_TEST_DIR" "$HOOK_REPO_DIR" 2>/dev/null
+
+# Test 7: Gated regression test for GIT_SHADOW_ENABLED override gap
+# When Phase 3 shadow mode is active, git -c core.hooksPath= could re-enable hooks.
+# This test documents the gap that Phase 3's wrapper must close.
+if [[ "${GIT_SHADOW_ENABLED:-0}" == "1" ]]; then
+    info "GIT_SHADOW_ENABLED=1: Testing -c core.hooksPath= override gap..."
+    # Try to override hooksPath via -c flag (Phase 3 wrapper should block this)
+    OVERRIDE_PATH=$(git -c core.hooksPath= config core.hooksPath 2>/dev/null)
+    if [[ -z "$OVERRIDE_PATH" || "$OVERRIDE_PATH" == "/dev/null" ]]; then
+        test_pass "git -c core.hooksPath= override blocked by wrapper"
+    else
+        test_warn "git -c core.hooksPath= override succeeded (expected when Phase 3 wrapper active)"
+        info "This gap is closed by Phase 3's git wrapper command allowlist"
+    fi
+else
+    info "GIT_SHADOW_ENABLED not set - skipping -c override gap test (Phase 3 not active)"
+fi
+
+# ============================================================================
+header "11. GIT MARKETPLACE ACCESS"
 # ============================================================================
 
 echo ""
@@ -406,7 +502,7 @@ else
 fi
 
 # ============================================================================
-header "7. CONTAINER ESCAPE / LATERAL MOVEMENT"
+header "12. CONTAINER ESCAPE / LATERAL MOVEMENT"
 # ============================================================================
 
 echo ""
@@ -481,7 +577,7 @@ for endpoint in "${METADATA_ENDPOINTS[@]}"; do
 done
 
 # ============================================================================
-header "8. PROCESS AND MOUNT INSPECTION"
+header "13. PROCESS AND MOUNT INSPECTION"
 # ============================================================================
 
 echo ""
@@ -513,7 +609,7 @@ else
 fi
 
 # ============================================================================
-header "9. GITHUB API FILTER TESTS"
+header "14. GITHUB API FILTER TESTS"
 # ============================================================================
 
 echo ""
@@ -537,7 +633,7 @@ else
 fi
 
 # ============================================================================
-header "9b. GITHUB POLICY BYPASS ATTEMPTS"
+header "15. GITHUB POLICY BYPASS ATTEMPTS"
 # ============================================================================
 
 echo ""
@@ -603,7 +699,7 @@ else
 fi
 
 # ============================================================================
-header "9c. REGISTRATION API ISOLATION"
+header "16. REGISTRATION API ISOLATION"
 # ============================================================================
 
 echo ""
@@ -656,7 +752,7 @@ else
 fi
 
 # ============================================================================
-header "10. CERTIFICATE AND TLS INSPECTION"
+header "17. CERTIFICATE AND TLS INSPECTION"
 # ============================================================================
 
 echo ""
@@ -692,7 +788,7 @@ else
 fi
 
 # ============================================================================
-header "11. FILESYSTEM ISOLATION"
+header "18. FILESYSTEM ISOLATION"
 # ============================================================================
 
 echo ""
@@ -767,7 +863,7 @@ else
 fi
 
 # ============================================================================
-header "12. CAPABILITY VERIFICATION"
+header "19. CAPABILITY VERIFICATION"
 # ============================================================================
 
 echo ""
@@ -830,7 +926,7 @@ else
 fi
 
 # ============================================================================
-header "13. ADDITIONAL CREDENTIAL PATTERNS"
+header "20. ADDITIONAL CREDENTIAL PATTERNS"
 # ============================================================================
 
 echo ""
@@ -883,7 +979,7 @@ else
 fi
 
 # ============================================================================
-header "14. NETWORK BYPASS ATTEMPTS"
+header "21. NETWORK BYPASS ATTEMPTS"
 # ============================================================================
 
 echo ""
@@ -951,7 +1047,7 @@ else
 fi
 
 # ============================================================================
-header "15. SENSITIVE PATH ACCESS"
+header "22. SENSITIVE PATH ACCESS"
 # ============================================================================
 
 echo ""

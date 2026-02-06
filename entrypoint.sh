@@ -172,6 +172,16 @@ if [ -f "/etc/gitconfig" ] && grep -q "gateway:8080" /etc/gitconfig 2>/dev/null;
     sudo rm -f /etc/gitconfig 2>/dev/null || rm -f /etc/gitconfig 2>/dev/null || true
 fi
 
+# Git hardening: disable hooks and fsmonitor to prevent malicious repos from executing code
+# Gate behind SANDBOX_GIT_HOOKS_ENABLED (default 0 = hooks disabled for security)
+if [ "${SANDBOX_GIT_HOOKS_ENABLED:-0}" != "1" ]; then
+    git config --global core.hooksPath /dev/null
+    git config --global init.templateDir ''
+    git config --global core.fsmonitor false
+    git config --global core.fsmonitorHookVersion 0
+    git config --global receive.denyCurrentBranch refuse
+fi
+
 # Configure DNS to use unified-proxy when in credential isolation mode
 # This enables domain allowlisting - only approved domains can be resolved
 # Note: In credential-isolation mode, DNS is configured by entrypoint-root.sh (as root)

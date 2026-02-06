@@ -31,6 +31,7 @@ from mitmproxy.flow import Flow
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from addons.container_identity import get_container_config
+from git_policies import check_protected_branches
 from pktline import PktLineRef, parse_pktline, read_pktline_prefix
 
 # Git path pattern: /<owner>/<repo>.git/<operation>
@@ -186,6 +187,22 @@ class GitProxyAddon:
                     container_id=container_id,
                 )
                 return
+
+            # Check protected branch enforcement (applies to all modes)
+            for ref in git_op.refs:
+                block_reason = check_protected_branches(
+                    refname=ref.refname,
+                    old_sha=ref.old_sha,
+                    new_sha=ref.new_sha,
+                    metadata=metadata,
+                )
+                if block_reason:
+                    self._deny_request(
+                        flow,
+                        block_reason,
+                        container_id=container_id,
+                    )
+                    return
 
             # Check bot mode restrictions
             auth_mode = metadata.get("auth_mode", "normal")
