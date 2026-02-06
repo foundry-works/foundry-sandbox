@@ -70,7 +70,7 @@ cmd_prune() {
         done
     fi
 
-    # Remove orphaned Docker networks (sandbox networks with no active containers)
+    # Remove orphaned Docker networks (sandbox networks with no containers)
     if [ "$networks" = true ]; then
         local network_name
         while IFS= read -r network_name; do
@@ -79,16 +79,24 @@ cmd_prune() {
             local sandbox_name="${network_name%_credential-isolation}"
             sandbox_name="${sandbox_name%_proxy-egress}"
 
-            # Check if any containers in this project are running
-            if ! docker ps -q --filter "name=^${sandbox_name}-" 2>/dev/null | grep -q .; then
+            # Check if any containers (running or stopped) belong to this sandbox
+            if ! docker ps -aq --filter "name=^${sandbox_name}-" 2>/dev/null | grep -q .; then
                 if [ "$force" = false ]; then
                     format_header "Orphaned network: $network_name"
                     if ! prompt_confirm "Remove this network?" false; then
                         continue
                     fi
                 fi
+                # Disconnect any dangling endpoints before removal
+                local endpoint
+                while IFS= read -r endpoint; do
+                    [ -z "$endpoint" ] && continue
+                    docker network disconnect -f "$network_name" "$endpoint" 2>/dev/null || true
+                done < <(docker network inspect --format '{{range .Containers}}{{.Name}} {{end}}' "$network_name" 2>/dev/null | tr ' ' '\n')
                 if docker network rm "$network_name" 2>/dev/null; then
                     removed_networks+=("$network_name")
+                else
+                    log_warn "Failed to remove network: $network_name"
                 fi
             fi
         done < <(docker network ls --format '{{.Name}}' | grep -E '^sandbox-.*_(credential-isolation|proxy-egress)$')
