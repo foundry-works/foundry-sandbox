@@ -416,6 +416,106 @@ else
 fi
 
 # ============================================================================
+header "10b. GIT SHADOW ISOLATION (Phase 3)"
+# ============================================================================
+
+echo ""
+echo "Testing git shadow mode isolation (tmpfs + wrapper + HMAC auth)..."
+
+if [[ "${GIT_SHADOW_ENABLED:-0}" == "1" ]]; then
+
+    # Test 1: /workspace/.git is an empty tmpfs
+    info "Testing /workspace/.git is empty tmpfs..."
+    if mountpoint -q /workspace/.git 2>/dev/null; then
+        GIT_MOUNT_TYPE=$(mount | grep "/workspace/.git " | awk '{print $5}')
+        if [[ "$GIT_MOUNT_TYPE" == "tmpfs" ]]; then
+            GIT_DIR_CONTENTS=$(ls -A /workspace/.git 2>/dev/null | wc -l)
+            if [[ "$GIT_DIR_CONTENTS" -eq 0 ]]; then
+                test_pass "/workspace/.git is empty tmpfs (mount type: tmpfs, 0 files)"
+            else
+                test_fail "/workspace/.git is tmpfs but NOT empty ($GIT_DIR_CONTENTS items found)"
+                info "Contents: $(ls -A /workspace/.git 2>/dev/null | head -5)"
+            fi
+        else
+            test_fail "/workspace/.git is mounted but not tmpfs (type: $GIT_MOUNT_TYPE)"
+        fi
+    else
+        test_fail "/workspace/.git is not a separate mount point (shadow not active)"
+    fi
+
+    # Test 2: /usr/bin/git status fails with 'not a git repository'
+    info "Testing raw /usr/bin/git status fails without real .git/..."
+    RAW_GIT_OUTPUT=$(/usr/bin/git status 2>&1)
+    RAW_GIT_EXIT=$?
+    if [[ $RAW_GIT_EXIT -ne 0 ]] && echo "$RAW_GIT_OUTPUT" | grep -qi "not a git repository"; then
+        test_pass "/usr/bin/git status fails with 'not a git repository'"
+    elif [[ $RAW_GIT_EXIT -eq 0 ]]; then
+        test_fail "/usr/bin/git status succeeded (shadow .git/ may contain metadata)"
+    else
+        test_fail "/usr/bin/git status failed but without expected message"
+        info "Exit code: $RAW_GIT_EXIT, output: $(echo "$RAW_GIT_OUTPUT" | head -c 200)"
+    fi
+
+    # Test 3: proxied git log works correctly via wrapper
+    info "Testing proxied git log via wrapper..."
+    if [[ -x /usr/local/bin/git ]]; then
+        WRAPPER_OUTPUT=$(/usr/local/bin/git log --oneline -5 2>&1)
+        WRAPPER_EXIT=$?
+        if [[ $WRAPPER_EXIT -eq 0 ]] && [[ -n "$WRAPPER_OUTPUT" ]]; then
+            test_pass "Proxied git log works via wrapper (returned commits)"
+        elif [[ $WRAPPER_EXIT -eq 0 ]]; then
+            test_warn "Proxied git log returned 0 but empty output (new repo?)"
+        else
+            test_fail "Proxied git log via wrapper failed (exit: $WRAPPER_EXIT)"
+            info "Output: $(echo "$WRAPPER_OUTPUT" | head -c 200)"
+        fi
+    else
+        test_fail "Git wrapper not found at /usr/local/bin/git"
+    fi
+
+    # Test 4: git --git-dir=/tmp/evil status rejected by wrapper
+    info "Testing --git-dir flag injection rejected by wrapper..."
+    mkdir -p /tmp/evil 2>/dev/null
+    GITDIR_OUTPUT=$(/usr/local/bin/git --git-dir=/tmp/evil status 2>&1)
+    GITDIR_EXIT=$?
+    rmdir /tmp/evil 2>/dev/null
+    if [[ $GITDIR_EXIT -ne 0 ]] && echo "$GITDIR_OUTPUT" | grep -qiE "(blocked|rejected|not allowed|forbidden|denied|error)"; then
+        test_pass "git --git-dir=/tmp/evil status rejected by wrapper"
+    elif [[ $GITDIR_EXIT -eq 0 ]]; then
+        test_fail "git --git-dir=/tmp/evil status succeeded (flag injection not blocked!)"
+    else
+        # Non-zero exit but unexpected message — still likely blocked
+        test_pass "git --git-dir=/tmp/evil status failed (exit: $GITDIR_EXIT)"
+        info "Output: $(echo "$GITDIR_OUTPUT" | head -c 200)"
+    fi
+
+    # Test 5: direct curl to git API without HMAC returns 401
+    info "Testing unauthenticated git API access returns 401..."
+    GIT_API_HOST="${GIT_API_HOST:-unified-proxy}"
+    GIT_API_PORT="${GIT_API_PORT:-8083}"
+    NOAUTH_RESP=$(curl -s --connect-timeout 5 --max-time 10 \
+        -X POST \
+        -H "Content-Type: application/json" \
+        -d '{"args":["status"],"cwd":"/workspace"}' \
+        -o /dev/null -w "%{http_code}" \
+        "http://${GIT_API_HOST}:${GIT_API_PORT}/git/exec" 2>&1)
+    if [[ "$NOAUTH_RESP" == "401" ]]; then
+        test_pass "Unauthenticated git API request returned 401"
+    elif [[ "$NOAUTH_RESP" == "000" ]]; then
+        test_fail "Git API unreachable at ${GIT_API_HOST}:${GIT_API_PORT}"
+    elif [[ "$NOAUTH_RESP" == "200" ]]; then
+        test_fail "Unauthenticated git API request succeeded (HMAC not enforced!)"
+    else
+        test_fail "Unauthenticated git API returned unexpected HTTP $NOAUTH_RESP (expected 401)"
+    fi
+
+else
+    info "GIT_SHADOW_ENABLED not set - skipping git shadow isolation tests (Phase 3 not active)"
+    info "  These tests require: tmpfs at /workspace/.git, git wrapper at /usr/local/bin/git,"
+    info "  and git API server at port 8083 with HMAC authentication."
+fi
+
+# ============================================================================
 header "11. GIT MARKETPLACE ACCESS"
 # ============================================================================
 

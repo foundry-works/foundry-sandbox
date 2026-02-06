@@ -2,7 +2,7 @@
   "spec_id": "git-policy-hardening-2026-02-06-001",
   "title": "git-policy-hardening",
   "generated": "2026-02-06T12:24:51.717343Z",
-  "last_updated": "2026-02-06T12:51:44.944260Z",
+  "last_updated": "2026-02-06T13:39:51.528456Z",
   "metadata": {
     "description": "",
     "mission": "Harden git security policies in foundry-sandbox to prevent malicious code execution via git hooks, unauthorized pushes to protected branches, data exfiltration via .git/ metadata, and API abuse through unvalidated endpoint paths.",
@@ -20,9 +20,9 @@
     "category": "implementation",
     "template": "empty"
   },
-  "progress_percentage": 17,
+  "progress_percentage": 44,
   "status": "in_progress",
-  "current_phase": "phase-2",
+  "current_phase": "phase-3",
   "hierarchy": {
     "spec-root": {
       "type": "spec",
@@ -37,7 +37,7 @@
         "phase-5"
       ],
       "total_tasks": 29,
-      "completed_tasks": 5,
+      "completed_tasks": 13,
       "metadata": {
         "purpose": "",
         "category": "implementation"
@@ -164,7 +164,7 @@
     "phase-2": {
       "type": "phase",
       "title": "Protected Branch Enforcement + Force Push Blocking",
-      "status": "in_progress",
+      "status": "completed",
       "parent": "spec-root",
       "children": [
         "task-2-1",
@@ -173,10 +173,12 @@
         "verify-2-1"
       ],
       "total_tasks": 4,
-      "completed_tasks": 2,
+      "completed_tasks": 4,
       "metadata": {
         "purpose": "",
-        "description": "Prevent direct pushes (create/update/delete) to main, master, release/*, production and configurable branches. Enforced for all sandbox modes (bot and normal) via shared validator. Impact: HIGH, Complexity: Small-Medium."
+        "description": "Prevent direct pushes (create/update/delete) to main, master, release/*, production and configurable branches. Enforced for all sandbox modes (bot and normal) via shared validator. Impact: HIGH, Complexity: Small-Medium.",
+        "needs_journaling": true,
+        "completed_at": "2026-02-06T13:14:07.275803Z"
       },
       "dependencies": {
         "blocks": [
@@ -258,11 +260,11 @@
     "task-2-3": {
       "type": "task",
       "title": "Add unit tests for protected branches",
-      "status": "pending",
+      "status": "completed",
       "parent": "phase-2",
       "children": [],
       "total_tasks": 1,
-      "completed_tasks": 0,
+      "completed_tasks": 1,
       "metadata": {
         "description": "Add comprehensive unit tests for protected branch enforcement. Tests: push update to refs/heads/main blocked, push update to refs/heads/feature-x allowed, push update to refs/heads/release/v2.0 blocked (wildcard), push to custom protected branch from metadata blocked, branch creation to protected branch when remote has heads blocked, bootstrap creation to refs/heads/main succeeds once then second attempt blocked, branch deletion to refs/heads/main blocked, metadata.git.protected_branches.enabled:false disables enforcement, default enabled for normal mode, lock file cannot be re-created after initial bootstrap.",
         "file_path": "tests/unit/test_git_proxy.py",
@@ -278,7 +280,12 @@
           "Test: default enabled for normal mode",
           "Test: lock file permanent (no orphan cleanup reopening)"
         ],
-        "task_category": "implementation"
+        "task_category": "implementation",
+        "started_at": "2026-02-06T12:53:16.565256Z",
+        "completed_at": "2026-02-06T12:54:30.166211Z",
+        "needs_journaling": false,
+        "actual_hours": 0.02,
+        "journaled_at": "2026-02-06T12:54:30.166276Z"
       },
       "dependencies": {
         "blocks": [],
@@ -289,14 +296,19 @@
     "verify-2-1": {
       "type": "verify",
       "title": "Verify Phase 2: Protected Branch Enforcement",
-      "status": "pending",
+      "status": "completed",
       "parent": "phase-2",
       "children": [],
       "total_tasks": 1,
-      "completed_tasks": 0,
+      "completed_tasks": 1,
       "metadata": {
         "description": "Run pytest tests/unit/test_git_proxy.py -v. Verify push to refs/heads/main blocked, push to refs/heads/feature-x allowed, wildcard patterns match correctly, bootstrap guard allows exactly one initial creation, lock files are permanent.",
-        "verification_type": "fidelity"
+        "verification_type": "fidelity",
+        "started_at": "2026-02-06T12:57:23.788727Z",
+        "completed_at": "2026-02-06T13:14:07.275764Z",
+        "needs_journaling": false,
+        "actual_hours": 0.28,
+        "journaled_at": "2026-02-06T13:14:07.275834Z"
       },
       "dependencies": {
         "blocks": [],
@@ -307,7 +319,7 @@
     "phase-3": {
       "type": "phase",
       "title": ".git/ Metadata Isolation via tmpfs Shadow + Flag Validation",
-      "status": "pending",
+      "status": "in_progress",
       "parent": "spec-root",
       "children": [
         "task-3-1",
@@ -325,7 +337,7 @@
         "verify-3-1"
       ],
       "total_tasks": 13,
-      "completed_tasks": 0,
+      "completed_tasks": 6,
       "metadata": {
         "purpose": "",
         "description": "Eliminate the largest data exfiltration surface \u2014 accessible .git/ metadata \u2014 by shadowing it with tmpfs and proxying all git commands through an authenticated, validated API endpoint. Includes flag validation, HMAC authentication, identity-bound rate limiting, and exhaustive -c config key validation. Impact: HIGH, Complexity: Large."
@@ -343,11 +355,11 @@
     "task-3-1": {
       "type": "task",
       "title": "Create git operations API with command allowlist and flag validation",
-      "status": "pending",
+      "status": "completed",
       "parent": "phase-3",
       "children": [],
       "total_tasks": 1,
-      "completed_tasks": 0,
+      "completed_tasks": 1,
       "metadata": {
         "description": "Create POST /git/exec endpoint receiving JSON {args, cwd, stdin_b64}. Server-side repo root derivation from authenticated sandbox identity via container registry lookup (ignore/override client cwd for repo path, only use client cwd for relative subdirectory within assigned workspace). Deny-by-default command allowlist: working tree (status, add, restore, stash, clean --dry-run), committing (commit, cherry-pick, merge, rebase non-interactive, revert), branching (branch, checkout, switch, tag), history (diff, show, log, blame, shortlog, describe, name-rev), remote (fetch, pull, push, remote read-only subcommands), patch (apply, am, format-patch), notes (read-only), config (--get, --list, --get-regexp), plumbing (rev-parse, symbolic-ref, for-each-ref, ls-tree, ls-files, ls-remote, cat-file, rev-list, diff-tree, diff-files, diff-index). Per-operation flag blocklist: --git-dir, --work-tree, --exec, --upload-pack, --receive-pack. Exhaustive -c config key validation: permitted prefixes (user.*, color.*, core.quotepath, core.autocrlf, core.eol, core.whitespace, diff.*, merge.*, format.*, log.*, pretty.*, column.*, pager.*); explicit never-allow list checked first (alias.*, core.sshCommand, core.pager, core.editor, core.hooksPath, core.fsmonitor, core.gitProxy, core.askPass, credential.*, http.*, remote.*.proxy, remote.*.pushurl, protocol.*.allow, diff.*.textconv, diff.*.command, filter.*, merge.*.driver, gpg.*, sendemail.*, browser.*, instaweb.*, difftool.*.cmd, mergetool.*.cmd, sequence.editor). Block --force/--force-with-lease on push, destructive checkout/switch/branch/clean variants. Block -i/--interactive on rebase. Block paths containing .. or outside /git-workspace. Max response 10MB with truncation. Base64 fallback for non-UTF-8 stdout. Per-sandbox command extension via metadata.git.allowed_commands. Stdin size cap (1MB decoded). Max in-flight operations per sandbox.",
         "file_path": "unified-proxy/git_operations.py",
@@ -376,7 +388,12 @@
           "GIT_CONFIG_PARAMETERS, GIT_DIR, GIT_WORK_TREE, GIT_SSH, GIT_SSH_COMMAND, GIT_ASKPASS, SSH_ASKPASS, GIT_EDITOR, GIT_PAGER explicitly cleared",
           "git remote subcommands explicitly enumerated: -v, show, get-url allowed; add, set-url, remove, rename blocked"
         ],
-        "task_category": "implementation"
+        "task_category": "implementation",
+        "started_at": "2026-02-06T13:17:04.344929Z",
+        "completed_at": "2026-02-06T13:20:10.722029Z",
+        "needs_journaling": false,
+        "actual_hours": 0.05,
+        "journaled_at": "2026-02-06T13:20:10.722120Z"
       },
       "dependencies": {
         "blocks": [],
@@ -387,11 +404,11 @@
     "task-3-2": {
       "type": "task",
       "title": "Create authenticated git API TCP server",
-      "status": "pending",
+      "status": "completed",
       "parent": "phase-3",
       "children": [],
       "total_tasks": 1,
-      "completed_tasks": 0,
+      "completed_tasks": 1,
       "metadata": {
         "description": "Dedicated TCP app on port 8083 for /git/exec only. Does NOT expose /internal/* registry routes. Authentication: bind to credential-isolation network only. HMAC-signed requests with per-sandbox shared secret delivered via Docker secrets mount (not env vars, per security review). Shared secret stored in proxy container registry. Each request includes X-Sandbox-Id header and X-Request-Signature (HMAC-SHA256). Signature covers canonical string: method + path + body hash + X-Request-Timestamp + X-Request-Nonce (replay protection). Enforce short clock window (5 min) and nonce uniqueness per sandbox. Reject unsigned/invalid/replayed requests with 401. Identity-bound rate limiting: per-sandbox token bucket (300 burst, 120 sustained) keyed on authenticated identity. Global ceiling 1000 req/min across all sandboxes. Pre-auth IP-based throttling to prevent HMAC brute-force. HTTP 429 + Retry-After on rate limit. HMAC secret lifecycle: rotation on sandbox recreation, explicit revocation on teardown, emergency rotate via admin command.",
         "file_path": "unified-proxy/git_api.py",
@@ -413,7 +430,12 @@
           "Secret rotation on sandbox recreation",
           "Secret revocation on teardown"
         ],
-        "task_category": "implementation"
+        "task_category": "implementation",
+        "started_at": "2026-02-06T13:21:10.328526Z",
+        "completed_at": "2026-02-06T13:23:24.586650Z",
+        "needs_journaling": false,
+        "actual_hours": 0.04,
+        "journaled_at": "2026-02-06T13:23:24.586722Z"
       },
       "dependencies": {
         "blocks": [],
@@ -424,11 +446,11 @@
     "task-3-3": {
       "type": "task",
       "title": "Create git wrapper script with injection-safe JSON serialization",
-      "status": "pending",
+      "status": "completed",
       "parent": "phase-3",
       "children": [],
       "total_tasks": 1,
-      "completed_tasks": 0,
+      "completed_tasks": 1,
       "metadata": {
         "description": "Shell script installed at /usr/local/bin/git in sandbox. Path detection: resolve -C <dir> or $PWD, canonicalize with symlink resolution (realpath -m), proxy only when canonical path is /workspace or under /workspace/. Reject ambiguous/unresolvable paths with explicit error. Use jq (or python3 json fallback) for JSON construction from arguments \u2014 never shell string concatenation. Include X-Sandbox-Id, X-Request-Timestamp, X-Request-Nonce, and X-Request-Signature (HMAC of canonical string) in HTTP headers. HMAC secret read from mounted secret file. Falls through to /usr/bin/git for non-workspace operations. Proxy-down: clear error after 30s timeout, exit 1. Signal handling: trap SIGINT/SIGTERM, exit with 128 + signal_number. Known limitation: for git push, remote-side push may complete after cancellation (inherent to git protocol).",
         "file_path": "stubs/git-wrapper.sh",
@@ -444,7 +466,12 @@
           "Clear error after 30s proxy timeout, exit 1",
           "Signal handling: trap SIGINT/SIGTERM, exit 128+signal"
         ],
-        "task_category": "implementation"
+        "task_category": "implementation",
+        "started_at": "2026-02-06T13:35:55.516252Z",
+        "completed_at": "2026-02-06T13:39:51.527136Z",
+        "needs_journaling": false,
+        "actual_hours": 0.07,
+        "journaled_at": "2026-02-06T13:39:51.527216Z"
       },
       "dependencies": {
         "blocks": [],
@@ -611,11 +638,11 @@
     "task-3-10": {
       "type": "task",
       "title": "Add unit tests for git operations API",
-      "status": "pending",
+      "status": "completed",
       "parent": "phase-3",
       "children": [],
       "total_tasks": 1,
-      "completed_tasks": 0,
+      "completed_tasks": 1,
       "metadata": {
         "description": "Comprehensive unit tests for git operations API covering command allowlist, flag validation, -c config key validation, authentication, rate limiting, and response handling.",
         "file_path": "tests/unit/test_git_operations.py",
@@ -650,7 +677,12 @@
           "Test: max request body size enforced",
           "Test: max args count enforced"
         ],
-        "task_category": "implementation"
+        "task_category": "implementation",
+        "started_at": "2026-02-06T13:23:44.325442Z",
+        "completed_at": "2026-02-06T13:26:18.375946Z",
+        "needs_journaling": false,
+        "actual_hours": 0.04,
+        "journaled_at": "2026-02-06T13:26:18.376044Z"
       },
       "dependencies": {
         "blocks": [],
@@ -661,11 +693,11 @@
     "task-3-11": {
       "type": "task",
       "title": "Add red-team tests for git shadow",
-      "status": "pending",
+      "status": "completed",
       "parent": "phase-3",
       "children": [],
       "total_tasks": 1,
-      "completed_tasks": 0,
+      "completed_tasks": 1,
       "metadata": {
         "description": "Red-team tests verifying git shadow isolation. Tests: /workspace/.git is empty tmpfs, /usr/bin/git status fails with not a git repository, proxied git log works correctly, git --git-dir=/tmp/evil status rejected, direct curl to git API without HMAC rejected with 401.",
         "file_path": "tests/redteam-sandbox.sh",
@@ -676,7 +708,12 @@
           "Test: git --git-dir=/tmp/evil status rejected by wrapper",
           "Test: direct curl to git API without HMAC returns 401"
         ],
-        "task_category": "implementation"
+        "task_category": "implementation",
+        "started_at": "2026-02-06T13:29:27.682193Z",
+        "completed_at": "2026-02-06T13:30:34.125609Z",
+        "needs_journaling": false,
+        "actual_hours": 0.02,
+        "journaled_at": "2026-02-06T13:30:34.125681Z"
       },
       "dependencies": {
         "blocks": [],
@@ -687,11 +724,11 @@
     "task-3-12": {
       "type": "task",
       "title": "Add git wrapper injection safety tests",
-      "status": "pending",
+      "status": "completed",
       "parent": "phase-3",
       "children": [],
       "total_tasks": 1,
-      "completed_tasks": 0,
+      "completed_tasks": 1,
       "metadata": {
         "description": "Test suite for git wrapper JSON serialization safety. Verify arguments with quotes, backslashes, newlines produce valid JSON. Verify null bytes are rejected or safely encoded. Verify unicode arguments correctly serialized. These tests validate the jq/python JSON construction path.",
         "file_path": "tests/unit/test_git_wrapper.py",
@@ -702,7 +739,12 @@
           "Test: null bytes in arguments are rejected or safely encoded",
           "Test: unicode arguments correctly serialized"
         ],
-        "task_category": "implementation"
+        "task_category": "implementation",
+        "started_at": "2026-02-06T13:32:01.320750Z",
+        "completed_at": "2026-02-06T13:34:07.201923Z",
+        "needs_journaling": false,
+        "actual_hours": 0.03,
+        "journaled_at": "2026-02-06T13:34:07.202021Z"
       },
       "dependencies": {
         "blocks": [],
@@ -1075,6 +1117,105 @@
       "author": "foundry-mcp",
       "metadata": {},
       "task_id": "verify-1-1"
+    },
+    {
+      "timestamp": "2026-02-06T12:54:30.166276Z",
+      "entry_type": "status_change",
+      "title": "Task Completed: Add unit tests for protected branches",
+      "content": "Added 10 protected branch unit tests in TestProtectedBranchEnforcement class. Fixed 3 existing tests that pushed to refs/heads/main (now protected). Fixed bot mode test assertion (protected branch check runs before bot mode). All 34 tests pass.\"",
+      "author": "foundry-mcp",
+      "metadata": {},
+      "task_id": "task-2-3"
+    },
+    {
+      "timestamp": "2026-02-06T13:14:07.275834Z",
+      "entry_type": "status_change",
+      "title": "Task Completed: Verify Phase 2: Protected Branch Enforcement",
+      "content": "Fidelity review completed with initial verdict: partial (split codex/claude). Fixed 3 categories of issues:\n\n1. **bare_repo_path not passed to validator** (HIGH\u2192resolved): Updated git_proxy.py:192 to read bare_repo_path from metadata and pass to check_protected_branches(). Bootstrap lock mechanism now functional through proxy path.\n\n2. **Security tests using protected branches** (MEDIUM\u2192resolved): Updated test_normal_mode_allows_all_branches in tests/security/test_git_policy.py to use non-protected branches (refs/heads/feature/test, refs/heads/develop). Updated test_push_size_exact_boundary to use refs/heads/feature/size-test.\n\n3. **Pre-existing cross-file mock isolation bug** (fixed): Both test_git_proxy.py and test_git_policy.py create separate MockCtx instances. When pytest runs them together, the second file overwrites git_proxy.ctx, disconnecting the first file's fixture from the module's ctx. Fixed by having both reset_mock_ctx fixtures reassign git_proxy.ctx = mock_ctx before each test.\n\n4. **Integration test conflict** (fixed): Updated test_user_mode_any_branch_allowed in tests/integration/test_git_operations.py to use refs/heads/feature/test instead of refs/heads/main.\n\nFinal test results: 354 passed, 0 failed across all test suites (unit, security, integration).\"",
+      "author": "foundry-mcp",
+      "metadata": {},
+      "task_id": "verify-2-1"
+    },
+    {
+      "timestamp": "2026-02-06T13:20:10.722120Z",
+      "entry_type": "status_change",
+      "title": "Task Completed: Create git operations API with command allowlist and flag validation",
+      "content": "Created unified-proxy/git_operations.py (530 lines) implementing the git operations API core logic.\n\nImplemented:\n- GitExecRequest/GitExecResponse/ValidationError data models\n- validate_request(): JSON parsing with body/args/stdin size limits (256KB body, 256 args, 8KB/arg, 1MB stdin)\n- validate_command(): Deny-by-default allowlist (41 commands, reset excluded), global flag blocklist, per-command flag blocking\n- _validate_config_key(): Exhaustive -c key=value validation \u2014 never-allow list checked FIRST (alias.*, core.sshCommand, credential.*, http.*, wildcard patterns for remote.*.proxy etc.), then permitted prefixes (user.*, color.*, diff.*, etc.)\n- _validate_command_flags(): --force blocked on push, -i/--interactive on rebase, destructive checkout/switch/branch/clean\n- _validate_remote_subcommand(): Explicit enumeration \u2014 -v/show/get-url allowed; add/set-url/remove/rename blocked\n- _validate_config_subcommand(): Only --get/--list/--get-regexp allowed\n- _validate_notes_subcommand(): Write operations blocked\n- _validate_clean_flags(): Only --dry-run/-n allowed\n- validate_path(): realpath + startswith for path traversal prevention, server-side repo root authoritative\n- validate_path_args(): Blocks .. in path-like args\n- build_clean_env(): Starts from empty env, copies only allowed vars (PATH, HOME, etc.), strips all GIT_*/SSH_*\n- execute_git(): Full pipeline \u2014 validate command, resolve cwd, sanitize env, subprocess.run with timeout, 10MB truncation, base64 fallback for non-UTF-8\n- execute_git_async(): Per-sandbox concurrency control via SandboxSemaphorePool (4 max concurrent)\n- Per-sandbox command extension via metadata.git.allowed_commands\n\nBasic verification: Module imports cleanly, 41 commands in allowlist, all validation rules verified via inline checks, actual git execution tested. Full testing deferred to task-3-10.\"",
+      "author": "foundry-mcp",
+      "metadata": {},
+      "task_id": "task-3-1"
+    },
+    {
+      "timestamp": "2026-02-06T13:23:24.586722Z",
+      "entry_type": "status_change",
+      "title": "Task Completed: Create authenticated git API TCP server",
+      "content": "Created unified-proxy/git_api.py (590 lines) implementing the authenticated git API TCP server.\n\nImplemented:\n- Flask app on port 8083 with POST /git/exec only (no /internal/* routes exposed)\n- GET /health endpoint for readiness checks\n- SecretStore: Per-sandbox HMAC secret management from Docker secrets mount (/run/secrets/sandbox-hmac/{sandbox_id}), with in-memory cache, revoke(), rotate() operations\n- HMAC-SHA256 signature verification: canonical string = METHOD\\\\nPATH\\\\nSHA256(body)\\\\nTIMESTAMP\\\\nNONCE, constant-time comparison via hmac.compare_digest\n- Clock window validation (5 min) with logged skew warnings\n- NonceStore: Per-sandbox nonce tracking with OrderedDict, 10-min TTL, LRU eviction at 1000 entries/sandbox, clear_sandbox() on teardown\n- RateLimiter with three layers:\n  - Pre-auth IP throttle (100 req/min per IP)\n  - Per-sandbox token bucket (300 burst, 120/min sustained)\n  - Global ceiling (1000 req/min across all sandboxes)\n  - HTTP 429 + Retry-After header on all rate limit responses\n- Request flow: IP throttle \u2192 extract headers \u2192 clock window \u2192 get secret \u2192 verify HMAC \u2192 check nonce \u2192 sandbox rate \u2192 global rate \u2192 validate request \u2192 resolve repo root \u2192 execute git\n- Admin operations: revoke_sandbox_secret(), rotate_sandbox_secret()\n- run_tcp_server() using werkzeug.serving.make_server (matches internal_api.py patterns)\n- MAX_REQUEST_BODY enforced via Flask MAX_CONTENT_LENGTH (256KB)\n\nBasic verification: Module imports, HMAC sign/verify correct, nonce replay detected, token bucket exhaustion, rate limiter per-sandbox + global + IP throttle, Flask routes verified via test client. Full testing deferred to task-3-10.\"",
+      "author": "foundry-mcp",
+      "metadata": {},
+      "task_id": "task-3-2"
+    },
+    {
+      "timestamp": "2026-02-06T13:26:18.376044Z",
+      "entry_type": "status_change",
+      "title": "Task Completed: Add unit tests for git operations API",
+      "content": "Created tests/unit/test_git_operations.py with 38 tests (29 required + 9 edge cases), all passing. Covers: command allowlist (2), flag validation (3), config key validation (6), path validation (2), request validation (2), env sanitization (3), remote subcommands (3), HMAC auth (3), rate limiting (2), response handling (2), request size limits (1), edge cases (9 including nonce TTL/LRU, token bucket refill, clock window, health endpoint, invalid JSON). Basic verification: all 38 tests pass. Full testing deferred to verify-3-1.\"",
+      "author": "foundry-mcp",
+      "metadata": {},
+      "task_id": "task-3-10"
+    },
+    {
+      "timestamp": "2026-02-06T13:29:27.682269Z",
+      "entry_type": "status_change",
+      "title": "Status changed to in_progress",
+      "content": "Starting implementation: adding gated red-team tests for git shadow isolation",
+      "author": "foundry-mcp",
+      "metadata": {},
+      "task_id": "task-3-11"
+    },
+    {
+      "timestamp": "2026-02-06T13:30:34.125681Z",
+      "entry_type": "status_change",
+      "title": "Task Completed: Add red-team tests for git shadow",
+      "content": "Added section '10b. GIT SHADOW ISOLATION (Phase 3)' to tests/redteam-sandbox.sh with 5 red-team tests gated behind GIT_SHADOW_ENABLED=1: (1) /workspace/.git is empty tmpfs \u2014 verifies mountpoint, mount type, and emptiness; (2) /usr/bin/git status fails with 'not a git repository' \u2014 calls raw git binary directly; (3) proxied git log works via wrapper at /usr/local/bin/git; (4) git --git-dir=/tmp/evil status rejected by wrapper \u2014 validates flag injection blocked; (5) direct curl to git API without HMAC headers returns 401. All tests gracefully skip when GIT_SHADOW_ENABLED is not set. Basic verification: bash -n syntax check passes. Full testing deferred to verify-3-1.\"",
+      "author": "foundry-mcp",
+      "metadata": {},
+      "task_id": "task-3-11"
+    },
+    {
+      "timestamp": "2026-02-06T13:32:01.320820Z",
+      "entry_type": "status_change",
+      "title": "Status changed to in_progress",
+      "content": "Implementing git wrapper JSON injection safety tests covering both jq and python3 serialization paths",
+      "author": "foundry-mcp",
+      "metadata": {},
+      "task_id": "task-3-12"
+    },
+    {
+      "timestamp": "2026-02-06T13:34:07.202021Z",
+      "entry_type": "status_change",
+      "title": "Task Completed: Add git wrapper injection safety tests",
+      "content": "Created tests/unit/test_git_wrapper.py with 28 test methods (52 parametrized runs across jq and python3 backends, 6 expected skips). Coverage: (1) double quotes \u2014 4 tests, (2) backslashes \u2014 4 tests, (3) newlines/CR/tab \u2014 3 tests, (4) null bytes \u2014 4 tests documenting jq and python3 behavior, (5) unicode \u2014 6 tests (basic, CJK, emoji, mixed, RTL, zero-width), plus cwd tests and combined edge cases (empty args, empty string arg, 10KB arg, 100 args). All 52 tests pass. Basic verification complete; full testing deferred to verify-3-1.\"",
+      "author": "foundry-mcp",
+      "metadata": {},
+      "task_id": "task-3-12"
+    },
+    {
+      "timestamp": "2026-02-06T13:35:55.516321Z",
+      "entry_type": "status_change",
+      "title": "Status changed to in_progress",
+      "content": "Starting implementation of git wrapper script at stubs/git-wrapper.sh",
+      "author": "foundry-mcp",
+      "metadata": {},
+      "task_id": "task-3-3"
+    },
+    {
+      "timestamp": "2026-02-06T13:39:51.527216Z",
+      "entry_type": "status_change",
+      "title": "Task Completed: Create git wrapper script with injection-safe JSON serialization",
+      "content": "Created stubs/git-wrapper.sh (~210 lines). All 10 acceptance criteria met:\n\n1. Designed for /usr/local/bin/git (REAL_GIT=/usr/bin/git fallthrough)\n2. resolve_cwd() handles -C <dir>, -C<dir>, and $PWD with realpath -m symlink resolution\n3. is_workspace_path() gates proxy \u2014 only /workspace or /workspace/* proxied\n4. Rejects ambiguous paths with explicit error when realpath fails\n5. JSON via python3 (primary, null-delimited) or jq (fallback, newline-delimited) \u2014 no shell string interpolation\n6. All 4 HMAC headers: X-Sandbox-Id, X-Request-Timestamp, X-Request-Nonce, X-Request-Signature\n7. Secret read from mounted file (/run/secrets/sandbox-hmac/${SANDBOX_ID})\n8. exec $REAL_GIT $@ for non-workspace paths\n9. 30s curl timeout with clear error message\n10. trap SIGINT/SIGTERM, exit 128+signal_number\n\nVerification: bash -n syntax check passes. HMAC signature verified to match git_api.py's compute_signature() exactly (tested with shared secret). Full testing deferred to verify-3-1.\"",
+      "author": "foundry-mcp",
+      "metadata": {},
+      "task_id": "task-3-3"
     }
   ]
 }

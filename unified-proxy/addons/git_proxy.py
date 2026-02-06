@@ -189,11 +189,13 @@ class GitProxyAddon:
                 return
 
             # Check protected branch enforcement (applies to all modes)
+            bare_repo_path = metadata.get("bare_repo_path")
             for ref in git_op.refs:
                 block_reason = check_protected_branches(
                     refname=ref.refname,
                     old_sha=ref.old_sha,
                     new_sha=ref.new_sha,
+                    bare_repo_path=bare_repo_path,
                     metadata=metadata,
                 )
                 if block_reason:

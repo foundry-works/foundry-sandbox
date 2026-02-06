@@ -152,7 +152,12 @@ GIT_METADATA_KEY = "git_operation"
 
 @pytest.fixture(autouse=True)
 def reset_mock_ctx():
-    """Reset mock ctx before each test."""
+    """Reset mock ctx before each test.
+
+    Uses git_proxy.ctx (not local mock_ctx) to handle cross-file mock
+    interference when pytest runs multiple test files in the same process.
+    """
+    git_proxy.ctx = mock_ctx
     mock_ctx.log.reset()
     yield
 
