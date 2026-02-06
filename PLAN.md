@@ -454,6 +454,71 @@ Flag validation is a required component of the git wrapper in Phase 3, not an op
 
 ---
 
+## Enhancement: Auto-Track New Branches
+
+**Impact: LOW (UX) | Complexity: Small**
+
+When creating a sandbox with a new branch (e.g., `cast new owner/repo feature-login main`), the branch is created locally but has no upstream tracking configured. Users must run `git push -u origin feature-login` to both push and set up tracking.
+
+Configure tracking at branch creation time so `git push` "just works" without requiring `-u`.
+
+**Current behavior:**
+```bash
+cast new owner/repo feature-login main
+# Inside sandbox:
+git push                           # fails: no upstream configured
+git push -u origin feature-login   # works, sets up tracking
+```
+
+**New behavior:**
+```bash
+cast new owner/repo feature-login main
+# Inside sandbox:
+git push                           # works: pushes to origin/feature-login
+```
+
+### Implementation
+
+**File:** `lib/git_worktree.sh`
+
+After creating a new branch with `git worktree add -b`, configure tracking:
+
+```bash
+# After: git -C "$bare_path" worktree add -b "$branch" "$worktree_path" "$from_branch"
+# Add tracking configuration:
+git -C "$worktree_path" config "branch.${branch}.remote" origin
+git -C "$worktree_path" config "branch.${branch}.merge" "refs/heads/${branch}"
+```
+
+This sets the tracking relationship locally without pushing. The remote branch doesn't need to exist yet — git will push to the correct location on the user's first `git push`.
+
+### Design notes
+
+- **No auto-push**: The branch is NOT created on remote. Users still control when their work becomes visible.
+- **Standard git behavior**: This mimics `git checkout -b feature && git push -u origin feature` but pre-configures the tracking so the `-u` isn't needed.
+- **Existing branches**: When checking out an existing remote branch (no `from_branch`), tracking is already configured by git. This change only affects new branches.
+
+### Verification
+
+```bash
+# Create sandbox with new branch
+cast new owner/repo test-tracking main
+
+# Inside sandbox:
+git config branch.test-tracking.remote
+# Expected: origin
+
+git config branch.test-tracking.merge
+# Expected: refs/heads/test-tracking
+
+# First push works without -u
+git commit --allow-empty -m "test"
+git push
+# Expected: pushes to origin/test-tracking
+```
+
+---
+
 ## Out of Scope
 
 | Feature | Reason to Skip |
@@ -684,4 +749,6 @@ Phase 3 (.git/ shadow + flags) ───── Batch 2: largest change, highest 
 Phase 4 (API path enforcement)  ────────┐
                                          ├── Batch 3: medium impact policy controls
 Phase 5 (PR/issue operation controls) ──┘
+
+Enhancement (auto-track branches) ── Independent: can be implemented at any time
 ```
