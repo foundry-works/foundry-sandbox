@@ -1,0 +1,1007 @@
+{
+  "spec_id": "git-policy-hardening-2026-02-06-001",
+  "title": "git-policy-hardening",
+  "generated": "2026-02-06T12:24:51.717343Z",
+  "last_updated": "2026-02-06T12:31:50.215726Z",
+  "metadata": {
+    "description": "",
+    "mission": "Harden git security policies in foundry-sandbox to prevent malicious code execution via git hooks, unauthorized pushes to protected branches, data exfiltration via .git/ metadata, and API abuse through unvalidated endpoint paths.",
+    "objectives": [],
+    "complexity": "low",
+    "estimated_hours": 0,
+    "assumptions": [
+      "Single-tenant sandboxes \u2014 one agent per sandbox, no multi-tenant branch ownership needed",
+      "Existing mitmproxy addon architecture is the enforcement point for HTTP-level policies",
+      "Sandboxes are ephemeral \u2014 no migration or rollback needed",
+      "credential-isolation Docker Compose is the deployment mode for all hardening features",
+      "HMAC shared secrets require rotation lifecycle, secret-mount delivery (not env vars), and revocation on teardown per security review"
+    ],
+    "owner": "",
+    "category": "implementation",
+    "template": "empty"
+  },
+  "progress_percentage": 0,
+  "status": "pending",
+  "current_phase": null,
+  "hierarchy": {
+    "spec-root": {
+      "type": "spec",
+      "title": "git-policy-hardening",
+      "status": "pending",
+      "parent": null,
+      "children": [
+        "phase-1",
+        "phase-2",
+        "phase-3",
+        "phase-4",
+        "phase-5"
+      ],
+      "total_tasks": 29,
+      "completed_tasks": 0,
+      "metadata": {
+        "purpose": "",
+        "category": "implementation"
+      },
+      "dependencies": {
+        "blocks": [],
+        "blocked_by": [],
+        "depends": []
+      }
+    },
+    "phase-1": {
+      "type": "phase",
+      "title": "Git Hook Prevention",
+      "status": "pending",
+      "parent": "spec-root",
+      "children": [
+        "task-1-1",
+        "task-1-2",
+        "verify-1-1"
+      ],
+      "total_tasks": 3,
+      "completed_tasks": 0,
+      "metadata": {
+        "purpose": "",
+        "description": "Prevent malicious repos from executing arbitrary code via git hooks (post-checkout, pre-commit, fsmonitor, etc.). Simplest phase with zero dependencies and immediate risk reduction. Impact: HIGH, Complexity: Small."
+      },
+      "dependencies": {
+        "blocks": [
+          "phase-2"
+        ],
+        "blocked_by": [],
+        "depends": []
+      }
+    },
+    "task-1-1": {
+      "type": "task",
+      "title": "Add git hardening config to entrypoint.sh",
+      "status": "pending",
+      "parent": "phase-1",
+      "children": [],
+      "total_tasks": 1,
+      "completed_tasks": 0,
+      "metadata": {
+        "description": "Add git configuration hardening section after the legacy gitconfig removal block (line ~173). Set core.hooksPath=/dev/null, init.templateDir='', core.fsmonitor=false, core.fsmonitorHookVersion=0, receive.denyCurrentBranch=refuse. Gate behind SANDBOX_GIT_HOOKS_ENABLED env var (default 0 = hooks disabled). The positive env var name avoids double-negative confusion.",
+        "file_path": "entrypoint.sh",
+        "acceptance_criteria": [
+          "core.hooksPath set to /dev/null by default",
+          "init.templateDir set to empty string",
+          "core.fsmonitor set to false",
+          "core.fsmonitorHookVersion set to 0",
+          "receive.denyCurrentBranch set to refuse",
+          "All settings gated behind SANDBOX_GIT_HOOKS_ENABLED env var (default 0)",
+          "Settings inserted after legacy gitconfig removal block"
+        ],
+        "task_category": "implementation"
+      },
+      "dependencies": {
+        "blocks": [],
+        "blocked_by": [],
+        "depends": []
+      }
+    },
+    "task-1-2": {
+      "type": "task",
+      "title": "Add red-team tests for hook prevention",
+      "status": "pending",
+      "parent": "phase-1",
+      "children": [],
+      "total_tasks": 1,
+      "completed_tasks": 0,
+      "metadata": {
+        "description": "Add tests to the red-team test suite verifying git hook hardening. Tests: verify core.hooksPath is /dev/null, core.fsmonitor is false, receive.denyCurrentBranch is refuse, a repo with malicious post-checkout hook does not execute on clone, and a gated regression test that when GIT_SHADOW_ENABLED=true asserts -c core.hooksPath= override is blocked by Phase 3 wrapper.",
+        "file_path": "tests/redteam-sandbox.sh",
+        "acceptance_criteria": [
+          "Test verifies core.hooksPath is /dev/null",
+          "Test verifies core.fsmonitor is false",
+          "Test verifies receive.denyCurrentBranch is refuse",
+          "Test clones repo with malicious post-checkout hook and verifies no hook execution",
+          "Gated regression test for GIT_SHADOW_ENABLED=true documents -c override gap"
+        ],
+        "task_category": "implementation"
+      },
+      "dependencies": {
+        "blocks": [],
+        "blocked_by": [],
+        "depends": []
+      }
+    },
+    "verify-1-1": {
+      "type": "verify",
+      "title": "Verify Phase 1: Git Hook Prevention",
+      "status": "pending",
+      "parent": "phase-1",
+      "children": [],
+      "total_tasks": 1,
+      "completed_tasks": 0,
+      "metadata": {
+        "description": "Run tests/redteam-sandbox.sh inside sandbox. Verify git config --global core.hooksPath returns /dev/null, core.fsmonitor returns false, receive.denyCurrentBranch returns refuse. Clone a repo with malicious hooks and verify no hook execution.",
+        "verification_type": "fidelity"
+      },
+      "dependencies": {
+        "blocks": [],
+        "blocked_by": [],
+        "depends": []
+      }
+    },
+    "phase-2": {
+      "type": "phase",
+      "title": "Protected Branch Enforcement + Force Push Blocking",
+      "status": "pending",
+      "parent": "spec-root",
+      "children": [
+        "task-2-1",
+        "task-2-2",
+        "task-2-3",
+        "verify-2-1"
+      ],
+      "total_tasks": 4,
+      "completed_tasks": 0,
+      "metadata": {
+        "purpose": "",
+        "description": "Prevent direct pushes (create/update/delete) to main, master, release/*, production and configurable branches. Enforced for all sandbox modes (bot and normal) via shared validator. Impact: HIGH, Complexity: Small-Medium."
+      },
+      "dependencies": {
+        "blocks": [
+          "phase-3"
+        ],
+        "blocked_by": [
+          "phase-1"
+        ],
+        "depends": []
+      }
+    },
+    "task-2-1": {
+      "type": "task",
+      "title": "Create shared git_policies.py validator",
+      "status": "pending",
+      "parent": "phase-2",
+      "children": [],
+      "total_tasks": 1,
+      "completed_tasks": 0,
+      "metadata": {
+        "description": "Create shared validator module with DEFAULT_PROTECTED_PATTERNS for refs/heads/main, refs/heads/master, refs/heads/release/*, refs/heads/production. Implement check_protected_branches() using fnmatch.fnmatch() against all protected patterns. Block updates, deletions, and non-bootstrap creations on protected branches. Bootstrap guard uses atomic lock file (O_CREAT | O_EXCL | O_WRONLY) at <bare-repo-path>/foundry-bootstrap.lock for first refs/heads/main creation only. No automatic time-based orphan cleanup \u2014 lock cleanup is admin-only (addresses security review MS-3). Read custom patterns from metadata.git.protected_branches.patterns. Gate behind metadata.git.protected_branches.enabled (default true for all modes). Metadata precedence: flow metadata > env vars > hardcoded defaults.",
+        "file_path": "unified-proxy/git_policies.py",
+        "acceptance_criteria": [
+          "DEFAULT_PROTECTED_PATTERNS includes main, master, release/*, production",
+          "check_protected_branches() returns Optional[str] with block reason",
+          "Uses fnmatch.fnmatch() for pattern matching",
+          "Blocks updates to protected branches",
+          "Blocks deletions of protected branches",
+          "Blocks non-bootstrap creations on protected branches",
+          "Bootstrap guard uses O_CREAT | O_EXCL | O_WRONLY atomic lock file",
+          "No automatic time-based orphan cleanup \u2014 admin-only lock cleanup",
+          "Reads custom patterns from metadata.git.protected_branches.patterns",
+          "Gated behind metadata.git.protected_branches.enabled (default true)",
+          "Metadata precedence: flow metadata > env vars > hardcoded defaults"
+        ],
+        "task_category": "implementation"
+      },
+      "dependencies": {
+        "blocks": [],
+        "blocked_by": [],
+        "depends": []
+      }
+    },
+    "task-2-2": {
+      "type": "task",
+      "title": "Wire shared validator into git_proxy.py",
+      "status": "pending",
+      "parent": "phase-2",
+      "children": [],
+      "total_tasks": 1,
+      "completed_tasks": 0,
+      "metadata": {
+        "description": "Import and call check_protected_branches() from git_policies.py before _check_bot_mode_restrictions() in the push handling flow. Protected branches apply to all modes (not just bot mode). Pass flow metadata for per-sandbox configuration.",
+        "file_path": "unified-proxy/addons/git_proxy.py",
+        "acceptance_criteria": [
+          "check_protected_branches() called before _check_bot_mode_restrictions()",
+          "Protected branch enforcement applies to all modes (bot and normal)",
+          "Flow metadata passed for per-sandbox configuration",
+          "Block response includes clear reason message"
+        ],
+        "task_category": "implementation"
+      },
+      "dependencies": {
+        "blocks": [],
+        "blocked_by": [],
+        "depends": []
+      }
+    },
+    "task-2-3": {
+      "type": "task",
+      "title": "Add unit tests for protected branches",
+      "status": "pending",
+      "parent": "phase-2",
+      "children": [],
+      "total_tasks": 1,
+      "completed_tasks": 0,
+      "metadata": {
+        "description": "Add comprehensive unit tests for protected branch enforcement. Tests: push update to refs/heads/main blocked, push update to refs/heads/feature-x allowed, push update to refs/heads/release/v2.0 blocked (wildcard), push to custom protected branch from metadata blocked, branch creation to protected branch when remote has heads blocked, bootstrap creation to refs/heads/main succeeds once then second attempt blocked, branch deletion to refs/heads/main blocked, metadata.git.protected_branches.enabled:false disables enforcement, default enabled for normal mode, lock file cannot be re-created after initial bootstrap.",
+        "file_path": "tests/unit/test_git_proxy.py",
+        "acceptance_criteria": [
+          "Test: push update to refs/heads/main blocked",
+          "Test: push update to refs/heads/feature-x allowed",
+          "Test: push update to refs/heads/release/v2.0 blocked (wildcard)",
+          "Test: custom protected branch from metadata blocked",
+          "Test: branch creation when remote has heads blocked",
+          "Test: bootstrap creation succeeds once then second attempt blocked",
+          "Test: branch deletion to refs/heads/main blocked",
+          "Test: enabled:false disables enforcement",
+          "Test: default enabled for normal mode",
+          "Test: lock file permanent (no orphan cleanup reopening)"
+        ],
+        "task_category": "implementation"
+      },
+      "dependencies": {
+        "blocks": [],
+        "blocked_by": [],
+        "depends": []
+      }
+    },
+    "verify-2-1": {
+      "type": "verify",
+      "title": "Verify Phase 2: Protected Branch Enforcement",
+      "status": "pending",
+      "parent": "phase-2",
+      "children": [],
+      "total_tasks": 1,
+      "completed_tasks": 0,
+      "metadata": {
+        "description": "Run pytest tests/unit/test_git_proxy.py -v. Verify push to refs/heads/main blocked, push to refs/heads/feature-x allowed, wildcard patterns match correctly, bootstrap guard allows exactly one initial creation, lock files are permanent.",
+        "verification_type": "fidelity"
+      },
+      "dependencies": {
+        "blocks": [],
+        "blocked_by": [],
+        "depends": []
+      }
+    },
+    "phase-3": {
+      "type": "phase",
+      "title": ".git/ Metadata Isolation via tmpfs Shadow + Flag Validation",
+      "status": "pending",
+      "parent": "spec-root",
+      "children": [
+        "task-3-1",
+        "task-3-2",
+        "task-3-3",
+        "task-3-4",
+        "task-3-5",
+        "task-3-6",
+        "task-3-7",
+        "task-3-8",
+        "task-3-9",
+        "task-3-10",
+        "task-3-11",
+        "task-3-12",
+        "verify-3-1"
+      ],
+      "total_tasks": 13,
+      "completed_tasks": 0,
+      "metadata": {
+        "purpose": "",
+        "description": "Eliminate the largest data exfiltration surface \u2014 accessible .git/ metadata \u2014 by shadowing it with tmpfs and proxying all git commands through an authenticated, validated API endpoint. Includes flag validation, HMAC authentication, identity-bound rate limiting, and exhaustive -c config key validation. Impact: HIGH, Complexity: Large."
+      },
+      "dependencies": {
+        "blocks": [
+          "phase-4"
+        ],
+        "blocked_by": [
+          "phase-2"
+        ],
+        "depends": []
+      }
+    },
+    "task-3-1": {
+      "type": "task",
+      "title": "Create git operations API with command allowlist and flag validation",
+      "status": "pending",
+      "parent": "phase-3",
+      "children": [],
+      "total_tasks": 1,
+      "completed_tasks": 0,
+      "metadata": {
+        "description": "Create POST /git/exec endpoint receiving JSON {args, cwd, stdin_b64}. Server-side repo root derivation from authenticated sandbox identity via container registry lookup (ignore/override client cwd for repo path, only use client cwd for relative subdirectory within assigned workspace). Deny-by-default command allowlist: working tree (status, add, restore, stash, clean --dry-run), committing (commit, cherry-pick, merge, rebase non-interactive, revert), branching (branch, checkout, switch, tag), history (diff, show, log, blame, shortlog, describe, name-rev), remote (fetch, pull, push, remote read-only subcommands), patch (apply, am, format-patch), notes (read-only), config (--get, --list, --get-regexp), plumbing (rev-parse, symbolic-ref, for-each-ref, ls-tree, ls-files, ls-remote, cat-file, rev-list, diff-tree, diff-files, diff-index). Per-operation flag blocklist: --git-dir, --work-tree, --exec, --upload-pack, --receive-pack. Exhaustive -c config key validation: permitted prefixes (user.*, color.*, core.quotepath, core.autocrlf, core.eol, core.whitespace, diff.*, merge.*, format.*, log.*, pretty.*, column.*, pager.*); explicit never-allow list checked first (alias.*, core.sshCommand, core.pager, core.editor, core.hooksPath, core.fsmonitor, core.gitProxy, core.askPass, credential.*, http.*, remote.*.proxy, remote.*.pushurl, protocol.*.allow, diff.*.textconv, diff.*.command, filter.*, merge.*.driver, gpg.*, sendemail.*, browser.*, instaweb.*, difftool.*.cmd, mergetool.*.cmd, sequence.editor). Block --force/--force-with-lease on push, destructive checkout/switch/branch/clean variants. Block -i/--interactive on rebase. Block paths containing .. or outside /git-workspace. Max response 10MB with truncation. Base64 fallback for non-UTF-8 stdout. Per-sandbox command extension via metadata.git.allowed_commands. Stdin size cap (1MB decoded). Max in-flight operations per sandbox.",
+        "file_path": "unified-proxy/git_operations.py",
+        "acceptance_criteria": [
+          "POST /git/exec endpoint accepts JSON {args, cwd, stdin_b64}",
+          "Server-side repo root derived from authenticated identity (client cwd ignored for repo path)",
+          "Subpath resolution uses realpath + startswith(repo_root) to prevent symlink escape",
+          "Open directories with O_NOFOLLOW when possible",
+          "Deny-by-default command allowlist covers all specified categories",
+          "reset excluded from default allowlist",
+          "Flag blocklist blocks --git-dir, --work-tree, --exec, --upload-pack, --receive-pack",
+          "Never-allow config key list checked before permitted prefixes",
+          "All specified never-allow keys are rejected (alias.*, core.sshCommand, credential.*, http.*, etc.)",
+          "Permitted prefix keys pass validation (user.*, color.*, etc.)",
+          "-c key parsing handles key=value format correctly",
+          "--force blocked on push, destructive checkout/switch/branch/clean",
+          "-i/--interactive blocked on rebase",
+          "Path traversal (..) blocked",
+          "Response truncated at 10MB with warning",
+          "Base64 fallback for non-UTF-8 stdout",
+          "Decoded stdin capped at 1MB",
+          "Max concurrent operations per sandbox enforced",
+          "Max request body size enforced (256KB)",
+          "Max args count enforced (256) and per-arg length (8KB)",
+          "Execute git with strict allowlist of environment variables (clear all GIT_* and SSH_* vars)",
+          "GIT_CONFIG_PARAMETERS, GIT_DIR, GIT_WORK_TREE, GIT_SSH, GIT_SSH_COMMAND, GIT_ASKPASS, SSH_ASKPASS, GIT_EDITOR, GIT_PAGER explicitly cleared",
+          "git remote subcommands explicitly enumerated: -v, show, get-url allowed; add, set-url, remove, rename blocked"
+        ],
+        "task_category": "implementation"
+      },
+      "dependencies": {
+        "blocks": [],
+        "blocked_by": [],
+        "depends": []
+      }
+    },
+    "task-3-2": {
+      "type": "task",
+      "title": "Create authenticated git API TCP server",
+      "status": "pending",
+      "parent": "phase-3",
+      "children": [],
+      "total_tasks": 1,
+      "completed_tasks": 0,
+      "metadata": {
+        "description": "Dedicated TCP app on port 8083 for /git/exec only. Does NOT expose /internal/* registry routes. Authentication: bind to credential-isolation network only. HMAC-signed requests with per-sandbox shared secret delivered via Docker secrets mount (not env vars, per security review). Shared secret stored in proxy container registry. Each request includes X-Sandbox-Id header and X-Request-Signature (HMAC-SHA256). Signature covers canonical string: method + path + body hash + X-Request-Timestamp + X-Request-Nonce (replay protection). Enforce short clock window (5 min) and nonce uniqueness per sandbox. Reject unsigned/invalid/replayed requests with 401. Identity-bound rate limiting: per-sandbox token bucket (300 burst, 120 sustained) keyed on authenticated identity. Global ceiling 1000 req/min across all sandboxes. Pre-auth IP-based throttling to prevent HMAC brute-force. HTTP 429 + Retry-After on rate limit. HMAC secret lifecycle: rotation on sandbox recreation, explicit revocation on teardown, emergency rotate via admin command.",
+        "file_path": "unified-proxy/git_api.py",
+        "acceptance_criteria": [
+          "TCP server on port 8083 serves /git/exec only",
+          "No /internal/* routes exposed",
+          "Bound to credential-isolation network only",
+          "HMAC-SHA256 signature validation on every request",
+          "Signature covers canonical string (method + path + body hash + timestamp + nonce)",
+          "Clock window enforced (5 min)",
+          "Nonce uniqueness per sandbox prevents replay",
+          "Nonce cache bounded per sandbox with TTL (5-10 min) and LRU eviction",
+          "Unsigned/invalid/replayed requests return 401",
+          "Per-sandbox rate limiting (300 burst, 120 sustained) keyed on authenticated identity",
+          "Global rate ceiling 1000 req/min",
+          "Pre-auth IP-based throttling for brute-force prevention",
+          "HTTP 429 + Retry-After on rate limit",
+          "Secret delivered via Docker secrets mount (not env vars)",
+          "Secret rotation on sandbox recreation",
+          "Secret revocation on teardown"
+        ],
+        "task_category": "implementation"
+      },
+      "dependencies": {
+        "blocks": [],
+        "blocked_by": [],
+        "depends": []
+      }
+    },
+    "task-3-3": {
+      "type": "task",
+      "title": "Create git wrapper script with injection-safe JSON serialization",
+      "status": "pending",
+      "parent": "phase-3",
+      "children": [],
+      "total_tasks": 1,
+      "completed_tasks": 0,
+      "metadata": {
+        "description": "Shell script installed at /usr/local/bin/git in sandbox. Path detection: resolve -C <dir> or $PWD, canonicalize with symlink resolution (realpath -m), proxy only when canonical path is /workspace or under /workspace/. Reject ambiguous/unresolvable paths with explicit error. Use jq (or python3 json fallback) for JSON construction from arguments \u2014 never shell string concatenation. Include X-Sandbox-Id, X-Request-Timestamp, X-Request-Nonce, and X-Request-Signature (HMAC of canonical string) in HTTP headers. HMAC secret read from mounted secret file. Falls through to /usr/bin/git for non-workspace operations. Proxy-down: clear error after 30s timeout, exit 1. Signal handling: trap SIGINT/SIGTERM, exit with 128 + signal_number. Known limitation: for git push, remote-side push may complete after cancellation (inherent to git protocol).",
+        "file_path": "stubs/git-wrapper.sh",
+        "acceptance_criteria": [
+          "Installed at /usr/local/bin/git (takes precedence over /usr/bin/git)",
+          "Path detection resolves -C <dir> or $PWD with symlink resolution",
+          "Proxies only when canonical path is /workspace or under /workspace/",
+          "Rejects ambiguous/unresolvable paths with explicit error",
+          "JSON constructed via jq or python3 json module (no shell string interpolation)",
+          "Includes HMAC signature headers (X-Sandbox-Id, X-Request-Timestamp, X-Request-Nonce, X-Request-Signature)",
+          "HMAC secret read from mounted file (not env var)",
+          "Falls through to /usr/bin/git for non-workspace operations",
+          "Clear error after 30s proxy timeout, exit 1",
+          "Signal handling: trap SIGINT/SIGTERM, exit 128+signal"
+        ],
+        "task_category": "implementation"
+      },
+      "dependencies": {
+        "blocks": [],
+        "blocked_by": [],
+        "depends": []
+      }
+    },
+    "task-3-4": {
+      "type": "task",
+      "title": "Wire protected branch validator into git operations API",
+      "status": "pending",
+      "parent": "phase-3",
+      "children": [],
+      "total_tasks": 1,
+      "completed_tasks": 0,
+      "metadata": {
+        "description": "Import and call check_protected_branches() from git_policies.py for push operations handled by the git operations API. This ensures the same protected branch enforcement applies to both the mitmproxy path (git_proxy.py) and the git wrapper path (/git/exec).",
+        "file_path": "unified-proxy/git_operations.py",
+        "acceptance_criteria": [
+          "check_protected_branches() called for push operations",
+          "Same enforcement as mitmproxy path",
+          "Block reason returned to client"
+        ],
+        "task_category": "implementation"
+      },
+      "dependencies": {
+        "blocks": [],
+        "blocked_by": [],
+        "depends": []
+      }
+    },
+    "task-3-5": {
+      "type": "task",
+      "title": "Modify docker-compose for tmpfs shadow and git API",
+      "status": "pending",
+      "parent": "phase-3",
+      "children": [],
+      "total_tasks": 1,
+      "completed_tasks": 0,
+      "metadata": {
+        "description": "Dev service: add tmpfs /workspace/.git:mode=755,uid=1000,gid=1000,size=1m. Proxy service: add volume ${WORKSPACE_PATH}:/git-workspace (same bind mount as sandbox for shared working tree). Proxy service: add volume ${REPOS_DIR}:/home/ubuntu/.sandboxes/repos (bare repos, RW). Proxy service: expose port 8083 on credential-isolation network only. Proxy service: add GIT_SHADOW_ENABLED=true env var (secure-on default per MS-6). Mount HMAC secret as Docker secret into both sandbox and proxy containers. Git wrapper installed as read-only bind mount at /usr/local/bin/git.",
+        "file_path": "docker-compose.credential-isolation.yml",
+        "acceptance_criteria": [
+          "tmpfs at /workspace/.git with mode=755, uid=1000, gid=1000, size=1m",
+          "Proxy has ${WORKSPACE_PATH}:/git-workspace volume",
+          "Proxy has ${REPOS_DIR}:/home/ubuntu/.sandboxes/repos volume",
+          "Port 8083 exposed on credential-isolation network only",
+          "GIT_SHADOW_ENABLED=true set by default",
+          "HMAC secret mounted as Docker secret",
+          "Git wrapper mounted as read-only bind mount"
+        ],
+        "task_category": "implementation"
+      },
+      "dependencies": {
+        "blocks": [],
+        "blocked_by": [],
+        "depends": []
+      }
+    },
+    "task-3-6": {
+      "type": "task",
+      "title": "Update proxy entrypoint for git API startup",
+      "status": "pending",
+      "parent": "phase-3",
+      "children": [],
+      "total_tasks": 1,
+      "completed_tasks": 0,
+      "metadata": {
+        "description": "Start git_api.py if GIT_SHADOW_ENABLED=true. Configure git credential helper inside proxy for push/fetch operations using GITHUB_TOKEN.",
+        "file_path": "unified-proxy/entrypoint.sh",
+        "acceptance_criteria": [
+          "git_api.py started when GIT_SHADOW_ENABLED=true",
+          "Git credential helper configured for push/fetch",
+          "API not started when GIT_SHADOW_ENABLED is not set"
+        ],
+        "task_category": "implementation"
+      },
+      "dependencies": {
+        "blocks": [],
+        "blocked_by": [],
+        "depends": []
+      }
+    },
+    "task-3-7": {
+      "type": "task",
+      "title": "Update sandbox entrypoint for git shadow mode",
+      "status": "pending",
+      "parent": "phase-3",
+      "children": [],
+      "total_tasks": 1,
+      "completed_tasks": 0,
+      "metadata": {
+        "description": "If GIT_SHADOW_ENABLED=true: keep /workspace/.git tmpfs empty (do not populate metadata files). Install git wrapper: ensure /usr/local/bin/git takes precedence (already handled by read-only bind mount in docker-compose). HMAC secret accessible from mounted secret file.",
+        "file_path": "entrypoint.sh",
+        "acceptance_criteria": [
+          "/workspace/.git remains empty when GIT_SHADOW_ENABLED=true",
+          "Git wrapper at /usr/local/bin/git takes precedence",
+          "HMAC secret accessible from mounted file path"
+        ],
+        "task_category": "implementation"
+      },
+      "dependencies": {
+        "blocks": [],
+        "blocked_by": [],
+        "depends": []
+      }
+    },
+    "task-3-8": {
+      "type": "task",
+      "title": "Update commands/new.sh for bare repo and secret provisioning",
+      "status": "pending",
+      "parent": "phase-3",
+      "children": [],
+      "total_tasks": 1,
+      "completed_tasks": 0,
+      "metadata": {
+        "description": "Create bare repo during sandbox creation using ensure_bare_repo (existing function in lib/git.sh). Write gitdir pointer file at ${WORKSPACE_PATH}/.git. Generate per-sandbox HMAC shared secret and store in Docker secrets mount for both sandbox and proxy. Export REPOS_DIR and WORKSPACE_PATH for docker-compose variable substitution. Handle new repos with no remote (git init --bare works standalone).",
+        "file_path": "commands/new.sh",
+        "acceptance_criteria": [
+          "Bare repo created during sandbox creation",
+          "Gitdir pointer file written at workspace .git path",
+          "Per-sandbox HMAC secret generated and stored as Docker secret",
+          "REPOS_DIR and WORKSPACE_PATH exported for docker-compose",
+          "Handles repos with no remote (git init --bare)"
+        ],
+        "task_category": "implementation"
+      },
+      "dependencies": {
+        "blocks": [],
+        "blocked_by": [],
+        "depends": []
+      }
+    },
+    "task-3-9": {
+      "type": "task",
+      "title": "Add identity-bound structured audit logging",
+      "status": "pending",
+      "parent": "phase-3",
+      "children": [],
+      "total_tasks": 1,
+      "completed_tasks": 0,
+      "metadata": {
+        "description": "Log all git requests (allowed and blocked) with enhanced schema. Base fields: timestamp, event, container_id, action, reason, component. Correlation fields: request_id (UUID), decision (allow/deny), matched_rule, policy_version. Caller fields: source_ip, authenticated sandbox_id. Sensitive data exclusion: never log stdin_b64, Authorization headers, HMAC secrets, env var values. Truncate stdout/stderr in logs to 1KB (reference full output by request_id). Use existing logging_config.py patterns for structured JSON output.",
+        "file_path": "unified-proxy/git_operations.py",
+        "acceptance_criteria": [
+          "All git requests logged (both allowed and blocked)",
+          "Base schema includes timestamp, event, container_id, action, reason, component",
+          "Correlation fields: request_id (UUID), decision, matched_rule, policy_version",
+          "Caller fields: source_ip, authenticated sandbox_id",
+          "stdin_b64 never logged",
+          "Authorization headers never logged",
+          "HMAC secrets never logged",
+          "stdout/stderr truncated to 1KB in logs",
+          "Uses existing logging_config.py structured JSON patterns"
+        ],
+        "task_category": "implementation"
+      },
+      "dependencies": {
+        "blocks": [],
+        "blocked_by": [],
+        "depends": []
+      }
+    },
+    "task-3-10": {
+      "type": "task",
+      "title": "Add unit tests for git operations API",
+      "status": "pending",
+      "parent": "phase-3",
+      "children": [],
+      "total_tasks": 1,
+      "completed_tasks": 0,
+      "metadata": {
+        "description": "Comprehensive unit tests for git operations API covering command allowlist, flag validation, -c config key validation, authentication, rate limiting, and response handling.",
+        "file_path": "tests/unit/test_git_operations.py",
+        "acceptance_criteria": [
+          "Test: allowed commands pass through",
+          "Test: non-allowlisted commands rejected",
+          "Test: --git-dir flag blocked",
+          "Test: -c core.hooksPath=evil blocked (never-allow)",
+          "Test: -c alias.st=!evil blocked (never-allow)",
+          "Test: -c core.sshCommand=evil blocked (never-allow)",
+          "Test: -c credential.helper=evil blocked (never-allow)",
+          "Test: -c user.name=Test allowed (permitted prefix)",
+          "Test: -c color.ui=auto allowed (permitted prefix)",
+          "Test: --force on push blocked",
+          "Test: interactive rebase blocked",
+          "Test: path traversal blocked",
+          "Test: unauthenticated request returns 401",
+          "Test: spoofed sandbox ID without valid HMAC returns 401",
+          "Test: replayed request (reused nonce) returns 401",
+          "Test: rate limiting returns 429 keyed on authenticated identity",
+          "Test: global rate ceiling enforced",
+          "Test: response truncation at 10MB",
+          "Test: server-side repo root derivation ignores client cwd",
+          "Test: decoded stdin over 1MB rejected",
+          "Test: GIT_CONFIG_PARAMETERS env var cleared/rejected",
+          "Test: GIT_DIR env var cleared/rejected",
+          "Test: GIT_SSH_COMMAND env var cleared/rejected",
+          "Test: symlink in cwd subpath does not escape repo root",
+          "Test: git remote add blocked",
+          "Test: git remote set-url blocked",
+          "Test: git remote -v allowed",
+          "Test: max request body size enforced",
+          "Test: max args count enforced"
+        ],
+        "task_category": "implementation"
+      },
+      "dependencies": {
+        "blocks": [],
+        "blocked_by": [],
+        "depends": []
+      }
+    },
+    "task-3-11": {
+      "type": "task",
+      "title": "Add red-team tests for git shadow",
+      "status": "pending",
+      "parent": "phase-3",
+      "children": [],
+      "total_tasks": 1,
+      "completed_tasks": 0,
+      "metadata": {
+        "description": "Red-team tests verifying git shadow isolation. Tests: /workspace/.git is empty tmpfs, /usr/bin/git status fails with not a git repository, proxied git log works correctly, git --git-dir=/tmp/evil status rejected, direct curl to git API without HMAC rejected with 401.",
+        "file_path": "tests/redteam-sandbox.sh",
+        "acceptance_criteria": [
+          "Test: /workspace/.git is empty tmpfs",
+          "Test: /usr/bin/git status fails with 'not a git repository'",
+          "Test: proxied git log works correctly via wrapper",
+          "Test: git --git-dir=/tmp/evil status rejected by wrapper",
+          "Test: direct curl to git API without HMAC returns 401"
+        ],
+        "task_category": "implementation"
+      },
+      "dependencies": {
+        "blocks": [],
+        "blocked_by": [],
+        "depends": []
+      }
+    },
+    "task-3-12": {
+      "type": "task",
+      "title": "Add git wrapper injection safety tests",
+      "status": "pending",
+      "parent": "phase-3",
+      "children": [],
+      "total_tasks": 1,
+      "completed_tasks": 0,
+      "metadata": {
+        "description": "Test suite for git wrapper JSON serialization safety. Verify arguments with quotes, backslashes, newlines produce valid JSON. Verify null bytes are rejected or safely encoded. Verify unicode arguments correctly serialized. These tests validate the jq/python JSON construction path.",
+        "file_path": "tests/unit/test_git_wrapper.py",
+        "acceptance_criteria": [
+          "Test: arguments with double quotes produce valid JSON",
+          "Test: arguments with backslashes produce valid JSON",
+          "Test: arguments with newlines produce valid JSON",
+          "Test: null bytes in arguments are rejected or safely encoded",
+          "Test: unicode arguments correctly serialized"
+        ],
+        "task_category": "implementation"
+      },
+      "dependencies": {
+        "blocks": [],
+        "blocked_by": [],
+        "depends": []
+      }
+    },
+    "verify-3-1": {
+      "type": "verify",
+      "title": "Verify Phase 3: Git Shadow + Flag Validation",
+      "status": "pending",
+      "parent": "phase-3",
+      "children": [],
+      "total_tasks": 1,
+      "completed_tasks": 0,
+      "metadata": {
+        "description": "Run unit tests and red-team tests. Verify end-to-end git workflow through authenticated wrapper: git log, git commit, git push work. Unauthenticated requests rejected. Flag injection blocked. Never-allow config keys rejected. /usr/bin/git fails without .git/.",
+        "verification_type": "fidelity"
+      },
+      "dependencies": {
+        "blocks": [],
+        "blocked_by": [],
+        "depends": []
+      }
+    },
+    "phase-4": {
+      "type": "phase",
+      "title": "GitHub API Endpoint Path Enforcement",
+      "status": "pending",
+      "parent": "spec-root",
+      "children": [
+        "task-4-1",
+        "task-4-2",
+        "task-4-3",
+        "task-4-4",
+        "task-4-5",
+        "verify-4-1"
+      ],
+      "total_tasks": 6,
+      "completed_tasks": 0,
+      "metadata": {
+        "purpose": "",
+        "description": "Enforce the existing http_endpoints path patterns in allowlist.yaml that are currently defined but not enforced. Block dangerous GitHub API paths (webhooks, deploy keys, secrets management) with a segment-aware matcher and strict normalization including double-encoding rejection. Impact: MEDIUM, Complexity: Medium."
+      },
+      "dependencies": {
+        "blocks": [
+          "phase-5"
+        ],
+        "blocked_by": [
+          "phase-3"
+        ],
+        "depends": []
+      }
+    },
+    "task-4-1": {
+      "type": "task",
+      "title": "Add segment-aware path matcher to config",
+      "status": "pending",
+      "parent": "phase-4",
+      "children": [],
+      "total_tasks": 1,
+      "completed_tasks": 0,
+      "metadata": {
+        "description": "Add segment_match(pattern, path) utility where * matches exactly one path segment (does not span /). Add BlockedPathConfig dataclass (host + patterns list). Add blocked_paths: List[BlockedPathConfig] field to AllowlistConfig (optional, defaults to empty). Cache compiled matchers at config load time for performance.",
+        "file_path": "unified-proxy/config.py",
+        "acceptance_criteria": [
+          "segment_match() where * matches exactly one path segment",
+          "BlockedPathConfig dataclass with host and patterns",
+          "blocked_paths field added to AllowlistConfig (optional, defaults empty)",
+          "Compiled matchers cached at config load time",
+          "* does not span / in segment matching"
+        ],
+        "task_category": "implementation"
+      },
+      "dependencies": {
+        "blocks": [],
+        "blocked_by": [],
+        "depends": []
+      }
+    },
+    "task-4-2": {
+      "type": "task",
+      "title": "Add blocked_paths to allowlist.yaml",
+      "status": "pending",
+      "parent": "phase-4",
+      "children": [],
+      "total_tasks": 1,
+      "completed_tasks": 0,
+      "metadata": {
+        "description": "Add blocked_paths section for api.github.com. Block patterns: /repos/*/*/hooks, /repos/*/*/hooks/*, /repos/*/*/keys, /repos/*/*/keys/*, /repos/*/*/deploy_keys, /repos/*/*/deploy_keys/*, /repos/*/*/environments/*/deployment-branch-policy, /repos/*/*/actions/secrets, /repos/*/*/actions/secrets/*, /repos/*/*/actions/variables, /repos/*/*/actions/variables/*.",
+        "file_path": "config/allowlist.yaml",
+        "acceptance_criteria": [
+          "blocked_paths section added to allowlist.yaml",
+          "Hooks endpoints blocked (with sub-paths)",
+          "Keys and deploy_keys endpoints blocked",
+          "Environment deployment-branch-policy blocked",
+          "Actions secrets and variables blocked (with sub-paths)"
+        ],
+        "task_category": "implementation"
+      },
+      "dependencies": {
+        "blocks": [],
+        "blocked_by": [],
+        "depends": []
+      }
+    },
+    "task-4-3": {
+      "type": "task",
+      "title": "Enforce endpoint paths in policy engine with strict normalization",
+      "status": "pending",
+      "parent": "phase-4",
+      "children": [],
+      "total_tasks": 1,
+      "completed_tasks": 0,
+      "metadata": {
+        "description": "After domain allowlist passes (Step 2, line ~164), add Step 2b: endpoint path enforcement. Strict path normalization: (1) URL-decode once, (2) reject if % still present after decode (no double-encoding permitted \u2014 legitimate GitHub API paths never contain encoded characters), (3) strip trailing slashes, (4) collapse // to /, (5) resolve .. segments, (6) strip query string. Document interaction with mitmproxy URL decoding layer. For api.github.com with endpoint entries: validate with segment-aware matching. After allowlist passes, check against blocked_paths. Immediate scope: enforce for api.github.com only; other hosts remain domain-level.",
+        "file_path": "unified-proxy/addons/policy_engine.py",
+        "acceptance_criteria": [
+          "Step 2b added after domain allowlist check",
+          "URL-decode applied once",
+          "Requests with % remaining after decode are rejected (double-encoding prevention)",
+          "Trailing slashes stripped",
+          "Repeated separators collapsed",
+          ".. segments resolved",
+          "Query string stripped before matching",
+          "Segment-aware matching used for api.github.com",
+          "blocked_paths checked after allowlist passes",
+          "Other hosts still use domain-level allowlisting only",
+          "mitmproxy URL decoding interaction documented"
+        ],
+        "task_category": "implementation"
+      },
+      "dependencies": {
+        "blocks": [],
+        "blocked_by": [],
+        "depends": []
+      }
+    },
+    "task-4-4": {
+      "type": "task",
+      "title": "Update allowlist path patterns for segment safety",
+      "status": "pending",
+      "parent": "phase-4",
+      "children": [],
+      "total_tasks": 1,
+      "completed_tasks": 0,
+      "metadata": {
+        "description": "Replace broad /repos/* with segment-safe patterns for api.github.com. New patterns: /repos/*/*, /repos/*/*/pulls, /repos/*/*/pulls/*, /repos/*/*/issues, /repos/*/*/issues/*, /repos/*/*/git/*, /repos/*/*/branches, /repos/*/*/branches/*, /repos/*/*/commits, /repos/*/*/commits/*, /repos/*/*/contents/*, /repos/*/*/compare/*, /repos/*/*/releases, /repos/*/*/releases/*, /repos/*/*/tags, etc. Cover all legitimate GitHub API paths that the sandbox needs.",
+        "file_path": "config/allowlist.yaml",
+        "acceptance_criteria": [
+          "/repos/* replaced with segment-safe patterns",
+          "Patterns cover pulls, issues, git, branches, commits, contents, compare, releases, tags",
+          "Each pattern uses * for single-segment matching only",
+          "No overly broad patterns that could match blocked paths"
+        ],
+        "task_category": "implementation"
+      },
+      "dependencies": {
+        "blocks": [],
+        "blocked_by": [],
+        "depends": []
+      }
+    },
+    "task-4-5": {
+      "type": "task",
+      "title": "Add unit tests for path enforcement",
+      "status": "pending",
+      "parent": "phase-4",
+      "children": [],
+      "total_tasks": 1,
+      "completed_tasks": 0,
+      "metadata": {
+        "description": "Unit tests for endpoint path enforcement. Tests: GET /repos/owner/repo allowed, POST /repos/owner/repo/hooks blocked, GET /repos/../admin/keys blocked (traversal), GET /repos/owner%2F..%2Fadmin/keys blocked (URL decode), GET /repos/owner//repo/hooks blocked (repeated separators), hosts without endpoint config still domain-level, POST /repos/owner/repo/actions/secrets blocked, trailing slash normalization. Double-encoding tests: %252F (double-encoded /) rejected, %25252F (triple-encoded) rejected, %2e%2e (encoded ..) rejected, mixed-case %2f vs %2F both normalized, legitimate path with no encoding allowed.",
+        "file_path": "tests/unit/test_policy_engine.py",
+        "acceptance_criteria": [
+          "Test: GET /repos/owner/repo allowed",
+          "Test: POST /repos/owner/repo/hooks blocked",
+          "Test: path traversal with .. blocked",
+          "Test: URL-encoded traversal blocked",
+          "Test: repeated separators blocked",
+          "Test: hosts without endpoint config domain-level allowed",
+          "Test: actions/secrets blocked",
+          "Test: trailing slash normalization",
+          "Test: %252F double-encoded rejected",
+          "Test: %25252F triple-encoded rejected",
+          "Test: %2e%2e encoded .. rejected after decode",
+          "Test: mixed-case %2f/%2F both normalized",
+          "Test: legitimate path with no encoding allowed"
+        ],
+        "task_category": "implementation"
+      },
+      "dependencies": {
+        "blocks": [],
+        "blocked_by": [],
+        "depends": []
+      }
+    },
+    "verify-4-1": {
+      "type": "verify",
+      "title": "Verify Phase 4: API Path Enforcement",
+      "status": "pending",
+      "parent": "phase-4",
+      "children": [],
+      "total_tasks": 1,
+      "completed_tasks": 0,
+      "metadata": {
+        "description": "Run pytest tests/unit/test_policy_engine.py -v. Verify path traversal blocked, double-encoding rejected, dangerous paths (hooks, keys, secrets) blocked, normal API operations (pulls, issues) still work.",
+        "verification_type": "fidelity"
+      },
+      "dependencies": {
+        "blocks": [],
+        "blocked_by": [],
+        "depends": []
+      }
+    },
+    "phase-5": {
+      "type": "phase",
+      "title": "PR and Issue Operation Controls",
+      "status": "pending",
+      "parent": "spec-root",
+      "children": [
+        "task-5-1",
+        "task-5-2",
+        "verify-5-1"
+      ],
+      "total_tasks": 3,
+      "completed_tasks": 0,
+      "metadata": {
+        "purpose": "",
+        "description": "Extend existing GitHub blocklist (which blocks PR merge and release creation) to block PR close and issue close operations via request body inspection with strict content-type enforcement. Impact: MEDIUM, Complexity: Medium."
+      },
+      "dependencies": {
+        "blocks": [],
+        "blocked_by": [
+          "phase-4"
+        ],
+        "depends": []
+      }
+    },
+    "task-5-1": {
+      "type": "task",
+      "title": "Add body inspection to policy engine with content-type enforcement",
+      "status": "pending",
+      "parent": "phase-5",
+      "children": [],
+      "total_tasks": 1,
+      "completed_tasks": 0,
+      "metadata": {
+        "description": "Add GITHUB_PATCH_PR_PATTERN and GITHUB_PATCH_ISSUE_PATTERN regex patterns. Add _check_github_body_policies(method, path, body, content_type) method. Content-type enforcement: for security-relevant PATCH endpoints, require Content-Type: application/json; reject missing or non-JSON content-type. For PATCH /repos/{owner}/{repo}/pulls/{number}: parse JSON body with json.loads(), block state:closed. For PATCH /repos/{owner}/{repo}/issues/{number}: same logic. Allow state:open (reopen) and no-state body (title/description edits). Handle malformed JSON: deny with explicit error (fail closed). Handle streaming mode (content is None): block with 400 error. Handle duplicate JSON keys: json.loads() uses last value, test that {state:open, state:closed} is blocked. Strip BOM before parsing. Reject compressed bodies for these endpoints. Call after _check_github_blocklist() in Step 3.",
+        "file_path": "unified-proxy/addons/policy_engine.py",
+        "acceptance_criteria": [
+          "GITHUB_PATCH_PR_PATTERN matches /repos/{owner}/{repo}/pulls/{number}",
+          "GITHUB_PATCH_ISSUE_PATTERN matches /repos/{owner}/{repo}/issues/{number}",
+          "Content-Type: application/json required for security-relevant PATCH endpoints",
+          "Missing content-type rejected",
+          "Non-JSON content-type rejected",
+          "state:closed in body blocked for PRs",
+          "state:closed in body blocked for issues",
+          "state:open in body allowed (reopen)",
+          "No-state body allowed (title/description edits)",
+          "Malformed JSON denied with explicit error",
+          "Streaming mode (content is None) blocked with 400",
+          "Duplicate keys: last value wins, state:closed detected",
+          "BOM stripped before parsing",
+          "Compressed bodies rejected for these endpoints",
+          "Called after _check_github_blocklist() in request flow"
+        ],
+        "task_category": "implementation"
+      },
+      "dependencies": {
+        "blocks": [],
+        "blocked_by": [],
+        "depends": []
+      }
+    },
+    "task-5-2": {
+      "type": "task",
+      "title": "Add unit tests for body policies",
+      "status": "pending",
+      "parent": "phase-5",
+      "children": [],
+      "total_tasks": 1,
+      "completed_tasks": 0,
+      "metadata": {
+        "description": "Unit tests for body inspection policies. Tests: PATCH /pulls/1 with {title: new} allowed, PATCH /pulls/1 with {state: closed} blocked, PATCH /pulls/1 with {state: open} allowed, PATCH /pulls/1 with {state: closed, title: new} blocked, PATCH /pulls/1 with malformed JSON blocked, PATCH /pulls/1 with content=None blocked, PATCH /issues/1 with {state: closed} blocked, existing merge block still works, missing Content-Type header rejected, Content-Type text/plain rejected, duplicate keys {state:open, state:closed} blocked (last value), unicode escape {state: \\u0063losed} blocked (json.loads resolves).",
+        "file_path": "tests/unit/test_policy_engine.py",
+        "acceptance_criteria": [
+          "Test: PATCH /pulls/1 with title edit allowed",
+          "Test: PATCH /pulls/1 with state:closed blocked",
+          "Test: PATCH /pulls/1 with state:open allowed",
+          "Test: PATCH /pulls/1 with state:closed + title blocked",
+          "Test: malformed JSON body blocked",
+          "Test: streaming mode content=None blocked",
+          "Test: PATCH /issues/1 with state:closed blocked",
+          "Test: existing merge block still works",
+          "Test: missing Content-Type rejected",
+          "Test: Content-Type text/plain rejected",
+          "Test: duplicate keys last-value-wins state:closed blocked",
+          "Test: unicode escape state resolved and blocked"
+        ],
+        "task_category": "implementation"
+      },
+      "dependencies": {
+        "blocks": [],
+        "blocked_by": [],
+        "depends": []
+      }
+    },
+    "verify-5-1": {
+      "type": "verify",
+      "title": "Verify Phase 5: PR and Issue Controls",
+      "status": "pending",
+      "parent": "phase-5",
+      "children": [],
+      "total_tasks": 1,
+      "completed_tasks": 0,
+      "metadata": {
+        "description": "Run pytest tests/unit/test_policy_engine.py -v. Verify PR close blocked, issue close blocked, PR reopen allowed, title edits allowed, content-type enforced, existing merge/release blocks unaffected.",
+        "verification_type": "fidelity"
+      },
+      "dependencies": {
+        "blocks": [],
+        "blocked_by": [],
+        "depends": []
+      }
+    }
+  },
+  "journal": []
+}
