@@ -475,7 +475,7 @@ def create_git_api(
             return _make_error(err.reason, 400)
 
         # --- Resolve repo root (server-side, ignoring client cwd for path) ---
-        metadata = _get_sandbox_metadata(sandbox_id)
+        metadata = _get_sandbox_metadata(sandbox_id, client_ip)
         repo_root = _resolve_repo_root(sandbox_id, metadata)
 
         # --- Execute git command ---
@@ -503,8 +503,16 @@ def create_git_api(
             f"Request body too large (max {MAX_REQUEST_BODY} bytes)", 413
         )
 
-    def _get_sandbox_metadata(sandbox_id: str) -> Optional[dict]:
-        """Get sandbox metadata from container registry."""
+    def _get_sandbox_metadata(
+        sandbox_id: str,
+        client_ip: Optional[str] = None,
+    ) -> Optional[dict]:
+        """Get sandbox metadata from container registry.
+
+        Lookup order:
+        1. sandbox_id as registry container_id (legacy behavior)
+        2. client IP address (matches internal proxy registration model)
+        """
         try:
             from registry import ContainerRegistry
 
@@ -512,6 +520,10 @@ def create_git_api(
             config = registry.get_by_container_id(sandbox_id)
             if config:
                 return config.metadata
+            if client_ip and client_ip != "unknown":
+                config = registry.get_by_ip(client_ip)
+                if config:
+                    return config.metadata
         except Exception:
             logger.debug(
                 "Could not load metadata for sandbox %s", sandbox_id

@@ -16,6 +16,18 @@
 set -euo pipefail
 
 # ---------------------------------------------------------------------------
+# Dependency Check
+# ---------------------------------------------------------------------------
+
+# python3 is required for HMAC-SHA256 computation (no fallback by design,
+# to keep the secret entirely in-process memory and avoid /proc leakage).
+if ! command -v python3 >/dev/null 2>&1; then
+    echo "error: git wrapper: python3 is required but not found in PATH" >&2
+    echo "hint: install python3 (e.g., apt-get install python3) to enable git operations through the sandbox proxy" >&2
+    exit 1
+fi
+
+# ---------------------------------------------------------------------------
 # Configuration
 # ---------------------------------------------------------------------------
 
@@ -24,7 +36,8 @@ GIT_API_HOST="${GIT_API_HOST:-unified-proxy}"
 GIT_API_PORT="${GIT_API_PORT:-8083}"
 GIT_API_URL="http://${GIT_API_HOST}:${GIT_API_PORT}/git/exec"
 SANDBOX_ID="${SANDBOX_ID:-}"
-HMAC_SECRET_FILE="${GIT_HMAC_SECRET_FILE:-/run/secrets/sandbox-hmac/${SANDBOX_ID}}"
+HMAC_SECRETS_DIR="${GIT_HMAC_SECRETS_DIR:-/run/secrets/sandbox-hmac}"
+HMAC_SECRET_FILE="${GIT_HMAC_SECRET_FILE:-${HMAC_SECRETS_DIR}/${SANDBOX_ID}}"
 PROXY_TIMEOUT=30
 
 # ---------------------------------------------------------------------------
@@ -102,6 +115,60 @@ is_workspace_path() {
 }
 
 # ---------------------------------------------------------------------------
+# Sandbox identity discovery for restart resilience
+# ---------------------------------------------------------------------------
+
+discover_sandbox_identity() {
+    # Fast path: explicit identity with matching secret file.
+    if [[ -n "$SANDBOX_ID" && -f "$HMAC_SECRET_FILE" ]]; then
+        return 0
+    fi
+
+    if [[ ! -d "$HMAC_SECRETS_DIR" ]]; then
+        return 1
+    fi
+
+    local candidates=()
+    local secret_path=""
+    shopt -s nullglob
+    for secret_path in "$HMAC_SECRETS_DIR"/*; do
+        [[ -f "$secret_path" ]] || continue
+        candidates+=("${secret_path##*/}")
+    done
+    shopt -u nullglob
+
+    # Per-sandbox volume should have exactly one secret file.
+    if [[ ${#candidates[@]} -eq 1 ]]; then
+        SANDBOX_ID="${candidates[0]}"
+        HMAC_SECRET_FILE="${HMAC_SECRETS_DIR}/${SANDBOX_ID}"
+        return 0
+    fi
+
+    return 1
+}
+
+# ---------------------------------------------------------------------------
+# Convert canonical workspace path to repo-relative cwd for API requests
+# ---------------------------------------------------------------------------
+
+to_request_cwd() {
+    local cwd="$1"
+
+    if [[ "$cwd" == "/workspace" ]]; then
+        echo "."
+        return
+    fi
+
+    if [[ "$cwd" == /workspace/* ]]; then
+        echo "${cwd#/workspace/}"
+        return
+    fi
+
+    # Fallback for unexpected inputs (should not happen after workspace check)
+    echo "."
+}
+
+# ---------------------------------------------------------------------------
 # JSON serialization: use jq with null-delimited input, fall back to python3
 # ---------------------------------------------------------------------------
 
@@ -150,16 +217,28 @@ compute_hmac() {
     local nonce="$5"
     local secret_file="$6"
 
-    # Compute SHA256 of body
-    local body_hash
-    body_hash=$(printf '%s' "$body" | openssl dgst -sha256 -hex 2>/dev/null | awk '{print $NF}')
+    # Use python3 for HMAC computation to keep the secret entirely in-process
+    # memory. The previous openssl approach leaked the secret via
+    # /proc/<pid>/cmdline because it was passed as a command-line argument.
+    python3 -c '
+import hashlib, hmac, sys
 
-    # Build canonical string: METHOD\nPATH\nSHA256(body)\nTIMESTAMP\nNONCE
-    local canonical
-    canonical=$(printf '%s\n%s\n%s\n%s\n%s' "$method" "$path" "$body_hash" "$timestamp" "$nonce")
+method, path, body, timestamp, nonce, secret_file = sys.argv[1:7]
 
-    # HMAC-SHA256 with secret from file
-    printf '%s' "$canonical" | openssl dgst -sha256 -hmac "$(cat "$secret_file")" -hex 2>/dev/null | awk '{print $NF}'
+# Read secret from file
+with open(secret_file, "rb") as f:
+    secret = f.read().strip()
+
+# SHA-256 of body
+body_hash = hashlib.sha256(body.encode("utf-8")).hexdigest()
+
+# Canonical string: METHOD\nPATH\nSHA256(body)\nTIMESTAMP\nNONCE
+canonical = f"{method}\n{path}\n{body_hash}\n{timestamp}\n{nonce}"
+
+# HMAC-SHA256
+sig = hmac.new(secret, canonical.encode("utf-8"), hashlib.sha256).hexdigest()
+print(sig)
+' "$method" "$path" "$body" "$timestamp" "$nonce" "$secret_file"
 }
 
 # ---------------------------------------------------------------------------
@@ -174,20 +253,26 @@ if ! is_workspace_path "$CWD"; then
     exec "$REAL_GIT" "$@"
 fi
 
-# Validate sandbox identity
+discover_sandbox_identity || true
+
+# Validate sandbox identity and HMAC secret file
 if [[ -z "$SANDBOX_ID" ]]; then
-    echo "error: git wrapper: SANDBOX_ID not set" >&2
+    echo "error: git wrapper: SANDBOX_ID not set and could not be discovered" >&2
     exit 1
 fi
-
-# Validate HMAC secret file
 if [[ ! -f "$HMAC_SECRET_FILE" ]]; then
     echo "error: git wrapper: HMAC secret file not found at $HMAC_SECRET_FILE" >&2
     exit 1
 fi
+if [[ ! -r "$HMAC_SECRET_FILE" ]]; then
+    echo "error: git wrapper: HMAC secret file is not readable at $HMAC_SECRET_FILE" >&2
+    exit 1
+fi
 
-# Build JSON body
-BODY=$(serialize_args "$CWD" "$@")
+# Build JSON body with cwd relative to /workspace.
+# The git API resolves this relative path against its own repo root mount.
+REQUEST_CWD=$(to_request_cwd "$CWD")
+BODY=$(serialize_args "$REQUEST_CWD" "$@")
 if [[ -z "$BODY" ]]; then
     echo "error: git wrapper: failed to serialize arguments" >&2
     exit 1

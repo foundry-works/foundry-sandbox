@@ -341,53 +341,38 @@ merge_claude_settings() {
         return 1
     }
 
-    # Merge settings in container
-    docker exec -u "$CONTAINER_USER" "$container_id" python3 - "$container_settings" "$temp_host" <<'PY'
-import json
-import sys
-import os
-
-container_path = sys.argv[1]
-host_path = sys.argv[2]
-
-# Load host settings
-try:
-    with open(host_path) as f:
-        host_data = json.load(f)
-except (FileNotFoundError, json.JSONDecodeError):
-    host_data = {}
-
-# Load existing container settings (may have hooks from prepopulate_foundry_global)
-try:
-    with open(container_path) as f:
-        container_data = json.load(f)
-except (FileNotFoundError, json.JSONDecodeError):
-    container_data = {}
-
-# Settings to preserve from container (sandbox defaults)
-preserve_keys = {"model", "subagentModel", "hooks"}
-preserved = {k: container_data[k] for k in preserve_keys if k in container_data}
-
-# Merge: host settings take precedence, except for preserved keys
+    # Merge settings in container using extracted Python module.
+    # Source: lib/python/merge_claude_settings.py (extracted for testability)
+    local merge_script="$SANDBOX_HOME/lib/python/merge_claude_settings.py"
+    if [ -f "$merge_script" ]; then
+        # Copy the Python modules to a temp dir in the container
+        local temp_pydir="/tmp/sandbox-python"
+        docker exec -u "$CONTAINER_USER" "$container_id" mkdir -p "$temp_pydir" 2>/dev/null || true
+        copy_file_to_container "$container_id" "$SANDBOX_HOME/lib/python/json_config.py" "$temp_pydir/json_config.py" || true
+        copy_file_to_container "$container_id" "$merge_script" "$temp_pydir/merge_claude_settings.py" || true
+        docker exec -u "$CONTAINER_USER" "$container_id" \
+            python3 "$temp_pydir/merge_claude_settings.py" "$container_settings" "$temp_host"
+        docker exec "$container_id" rm -rf "$temp_pydir" 2>/dev/null || true
+    else
+        # Fallback: inline script (kept for backward compatibility)
+        docker exec -u "$CONTAINER_USER" "$container_id" python3 - "$container_settings" "$temp_host" <<'PY'
+import json, sys, os
+container_path, host_path = sys.argv[1], sys.argv[2]
+def load(p):
+    try:
+        with open(p) as f: return json.load(f)
+    except: return {}
+host_data, container_data = load(host_path), load(container_path)
+preserved = {k: container_data[k] for k in ("model","subagentModel","hooks") if k in container_data}
 merged = {**container_data, **host_data}
-
-# Restore preserved settings (opus model, haiku subagent, hooks config)
 merged.update(preserved)
-
-# Remove foundry plugin from enabledPlugins - we use direct global install for it
-# This prevents "Plugin not found" errors from stale host config
-# But keep other plugins like pyright-lsp that use the normal plugin system
 if "enabledPlugins" in merged:
     merged["enabledPlugins"].pop("foundry@claude-foundry", None)
-    # Clean up empty dict
-    if not merged["enabledPlugins"]:
-        del merged["enabledPlugins"]
-
+    if not merged["enabledPlugins"]: del merged["enabledPlugins"]
 os.makedirs(os.path.dirname(container_path), exist_ok=True)
-with open(container_path, "w") as f:
-    json.dump(merged, f, indent=2)
-    f.write("\n")
+with open(container_path, "w") as f: json.dump(merged, f, indent=2); f.write("\n")
 PY
+    fi
 
     # Clean up temp file
     docker exec "$container_id" rm -f "$temp_host" 2>/dev/null || true

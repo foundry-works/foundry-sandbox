@@ -731,6 +731,10 @@ guided_new() {
     cmd_new "${args[@]}"
 }
 
+# Tech debt: cmd_new() (~595 lines) handles argument parsing, repo resolution,
+# validation, container provisioning, registration, and IDE launch in a single
+# function. Consider decomposing into validate_inputs / provision_sandbox /
+# configure_container phases.
 cmd_new() {
     # Detect no-args mode and launch guided wizard
     if [[ $# -eq 0 ]]; then
@@ -1149,6 +1153,17 @@ OVERRIDES
             export ALLOW_PR_OPERATIONS=
             log_step "PR operations: blocked (default)"
         fi
+        # Git shadow mode: generate sandbox identity and write gitdir pointer
+        # SANDBOX_ID is a unique identifier used for HMAC authentication with the git API
+        export SANDBOX_ID
+        SANDBOX_ID=$(generate_sandbox_id "${container}:${name}:$(date +%s%N)") || \
+            die "Failed to generate sandbox identity (missing SHA-256 toolchain)"
+        log_step "Sandbox ID: ${SANDBOX_ID}"
+
+        # Write gitdir pointer so the proxy can locate the bare repo from the workspace
+        # The gitdir file in the worktree points to the bare repo's worktree directory
+        # This is already created by create_worktree, but we export bare_path for docker-compose
+        export REPOS_DIR="${REPOS_DIR}"
     fi
     compose_up "$worktree_dir" "$claude_config_path" "$container" "$override_file" "$isolate_credentials"
 

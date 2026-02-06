@@ -14,28 +14,17 @@ Tests the git_operations.py and git_api.py modules covering:
 """
 
 import base64
-import hashlib
-import hmac
 import json
 import os
-import sys
 import tempfile
 import time
 from unittest.mock import MagicMock, patch
 
 import pytest
 
-# Add unified-proxy to path for imports
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../../unified-proxy"))
+# mitmproxy mocks and sys.path setup handled by conftest.py
 
-# Mock mitmproxy modules before imports (same pattern as test_git_proxy.py)
-mock_mitmproxy = MagicMock()
-sys.modules["mitmproxy"] = mock_mitmproxy
-sys.modules["mitmproxy.http"] = MagicMock()
-sys.modules["mitmproxy.ctx"] = MagicMock()
-sys.modules["mitmproxy.flow"] = MagicMock()
-
-# Now import the modules under test
+# Import the modules under test
 import git_operations
 from git_operations import (
     ALLOWED_COMMANDS,
@@ -51,6 +40,7 @@ from git_operations import (
     REMOTE_BLOCKED_SUBCOMMANDS,
     GitExecRequest,
     build_clean_env,
+    check_push_protected_branches,
     execute_git,
     validate_command,
     validate_path,
@@ -460,6 +450,173 @@ class TestResponseHandling:
                 assert called_cwd.startswith(tmpdir)
 
 
+class TestGitApiMetadataLookup:
+    """Tests for metadata lookup behavior in git API."""
+
+    def test_metadata_lookup_falls_back_to_client_ip(self):
+        """When sandbox_id is not a registry container_id, lookup falls back to source IP."""
+        secrets = SecretStore()
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            secrets._path = tmpdir
+            secret_file = os.path.join(tmpdir, "sandbox-123")
+            with open(secret_file, "wb") as f:
+                f.write(b"secret123")
+
+            registry_instance = MagicMock()
+            registry_instance.get_by_container_id.return_value = None
+            registry_instance.get_by_ip.return_value = MagicMock(
+                metadata={"repo_root": "/git-workspace/from-ip", "allow_pr": True}
+            )
+
+            mock_git_response = MagicMock()
+            mock_git_response.to_dict.return_value = {
+                "exit_code": 0,
+                "stdout": "",
+                "stderr": "",
+                "truncated": False,
+            }
+
+            with patch("registry.ContainerRegistry", return_value=registry_instance):
+                with patch(
+                    "git_operations.execute_git",
+                    return_value=(mock_git_response, None),
+                ) as mock_execute:
+                    app = create_git_api(secret_store=secrets)
+                    client = app.test_client()
+
+                    body = json.dumps({"args": ["status"], "cwd": "."}).encode("utf-8")
+                    timestamp = str(time.time())
+                    nonce = "nonce-meta-ip"
+                    sig = compute_signature(
+                        "POST",
+                        "/git/exec",
+                        body,
+                        timestamp,
+                        nonce,
+                        b"secret123",
+                    )
+
+                    response = client.post(
+                        "/git/exec",
+                        data=body,
+                        headers={
+                            "X-Sandbox-Id": "sandbox-123",
+                            "X-Request-Signature": sig,
+                            "X-Request-Timestamp": timestamp,
+                            "X-Request-Nonce": nonce,
+                        },
+                        environ_base={"REMOTE_ADDR": "172.20.0.9"},
+                    )
+
+                    assert response.status_code == 200
+                    registry_instance.get_by_container_id.assert_called_with(
+                        "sandbox-123"
+                    )
+                    registry_instance.get_by_ip.assert_called_with("172.20.0.9")
+
+                    _, repo_root_arg, metadata_arg = mock_execute.call_args[0]
+                    assert repo_root_arg == "/git-workspace/from-ip"
+                    assert metadata_arg == {
+                        "repo_root": "/git-workspace/from-ip",
+                        "allow_pr": True,
+                    }
+
+
+class TestProtectedBranchPushValidation:
+    """Tests for protected-branch enforcement in push argument parsing."""
+
+    def test_push_without_refspec_is_rejected(self):
+        """Implicit push targets must be rejected to prevent bypasses."""
+        err = check_push_protected_branches(["origin"], "/tmp", metadata=None)
+        assert err is not None
+        assert "explicit refspecs" in err.reason.lower()
+
+    def test_push_all_is_rejected(self):
+        """--all push mode is too broad for deterministic policy checks."""
+        err = check_push_protected_branches(["--all", "origin"], "/tmp", metadata=None)
+        assert err is not None
+        assert "--all" in err.reason
+
+    def test_push_mirror_is_rejected(self):
+        """--mirror push mode is too broad for deterministic policy checks."""
+        err = check_push_protected_branches(
+            ["--mirror", "origin"], "/tmp", metadata=None
+        )
+        assert err is not None
+        assert "--mirror" in err.reason
+
+    def test_push_main_refspec_is_rejected(self):
+        """Explicit push to protected branch should be blocked."""
+        err = check_push_protected_branches(["origin", "main"], "/tmp", metadata=None)
+        assert err is not None
+        assert "protected branch" in err.reason.lower()
+
+    def test_push_non_protected_branch_is_allowed(self):
+        """Explicit push to non-protected branch should be allowed."""
+        err = check_push_protected_branches(
+            ["origin", "feature/test"], "/tmp", metadata=None
+        )
+        assert err is None
+
+    def test_push_wildcard_refspec_is_rejected(self):
+        """Wildcard refspecs are rejected to prevent broad push bypasses."""
+        err = check_push_protected_branches(
+            ["origin", "refs/heads/*:refs/heads/*"], "/tmp", metadata=None
+        )
+        assert err is not None
+        assert "wildcard" in err.reason.lower()
+
+    def test_execute_git_blocks_implicit_push_before_subprocess(self):
+        """Implicit push should be denied before running git subprocess."""
+        request = GitExecRequest(args=["push", "origin"])
+        with patch("git_operations.subprocess.run") as mock_run:
+            response, err = execute_git(request, "/tmp", metadata=None)
+            assert response is None
+            assert err is not None
+            assert "explicit refspecs" in err.reason.lower()
+            mock_run.assert_not_called()
+
+    def test_execute_git_blocks_wildcard_refspec_before_subprocess(self):
+        """Wildcard refspec push should be denied before running git subprocess."""
+        request = GitExecRequest(args=["push", "origin", "refs/heads/*:refs/heads/*"])
+        with patch("git_operations.subprocess.run") as mock_run:
+            response, err = execute_git(request, "/tmp", metadata=None)
+            assert response is None
+            assert err is not None
+            assert "wildcard" in err.reason.lower()
+            mock_run.assert_not_called()
+
+    def test_push_tags_only_is_allowed(self):
+        """Push with only --tags and a remote should be allowed (no branch refspecs)."""
+        err = check_push_protected_branches(
+            ["origin", "--tags"], "/tmp", metadata=None
+        )
+        assert err is None
+
+    def test_push_delete_protected_branch_is_rejected(self):
+        """Deleting a protected branch via --delete should be blocked."""
+        err = check_push_protected_branches(
+            ["--delete", "origin", "main"], "/tmp", metadata=None
+        )
+        assert err is not None
+        assert "protected branch" in err.reason.lower()
+
+    def test_push_delete_non_protected_branch_is_allowed(self):
+        """Deleting a non-protected branch via --delete should be allowed."""
+        err = check_push_protected_branches(
+            ["--delete", "origin", "feature/old"], "/tmp", metadata=None
+        )
+        assert err is None
+
+    def test_push_with_double_dash_treats_remaining_as_positional(self):
+        """Arguments after -- should be treated as positional (remote + refspec)."""
+        err = check_push_protected_branches(
+            ["--", "origin", "feature/test"], "/tmp", metadata=None
+        )
+        assert err is None
+
+
 class TestRequestSizeLimits:
     """Tests for request size limits."""
 
@@ -526,6 +683,13 @@ class TestEdgeCases:
             result_path, error = validate_path("/etc/passwd", tmpdir)
             assert error is not None
             assert "outside repo root" in error.reason.lower()
+
+    def test_path_validation_maps_workspace_absolute_path(self):
+        """Absolute /workspace paths are translated to repo_root for compatibility."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            result_path, error = validate_path("/workspace/src", tmpdir)
+            assert error is None
+            assert result_path == os.path.realpath(os.path.join(tmpdir, "src"))
 
     def test_nonce_store_ttl_expiration(self):
         """Test that expired nonces are cleaned up."""

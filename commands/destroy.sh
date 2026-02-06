@@ -45,6 +45,8 @@ cmd_destroy() {
 
     # Remove stubs volume (external volume not removed by compose down -v)
     remove_stubs_volume "$container"
+    # Remove HMAC secrets volume (git shadow mode)
+    remove_hmac_volume "$container"
 
     # Remove credential isolation networks (not always removed by compose down)
     for network_suffix in credential-isolation proxy-egress; do

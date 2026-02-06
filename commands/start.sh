@@ -109,6 +109,41 @@ cmd_start() {
         isolate_credentials="true"
         populate_stubs_volume "$container"
         export STUBS_VOLUME_NAME="${container}_stubs"
+        export HMAC_VOLUME_NAME="${container}_hmac"
+        # Reuse the existing per-sandbox secret volume when available.
+        if docker volume inspect "${HMAC_VOLUME_NAME}" >/dev/null 2>&1; then
+            # Repair legacy permissions so both runtime users can read the secret.
+            repair_hmac_secret_permissions "$container" || \
+                die "Failed to repair HMAC secret permissions for ${HMAC_VOLUME_NAME}"
+
+            local hmac_secret_count
+            hmac_secret_count=$(hmac_secret_file_count "$container") || \
+                die "Failed to inspect HMAC secrets in ${HMAC_VOLUME_NAME}"
+            if ! [[ "$hmac_secret_count" =~ ^[0-9]+$ ]]; then
+                die "Invalid HMAC secret count '${hmac_secret_count}' in ${HMAC_VOLUME_NAME}"
+            fi
+
+            if [ "$hmac_secret_count" -eq 1 ]; then
+                # Prevent accidental reprovisioning with an unrelated host SANDBOX_ID.
+                unset SANDBOX_ID
+            elif [ "$hmac_secret_count" -eq 0 ]; then
+                # Existing volume with no secret: provision a new secret on start.
+                SANDBOX_ID=$(generate_sandbox_id "${container}:${name}:$(date +%s%N)") || \
+                    die "Failed to generate sandbox identity (missing SHA-256 toolchain)"
+                export SANDBOX_ID
+                log_warn "HMAC volume ${HMAC_VOLUME_NAME} had no secrets; provisioning a new git shadow secret"
+                log_step "Sandbox ID: ${SANDBOX_ID}"
+            else
+                die "HMAC volume ${HMAC_VOLUME_NAME} has ${hmac_secret_count} secrets (expected 1)"
+            fi
+        else
+            # Backward compatibility: old sandboxes may predate git shadow secret volumes.
+            SANDBOX_ID=$(generate_sandbox_id "${container}:${name}:$(date +%s%N)") || \
+                die "Failed to generate sandbox identity (missing SHA-256 toolchain)"
+            export SANDBOX_ID
+            log_warn "Missing HMAC volume ${HMAC_VOLUME_NAME}; provisioning a new git shadow secret"
+            log_step "Sandbox ID: ${SANDBOX_ID}"
+        fi
         # Export ALLOW_PR_OPERATIONS from metadata
         if [ "${SANDBOX_ALLOW_PR:-0}" = "1" ]; then
             export ALLOW_PR_OPERATIONS=true

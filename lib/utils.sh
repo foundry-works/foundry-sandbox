@@ -188,3 +188,33 @@ export_docker_env() {
     DOCKER_UID=$(id -u)
     DOCKER_GID=$(id -g)
 }
+
+# Compute SHA-256 hash in a cross-platform way.
+# Reads input from stdin and prints lowercase hex digest.
+portable_sha256() {
+    if command -v sha256sum >/dev/null 2>&1; then
+        sha256sum | awk '{print $1}'
+        return 0
+    fi
+
+    if command -v shasum >/dev/null 2>&1; then
+        shasum -a 256 | awk '{print $1}'
+        return 0
+    fi
+
+    if command -v openssl >/dev/null 2>&1; then
+        openssl dgst -sha256 -hex | awk '{print $NF}'
+        return 0
+    fi
+
+    return 1
+}
+
+# Generate a short, stable-format sandbox identifier for git shadow auth.
+generate_sandbox_id() {
+    local seed="$1"
+    local digest
+
+    digest=$(printf '%s' "$seed" | portable_sha256 2>/dev/null) || return 1
+    printf '%s\n' "${digest}" | cut -c1-16
+}

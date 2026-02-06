@@ -9,22 +9,15 @@ Tests the PolicyEngine class including:
 - Conflict resolution
 """
 
-import os
-import sys
-from unittest.mock import MagicMock, Mock, patch
+from unittest.mock import Mock, patch
 
 import pytest
 
-# Mock mitmproxy before imports
-sys.modules["mitmproxy"] = MagicMock()
-sys.modules["mitmproxy.http"] = MagicMock()
-sys.modules["mitmproxy.ctx"] = MagicMock()
-sys.modules["mitmproxy.flow"] = MagicMock()
-
-# Add unified-proxy to path
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../../unified-proxy"))
+# mitmproxy mocks and sys.path setup handled by conftest.py
 
 from addons.policy_engine import (
+    GITHUB_PATCH_ISSUE_PATTERN,
+    GITHUB_PATCH_PR_PATTERN,
     POLICY_DECISION_KEY,
     PolicyDecision,
     PolicyEngine,
@@ -762,6 +755,10 @@ class TestIsGithubRequest:
         """Test detection of GitHub API requests."""
         assert policy_engine._is_github_request("api.github.com") is True
 
+    def test_is_github_request_case_insensitive(self, policy_engine):
+        """Test GitHub API detection is case-insensitive."""
+        assert policy_engine._is_github_request("API.GITHUB.COM") is True
+
     def test_is_github_request_false(self, policy_engine):
         """Test detection of non-GitHub requests."""
         non_github_hosts = [
@@ -801,6 +798,23 @@ class TestCheckGithubBlocklist:
         assert result is not None
         assert "release creation" in result
 
+    def test_check_github_blocklist_git_ref_creation(self, policy_engine):
+        """Test git ref creation endpoint is blocked."""
+        result = policy_engine._check_github_blocklist(
+            "POST", "/repos/owner/repo/git/refs"
+        )
+        assert result is not None
+        assert "ref creation" in result
+
+    def test_check_github_blocklist_git_ref_mutation(self, policy_engine):
+        """Test git ref update/delete endpoints are blocked."""
+        for method in ("PATCH", "DELETE"):
+            result = policy_engine._check_github_blocklist(
+                method, "/repos/owner/repo/git/refs/heads/main"
+            )
+            assert result is not None
+            assert "ref mutation" in result
+
     def test_check_github_blocklist_no_match(self, policy_engine):
         """Test that non-blocked requests return None."""
         safe_requests = [
@@ -808,6 +822,7 @@ class TestCheckGithubBlocklist:
             ("GET", "/user"),
             ("POST", "/repos/owner/repo/pulls"),
             ("GET", "/repos/owner/repo/releases"),
+            ("GET", "/repos/owner/repo/git/refs/heads/main"),
         ]
 
         for method, path in safe_requests:
@@ -829,6 +844,1033 @@ class TestCheckGithubBlocklist:
             "GET", "/repos/owner/repo/releases"
         )
         assert result is None
+
+
+class TestNormalizePath:
+    """Tests for normalize_path function."""
+
+    def test_basic_path(self):
+        from addons.policy_engine import normalize_path
+        assert normalize_path("/repos/owner/repo") == "/repos/owner/repo"
+
+    def test_strip_query_string(self):
+        from addons.policy_engine import normalize_path
+        assert normalize_path("/repos/owner/repo?page=1&per_page=30") == "/repos/owner/repo"
+
+    def test_strip_trailing_slash(self):
+        from addons.policy_engine import normalize_path
+        assert normalize_path("/repos/owner/repo/") == "/repos/owner/repo"
+
+    def test_collapse_repeated_slashes(self):
+        from addons.policy_engine import normalize_path
+        assert normalize_path("/repos//owner///repo") == "/repos/owner/repo"
+
+    def test_resolve_dot_dot(self):
+        from addons.policy_engine import normalize_path
+        assert normalize_path("/repos/owner/repo/../other") == "/repos/owner/other"
+
+    def test_url_decode(self):
+        from addons.policy_engine import normalize_path
+        # %2F decodes to / — single encoding is fine
+        assert normalize_path("/repos/owner%2Frepo") == "/repos/owner/repo"
+
+    def test_double_encoding_rejected(self):
+        from addons.policy_engine import normalize_path
+        # %252F decodes to %2F — % still present → rejected
+        assert normalize_path("/repos/%252F/evil") is None
+
+    def test_triple_encoding_rejected(self):
+        from addons.policy_engine import normalize_path
+        # %25252F decodes to %252F — % still present → rejected
+        assert normalize_path("/repos/%25252F/evil") is None
+
+    def test_encoded_dot_dot_rejected(self):
+        from addons.policy_engine import normalize_path
+        # %252e%252e decodes to %2e%2e — % still present → rejected
+        assert normalize_path("/repos/%252e%252e/evil") is None
+
+    def test_bare_slash(self):
+        from addons.policy_engine import normalize_path
+        assert normalize_path("/") == "/"
+
+    def test_empty_path(self):
+        from addons.policy_engine import normalize_path
+        assert normalize_path("") == "/"
+
+    def test_legitimate_no_encoding(self):
+        from addons.policy_engine import normalize_path
+        assert normalize_path("/repos/owner/repo/pulls/123") == "/repos/owner/repo/pulls/123"
+
+
+class TestEndpointPathEnforcement:
+    """Tests for endpoint path enforcement (Step 2b)."""
+
+    @pytest.fixture
+    def policy_engine_with_config(self):
+        """Create PolicyEngine with full allowlist config including endpoints."""
+        from config import AllowlistConfig, HttpEndpointConfig, BlockedPathConfig
+
+        engine = PolicyEngine()
+        engine._domains = ["api.github.com", "pypi.org"]
+        engine._allowlist = AllowlistConfig(
+            version="1.0",
+            domains=["api.github.com", "pypi.org"],
+            http_endpoints=[
+                HttpEndpointConfig(
+                    host="api.github.com",
+                    methods=["GET", "POST", "PUT", "PATCH", "DELETE"],
+                    paths=[
+                        "/repos/*/*",
+                        "/repos/*/*/pulls",
+                        "/repos/*/*/pulls/*",
+                        "/repos/*/*/issues",
+                        "/repos/*/*/issues/*",
+                        "/repos/*/*/issues/*/comments",
+                        "/repos/*/*/issues/*/comments/*",
+                        "/repos/*/*/issues/comments",
+                        "/repos/*/*/issues/comments/*",
+                        "/repos/*/*/branches",
+                        "/repos/*/*/branches/**",
+                        "/repos/*/*/git/**",
+                        "/repos/*/*/contents",
+                        "/repos/*/*/contents/**",
+                        "/repos/*/*/compare/**",
+                        "/repos/*/*/commits",
+                        "/repos/*/*/commits/*",
+                        "/repos/*/*/releases",
+                        "/repos/*/*/releases/*",
+                        "/repos/*/*/pulls/*/comments",
+                        "/repos/*/*/pulls/*/comments/*",
+                        "/repos/*/*/pulls/comments",
+                        "/repos/*/*/pulls/comments/*",
+                        "/repos/*/*/pulls/*/reviews",
+                        "/repos/*/*/pulls/*/reviews/*",
+                        "/repos/*/*/pulls/*/reviews/**",
+                        "/user/*",
+                        "/rate_limit",
+                    ],
+                ),
+            ],
+            blocked_paths=[
+                BlockedPathConfig(
+                    host="api.github.com",
+                    patterns=[
+                        "/repos/*/*/hooks",
+                        "/repos/*/*/hooks/*",
+                        "/repos/*/*/keys",
+                        "/repos/*/*/keys/*",
+                        "/repos/*/*/actions/secrets",
+                        "/repos/*/*/actions/secrets/*",
+                        "/repos/*/*/branches/**/protection",
+                        "/repos/*/*/branches/**/protection/**",
+                        "/repos/*/*/branches/**/rename",
+                    ],
+                ),
+            ],
+        )
+        return engine
+
+    @pytest.fixture
+    def mock_container_config(self):
+        config = Mock()
+        config.container_id = "test-container"
+        return config
+
+    def _make_flow(self, method, host, path):
+        flow = Mock()
+        flow.request = Mock()
+        flow.request.method = method
+        flow.request.pretty_host = host
+        flow.request.path = path
+        flow.metadata = {}
+        flow.response = None
+        return flow
+
+    @patch("addons.policy_engine.http.Response.make", side_effect=make_mock_response)
+    @patch("addons.policy_engine.get_container_config")
+    @patch("addons.policy_engine.ctx")
+    def test_allowed_repo_path(
+        self, mock_ctx, mock_get_config, mock_response_make,
+        policy_engine_with_config, mock_container_config
+    ):
+        """GET /repos/owner/repo is allowed."""
+        mock_get_config.return_value = mock_container_config
+        mock_ctx.log = Mock()
+        flow = self._make_flow("GET", "api.github.com", "/repos/owner/repo")
+
+        policy_engine_with_config.request(flow)
+
+        decision = flow.metadata[POLICY_DECISION_KEY]
+        assert decision["allowed"] is True
+
+    @patch("addons.policy_engine.http.Response.make", side_effect=make_mock_response)
+    @patch("addons.policy_engine.get_container_config")
+    @patch("addons.policy_engine.ctx")
+    def test_disallowed_method_denied(
+        self, mock_ctx, mock_get_config, mock_response_make,
+        policy_engine_with_config, mock_container_config
+    ):
+        """HEAD method is denied when endpoint methods do not include HEAD."""
+        mock_get_config.return_value = mock_container_config
+        mock_ctx.log = Mock()
+        flow = self._make_flow("HEAD", "api.github.com", "/repos/owner/repo")
+
+        policy_engine_with_config.request(flow)
+
+        decision = flow.metadata[POLICY_DECISION_KEY]
+        assert decision["allowed"] is False
+        assert decision["policy_type"] == "endpoint_path"
+        assert "method" in decision["reason"].lower()
+
+    @patch("addons.policy_engine.http.Response.make", side_effect=make_mock_response)
+    @patch("addons.policy_engine.get_container_config")
+    @patch("addons.policy_engine.ctx")
+    def test_blocked_hooks_path(
+        self, mock_ctx, mock_get_config, mock_response_make,
+        policy_engine_with_config, mock_container_config
+    ):
+        """POST /repos/owner/repo/hooks is denied (not in allowed paths)."""
+        mock_get_config.return_value = mock_container_config
+        mock_ctx.log = Mock()
+        flow = self._make_flow("POST", "api.github.com", "/repos/owner/repo/hooks")
+
+        policy_engine_with_config.request(flow)
+
+        decision = flow.metadata[POLICY_DECISION_KEY]
+        assert decision["allowed"] is False
+        assert decision["policy_type"] == "endpoint_path"
+
+    @patch("addons.policy_engine.http.Response.make", side_effect=make_mock_response)
+    @patch("addons.policy_engine.get_container_config")
+    @patch("addons.policy_engine.ctx")
+    def test_blocked_actions_secrets(
+        self, mock_ctx, mock_get_config, mock_response_make,
+        policy_engine_with_config, mock_container_config
+    ):
+        """POST /repos/owner/repo/actions/secrets is denied (not in allowed paths)."""
+        mock_get_config.return_value = mock_container_config
+        mock_ctx.log = Mock()
+        flow = self._make_flow("POST", "api.github.com", "/repos/owner/repo/actions/secrets")
+
+        policy_engine_with_config.request(flow)
+
+        decision = flow.metadata[POLICY_DECISION_KEY]
+        assert decision["allowed"] is False
+        assert decision["policy_type"] == "endpoint_path"
+
+    @patch("addons.policy_engine.http.Response.make", side_effect=make_mock_response)
+    @patch("addons.policy_engine.get_container_config")
+    @patch("addons.policy_engine.ctx")
+    def test_path_traversal_blocked(
+        self, mock_ctx, mock_get_config, mock_response_make,
+        policy_engine_with_config, mock_container_config
+    ):
+        """Path traversal with .. resolves and is checked against allowed paths."""
+        mock_get_config.return_value = mock_container_config
+        mock_ctx.log = Mock()
+        # /repos/owner/repo/../../../admin resolves to /admin — not in allowed paths
+        flow = self._make_flow("GET", "api.github.com", "/repos/owner/repo/../../../admin")
+
+        policy_engine_with_config.request(flow)
+
+        decision = flow.metadata[POLICY_DECISION_KEY]
+        assert decision["allowed"] is False
+        assert "not in allowed paths" in decision["reason"]
+
+    @patch("addons.policy_engine.http.Response.make", side_effect=make_mock_response)
+    @patch("addons.policy_engine.get_container_config")
+    @patch("addons.policy_engine.ctx")
+    def test_double_encoded_path_rejected(
+        self, mock_ctx, mock_get_config, mock_response_make,
+        policy_engine_with_config, mock_container_config
+    ):
+        """%252F double-encoded path is rejected."""
+        mock_get_config.return_value = mock_container_config
+        mock_ctx.log = Mock()
+        flow = self._make_flow("GET", "api.github.com", "/repos/%252e%252e/evil")
+
+        policy_engine_with_config.request(flow)
+
+        decision = flow.metadata[POLICY_DECISION_KEY]
+        assert decision["allowed"] is False
+        assert "double-encoding" in decision["reason"]
+
+    @patch("addons.policy_engine.http.Response.make", side_effect=make_mock_response)
+    @patch("addons.policy_engine.get_container_config")
+    @patch("addons.policy_engine.ctx")
+    def test_repeated_separators_normalized(
+        self, mock_ctx, mock_get_config, mock_response_make,
+        policy_engine_with_config, mock_container_config
+    ):
+        """Repeated slashes are collapsed before matching."""
+        mock_get_config.return_value = mock_container_config
+        mock_ctx.log = Mock()
+        # /repos//owner///repo → /repos/owner/repo (matches /repos/*/*)
+        flow = self._make_flow("GET", "api.github.com", "/repos//owner///repo")
+
+        policy_engine_with_config.request(flow)
+
+        decision = flow.metadata[POLICY_DECISION_KEY]
+        assert decision["allowed"] is True
+
+    @patch("addons.policy_engine.http.Response.make", side_effect=make_mock_response)
+    @patch("addons.policy_engine.get_container_config")
+    @patch("addons.policy_engine.ctx")
+    def test_trailing_slash_normalized(
+        self, mock_ctx, mock_get_config, mock_response_make,
+        policy_engine_with_config, mock_container_config
+    ):
+        """Trailing slashes are stripped before matching."""
+        mock_get_config.return_value = mock_container_config
+        mock_ctx.log = Mock()
+        flow = self._make_flow("GET", "api.github.com", "/repos/owner/repo/")
+
+        policy_engine_with_config.request(flow)
+
+        decision = flow.metadata[POLICY_DECISION_KEY]
+        assert decision["allowed"] is True
+
+    @patch("addons.policy_engine.get_container_config")
+    @patch("addons.policy_engine.ctx")
+    def test_non_endpoint_host_domain_level_only(
+        self, mock_ctx, mock_get_config,
+        policy_engine_with_config, mock_container_config
+    ):
+        """Hosts without endpoint config use domain-level allowlisting only."""
+        mock_get_config.return_value = mock_container_config
+        mock_ctx.log = Mock()
+        # pypi.org is in domains but has no http_endpoints entry
+        flow = self._make_flow("GET", "pypi.org", "/any/path/here")
+
+        policy_engine_with_config.request(flow)
+
+        decision = flow.metadata[POLICY_DECISION_KEY]
+        assert decision["allowed"] is True
+
+    @patch("addons.policy_engine.http.Response.make", side_effect=make_mock_response)
+    @patch("addons.policy_engine.get_container_config")
+    @patch("addons.policy_engine.ctx")
+    def test_unmatched_path_denied(
+        self, mock_ctx, mock_get_config, mock_response_make,
+        policy_engine_with_config, mock_container_config
+    ):
+        """Paths not matching any allowed pattern are denied."""
+        mock_get_config.return_value = mock_container_config
+        mock_ctx.log = Mock()
+        flow = self._make_flow("GET", "api.github.com", "/admin/something")
+
+        policy_engine_with_config.request(flow)
+
+        decision = flow.metadata[POLICY_DECISION_KEY]
+        assert decision["allowed"] is False
+        assert "not in allowed paths" in decision["reason"]
+
+    @patch("addons.policy_engine.http.Response.make", side_effect=make_mock_response)
+    @patch("addons.policy_engine.get_container_config")
+    @patch("addons.policy_engine.ctx")
+    def test_mixed_case_encoding_normalized(
+        self, mock_ctx, mock_get_config, mock_response_make,
+        policy_engine_with_config, mock_container_config
+    ):
+        """Mixed-case %2f/%2F both normalize to /."""
+        mock_get_config.return_value = mock_container_config
+        mock_ctx.log = Mock()
+        # %2f and %2F both decode to / — should match /repos/*/*
+        flow = self._make_flow("GET", "api.github.com", "/repos/owner%2frepo")
+
+        policy_engine_with_config.request(flow)
+
+        decision = flow.metadata[POLICY_DECISION_KEY]
+        # After decode: /repos/owner/repo — matches /repos/*/*
+        assert decision["allowed"] is True
+
+    @patch("addons.policy_engine.http.Response.make", side_effect=make_mock_response)
+    @patch("addons.policy_engine.get_container_config")
+    @patch("addons.policy_engine.ctx")
+    def test_legitimate_path_no_encoding(
+        self, mock_ctx, mock_get_config, mock_response_make,
+        policy_engine_with_config, mock_container_config
+    ):
+        """Legitimate path with no encoding is allowed."""
+        mock_get_config.return_value = mock_container_config
+        mock_ctx.log = Mock()
+        flow = self._make_flow("GET", "api.github.com", "/repos/owner/repo/pulls/123")
+
+        policy_engine_with_config.request(flow)
+
+        decision = flow.metadata[POLICY_DECISION_KEY]
+        assert decision["allowed"] is True
+
+    @patch("addons.policy_engine.http.Response.make", side_effect=make_mock_response)
+    @patch("addons.policy_engine.get_container_config")
+    @patch("addons.policy_engine.ctx")
+    def test_compare_path_with_encoded_slash_allowed(
+        self, mock_ctx, mock_get_config, mock_response_make,
+        policy_engine_with_config, mock_container_config
+    ):
+        """Compare refs with encoded slashes should remain allowed."""
+        mock_get_config.return_value = mock_container_config
+        mock_ctx.log = Mock()
+        flow = self._make_flow(
+            "GET",
+            "api.github.com",
+            "/repos/owner/repo/compare/main...feature%2Fone",
+        )
+
+        policy_engine_with_config.request(flow)
+
+        decision = flow.metadata[POLICY_DECISION_KEY]
+        assert decision["allowed"] is True
+
+    @patch("addons.policy_engine.http.Response.make", side_effect=make_mock_response)
+    @patch("addons.policy_engine.get_container_config")
+    @patch("addons.policy_engine.ctx")
+    def test_git_ref_mutation_path_blocked(
+        self, mock_ctx, mock_get_config, mock_response_make,
+        policy_engine_with_config, mock_container_config
+    ):
+        """Git ref update endpoints are blocked even when endpoint paths allow /git/**."""
+        mock_get_config.return_value = mock_container_config
+        mock_ctx.log = Mock()
+        flow = self._make_flow(
+            "PATCH",
+            "api.github.com",
+            "/repos/owner/repo/git/refs/heads/main",
+        )
+
+        policy_engine_with_config.request(flow)
+
+        decision = flow.metadata[POLICY_DECISION_KEY]
+        assert decision["allowed"] is False
+        assert decision["policy_type"] == "blocklist"
+        assert "ref mutation" in decision["reason"].lower()
+
+    @patch("addons.policy_engine.http.Response.make", side_effect=make_mock_response)
+    @patch("addons.policy_engine.get_container_config")
+    @patch("addons.policy_engine.ctx")
+    def test_git_ref_read_path_allowed(
+        self, mock_ctx, mock_get_config, mock_response_make,
+        policy_engine_with_config, mock_container_config
+    ):
+        """Git ref read endpoints remain allowed."""
+        mock_get_config.return_value = mock_container_config
+        mock_ctx.log = Mock()
+        flow = self._make_flow(
+            "GET",
+            "api.github.com",
+            "/repos/owner/repo/git/refs/heads/main",
+        )
+
+        policy_engine_with_config.request(flow)
+
+        decision = flow.metadata[POLICY_DECISION_KEY]
+        assert decision["allowed"] is True
+
+    @patch("addons.policy_engine.http.Response.make", side_effect=make_mock_response)
+    @patch("addons.policy_engine.get_container_config")
+    @patch("addons.policy_engine.ctx")
+    def test_contents_path_with_nested_file_allowed(
+        self, mock_ctx, mock_get_config, mock_response_make,
+        policy_engine_with_config, mock_container_config
+    ):
+        """Nested file paths in contents endpoint should remain allowed."""
+        mock_get_config.return_value = mock_container_config
+        mock_ctx.log = Mock()
+        flow = self._make_flow(
+            "GET",
+            "api.github.com",
+            "/repos/owner/repo/contents/src%2Fpkg%2Ffile.py",
+        )
+
+        policy_engine_with_config.request(flow)
+
+        decision = flow.metadata[POLICY_DECISION_KEY]
+        assert decision["allowed"] is True
+
+    @patch("addons.policy_engine.http.Response.make", side_effect=make_mock_response)
+    @patch("addons.policy_engine.get_container_config")
+    @patch("addons.policy_engine.ctx")
+    def test_contents_root_path_allowed(
+        self, mock_ctx, mock_get_config, mock_response_make,
+        policy_engine_with_config, mock_container_config
+    ):
+        """Contents root endpoint should remain allowed."""
+        mock_get_config.return_value = mock_container_config
+        mock_ctx.log = Mock()
+        flow = self._make_flow(
+            "GET",
+            "api.github.com",
+            "/repos/owner/repo/contents",
+        )
+
+        policy_engine_with_config.request(flow)
+
+        decision = flow.metadata[POLICY_DECISION_KEY]
+        assert decision["allowed"] is True
+
+    @patch("addons.policy_engine.http.Response.make", side_effect=make_mock_response)
+    @patch("addons.policy_engine.get_container_config")
+    @patch("addons.policy_engine.ctx")
+    def test_uppercase_host_still_enforces_github_blocklist(
+        self, mock_ctx, mock_get_config, mock_response_make,
+        policy_engine_with_config, mock_container_config
+    ):
+        """Mixed-case host headers must not bypass GitHub blocklist checks."""
+        mock_get_config.return_value = mock_container_config
+        mock_ctx.log = Mock()
+        flow = self._make_flow(
+            "PATCH",
+            "API.GITHUB.COM",
+            "/repos/owner/repo/git/refs/heads/main",
+        )
+
+        policy_engine_with_config.request(flow)
+
+        decision = flow.metadata[POLICY_DECISION_KEY]
+        assert decision["allowed"] is False
+        assert decision["policy_type"] == "blocklist"
+        assert "ref mutation" in decision["reason"].lower()
+
+    @patch("addons.policy_engine.http.Response.make", side_effect=make_mock_response)
+    @patch("addons.policy_engine.get_container_config")
+    @patch("addons.policy_engine.ctx")
+    def test_issue_comment_path_allowed(
+        self, mock_ctx, mock_get_config, mock_response_make,
+        policy_engine_with_config, mock_container_config
+    ):
+        """Issue comment endpoints remain allowed."""
+        mock_get_config.return_value = mock_container_config
+        mock_ctx.log = Mock()
+        flow = self._make_flow(
+            "POST",
+            "api.github.com",
+            "/repos/owner/repo/issues/1/comments",
+        )
+
+        policy_engine_with_config.request(flow)
+
+        decision = flow.metadata[POLICY_DECISION_KEY]
+        assert decision["allowed"] is True
+
+    @patch("addons.policy_engine.http.Response.make", side_effect=make_mock_response)
+    @patch("addons.policy_engine.get_container_config")
+    @patch("addons.policy_engine.ctx")
+    def test_pull_review_path_allowed(
+        self, mock_ctx, mock_get_config, mock_response_make,
+        policy_engine_with_config, mock_container_config
+    ):
+        """Pull request review endpoints remain allowed."""
+        mock_get_config.return_value = mock_container_config
+        mock_ctx.log = Mock()
+        flow = self._make_flow(
+            "POST",
+            "api.github.com",
+            "/repos/owner/repo/pulls/1/reviews",
+        )
+
+        policy_engine_with_config.request(flow)
+
+        decision = flow.metadata[POLICY_DECISION_KEY]
+        assert decision["allowed"] is True
+
+    @patch("addons.policy_engine.http.Response.make", side_effect=make_mock_response)
+    @patch("addons.policy_engine.get_container_config")
+    @patch("addons.policy_engine.ctx")
+    def test_pull_review_subpath_allowed(
+        self, mock_ctx, mock_get_config, mock_response_make,
+        policy_engine_with_config, mock_container_config
+    ):
+        """Nested review subpaths remain allowed via ** matching."""
+        mock_get_config.return_value = mock_container_config
+        mock_ctx.log = Mock()
+        flow = self._make_flow(
+            "GET",
+            "api.github.com",
+            "/repos/owner/repo/pulls/1/reviews/2/events",
+        )
+
+        policy_engine_with_config.request(flow)
+
+        decision = flow.metadata[POLICY_DECISION_KEY]
+        assert decision["allowed"] is True
+
+    @patch("addons.policy_engine.http.Response.make", side_effect=make_mock_response)
+    @patch("addons.policy_engine.get_container_config")
+    @patch("addons.policy_engine.ctx")
+    def test_branch_protection_path_blocked(
+        self, mock_ctx, mock_get_config, mock_response_make,
+        policy_engine_with_config, mock_container_config
+    ):
+        """Branch protection mutation endpoint is blocked."""
+        mock_get_config.return_value = mock_container_config
+        mock_ctx.log = Mock()
+        flow = self._make_flow(
+            "PUT",
+            "api.github.com",
+            "/repos/owner/repo/branches/main/protection",
+        )
+
+        policy_engine_with_config.request(flow)
+
+        decision = flow.metadata[POLICY_DECISION_KEY]
+        assert decision["allowed"] is False
+        assert "blocked by policy" in decision["reason"]
+
+    @patch("addons.policy_engine.http.Response.make", side_effect=make_mock_response)
+    @patch("addons.policy_engine.get_container_config")
+    @patch("addons.policy_engine.ctx")
+    def test_branch_protection_nested_branch_blocked(
+        self, mock_ctx, mock_get_config, mock_response_make,
+        policy_engine_with_config, mock_container_config
+    ):
+        """Branch protection endpoint with encoded slash branch is blocked."""
+        mock_get_config.return_value = mock_container_config
+        mock_ctx.log = Mock()
+        flow = self._make_flow(
+            "PUT",
+            "api.github.com",
+            "/repos/owner/repo/branches/feature%2Fone/protection",
+        )
+
+        policy_engine_with_config.request(flow)
+
+        decision = flow.metadata[POLICY_DECISION_KEY]
+        assert decision["allowed"] is False
+        assert "blocked by policy" in decision["reason"]
+
+    @patch("addons.policy_engine.http.Response.make", side_effect=make_mock_response)
+    @patch("addons.policy_engine.get_container_config")
+    @patch("addons.policy_engine.ctx")
+    def test_branch_rename_path_blocked(
+        self, mock_ctx, mock_get_config, mock_response_make,
+        policy_engine_with_config, mock_container_config
+    ):
+        """Branch rename endpoint is blocked."""
+        mock_get_config.return_value = mock_container_config
+        mock_ctx.log = Mock()
+        flow = self._make_flow(
+            "POST",
+            "api.github.com",
+            "/repos/owner/repo/branches/main/rename",
+        )
+
+        policy_engine_with_config.request(flow)
+
+        decision = flow.metadata[POLICY_DECISION_KEY]
+        assert decision["allowed"] is False
+        assert "blocked by policy" in decision["reason"]
+
+    @patch("addons.policy_engine.http.Response.make", side_effect=make_mock_response)
+    @patch("addons.policy_engine.get_container_config")
+    @patch("addons.policy_engine.ctx")
+    def test_blocked_hooks_subpath(
+        self, mock_ctx, mock_get_config, mock_response_make,
+        policy_engine_with_config, mock_container_config
+    ):
+        """GET /repos/owner/repo/hooks/456 is denied (not in allowed paths)."""
+        mock_get_config.return_value = mock_container_config
+        mock_ctx.log = Mock()
+        flow = self._make_flow("GET", "api.github.com", "/repos/owner/repo/hooks/456")
+
+        policy_engine_with_config.request(flow)
+
+        decision = flow.metadata[POLICY_DECISION_KEY]
+        assert decision["allowed"] is False
+        assert decision["policy_type"] == "endpoint_path"
+
+
+class TestBlockedPathsDefenseInDepth:
+    """Tests for blocked_paths as defense-in-depth when paths match allowed patterns."""
+
+    @pytest.fixture
+    def engine_with_broad_allow(self):
+        """Engine with broad allowed paths to test blocked_paths layer."""
+        from config import AllowlistConfig, HttpEndpointConfig, BlockedPathConfig
+
+        engine = PolicyEngine()
+        engine._domains = ["api.github.com"]
+        engine._allowlist = AllowlistConfig(
+            version="1.0",
+            domains=["api.github.com"],
+            http_endpoints=[
+                HttpEndpointConfig(
+                    host="api.github.com",
+                    methods=["GET", "POST", "PUT", "PATCH", "DELETE"],
+                    paths=[
+                        "/repos/*/*",
+                        "/repos/*/*/hooks",
+                        "/repos/*/*/hooks/*",
+                        "/repos/*/*/actions/secrets",
+                        "/repos/*/*/actions/secrets/*",
+                        "/repos/*/*/branches/**",
+                        "/repos/*/*/pulls",
+                        "/repos/*/*/pulls/*",
+                    ],
+                ),
+            ],
+            blocked_paths=[
+                BlockedPathConfig(
+                    host="api.github.com",
+                    patterns=[
+                        "/repos/*/*/hooks",
+                        "/repos/*/*/hooks/*",
+                        "/repos/*/*/actions/secrets",
+                        "/repos/*/*/actions/secrets/*",
+                        "/repos/*/*/branches/**/protection",
+                        "/repos/*/*/branches/**/protection/**",
+                        "/repos/*/*/branches/**/rename",
+                    ],
+                ),
+            ],
+        )
+        return engine
+
+    @pytest.fixture
+    def mock_container_config(self):
+        config = Mock()
+        config.container_id = "test"
+        return config
+
+    def _make_flow(self, method, host, path):
+        flow = Mock()
+        flow.request = Mock()
+        flow.request.method = method
+        flow.request.pretty_host = host
+        flow.request.path = path
+        flow.metadata = {}
+        flow.response = None
+        return flow
+
+    @patch("addons.policy_engine.http.Response.make", side_effect=make_mock_response)
+    @patch("addons.policy_engine.get_container_config")
+    @patch("addons.policy_engine.ctx")
+    def test_hooks_blocked_even_if_allowed(
+        self, mock_ctx, mock_get_config, mock_response_make,
+        engine_with_broad_allow, mock_container_config
+    ):
+        """blocked_paths denies hooks even when the pattern appears in allowed paths."""
+        mock_get_config.return_value = mock_container_config
+        mock_ctx.log = Mock()
+        flow = self._make_flow("POST", "api.github.com", "/repos/owner/repo/hooks")
+
+        engine_with_broad_allow.request(flow)
+
+        decision = flow.metadata[POLICY_DECISION_KEY]
+        assert decision["allowed"] is False
+        assert "blocked by policy" in decision["reason"]
+
+    @patch("addons.policy_engine.http.Response.make", side_effect=make_mock_response)
+    @patch("addons.policy_engine.get_container_config")
+    @patch("addons.policy_engine.ctx")
+    def test_secrets_blocked_even_if_allowed(
+        self, mock_ctx, mock_get_config, mock_response_make,
+        engine_with_broad_allow, mock_container_config
+    ):
+        """blocked_paths denies actions/secrets even when pattern is allowed."""
+        mock_get_config.return_value = mock_container_config
+        mock_ctx.log = Mock()
+        flow = self._make_flow("GET", "api.github.com", "/repos/owner/repo/actions/secrets/MY_SECRET")
+
+        engine_with_broad_allow.request(flow)
+
+        decision = flow.metadata[POLICY_DECISION_KEY]
+        assert decision["allowed"] is False
+        assert "blocked by policy" in decision["reason"]
+
+    @patch("addons.policy_engine.http.Response.make", side_effect=make_mock_response)
+    @patch("addons.policy_engine.get_container_config")
+    @patch("addons.policy_engine.ctx")
+    def test_branch_protection_blocked_even_if_allowed(
+        self, mock_ctx, mock_get_config, mock_response_make,
+        engine_with_broad_allow, mock_container_config
+    ):
+        """blocked_paths denies branch protection endpoints even with broad allow patterns."""
+        mock_get_config.return_value = mock_container_config
+        mock_ctx.log = Mock()
+        flow = self._make_flow(
+            "PUT",
+            "api.github.com",
+            "/repos/owner/repo/branches/main/protection",
+        )
+
+        engine_with_broad_allow.request(flow)
+
+        decision = flow.metadata[POLICY_DECISION_KEY]
+        assert decision["allowed"] is False
+        assert "blocked by policy" in decision["reason"]
+
+    @patch("addons.policy_engine.get_container_config")
+    @patch("addons.policy_engine.ctx")
+    def test_pulls_allowed_not_in_blocked(
+        self, mock_ctx, mock_get_config,
+        engine_with_broad_allow, mock_container_config
+    ):
+        """Pulls are allowed because they're in allowed paths and not in blocked_paths."""
+        mock_get_config.return_value = mock_container_config
+        mock_ctx.log = Mock()
+        flow = self._make_flow("GET", "api.github.com", "/repos/owner/repo/pulls/123")
+
+        engine_with_broad_allow.request(flow)
+
+        decision = flow.metadata[POLICY_DECISION_KEY]
+        assert decision["allowed"] is True
+
+
+class TestSegmentMatch:
+    """Tests for segment_match function."""
+
+    def test_exact_path(self):
+        from config import segment_match
+        assert segment_match("/rate_limit", "/rate_limit") is True
+
+    def test_single_wildcard(self):
+        from config import segment_match
+        assert segment_match("/user/*", "/user/repos") is True
+
+    def test_wildcard_no_span(self):
+        from config import segment_match
+        assert segment_match("/user/*", "/user/repos/extra") is False
+
+    def test_double_wildcard(self):
+        from config import segment_match
+        assert segment_match("/repos/*/*", "/repos/owner/repo") is True
+
+    def test_double_wildcard_no_span(self):
+        from config import segment_match
+        assert segment_match("/repos/*/*", "/repos/owner/repo/extra") is False
+
+    def test_wildcard_empty_segment(self):
+        from config import segment_match
+        # * requires at least one character
+        assert segment_match("/repos/*/hooks", "/repos//hooks") is False
+
+    def test_no_match(self):
+        from config import segment_match
+        assert segment_match("/repos/*/*/pulls", "/repos/owner/repo/issues") is False
+
+    def test_double_star_matches_multi_segment(self):
+        from config import segment_match
+        assert segment_match(
+            "/repos/*/*/contents/**", "/repos/owner/repo/contents/src/pkg/main.py"
+        ) is True
+
+    def test_single_star_does_not_match_multi_segment(self):
+        from config import segment_match
+        assert segment_match(
+            "/repos/*/*/contents/*", "/repos/owner/repo/contents/src/pkg/main.py"
+        ) is False
+
+
+class TestCheckGithubBodyPolicies:
+    """Tests for _check_github_body_policies method."""
+
+    @pytest.fixture
+    def policy_engine(self):
+        """Create PolicyEngine instance."""
+        return PolicyEngine()
+
+    def test_patch_pr_title_edit_allowed(self, policy_engine):
+        """Test PATCH /pulls/1 with title edit is allowed."""
+        import json
+
+        body = json.dumps({"title": "new title"}).encode()
+        result = policy_engine._check_github_body_policies(
+            "PATCH", "/repos/owner/repo/pulls/1", body, "application/json", ""
+        )
+        assert result is None
+
+    def test_patch_pr_state_closed_blocked(self, policy_engine):
+        """Test PATCH /pulls/1 with state:closed is blocked."""
+        import json
+
+        body = json.dumps({"state": "closed"}).encode()
+        result = policy_engine._check_github_body_policies(
+            "PATCH", "/repos/owner/repo/pulls/1", body, "application/json", ""
+        )
+        assert result is not None
+        assert "pull request" in result.lower() or "Closing" in result
+
+    def test_patch_pr_state_open_allowed(self, policy_engine):
+        """Test PATCH /pulls/1 with state:open is allowed (reopen)."""
+        import json
+
+        body = json.dumps({"state": "open"}).encode()
+        result = policy_engine._check_github_body_policies(
+            "PATCH", "/repos/owner/repo/pulls/1", body, "application/json", ""
+        )
+        assert result is None
+
+    def test_patch_pr_state_closed_with_title_blocked(self, policy_engine):
+        """Test PATCH /pulls/1 with state:closed + title is still blocked."""
+        import json
+
+        body = json.dumps({"state": "closed", "title": "new title"}).encode()
+        result = policy_engine._check_github_body_policies(
+            "PATCH", "/repos/owner/repo/pulls/1", body, "application/json", ""
+        )
+        assert result is not None
+        assert "Closing" in result
+
+    def test_malformed_json_blocked(self, policy_engine):
+        """Test malformed JSON body is blocked."""
+        body = b"{not valid json"
+        result = policy_engine._check_github_body_policies(
+            "PATCH", "/repos/owner/repo/pulls/1", body, "application/json", ""
+        )
+        assert result is not None
+        assert "Malformed" in result
+
+    def test_streaming_mode_blocked(self, policy_engine):
+        """Test streaming mode (content=None) is blocked."""
+        result = policy_engine._check_github_body_policies(
+            "PATCH", "/repos/owner/repo/pulls/1", None, "application/json", ""
+        )
+        assert result is not None
+        assert "Streaming" in result
+
+    def test_patch_issue_state_closed_blocked(self, policy_engine):
+        """Test PATCH /issues/1 with state:closed is blocked."""
+        import json
+
+        body = json.dumps({"state": "closed"}).encode()
+        result = policy_engine._check_github_body_policies(
+            "PATCH", "/repos/owner/repo/issues/1", body, "application/json", ""
+        )
+        assert result is not None
+        assert "issue" in result.lower() or "Closing" in result
+
+    def test_existing_merge_block_still_works(self, policy_engine):
+        """Test that existing merge block is not affected by body policies."""
+        # Merge block is in _check_github_blocklist, not body policies
+        result = policy_engine._check_github_blocklist(
+            "PUT", "/repos/owner/repo/pulls/1/merge"
+        )
+        assert result is not None
+        assert "merge" in result.lower()
+
+    def test_missing_content_type_rejected(self, policy_engine):
+        """Test missing Content-Type header is rejected."""
+        import json
+
+        body = json.dumps({"title": "new"}).encode()
+        result = policy_engine._check_github_body_policies(
+            "PATCH", "/repos/owner/repo/pulls/1", body, "", ""
+        )
+        assert result is not None
+        assert "Content-Type" in result
+
+    def test_wrong_content_type_rejected(self, policy_engine):
+        """Test Content-Type text/plain is rejected."""
+        import json
+
+        body = json.dumps({"title": "new"}).encode()
+        result = policy_engine._check_github_body_policies(
+            "PATCH", "/repos/owner/repo/pulls/1", body, "text/plain", ""
+        )
+        assert result is not None
+        assert "Content-Type" in result
+        assert "text/plain" in result
+
+    def test_duplicate_keys_last_value_wins_blocked(self, policy_engine):
+        """Test duplicate keys: {state:open, state:closed} blocked (last value wins)."""
+        # json.loads uses last value for duplicate keys
+        # Manually craft JSON with duplicate keys
+        body = b'{"state": "open", "state": "closed"}'
+        result = policy_engine._check_github_body_policies(
+            "PATCH", "/repos/owner/repo/pulls/1", body, "application/json", ""
+        )
+        assert result is not None
+        assert "Closing" in result
+
+    def test_unicode_escape_state_blocked(self, policy_engine):
+        """Test unicode escape state resolved and blocked."""
+        # json.loads resolves unicode escapes: \u0063losed -> closed
+        body = b'{"state": "\\u0063losed"}'
+        result = policy_engine._check_github_body_policies(
+            "PATCH", "/repos/owner/repo/pulls/1", body, "application/json", ""
+        )
+        assert result is not None
+        assert "Closing" in result
+
+    def test_non_patch_method_ignored(self, policy_engine):
+        """Test that non-PATCH methods are not inspected."""
+        import json
+
+        body = json.dumps({"state": "closed"}).encode()
+        result = policy_engine._check_github_body_policies(
+            "GET", "/repos/owner/repo/pulls/1", body, "application/json", ""
+        )
+        assert result is None
+
+    def test_non_matching_path_ignored(self, policy_engine):
+        """Test that non-PR/issue paths are not inspected."""
+        import json
+
+        body = json.dumps({"state": "closed"}).encode()
+        result = policy_engine._check_github_body_policies(
+            "PATCH", "/repos/owner/repo/labels/1", body, "application/json", ""
+        )
+        assert result is None
+
+    def test_compressed_body_rejected(self, policy_engine):
+        """Test compressed request bodies are rejected."""
+        import json
+
+        body = json.dumps({"title": "new"}).encode()
+        result = policy_engine._check_github_body_policies(
+            "PATCH", "/repos/owner/repo/pulls/1", body, "application/json", "gzip"
+        )
+        assert result is not None
+        assert "Compressed" in result
+
+    def test_bom_stripped_before_parsing(self, policy_engine):
+        """Test UTF-8 BOM is stripped before JSON parsing."""
+        import json
+
+        body = b"\xef\xbb\xbf" + json.dumps({"title": "new"}).encode()
+        result = policy_engine._check_github_body_policies(
+            "PATCH", "/repos/owner/repo/pulls/1", body, "application/json", ""
+        )
+        assert result is None
+
+    def test_content_type_with_charset_allowed(self, policy_engine):
+        """Test Content-Type with charset parameter is accepted."""
+        import json
+
+        body = json.dumps({"title": "new"}).encode()
+        result = policy_engine._check_github_body_policies(
+            "PATCH",
+            "/repos/owner/repo/pulls/1",
+            body,
+            "application/json; charset=utf-8",
+            "",
+        )
+        assert result is None
+
+    def test_non_object_body_rejected(self, policy_engine):
+        """Test non-object JSON body (e.g., array) is rejected."""
+        body = b'["state", "closed"]'
+        result = policy_engine._check_github_body_policies(
+            "PATCH", "/repos/owner/repo/pulls/1", body, "application/json", ""
+        )
+        assert result is not None
+        assert "JSON object" in result
+
+    def test_pattern_matches_pr_endpoint(self):
+        """Test GITHUB_PATCH_PR_PATTERN matches PR endpoints."""
+        assert GITHUB_PATCH_PR_PATTERN.match("/repos/owner/repo/pulls/1")
+        assert GITHUB_PATCH_PR_PATTERN.match("/repos/org/my-repo/pulls/42")
+        assert not GITHUB_PATCH_PR_PATTERN.match("/repos/owner/repo/pulls/1/merge")
+        assert not GITHUB_PATCH_PR_PATTERN.match("/repos/owner/repo/pulls")
+
+    def test_pattern_matches_issue_endpoint(self):
+        """Test GITHUB_PATCH_ISSUE_PATTERN matches issue endpoints."""
+        assert GITHUB_PATCH_ISSUE_PATTERN.match("/repos/owner/repo/issues/1")
+        assert GITHUB_PATCH_ISSUE_PATTERN.match("/repos/org/my-repo/issues/99")
+        assert not GITHUB_PATCH_ISSUE_PATTERN.match("/repos/owner/repo/issues")
+        assert not GITHUB_PATCH_ISSUE_PATTERN.match(
+            "/repos/owner/repo/issues/1/comments"
+        )
 
 
 if __name__ == "__main__":

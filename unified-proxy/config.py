@@ -7,8 +7,9 @@ with support for environment variable overrides.
 import os
 import re
 from dataclasses import dataclass, field
+from functools import lru_cache
 from pathlib import Path
-from typing import List, Optional, Dict, Any
+from typing import List, Optional, Dict, Any, Tuple
 
 import yaml
 
@@ -60,6 +61,20 @@ class CircuitBreakerConfig:
             )
 
 
+
+# Maximum allowed length for user-provided regex patterns to mitigate ReDoS.
+MAX_REGEX_PATTERN_LENGTH = 1024
+
+# Regex detecting nested quantifiers that can cause catastrophic backtracking.
+# Matches patterns like (a+)+, (a*)+, (a+)*, (a{2,})+ etc.
+_REDOS_NESTED_QUANTIFIER = re.compile(
+    r"[+*]\)?[+*]"
+    r"|[+*]\)?\{[0-9,]+\}"
+    r"|\{[0-9,]+\}\)?[+*]"
+    r"|\{[0-9,]+\}\)?\{[0-9,]+\}"
+)
+
+
 @dataclass
 class BlockedPatternConfig:
     """Configuration for a blocked request pattern."""
@@ -83,6 +98,19 @@ class BlockedPatternConfig:
                 f"Valid methods: {', '.join(sorted(valid_methods))}"
             )
 
+        # Validate regex complexity to prevent ReDoS
+        if len(self.path_pattern) > MAX_REGEX_PATTERN_LENGTH:
+            raise ConfigError(
+                f"Regex pattern too long ({len(self.path_pattern)} chars, "
+                f"max {MAX_REGEX_PATTERN_LENGTH}): '{self.path_pattern[:50]}...'"
+            )
+
+        if _REDOS_NESTED_QUANTIFIER.search(self.path_pattern):
+            raise ConfigError(
+                f"Regex pattern contains nested quantifiers (potential ReDoS): "
+                f"'{self.path_pattern}'"
+            )
+
         # Compile regex pattern
         try:
             self._compiled_pattern = re.compile(self.path_pattern)
@@ -104,6 +132,90 @@ class BlockedPatternConfig:
         if self._compiled_pattern is None:
             return False
         return self._compiled_pattern.match(path) is not None
+
+
+@lru_cache(maxsize=256)
+def _compile_segment_pattern(pattern: str) -> re.Pattern:
+    """Compile a segment-aware glob pattern into a regex.
+
+    Supported wildcards:
+    - *  matches exactly one path segment (does not span /)
+    - ** matches one or more characters and may span /
+
+    The compiled pattern is anchored to match the full path.
+
+    Args:
+        pattern: Glob pattern (e.g., '/repos/*/hooks', '/repos/*/keys/*').
+
+    Returns:
+        Compiled regex pattern.
+    """
+    regex_parts: List[str] = []
+    i = 0
+    while i < len(pattern):
+        if pattern[i : i + 2] == "**":
+            regex_parts.append(r".+")
+            i += 2
+            continue
+        if pattern[i] == "*":
+            regex_parts.append(r"[^/]+")
+            i += 1
+            continue
+        regex_parts.append(re.escape(pattern[i]))
+        i += 1
+
+    regex = "".join(regex_parts)
+    return re.compile(r"\A" + regex + r"\Z")
+
+
+def segment_match(pattern: str, path: str) -> bool:
+    """Match a path against a segment-aware glob pattern.
+
+    Wildcards:
+    - *  matches exactly one path segment (any characters except /)
+    - ** matches one or more characters and may span /
+
+    Args:
+        pattern: Glob pattern (e.g., '/repos/*/hooks').
+        path: URL path to test (e.g., '/repos/my-repo/hooks').
+
+    Returns:
+        True if path matches the pattern.
+    """
+    compiled = _compile_segment_pattern(pattern)
+    return compiled.match(path) is not None
+
+
+@dataclass
+class BlockedPathConfig:
+    """Configuration for blocked API paths per host."""
+
+    host: str
+    patterns: List[str]
+    _compiled_matchers: Tuple[re.Pattern, ...] = field(
+        default=(), init=False, repr=False
+    )
+
+    def __post_init__(self):
+        """Validate and compile patterns at load time."""
+        if not self.host:
+            raise ConfigError("Blocked path host cannot be empty")
+        if not self.patterns:
+            raise ConfigError(f"Blocked path config for {self.host} must have at least one pattern")
+        self._compiled_matchers = tuple(
+            _compile_segment_pattern(p) for p in self.patterns
+        )
+
+    def matches(self, path: str) -> bool:
+        """Check if a path matches any blocked pattern for this host.
+
+        Args:
+            path: URL path to check.
+
+        Returns:
+            True if the path matches any blocked pattern.
+        """
+        return any(m.match(path) is not None for m in self._compiled_matchers)
 
 
 @dataclass
@@ -173,6 +285,7 @@ class AllowlistConfig:
     version: str
     domains: List[str]
     http_endpoints: List[HttpEndpointConfig]
+    blocked_paths: List[BlockedPathConfig] = field(default_factory=list)
 
     def __post_init__(self):
         """Validate allowlist configuration."""
@@ -434,8 +547,33 @@ def load_allowlist_config(path: Optional[str] = None) -> AllowlistConfig:
             )
         )
 
+    # Parse blocked paths (optional field)
+    blocked_paths: List[BlockedPathConfig] = []
+    if "blocked_paths" in data:
+        bp_data = data["blocked_paths"]
+        if not isinstance(bp_data, list):
+            raise ConfigError("blocked_paths must be a list")
+
+        for i, bp in enumerate(bp_data):
+            if not isinstance(bp, dict):
+                raise ConfigError(f"blocked_paths[{i}] must be a dictionary")
+            if "host" not in bp:
+                raise ConfigError(f"blocked_paths[{i}] missing required field 'host'")
+            if "patterns" not in bp:
+                raise ConfigError(f"blocked_paths[{i}] missing required field 'patterns'")
+            if not isinstance(bp["patterns"], list):
+                raise ConfigError(f"blocked_paths[{i}].patterns must be a list")
+
+            blocked_paths.append(
+                BlockedPathConfig(
+                    host=str(bp["host"]),
+                    patterns=[str(p) for p in bp["patterns"]],
+                )
+            )
+
     return AllowlistConfig(
         version=str(data["version"]),
         domains=domains,
         http_endpoints=http_endpoints,
+        blocked_paths=blocked_paths,
     )

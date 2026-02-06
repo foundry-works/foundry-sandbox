@@ -315,6 +315,51 @@ If credential isolation is disabled (`--no-isolate-credentials`), the AI can rea
 
 **Rationale:** Credential isolation is opt-out for compatibility. When disabled, the user accepts that credentials may be exposed. See [Credential Isolation](credential-isolation.md) for why you should keep it enabled.
 
+### Container Filesystem Write Capability
+
+The sandbox container runs with `read_only: false` (required for DNS configuration and tmpfs setup).
+
+**Mitigations:**
+- Non-root user (uid 1000 via gosu) limits write scope
+- Network isolation (`internal: true`) prevents data exfiltration
+- Tmpfs `/home` means writes don't persist across restarts
+- The worktree is mounted read-only; `/workspace/.git` is a tmpfs overlay
+
+**Rationale:** Full read-only mode prevents DNS firewall setup via iptables. Shell override protections (e.g., custom shells) were removed as they were bypassable via `/bin/rm` or direct binary execution, making them security theater rather than a real control.
+
+### NET_ADMIN Capability
+
+The sandbox container is granted `CAP_NET_ADMIN` for iptables DNS firewall rules.
+
+**Mitigations:**
+- Privilege drop to uid 1000 via gosu occurs after iptables rules are set in `entrypoint-root.sh`
+- After privilege drop, the unprivileged user cannot modify iptables rules (requires effective uid 0)
+- `CAP_NET_RAW` is separately dropped to prevent raw socket abuse
+
+**Rationale:** DNS firewall requires iptables. The capability is only useful during root-phase initialization.
+
+### Mitmproxy CA Trust
+
+The sandbox trusts the unified-proxy's mitmproxy CA certificate for HTTPS interception.
+
+**Mitigations:**
+- The CA private key never enters the sandbox (stored only on the proxy container)
+- The sandbox only receives the public CA certificate (`mitmproxy-ca.pem`)
+- Network isolation ensures only the unified-proxy can use this CA for interception
+
+**Rationale:** Architectural requirement for credential injection. The proxy must terminate TLS to inject real credentials into outbound API requests.
+
+### In-Memory State Reset
+
+Rate limiters, circuit breakers, and nonce replay stores reset on proxy restart.
+
+**Mitigations:**
+- Rate limiter reset only allows a brief burst before new limits take effect
+- Nonce replay protection is bounded by the HMAC timestamp window (clock skew tolerance), so expired nonces are rejected regardless of store state
+- Circuit breakers reset to closed (healthy) state, which is the safe default
+
+**Rationale:** Persistence adds complexity without meaningful security gain given the bounded time windows.
+
 ---
 
 ## Design Principles

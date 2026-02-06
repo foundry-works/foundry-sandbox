@@ -69,6 +69,13 @@ compose_up() {
         # Populate stubs volume (avoids Docker Desktop bind mount staleness)
         populate_stubs_volume "$container"
         export STUBS_VOLUME_NAME="${container}_stubs"
+        # Export REPOS_DIR for docker-compose volume substitution
+        export REPOS_DIR="${REPOS_DIR}"
+        # Git shadow mode: provision HMAC secret for git API authentication
+        if [ -n "${SANDBOX_ID:-}" ]; then
+            provision_hmac_secret "$container" "$SANDBOX_ID"
+            export HMAC_VOLUME_NAME="${container}_hmac"
+        fi
     fi
 
     local compose_cmd
@@ -173,4 +180,55 @@ populate_stubs_volume() {
 remove_stubs_volume() {
     local container="$1"
     docker volume rm "${container}_stubs" 2>/dev/null || true
+}
+
+# Provision per-sandbox HMAC secret for git API authentication
+# Creates a Docker volume containing the shared secret file
+provision_hmac_secret() {
+    local container="$1"
+    local sandbox_id="$2"
+    local volume_name="${container}_hmac"
+
+    # Generate 32-byte (256-bit) random secret
+    local hmac_secret
+    hmac_secret=$(openssl rand -base64 32)
+
+    docker volume create "$volume_name" >/dev/null 2>&1 || true
+
+    # Write secret to volume using temporary container.
+    # File is named by sandbox_id so git_api.py can look it up per-request.
+    # Mode 0444 is intentional: both runtime users (sandbox user and mitmproxy
+    # user) must read this file, and UID/GID differ across base images.
+    docker run --rm \
+        -v "${volume_name}:/secrets" \
+        alpine:latest \
+        sh -c "echo -n '${hmac_secret}' > /secrets/${sandbox_id} && chmod 0444 /secrets/${sandbox_id}" || return 1
+}
+
+# Return the number of HMAC secret files in a sandbox volume.
+hmac_secret_file_count() {
+    local container="$1"
+    local volume_name="${container}_hmac"
+
+    docker run --rm \
+        -v "${volume_name}:/secrets" \
+        alpine:latest \
+        sh -c "find /secrets -mindepth 1 -maxdepth 1 -type f | wc -l" 2>/dev/null | tr -d '[:space:]'
+}
+
+# Ensure HMAC secret files are readable by both sandbox and proxy runtime users.
+repair_hmac_secret_permissions() {
+    local container="$1"
+    local volume_name="${container}_hmac"
+
+    docker run --rm \
+        -v "${volume_name}:/secrets" \
+        alpine:latest \
+        sh -c "find /secrets -mindepth 1 -maxdepth 1 -type f -exec chmod 0444 {} +" >/dev/null
+}
+
+# Remove the HMAC secrets volume for a sandbox
+remove_hmac_volume() {
+    local container="$1"
+    docker volume rm "${container}_hmac" 2>/dev/null || true
 }

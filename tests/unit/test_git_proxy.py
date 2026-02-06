@@ -581,6 +581,49 @@ class TestPushSizeLimits:
         assert flow.response is None
 
 
+class TestMalformedPushPayload:
+    """Tests that malformed push payloads fail closed."""
+
+    def test_invalid_pktline_header_is_denied(self):
+        """Non-hex pkt-line prefix should be denied."""
+        addon = git_proxy.GitProxyAddon()
+        container = create_container_config(repos=["octocat/hello-world"])
+
+        flow = create_git_flow(
+            "/octocat/hello-world.git/git-receive-pack",
+            method="POST",
+            content=b"XXXXnot-a-pktline",
+            container_config=container,
+        )
+
+        addon.request(flow)
+
+        assert flow.response is not None
+        assert flow.response.status_code == 403
+        assert b"malformed git push payload" in flow.response.content.lower()
+
+    def test_push_without_ref_updates_is_denied(self):
+        """Pkt-line stream with no ref updates should be denied."""
+        addon = git_proxy.GitProxyAddon()
+        container = create_container_config(repos=["octocat/hello-world"])
+
+        # Valid pkt-line framing + flush, but payload is not a ref-update line.
+        # parse_pktline() should return no refs.
+        content = b"0008NAK\n0000"
+        flow = create_git_flow(
+            "/octocat/hello-world.git/git-receive-pack",
+            method="POST",
+            content=content,
+            container_config=container,
+        )
+
+        addon.request(flow)
+
+        assert flow.response is not None
+        assert flow.response.status_code == 403
+        assert b"malformed git push payload" in flow.response.content.lower()
+
+
 class TestLogging:
     """Tests for git operation logging."""
 

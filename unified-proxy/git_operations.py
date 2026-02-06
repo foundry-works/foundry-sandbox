@@ -19,10 +19,96 @@ import base64
 import logging
 import os
 import subprocess
+import uuid
 from dataclasses import dataclass
-from typing import Dict, FrozenSet, List, Optional, Set, Tuple
+from typing import Any, Dict, FrozenSet, List, Optional, Set, Tuple
+
+from git_policies import check_protected_branches
 
 logger = logging.getLogger(__name__)
+audit_logger = logging.getLogger("git_audit")
+
+# ---------------------------------------------------------------------------
+# Audit Logging
+# ---------------------------------------------------------------------------
+
+# Max bytes of stdout/stderr to include in audit log entries
+AUDIT_OUTPUT_TRUNCATE = 1024
+
+# Policy version for tracking audit schema changes
+AUDIT_POLICY_VERSION = "1.0"
+
+
+def audit_log(
+    *,
+    event: str,
+    action: str,
+    decision: str,
+    command_args: Optional[List[str]] = None,
+    sandbox_id: Optional[str] = None,
+    source_ip: Optional[str] = None,
+    container_id: Optional[str] = None,
+    request_id: Optional[str] = None,
+    reason: Optional[str] = None,
+    matched_rule: Optional[str] = None,
+    exit_code: Optional[int] = None,
+    stdout: Optional[str] = None,
+    stderr: Optional[str] = None,
+    component: str = "git_operations",
+    **extra: Any,
+) -> None:
+    """Emit a structured audit log entry for a git operation.
+
+    Sensitive data exclusion:
+    - stdin_b64 is NEVER passed to this function
+    - Authorization headers are NEVER passed
+    - HMAC secrets are NEVER passed
+    - stdout/stderr are truncated to AUDIT_OUTPUT_TRUNCATE bytes
+    """
+    entry: Dict[str, Any] = {
+        "event": event,
+        "component": component,
+        "action": action,
+        "decision": decision,
+        "policy_version": AUDIT_POLICY_VERSION,
+    }
+
+    if request_id is None:
+        request_id = str(uuid.uuid4())
+    entry["request_id"] = request_id
+
+    if container_id:
+        entry["container_id"] = container_id
+    if sandbox_id:
+        entry["sandbox_id"] = sandbox_id
+    if source_ip:
+        entry["source_ip"] = source_ip
+    if reason:
+        entry["reason"] = reason
+    if matched_rule:
+        entry["matched_rule"] = matched_rule
+    if command_args:
+        # Avoid clobbering LogRecord.args (reserved field in logging).
+        entry["command_args"] = command_args
+    if exit_code is not None:
+        entry["exit_code"] = exit_code
+
+    # Truncate output fields
+    if stdout is not None:
+        entry["stdout"] = stdout[:AUDIT_OUTPUT_TRUNCATE]
+        if len(stdout) > AUDIT_OUTPUT_TRUNCATE:
+            entry["stdout_truncated"] = True
+    if stderr is not None:
+        entry["stderr"] = stderr[:AUDIT_OUTPUT_TRUNCATE]
+        if len(stderr) > AUDIT_OUTPUT_TRUNCATE:
+            entry["stderr_truncated"] = True
+
+    if extra:
+        entry.update(extra)
+
+    log_fn = audit_logger.warning if decision == "deny" else audit_logger.info
+    log_fn("git.%s", event, extra=entry)
+
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -657,6 +743,17 @@ def validate_path(
     if os.path.isabs(cwd):
         # Absolute paths: must be within repo root
         resolved = os.path.realpath(cwd)
+        # Compatibility: wrapper may send /workspace absolute paths while
+        # the proxy repo_root is mounted at /git-workspace.
+        client_workspace_root = os.path.realpath(
+            os.environ.get("GIT_CLIENT_WORKSPACE_ROOT", "/workspace")
+        )
+        if (
+            resolved == client_workspace_root
+            or resolved.startswith(client_workspace_root + os.sep)
+        ):
+            rel = os.path.relpath(resolved, client_workspace_root)
+            resolved = os.path.realpath(os.path.join(real_root, rel))
     else:
         resolved = os.path.realpath(os.path.join(real_root, cwd))
 
@@ -684,6 +781,286 @@ def validate_path_args(args: List[str], repo_root: str) -> Optional[ValidationEr
             resolved = os.path.realpath(os.path.join(real_root, arg))
             if not resolved.startswith(real_root + os.sep) and resolved != real_root:
                 return ValidationError(f"Path outside repo root: {arg}")
+
+    return None
+
+
+# ---------------------------------------------------------------------------
+# Protected Branch Enforcement (push operations)
+# ---------------------------------------------------------------------------
+
+# SHA used by git_policies to detect creation/deletion operations.
+_ZERO_SHA = "0" * 40
+
+# Push options that consume the following argument.
+_PUSH_OPTIONS_WITH_VALUE: FrozenSet[str] = frozenset({
+    "--repo",
+    "--receive-pack",
+    "--exec",
+    "--upload-pack",
+    "--push-option",
+    "-o",
+})
+
+
+def _has_push_flag(args: List[str], flag: str) -> bool:
+    """Check if a push flag is present in args."""
+    return any(arg == flag or arg.startswith(flag + "=") for arg in args)
+
+
+def _is_wildcard_refspec(spec: str) -> bool:
+    """Check if a push refspec uses wildcard patterns."""
+    if spec.startswith("+"):
+        spec = spec[1:]
+
+    parts: List[str]
+    if ":" in spec:
+        src, dst = spec.split(":", 1)
+        parts = [src, dst]
+    else:
+        parts = [spec]
+
+    wildcard_chars = ("*", "?", "[")
+    for part in parts:
+        if any(ch in part for ch in wildcard_chars):
+            return True
+    return False
+
+
+def _extract_push_positionals(args: List[str]) -> List[str]:
+    """Extract positional args from push subcommand args.
+
+    Returns [remote, refspec1, refspec2, ...] after stripping flags
+    and options that consume values.
+    """
+    positionals: List[str] = []
+    idx = 0
+
+    while idx < len(args):
+        arg = args[idx]
+
+        # -- terminates options; everything after is positional
+        if arg == "--":
+            idx += 1
+            positionals.extend(args[idx:])
+            break
+
+        if arg in _PUSH_OPTIONS_WITH_VALUE:
+            idx += 2
+            continue
+
+        if any(
+            arg.startswith(opt + "=")
+            for opt in _PUSH_OPTIONS_WITH_VALUE
+            if opt.startswith("--")
+        ):
+            idx += 1
+            continue
+
+        if arg.startswith("-o") and arg != "-o":
+            idx += 1
+            continue
+
+        if arg.startswith("-"):
+            idx += 1
+            continue
+
+        positionals.append(arg)
+        idx += 1
+
+    return positionals
+
+
+def _parse_push_refspecs(args: List[str]) -> List[str]:
+    """Extract target refnames from push command arguments.
+
+    Parses push subcommand args (after 'push') to find refspecs and extracts
+    destination refs.
+
+    Returns a list of fully qualified refnames (refs/heads/<branch>).
+    """
+    refs: List[str] = []
+
+    positionals = _extract_push_positionals(args)
+    if len(positionals) <= 1:
+        return refs
+
+    for spec in positionals[1:]:
+        refs.extend(_parse_single_refspec(spec))
+
+    return refs
+
+
+def _parse_single_refspec(spec: str) -> List[str]:
+    """Parse a single refspec into target refnames.
+
+    Refspec forms:
+      "branch"          -> push local branch to refs/heads/branch
+      "src:dst"         -> push src to dst
+      ":branch"         -> delete remote branch (handled separately)
+      "+src:dst"        -> force push (+ prefix ignored, force flag handled elsewhere)
+      "refs/heads/main" -> fully qualified ref
+    """
+    # Strip force prefix
+    if spec.startswith("+"):
+        spec = spec[1:]
+
+    if ":" in spec:
+        src, dst = spec.split(":", 1)
+        if not dst:
+            return []
+        if not src:
+            # Deletion refspec — handled separately in check_push_protected_branches
+            return []
+        return [_qualify_ref(dst)]
+    else:
+        if not spec:
+            return []
+        # "HEAD" without explicit destination is ambiguous for policy checks.
+        if spec == "HEAD":
+            return []
+        return [_qualify_ref(spec)]
+
+
+def _qualify_ref(ref: str) -> str:
+    """Ensure a ref is fully qualified (refs/heads/...)."""
+    if ref.startswith("refs/"):
+        return ref
+    return f"refs/heads/{ref}"
+
+
+def _extract_push_args(args: List[str]) -> Optional[List[str]]:
+    """Extract push subcommand arguments from a full git args list.
+
+    Skips global flags and -c options to find the subcommand.
+    Returns the args after 'push' if the command is a push,
+    or None if it's not a push command.
+    """
+    idx = 0
+    while idx < len(args):
+        arg = args[idx]
+        # Skip -c key=value pairs
+        if arg == "-c" and idx + 1 < len(args):
+            idx += 2
+            continue
+        if arg.startswith("-c") and len(arg) > 2:
+            idx += 1
+            continue
+        # Skip other global flags
+        if arg.startswith("-"):
+            idx += 1
+            continue
+        # Found the subcommand
+        if arg == "push":
+            return args[idx + 1:]
+        return None
+    return None
+
+
+def check_push_protected_branches(
+    args: List[str],
+    repo_root: str,
+    metadata: Optional[dict] = None,
+) -> Optional[ValidationError]:
+    """Check if a push command targets protected branches.
+
+    Parses push CLI arguments to extract target refspecs, then checks
+    each against the protected branch policy using the shared validator
+    from git_policies.py.
+
+    To avoid bypasses from implicit push targets, this validator requires
+    explicit refspecs for branch pushes and blocks broad push modes
+    (--all, --mirror).
+
+    Args:
+        args: The push subcommand arguments (after the 'push' subcommand).
+        repo_root: Repository root path (unused here but kept for consistency).
+        metadata: Container metadata for policy configuration.
+
+    Returns:
+        None if allowed, ValidationError if a protected branch would be pushed to.
+    """
+    bare_repo_path = None
+    if metadata:
+        bare_repo_path = metadata.get("bare_repo_path")
+
+    if _has_push_flag(args, "--all") or _has_push_flag(args, "--mirror"):
+        return ValidationError(
+            "Push modes --all and --mirror are not allowed; use explicit refspecs"
+        )
+
+    positionals = _extract_push_positionals(args)
+    if not positionals:
+        return ValidationError("Push command must include a remote")
+
+    # Only a remote specified: this relies on implicit/default push targets.
+    # Require explicit refspecs to ensure protected-branch enforcement applies.
+    if len(positionals) == 1:
+        if _has_push_flag(args, "--tags"):
+            return None
+        return ValidationError(
+            "Push command must include explicit refspecs for policy enforcement"
+        )
+
+    refspecs = positionals[1:]
+    for spec in refspecs:
+        if _is_wildcard_refspec(spec):
+            return ValidationError(
+                "Wildcard push refspecs are not allowed; use explicit branch names"
+            )
+
+    # --delete mode uses plain ref names after remote.
+    if _has_push_flag(args, "--delete"):
+        for target in refspecs:
+            qualified = _qualify_ref(target)
+            block_reason = check_protected_branches(
+                refname=qualified,
+                old_sha="1" * 40,
+                new_sha=_ZERO_SHA,  # Deletion
+                bare_repo_path=bare_repo_path,
+                metadata=metadata,
+            )
+            if block_reason:
+                return ValidationError(block_reason)
+        return None
+
+    # Check regular push refspecs (treated as updates)
+    refnames = _parse_push_refspecs(args)
+    for refname in refnames:
+        block_reason = check_protected_branches(
+            refname=refname,
+            old_sha="1" * 40,   # Non-zero: treat as update
+            new_sha="2" * 40,   # Non-zero: treat as update
+            bare_repo_path=bare_repo_path,
+            metadata=metadata,
+        )
+        if block_reason:
+            return ValidationError(block_reason)
+
+    # Check deletion refspecs (":ref" form)
+    saw_deletion = False
+    for spec in refspecs:
+        if spec.startswith("+"):
+            spec = spec[1:]
+        if ":" in spec:
+            src, dst = spec.split(":", 1)
+            if not src and dst:
+                saw_deletion = True
+                qualified = _qualify_ref(dst)
+                block_reason = check_protected_branches(
+                    refname=qualified,
+                    old_sha="1" * 40,
+                    new_sha=_ZERO_SHA,  # Deletion
+                    bare_repo_path=bare_repo_path,
+                    metadata=metadata,
+                )
+                if block_reason:
+                    return ValidationError(block_reason)
+
+    if not refnames and not saw_deletion and not _has_push_flag(args, "--tags"):
+        return ValidationError(
+            "Push refspecs could not be resolved; use explicit <src>:<dst> forms"
+        )
 
     return None
 
@@ -742,20 +1119,48 @@ def execute_git(
             if isinstance(extra, list):
                 extra_allowed = set(extra)
 
+    # Generate request ID for audit correlation
+    req_id = str(uuid.uuid4())
+
     # Validate command
     err = validate_command(request.args, extra_allowed)
     if err:
+        audit_log(
+            event="command_blocked",
+            action=" ".join(request.args[:3]),
+            decision="deny",
+            command_args=request.args,
+            reason=err.reason,
+            matched_rule="command_validation",
+            request_id=req_id,
+        )
         return None, err
 
     # Validate working directory
     resolved_cwd, err = validate_path(request.cwd, repo_root)
     if err:
+        audit_log(event="path_blocked", action=" ".join(request.args[:3]),
+                  decision="deny", command_args=request.args, reason=err.reason,
+                  matched_rule="path_validation", request_id=req_id)
         return None, err
 
     # Validate path args
     err = validate_path_args(request.args, repo_root)
     if err:
+        audit_log(event="path_blocked", action=" ".join(request.args[:3]),
+                  decision="deny", command_args=request.args, reason=err.reason,
+                  matched_rule="path_arg_validation", request_id=req_id)
         return None, err
+
+    # Check protected branches for push operations
+    push_args = _extract_push_args(request.args)
+    if push_args is not None:
+        err = check_push_protected_branches(push_args, repo_root, metadata)
+        if err:
+            audit_log(event="push_blocked", action="push",
+                      decision="deny", command_args=request.args, reason=err.reason,
+                      matched_rule="protected_branch", request_id=req_id)
+            return None, err
 
     # Decode stdin if provided
     stdin_data = None
@@ -782,9 +1187,15 @@ def execute_git(
             env=env,
         )
     except subprocess.TimeoutExpired:
+        audit_log(event="command_timeout", action=" ".join(request.args[:3]),
+                  decision="deny", command_args=request.args, reason="Command timed out",
+                  matched_rule="timeout", request_id=req_id)
         return None, ValidationError("Command timed out")
     except OSError as exc:
         logger.error("Git execution failed: %s", exc)
+        audit_log(event="command_error", action=" ".join(request.args[:3]),
+                  decision="deny", command_args=request.args, reason=str(exc),
+                  matched_rule="os_error", request_id=req_id)
         return None, ValidationError(f"Execution error: {exc}")
 
     # Process stdout
@@ -814,11 +1225,15 @@ def execute_git(
         truncated=truncated,
     )
 
-    logger.info(
-        "Git command executed: %s (exit=%d, truncated=%s)",
-        " ".join(request.args),
-        result.returncode,
-        truncated,
+    audit_log(
+        event="command_executed",
+        action=" ".join(request.args[:3]),
+        decision="allow",
+        command_args=request.args,
+        exit_code=result.returncode,
+        stdout=stdout_str or "",
+        stderr=stderr_str,
+        request_id=req_id,
     )
 
     return response, None

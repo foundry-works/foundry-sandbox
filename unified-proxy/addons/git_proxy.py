@@ -68,6 +68,7 @@ class GitOperation:
     is_write: bool
     refs: List[PktLineRef]
     push_size: int = 0
+    parse_error: Optional[str] = None
 
     def repo_path(self) -> str:
         """Return the owner/repo path."""
@@ -75,7 +76,7 @@ class GitOperation:
 
     def to_dict(self) -> dict:
         """Convert to dictionary for metadata storage and logging."""
-        return {
+        data = {
             "owner": self.owner,
             "repo": self.repo,
             "operation": self.operation,
@@ -90,6 +91,9 @@ class GitOperation:
                 for ref in self.refs
             ],
         }
+        if self.parse_error:
+            data["parse_error"] = self.parse_error
+        return data
 
 
 class GitProxyAddon:
@@ -167,6 +171,15 @@ class GitProxyAddon:
 
         # For write operations, apply additional checks
         if git_op.is_write:
+            # Fail closed on malformed push payloads.
+            if git_op.parse_error:
+                self._deny_request(
+                    flow,
+                    f"Malformed git push payload: {git_op.parse_error}",
+                    container_id=container_id,
+                )
+                return
+
             # Check push size limit
             if git_op.push_size > self._max_push_size:
                 self._deny_request(
@@ -251,17 +264,26 @@ class GitProxyAddon:
         # Parse pkt-line data for push operations
         refs: List[PktLineRef] = []
         push_size = 0
+        parse_error: Optional[str] = None
 
         if is_write:
             body = flow.request.content or b""
             push_size = len(body)
 
             # Parse pkt-line header to extract refs
-            if body:
+            if not body:
+                parse_error = "empty request body"
+            else:
                 stream = BytesIO(body)
                 buf, pktline_end, err = read_pktline_prefix(stream)
-                if err is None and pktline_end is not None:
+                if err is not None:
+                    parse_error = f"invalid pkt-line header ({err})"
+                elif pktline_end is None:
+                    parse_error = "invalid pkt-line header"
+                else:
                     refs = parse_pktline(buf[:pktline_end])
+                    if not refs:
+                        parse_error = "no ref updates in pkt-line header"
 
         return GitOperation(
             owner=owner,
@@ -270,6 +292,7 @@ class GitProxyAddon:
             is_write=is_write,
             refs=refs,
             push_size=push_size,
+            parse_error=parse_error,
         )
 
     def _is_repo_authorized(
