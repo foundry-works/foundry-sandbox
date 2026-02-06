@@ -371,7 +371,7 @@ class TestBranchDeletionBlocking:
         addon = git_proxy.GitProxyAddon()
         container = create_container_config(repos=["octocat/hello-world"])
 
-        refs = [("a" * 40, "b" * 40, "refs/heads/main")]
+        refs = [("a" * 40, "b" * 40, "refs/heads/feature-x")]
         content = create_pktline_data(refs)
 
         flow = create_git_flow(
@@ -410,7 +410,11 @@ class TestBotModeRestrictions:
     """Tests for bot mode push restrictions."""
 
     def test_bot_mode_push_to_main_returns_403(self):
-        """Test that bot mode push to main branch returns 403."""
+        """Test that bot mode push to main branch returns 403.
+
+        Note: Protected branch enforcement runs before bot mode restrictions,
+        so the error message references protected branches rather than bot mode.
+        """
         addon = git_proxy.GitProxyAddon()
         container = create_container_config(
             repos=["octocat/hello-world"],
@@ -431,7 +435,7 @@ class TestBotModeRestrictions:
 
         assert flow.response is not None
         assert flow.response.status_code == 403
-        assert b"bot mode" in flow.response.content.lower()
+        assert b"protected branch" in flow.response.content.lower()
 
     def test_bot_mode_push_to_feature_returns_403(self):
         """Test that bot mode push to feature branch returns 403."""
@@ -501,15 +505,15 @@ class TestBotModeRestrictions:
 
         assert flow.response is None
 
-    def test_normal_mode_push_to_main_succeeds(self):
-        """Test that normal mode push to main succeeds."""
+    def test_normal_mode_push_to_feature_succeeds(self):
+        """Test that normal mode push to feature branch succeeds."""
         addon = git_proxy.GitProxyAddon()
         container = create_container_config(
             repos=["octocat/hello-world"],
             auth_mode="normal",
         )
 
-        refs = [("a" * 40, "b" * 40, "refs/heads/main")]
+        refs = [("a" * 40, "b" * 40, "refs/heads/feature-x")]
         content = create_pktline_data(refs)
 
         flow = create_git_flow(
@@ -557,7 +561,7 @@ class TestPushSizeLimits:
         addon = git_proxy.GitProxyAddon(max_push_size=10000)
         container = create_container_config(repos=["octocat/hello-world"])
 
-        refs = [("a" * 40, "b" * 40, "refs/heads/main")]
+        refs = [("a" * 40, "b" * 40, "refs/heads/feature-x")]
         content = create_pktline_data(refs)
 
         flow = create_git_flow(
@@ -673,6 +677,185 @@ class TestQueryStringHandling:
         assert GIT_METADATA_KEY in flow.metadata
         assert flow.metadata[GIT_METADATA_KEY]["operation"] == "info/refs"
         assert flow.response is None
+
+
+class TestProtectedBranchEnforcement:
+    """Tests for protected branch enforcement via git_policies.py."""
+
+    def test_push_update_to_main_blocked(self):
+        """Test that push update to refs/heads/main is blocked."""
+        addon = git_proxy.GitProxyAddon()
+        container = create_container_config(repos=["octocat/hello-world"])
+        refs = [("a" * 40, "b" * 40, "refs/heads/main")]
+        content = create_pktline_data(refs)
+        flow = create_git_flow(
+            "/octocat/hello-world.git/git-receive-pack",
+            method="POST", content=content, container_config=container,
+        )
+        addon.request(flow)
+        assert flow.response is not None
+        assert flow.response.status_code == 403
+        assert b"protected branch" in flow.response.content.lower()
+
+    def test_push_update_to_feature_allowed(self):
+        """Test that push update to refs/heads/feature-x is allowed."""
+        addon = git_proxy.GitProxyAddon()
+        container = create_container_config(repos=["octocat/hello-world"])
+        refs = [("a" * 40, "b" * 40, "refs/heads/feature-x")]
+        content = create_pktline_data(refs)
+        flow = create_git_flow(
+            "/octocat/hello-world.git/git-receive-pack",
+            method="POST", content=content, container_config=container,
+        )
+        addon.request(flow)
+        assert flow.response is None
+
+    def test_push_update_to_release_wildcard_blocked(self):
+        """Test that push update to refs/heads/release/v2.0 is blocked (wildcard)."""
+        addon = git_proxy.GitProxyAddon()
+        container = create_container_config(repos=["octocat/hello-world"])
+        refs = [("a" * 40, "b" * 40, "refs/heads/release/v2.0")]
+        content = create_pktline_data(refs)
+        flow = create_git_flow(
+            "/octocat/hello-world.git/git-receive-pack",
+            method="POST", content=content, container_config=container,
+        )
+        addon.request(flow)
+        assert flow.response is not None
+        assert flow.response.status_code == 403
+
+    def test_custom_protected_branch_from_metadata_blocked(self):
+        """Test that custom protected branch from metadata is blocked."""
+        addon = git_proxy.GitProxyAddon()
+        container = create_container_config(
+            repos=["octocat/hello-world"],
+            git={"protected_branches": {"patterns": ["refs/heads/staging"]}},
+        )
+        refs = [("a" * 40, "b" * 40, "refs/heads/staging")]
+        content = create_pktline_data(refs)
+        flow = create_git_flow(
+            "/octocat/hello-world.git/git-receive-pack",
+            method="POST", content=content, container_config=container,
+        )
+        addon.request(flow)
+        assert flow.response is not None
+        assert flow.response.status_code == 403
+
+    def test_branch_creation_protected_blocked(self):
+        """Test that branch creation on protected branch is blocked (no bootstrap)."""
+        addon = git_proxy.GitProxyAddon()
+        container = create_container_config(repos=["octocat/hello-world"])
+        refs = [(ZERO_SHA, "b" * 40, "refs/heads/master")]
+        content = create_pktline_data(refs)
+        flow = create_git_flow(
+            "/octocat/hello-world.git/git-receive-pack",
+            method="POST", content=content, container_config=container,
+        )
+        addon.request(flow)
+        assert flow.response is not None
+        assert flow.response.status_code == 403
+        assert b"creation" in flow.response.content.lower()
+
+    def test_bootstrap_creation_succeeds_then_blocked(self):
+        """Test bootstrap creation to refs/heads/main succeeds once then blocked."""
+        import tempfile
+        addon = git_proxy.GitProxyAddon()
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            container = create_container_config(
+                repos=["octocat/hello-world"],
+                git={"protected_branches": {"bare_repo_path": tmpdir}},
+            )
+            # Note: bare_repo_path is not passed through git_proxy flow metadata,
+            # so bootstrap requires the git_policies module directly.
+            # Test the module directly for bootstrap lock behavior.
+            from git_policies import check_protected_branches
+
+            # First creation succeeds
+            result = check_protected_branches(
+                "refs/heads/main", ZERO_SHA, "b" * 40, bare_repo_path=tmpdir,
+            )
+            assert result is None
+
+            # Second creation blocked
+            result = check_protected_branches(
+                "refs/heads/main", ZERO_SHA, "c" * 40, bare_repo_path=tmpdir,
+            )
+            assert result is not None
+            assert "bootstrap already completed" in result
+
+    def test_branch_deletion_main_blocked(self):
+        """Test that branch deletion of refs/heads/main is blocked."""
+        addon = git_proxy.GitProxyAddon()
+        container = create_container_config(repos=["octocat/hello-world"])
+        refs = [("a" * 40, ZERO_SHA, "refs/heads/main")]
+        content = create_pktline_data(refs)
+        flow = create_git_flow(
+            "/octocat/hello-world.git/git-receive-pack",
+            method="POST", content=content, container_config=container,
+        )
+        addon.request(flow)
+        assert flow.response is not None
+        assert flow.response.status_code == 403
+        # Blocked by deletion check (runs before protected branch check)
+        assert b"deletion" in flow.response.content.lower()
+
+    def test_disabled_enforcement_allows_push_to_main(self):
+        """Test that enabled:false disables protected branch enforcement."""
+        addon = git_proxy.GitProxyAddon()
+        container = create_container_config(
+            repos=["octocat/hello-world"],
+            git={"protected_branches": {"enabled": False}},
+        )
+        refs = [("a" * 40, "b" * 40, "refs/heads/main")]
+        content = create_pktline_data(refs)
+        flow = create_git_flow(
+            "/octocat/hello-world.git/git-receive-pack",
+            method="POST", content=content, container_config=container,
+        )
+        addon.request(flow)
+        assert flow.response is None
+
+    def test_default_enabled_for_normal_mode(self):
+        """Test that protected branches are enabled by default in normal mode."""
+        addon = git_proxy.GitProxyAddon()
+        container = create_container_config(
+            repos=["octocat/hello-world"],
+            auth_mode="normal",
+        )
+        refs = [("a" * 40, "b" * 40, "refs/heads/production")]
+        content = create_pktline_data(refs)
+        flow = create_git_flow(
+            "/octocat/hello-world.git/git-receive-pack",
+            method="POST", content=content, container_config=container,
+        )
+        addon.request(flow)
+        assert flow.response is not None
+        assert flow.response.status_code == 403
+
+    def test_lock_file_permanent_no_orphan_cleanup(self):
+        """Test that lock file is permanent (no automatic orphan cleanup)."""
+        import os
+        import tempfile
+        from git_policies import check_protected_branches
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            # Create bootstrap lock
+            result = check_protected_branches(
+                "refs/heads/main", ZERO_SHA, "b" * 40, bare_repo_path=tmpdir,
+            )
+            assert result is None
+
+            lock_path = os.path.join(tmpdir, "foundry-bootstrap.lock")
+            assert os.path.exists(lock_path)
+
+            # Lock persists - subsequent attempts always blocked
+            for _ in range(3):
+                result = check_protected_branches(
+                    "refs/heads/main", ZERO_SHA, "c" * 40, bare_repo_path=tmpdir,
+                )
+                assert result is not None
+            assert os.path.exists(lock_path)
 
 
 if __name__ == "__main__":
