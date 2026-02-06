@@ -41,7 +41,7 @@ cmd_prune() {
         fi
     done
 
-    # Remove sandboxes with no container (worktree exists but container doesn't)
+    # Remove sandboxes with no running container (worktree exists but no running container)
     if [ "$no_container" = true ]; then
         for worktree_dir in "$WORKTREES_DIR"/*/; do
             [ -d "$worktree_dir" ] || continue
@@ -51,8 +51,8 @@ cmd_prune() {
             container=$(container_name "$name")
             local config_dir="$CLAUDE_CONFIGS_DIR/$name"
 
-            # Check if container exists (running or stopped)
-            if ! docker ps -a --filter "name=^${container}-dev-1$" -q 2>/dev/null | grep -q .; then
+            # Check if container is running (stopped containers count as "no container")
+            if ! docker ps --filter "name=^${container}-dev-1$" -q 2>/dev/null | grep -q .; then
                 if [ "$force" = false ]; then
                     format_header "No container: $name"
                     format_kv "Worktree" "$worktree_dir"
@@ -70,7 +70,7 @@ cmd_prune() {
         done
     fi
 
-    # Remove orphaned Docker networks (sandbox networks with no containers)
+    # Remove orphaned Docker networks (sandbox networks with no running containers)
     if [ "$networks" = true ]; then
         local network_name
         while IFS= read -r network_name; do
@@ -79,14 +79,21 @@ cmd_prune() {
             local sandbox_name="${network_name%_credential-isolation}"
             sandbox_name="${sandbox_name%_proxy-egress}"
 
-            # Check if any containers (running or stopped) belong to this sandbox
-            if ! docker ps -aq --filter "name=^${sandbox_name}-" 2>/dev/null | grep -q .; then
+            # Check if any RUNNING containers belong to this sandbox
+            # Stopped containers are not a reason to keep the network
+            if ! docker ps -q --filter "name=^${sandbox_name}-" 2>/dev/null | grep -q .; then
                 if [ "$force" = false ]; then
                     format_header "Orphaned network: $network_name"
                     if ! prompt_confirm "Remove this network?" false; then
                         continue
                     fi
                 fi
+                # Remove stopped containers that reference this sandbox before network removal
+                local stopped_id
+                while IFS= read -r stopped_id; do
+                    [ -z "$stopped_id" ] && continue
+                    docker rm "$stopped_id" 2>/dev/null || true
+                done < <(docker ps -aq --filter "status=exited" --filter "name=^${sandbox_name}-" 2>/dev/null)
                 # Disconnect any dangling endpoints before removal
                 local endpoint
                 while IFS= read -r endpoint; do
