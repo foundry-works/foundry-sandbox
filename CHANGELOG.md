@@ -7,6 +7,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.10.0] - 2026-02-06
+
+### Added
+- **Git Policy Hardening** - six-phase security hardening for git operations in sandboxes
+  - **Phase 1: Git hook prevention** - Disables git hooks via `core.hooksPath=/dev/null`, `core.fsmonitor=false`; controlled by `SANDBOX_GIT_HOOKS_ENABLED` env var
+  - **Phase 2: Protected branch enforcement** - Blocks direct pushes to `main`, `master`, `release/*`, `production` with fnmatch pattern support and atomic bootstrap lock
+  - **Phase 3: .git/ shadow mode isolation** - Hides `.git/` metadata behind tmpfs overlay; all git operations proxied through HTTP API with HMAC-SHA256 authentication
+    - `stubs/git-wrapper.sh` - Shell wrapper intercepting git commands with signal handling, 30s timeout, fail-closed on errors
+    - `unified-proxy/git_api.py` - HTTP API (port 8083) for git command execution
+    - `unified-proxy/git_operations.py` - Deny-by-default command allowlist with per-operation flag validation, path traversal prevention, 10MB output limit
+  - **Phase 4: GitHub API endpoint path enforcement** - Blocks dangerous API paths (webhooks, deploy keys, secrets, actions) with segment-aware matching and path normalization
+  - **Phase 5: PR/issue operation controls** - Blocks closing PRs/issues via PATCH with JSON body inspection; fail-closed on malformed/streaming bodies
+  - **Phase 6: Auto-track new branches** - Configures tracking on branch creation so `git push` works without `--set-upstream`
+- **Git policy hardening spec** and implementation plan documentation
+- **Security test suite** for git policy enforcement (`tests/security/test_git_policy.py`)
+- **Unit tests** for git wrapper, git operations, and git proxy components
+
+### Fixed
+- **Prune command** now treats stopped containers as prunable (previously only removed exited containers)
+- **Orphaned Docker network cleanup** improved in prune command with better detection logic
+
 ## [0.9.5] - 2026-02-05
 
 ### Added
@@ -481,7 +502,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Tab completion for bash
 - macOS and Linux support
 
-[Unreleased]: https://github.com/foundry-works/foundry-sandbox/compare/v0.9.5...HEAD
+[Unreleased]: https://github.com/foundry-works/foundry-sandbox/compare/v0.10.0...HEAD
+[0.10.0]: https://github.com/foundry-works/foundry-sandbox/compare/v0.9.5...v0.10.0
 [0.9.5]: https://github.com/foundry-works/foundry-sandbox/compare/v0.9.2...v0.9.5
 [0.9.2]: https://github.com/foundry-works/foundry-sandbox/compare/v0.9.1...v0.9.2
 [0.9.1]: https://github.com/foundry-works/foundry-sandbox/compare/v0.9.0...v0.9.1
