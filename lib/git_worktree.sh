@@ -153,7 +153,7 @@ cleanup_sandbox_branch() {
     fi
 
     # Delete the branch
-    if git -C "$bare_path" branch -D "$branch" >/dev/null 2>&1; then
+    if git -C "$bare_path" branch -D -- "$branch" >/dev/null 2>&1; then
         log_info "Cleaned up sandbox branch: $branch"
     fi
 

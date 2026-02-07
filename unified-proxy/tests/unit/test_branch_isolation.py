@@ -22,12 +22,16 @@ for mod in ("mitmproxy", "mitmproxy.http", "mitmproxy.ctx", "mitmproxy.flow"):
         sys.modules[mod] = mock.MagicMock()
 
 from git_operations import (
+    _extract_sha_args,
     _filter_ref_listing_output,
+    _filter_stderr_branch_refs,
     _get_subcommand_args,
     _is_allowed_branch_name,
     _is_allowed_ref,
+    _is_allowed_short_ref_token,
     _strip_rev_suffixes,
     validate_branch_isolation,
+    validate_sha_reachability,
 )
 
 
@@ -469,8 +473,14 @@ class TestValidateBranchIsolation:
         err = validate_branch_isolation(["pull", "origin", OTHER], META)
         assert err is not None
 
-    # --- rev-parse ---
-    # rev-parse is not in _REF_READING_CMDS, so it passes through
+    # --- rev-parse (IS in _REF_READING_CMDS) ---
+
+    def test_rev_parse_other_branch_blocked(self):
+        err = validate_branch_isolation(["rev-parse", OTHER], META)
+        assert err is not None
+
+    def test_rev_parse_own_branch_allowed(self):
+        assert validate_branch_isolation(["rev-parse", SANDBOX], META) is None
 
     # --- worktree add ---
 
@@ -707,4 +717,603 @@ class TestFilterRefListingOutput:
             output, ["log", "--format=%H %s"], SANDBOX
         )
         assert "HEAD" in result
+        assert "sandbox/other" not in result
+
+
+# ---------------------------------------------------------------------------
+# Additional ref-reading commands coverage
+# ---------------------------------------------------------------------------
+
+
+class TestRefReadingCommandsCoverage:
+    """Verify all commands in _REF_READING_CMDS block other sandbox refs."""
+
+    @pytest.mark.parametrize("cmd", [
+        "show", "diff", "blame", "cherry-pick", "merge", "rebase",
+        "rev-list", "diff-tree", "describe", "cat-file", "ls-tree",
+    ])
+    def test_ref_reading_cmd_blocks_other_branch(self, cmd):
+        err = validate_branch_isolation([cmd, OTHER], META)
+        assert err is not None
+        assert OTHER in err.reason
+
+    @pytest.mark.parametrize("cmd", [
+        "show", "diff", "blame", "cherry-pick", "merge", "rebase",
+        "rev-list", "diff-tree", "describe", "cat-file", "ls-tree",
+    ])
+    def test_ref_reading_cmd_allows_own_branch(self, cmd):
+        assert validate_branch_isolation([cmd, SANDBOX], META) is None
+
+
+# ---------------------------------------------------------------------------
+# Notes isolation
+# ---------------------------------------------------------------------------
+
+
+class TestNotesIsolation:
+    """Test notes --ref validation including split form."""
+
+    def test_notes_ref_equals_other_blocked(self):
+        err = validate_branch_isolation(
+            ["notes", "--ref=sandbox/other", "list"], META
+        )
+        assert err is not None
+        assert "sandbox/other" in err.reason
+
+    def test_notes_ref_split_other_blocked(self):
+        """The split form --ref <value> must also be validated."""
+        err = validate_branch_isolation(
+            ["notes", "--ref", "sandbox/other", "list"], META
+        )
+        assert err is not None
+        assert "sandbox/other" in err.reason
+
+    def test_notes_ref_equals_own_allowed(self):
+        assert validate_branch_isolation(
+            ["notes", f"--ref={SANDBOX}", "list"], META
+        ) is None
+
+    def test_notes_ref_split_own_allowed(self):
+        assert validate_branch_isolation(
+            ["notes", "--ref", SANDBOX, "list"], META
+        ) is None
+
+    def test_notes_positional_other_blocked(self):
+        err = validate_branch_isolation(
+            ["notes", "show", OTHER], META
+        )
+        assert err is not None
+
+    def test_notes_positional_own_allowed(self):
+        assert validate_branch_isolation(
+            ["notes", "show", SANDBOX], META
+        ) is None
+
+
+# ---------------------------------------------------------------------------
+# Reflog isolation
+# ---------------------------------------------------------------------------
+
+
+class TestReflogIsolation:
+    """Test reflog ref validation."""
+
+    def test_reflog_show_other_blocked(self):
+        err = validate_branch_isolation(
+            ["reflog", "show", OTHER], META
+        )
+        assert err is not None
+
+    def test_reflog_show_own_allowed(self):
+        assert validate_branch_isolation(
+            ["reflog", "show", SANDBOX], META
+        ) is None
+
+    def test_reflog_bare_other_blocked(self):
+        """reflog <ref> without sub-subcommand."""
+        err = validate_branch_isolation(
+            ["reflog", OTHER], META
+        )
+        assert err is not None
+
+    def test_reflog_no_args_allowed(self):
+        assert validate_branch_isolation(["reflog"], META) is None
+
+
+# ---------------------------------------------------------------------------
+# Tag isolation
+# ---------------------------------------------------------------------------
+
+
+class TestTagIsolation:
+    """Test tag commit-ish validation."""
+
+    def test_tag_create_with_other_branch_blocked(self):
+        err = validate_branch_isolation(
+            ["tag", "v1.0", OTHER], META
+        )
+        assert err is not None
+        assert OTHER in err.reason
+
+    def test_tag_create_with_own_branch_allowed(self):
+        assert validate_branch_isolation(
+            ["tag", "v1.0", SANDBOX], META
+        ) is None
+
+    def test_tag_with_message_and_other_blocked(self):
+        err = validate_branch_isolation(
+            ["tag", "-a", "v1.0", "-m", "release", OTHER], META
+        )
+        assert err is not None
+
+    def test_tag_name_only_allowed(self):
+        """Just a tag name, no commit-ish."""
+        assert validate_branch_isolation(
+            ["tag", "v1.0"], META
+        ) is None
+
+    def test_tag_list_allowed(self):
+        assert validate_branch_isolation(["tag", "-l"], META) is None
+
+
+# ---------------------------------------------------------------------------
+# Stash ref handling
+# ---------------------------------------------------------------------------
+
+
+class TestStashRefAllowed:
+    """Verify stash refs are allowed."""
+
+    def test_stash_bare(self):
+        assert _is_allowed_ref("stash", SANDBOX) is True
+
+    def test_stash_at_index(self):
+        assert _is_allowed_ref("stash@{0}", SANDBOX) is True
+
+    def test_stash_at_higher_index(self):
+        assert _is_allowed_ref("stash@{5}", SANDBOX) is True
+
+
+# ---------------------------------------------------------------------------
+# Remote branch output filtering
+# ---------------------------------------------------------------------------
+
+
+class TestRemoteBranchOutputFiltering:
+    """Test git branch -a output filtering for remote branches."""
+
+    def test_branch_a_hides_remote_other_sandbox(self):
+        output = (
+            f"* {SANDBOX}\n"
+            "  main\n"
+            "  remotes/origin/main\n"
+            f"  remotes/origin/{SANDBOX}\n"
+            "  remotes/origin/sandbox/other\n"
+        )
+        result = _filter_ref_listing_output(output, ["branch", "-a"], SANDBOX)
+        assert f"* {SANDBOX}" in result
+        assert "main" in result
+        assert "sandbox/other" not in result
+
+
+# ---------------------------------------------------------------------------
+# _extract_sha_args — value flag skipping
+# ---------------------------------------------------------------------------
+
+
+class TestExtractShaArgs:
+    """Test SHA-like arg extraction with value flag skipping."""
+
+    def test_basic_sha(self):
+        shas = _extract_sha_args(["abc123def456"])
+        assert shas == ["abc123def456"]
+
+    def test_skips_format_value(self):
+        """--format value should not be mistaken for a SHA."""
+        shas = _extract_sha_args(["--format", "abc123def456"])
+        assert shas == []
+
+    def test_skips_format_equals_value(self):
+        shas = _extract_sha_args(["--format=abc123def456"])
+        assert shas == []
+
+    def test_skips_pretty_value(self):
+        shas = _extract_sha_args(["--pretty", "abc123def456"])
+        assert shas == []
+
+    def test_sha_after_format(self):
+        shas = _extract_sha_args(["--format", "oneline", "abc123def456"])
+        assert shas == ["abc123def456"]
+
+    def test_stops_at_double_dash(self):
+        shas = _extract_sha_args(["--", "abc123def456"])
+        assert shas == []
+
+    def test_range_operator(self):
+        shas = _extract_sha_args(["abc123def456..def456abc123"])
+        assert len(shas) == 2
+
+    def test_skips_short_hex(self):
+        shas = _extract_sha_args(["abc123"])
+        assert shas == []
+
+    def test_skips_dash_flags(self):
+        shas = _extract_sha_args(["--oneline", "-n", "5", "abc123def456"])
+        assert shas == ["abc123def456"]
+
+
+# ---------------------------------------------------------------------------
+# _filter_stderr_branch_refs
+# ---------------------------------------------------------------------------
+
+
+class TestFilterStderrBranchRefs:
+    """Test stderr redaction of disallowed branch names."""
+
+    def test_redacts_disallowed_heads_ref(self):
+        stderr = "error: pathspec 'refs/heads/sandbox/other' did not match"
+        result = _filter_stderr_branch_refs(stderr, SANDBOX)
+        assert "sandbox/other" not in result
+        assert "<redacted>" in result
+
+    def test_keeps_allowed_heads_ref(self):
+        stderr = f"hint: refs/heads/{SANDBOX} is up to date"
+        result = _filter_stderr_branch_refs(stderr, SANDBOX)
+        assert SANDBOX in result
+        assert "<redacted>" not in result
+
+    def test_redacts_disallowed_remote_ref(self):
+        stderr = "error: refs/remotes/origin/sandbox/other not found"
+        result = _filter_stderr_branch_refs(stderr, SANDBOX)
+        assert "sandbox/other" not in result
+        assert "<redacted>" in result
+
+    def test_keeps_well_known_branch(self):
+        stderr = "hint: refs/heads/main is up to date"
+        result = _filter_stderr_branch_refs(stderr, SANDBOX)
+        assert "main" in result
+        assert "<redacted>" not in result
+
+    def test_empty_stderr(self):
+        assert _filter_stderr_branch_refs("", SANDBOX) == ""
+
+    def test_none_sandbox_branch(self):
+        stderr = "error: refs/heads/sandbox/other"
+        assert _filter_stderr_branch_refs(stderr, None) == stderr
+
+
+# ---------------------------------------------------------------------------
+# fetch --all blocking
+# ---------------------------------------------------------------------------
+
+
+class TestFetchAllBlocking:
+    """Test that fetch --all is blocked under branch isolation."""
+
+    def test_fetch_all_blocked(self):
+        err = validate_branch_isolation(["fetch", "--all"], META)
+        assert err is not None
+        assert "--all" in err.reason
+
+    def test_fetch_origin_main_allowed(self):
+        err = validate_branch_isolation(["fetch", "origin", "main"], META)
+        assert err is None
+
+    def test_pull_all_blocked(self):
+        err = validate_branch_isolation(["pull", "--all"], META)
+        assert err is not None
+        assert "--all" in err.reason
+
+
+# ---------------------------------------------------------------------------
+# _is_allowed_ref — non-origin remote handling
+# ---------------------------------------------------------------------------
+
+
+class TestIsAllowedRefNonOriginRemotes:
+    """Test ref validation with non-origin remote names."""
+
+    def test_upstream_main_allowed(self):
+        assert _is_allowed_ref("upstream/main", SANDBOX) is True
+
+    def test_upstream_disallowed_sandbox(self):
+        assert _is_allowed_ref("upstream/sandbox/other", SANDBOX) is False
+
+    def test_upstream_own_sandbox_allowed(self):
+        assert _is_allowed_ref(f"upstream/{SANDBOX}", SANDBOX) is True
+
+    def test_refs_remotes_upstream_main(self):
+        assert _is_allowed_ref("refs/remotes/upstream/main", SANDBOX) is True
+
+    def test_refs_remotes_upstream_disallowed(self):
+        assert _is_allowed_ref("refs/remotes/upstream/sandbox/other", SANDBOX) is False
+
+    def test_refs_remotes_origin_main(self):
+        assert _is_allowed_ref("refs/remotes/origin/main", SANDBOX) is True
+
+    def test_refs_remotes_origin_disallowed(self):
+        assert _is_allowed_ref("refs/remotes/origin/sandbox/other", SANDBOX) is False
+
+
+# ---------------------------------------------------------------------------
+# _is_allowed_short_ref_token — incomplete remote paths
+# ---------------------------------------------------------------------------
+
+
+class TestIsAllowedShortRefTokenRemotes:
+    """Test short ref token validation for remote refs."""
+
+    def test_complete_remote_ref_allowed(self):
+        assert _is_allowed_short_ref_token("refs/remotes/origin/main", SANDBOX) is True
+
+    def test_complete_remote_ref_disallowed(self):
+        assert _is_allowed_short_ref_token(
+            "refs/remotes/origin/sandbox/other", SANDBOX
+        ) is False
+
+    def test_incomplete_remote_ref_denied(self):
+        """refs/remotes/origin (no branch component) should be denied."""
+        assert _is_allowed_short_ref_token("refs/remotes/origin", SANDBOX) is False
+
+    def test_incomplete_remote_ref_two_parts(self):
+        """refs/remotes (only 2 parts) should be denied."""
+        assert _is_allowed_short_ref_token("refs/remotes", SANDBOX) is False
+
+    def test_non_origin_remote_ref(self):
+        assert _is_allowed_short_ref_token(
+            "refs/remotes/upstream/main", SANDBOX
+        ) is True
+
+
+# ---------------------------------------------------------------------------
+# Output filter — unrecognized lines dropped
+# ---------------------------------------------------------------------------
+
+
+class TestOutputFilterDropsUnrecognized:
+    """Test that output filters drop unrecognized lines (fail-closed)."""
+
+    def test_branch_output_drops_unrecognized_line(self):
+        output = (
+            f"* {SANDBOX}\n"
+            "  main\n"
+            "WEIRD UNRECOGNIZED FORMAT\n"
+        )
+        result = _filter_ref_listing_output(output, ["branch"], SANDBOX)
+        assert SANDBOX in result
+        assert "main" in result
+        assert "WEIRD UNRECOGNIZED FORMAT" not in result
+
+    def test_branch_output_keeps_empty_lines(self):
+        output = (
+            f"* {SANDBOX}\n"
+            "\n"
+            "  main\n"
+        )
+        result = _filter_ref_listing_output(output, ["branch"], SANDBOX)
+        assert SANDBOX in result
+        assert "main" in result
+
+    def test_ref_enum_drops_unrecognized_nonempty(self):
+        output = (
+            "abc123456789 refs/heads/main\n"
+            "WEIRD LINE NO REF\n"
+        )
+        result = _filter_ref_listing_output(output, ["for-each-ref"], SANDBOX)
+        assert "main" in result
+        # The weird line has no recognizable ref format — it should be dropped
+        # unless its first token passes the short ref check
+        # "WEIRD" doesn't pass _is_allowed_short_ref_token so it gets dropped
+        assert "WEIRD LINE NO REF" not in result
+
+    def test_ref_enum_keeps_empty_lines(self):
+        output = (
+            "abc123456789 refs/heads/main\n"
+            "\n"
+            "def456789012 refs/tags/v1.0\n"
+        )
+        result = _filter_ref_listing_output(output, ["for-each-ref"], SANDBOX)
+        assert "main" in result
+        assert "v1.0" in result
+
+
+# ---------------------------------------------------------------------------
+# validate_sha_reachability — fail-closed on bare repo resolution
+# ---------------------------------------------------------------------------
+
+
+class TestShaReachabilityFailClosed:
+    """Test that SHA reachability denies when bare repo cannot be resolved."""
+
+    def test_returns_error_when_no_bare_repo(self, tmp_path):
+        """When _resolve_bare_repo_path returns None, should return error."""
+        # Create a directory without .git
+        repo = tmp_path / "not-a-repo"
+        repo.mkdir()
+        # A SHA-like arg in a ref-reading command
+        args = ["log", "abc123def45678"]
+        metadata = {"sandbox_branch": SANDBOX}
+        result = validate_sha_reachability(args, str(repo), metadata)
+        assert result is not None
+        assert "cannot resolve bare repo" in result.reason
+
+    def test_skips_when_no_metadata(self):
+        result = validate_sha_reachability(["log", "abc123def45678"], "/fake", None)
+        assert result is None
+
+    def test_skips_when_no_sandbox_branch(self):
+        result = validate_sha_reachability(
+            ["log", "abc123def45678"], "/fake", {}
+        )
+        assert result is None
+
+    def test_skips_non_ref_reading_command(self):
+        result = validate_sha_reachability(
+            ["push", "abc123def45678"], "/fake",
+            {"sandbox_branch": SANDBOX},
+        )
+        assert result is None
+
+
+# ---------------------------------------------------------------------------
+# Ref exclusion prefix (^ref) and --not flag
+# ---------------------------------------------------------------------------
+
+
+class TestRefExclusionPrefix:
+    """Test ^ref exclusion prefix handling in ref-reading isolation.
+
+    The ^ref prefix (used by rev-list/log to exclude refs) is NOT
+    stripped by _strip_rev_suffixes (which only handles trailing ^N).
+    As a result, ^ref is treated as a bare branch name and blocked
+    unless it matches the sandbox branch.  This is the intended
+    conservative behaviour.
+    """
+
+    def test_caret_ref_blocked(self):
+        """^main is blocked — caret prefix is not recognized as negation."""
+        err = validate_branch_isolation(["log", "^main"], META)
+        assert err is not None
+
+    def test_caret_disallowed_ref(self):
+        err = validate_branch_isolation(["log", "^sandbox/other"], META)
+        assert err is not None
+
+
+# ---------------------------------------------------------------------------
+# sandbox/other@{upstream} pattern
+# ---------------------------------------------------------------------------
+
+
+class TestRefSuffixPatterns:
+    """Test ref@{upstream} and similar suffix patterns."""
+
+    def test_own_branch_upstream(self):
+        assert _is_allowed_ref(f"{SANDBOX}@{{upstream}}", SANDBOX) is True
+
+    def test_disallowed_branch_upstream(self):
+        assert _is_allowed_ref("sandbox/other@{upstream}", SANDBOX) is False
+
+    def test_own_branch_at_number(self):
+        assert _is_allowed_ref(f"{SANDBOX}@{{0}}", SANDBOX) is True
+
+
+# ---------------------------------------------------------------------------
+# --branches=, --remotes= value forms in ref-reading
+# ---------------------------------------------------------------------------
+
+
+class TestRefReadingValueFormFlags:
+    """Test --branches=, --remotes= patterns in ref-reading isolation."""
+
+    def test_branches_equals_blocked(self):
+        err = validate_branch_isolation(["log", "--branches=sandbox/*"], META)
+        assert err is not None
+
+    def test_remotes_equals_blocked(self):
+        err = validate_branch_isolation(["log", "--remotes=origin/*"], META)
+        assert err is not None
+
+    def test_glob_equals_blocked(self):
+        err = validate_branch_isolation(["log", "--glob=refs/heads/*"], META)
+        assert err is not None
+
+
+# ---------------------------------------------------------------------------
+# Reflog expire/delete sub-subcommands
+# ---------------------------------------------------------------------------
+
+
+class TestReflogSubSubcommands:
+    """Test reflog expire/delete isolation."""
+
+    def test_reflog_expire_own_branch(self):
+        err = validate_branch_isolation(["reflog", "expire", SANDBOX], META)
+        assert err is None
+
+    def test_reflog_expire_disallowed(self):
+        err = validate_branch_isolation(
+            ["reflog", "expire", "sandbox/other"], META
+        )
+        assert err is not None
+
+    def test_reflog_delete_own_branch(self):
+        err = validate_branch_isolation(
+            ["reflog", "delete", f"{SANDBOX}@{{0}}"], META
+        )
+        assert err is None
+
+    def test_reflog_delete_disallowed(self):
+        err = validate_branch_isolation(
+            ["reflog", "delete", "sandbox/other@{0}"], META
+        )
+        assert err is not None
+
+    def test_reflog_show_allowed(self):
+        err = validate_branch_isolation(["reflog", "show", SANDBOX], META)
+        assert err is None
+
+
+# ---------------------------------------------------------------------------
+# bisect with disallowed ref
+# ---------------------------------------------------------------------------
+
+
+class TestBisectIsolation:
+    """Test bisect sub-subcommand isolation."""
+
+    def test_bisect_start_own_branch(self):
+        err = validate_branch_isolation(["bisect", "start", SANDBOX], META)
+        assert err is None
+
+    def test_bisect_start_disallowed(self):
+        err = validate_branch_isolation(
+            ["bisect", "start", "sandbox/other"], META
+        )
+        assert err is not None
+
+    def test_bisect_good_not_checked(self):
+        """Known gap: bisect good/bad refs are not validated."""
+        err = validate_branch_isolation(
+            ["bisect", "good", "sandbox/other"], META
+        )
+        # Currently not checked — this pins the existing behaviour
+        assert err is None
+
+    def test_bisect_bad_not_checked(self):
+        """Known gap: bisect good/bad refs are not validated."""
+        err = validate_branch_isolation(
+            ["bisect", "bad", "sandbox/other"], META
+        )
+        assert err is None
+
+
+# ---------------------------------------------------------------------------
+# ls-remote output filtering
+# ---------------------------------------------------------------------------
+
+
+class TestLsRemoteOutputFiltering:
+    """Test ls-remote output format filtering."""
+
+    def test_ls_remote_filters_disallowed(self):
+        output = (
+            "abc123456789\trefs/heads/main\n"
+            "def456789012\trefs/heads/sandbox/other\n"
+            f"fed987654321\trefs/heads/{SANDBOX}\n"
+            "111222333444\trefs/tags/v1.0\n"
+        )
+        result = _filter_ref_listing_output(output, ["ls-remote"], SANDBOX)
+        assert "main" in result
+        assert SANDBOX in result
+        assert "v1.0" in result
+        assert "sandbox/other" not in result
+
+    def test_show_ref_filters_disallowed(self):
+        output = (
+            "abc123456789 refs/heads/main\n"
+            "def456789012 refs/heads/sandbox/other\n"
+        )
+        result = _filter_ref_listing_output(output, ["show-ref"], SANDBOX)
+        assert "main" in result
         assert "sandbox/other" not in result

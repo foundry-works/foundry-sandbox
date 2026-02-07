@@ -276,11 +276,18 @@ _REF_READING_CMDS: FrozenSet[str] = frozenset({
     "log", "show", "diff", "blame", "cherry-pick", "merge", "rebase",
     "reset", "rev-list", "diff-tree", "rev-parse", "shortlog", "describe",
     "name-rev", "archive", "format-patch",
+    "cat-file", "ls-tree",
 })
 
 # Commands that enumerate refs
 _REF_ENUM_CMDS: FrozenSet[str] = frozenset({
     "for-each-ref", "ls-remote", "show-ref",
+})
+
+# Notes sub-subcommands (used in branch isolation for positional arg parsing)
+_NOTES_SUBCMDS: FrozenSet[str] = frozenset({
+    "list", "add", "copy", "append", "edit", "show",
+    "merge", "remove", "prune",
 })
 
 # Flags that implicitly reference all branches/refs
@@ -371,7 +378,8 @@ def _is_allowed_ref(ref: str, sandbox_branch: str) -> bool:
     if base == "HEAD" or base.startswith("@{"):
         return True
 
-    # Stash refs are allowed
+    # Stash refs are allowed (stash@{ is defensive — _strip_rev_suffixes
+    # normally handles @{N} forms, but this catches malformed variants)
     if base == "stash" or base.startswith("stash@{"):
         return True
 
@@ -379,11 +387,32 @@ def _is_allowed_ref(ref: str, sandbox_branch: str) -> bool:
     if base.startswith("refs/tags/") or base.startswith("tags/"):
         return True
 
-    # Remote tracking refs: apply branch name isolation to the branch part
-    for remote_prefix in ("refs/remotes/origin/", "origin/"):
-        if base.startswith(remote_prefix):
-            branch_name = base[len(remote_prefix):]
-            return _is_allowed_branch_name(branch_name, sandbox_branch)
+    # Remote tracking refs: apply branch name isolation to the branch part.
+    # Handle any remote name (origin, upstream, etc.) — split on the remote
+    # component rather than hardcoding "origin".
+    if base.startswith("refs/remotes/"):
+        # refs/remotes/<remote>/<branch...>
+        parts = base.split("/", 3)
+        if len(parts) >= 4:
+            return _is_allowed_branch_name(parts[3], sandbox_branch)
+        # Incomplete path like "refs/remotes/origin" — deny
+        return False
+
+    # Short remote form: <remote>/<branch> — only match when not a
+    # refs/heads/ or refs/tags/ path (handled below/above).
+    # We detect this by checking for a "/" and confirming the prefix
+    # is not a known ref namespace.
+    if "/" in base and not base.startswith("refs/"):
+        prefix, _, branch_part = base.partition("/")
+        # If prefix looks like a remote name (not a branch namespace),
+        # check the branch part.  We test this by checking if the whole
+        # base passes _is_allowed_branch_name — if it does, we allow it
+        # as a slashed branch name first (e.g. "release/1.0").
+        if not _is_allowed_branch_name(base, sandbox_branch):
+            # Not an allowed branch name as-is, try as remote/branch
+            if branch_part:
+                return _is_allowed_branch_name(branch_part, sandbox_branch)
+            return False
 
     # Full ref paths
     if base.startswith("refs/heads/"):
@@ -821,16 +850,18 @@ def validate_branch_isolation(
 
     # --- notes ---
     if subcommand == "notes":
-        _NOTES_SUBCMDS = {
-            "list", "add", "copy", "append", "edit", "show",
-            "merge", "remove", "prune",
-        }
         # Check --ref=<ref> flag value
-        notes_args = list(sub_args)
         skip_next = False
+        pending_ref_check = False
         for a in sub_args:
             if skip_next:
                 skip_next = False
+                if pending_ref_check:
+                    pending_ref_check = False
+                    if not _is_allowed_ref(a, sandbox_branch):
+                        return ValidationError(
+                            f"Branch isolation: ref '{a}' not allowed in notes"
+                        )
                 continue
             if a.startswith("--ref="):
                 ref_val = a[len("--ref="):]
@@ -839,7 +870,8 @@ def validate_branch_isolation(
                         f"Branch isolation: ref '{ref_val}' not allowed in notes"
                     )
             elif a == "--ref":
-                skip_next = True  # next arg is the ref value, handled above
+                skip_next = True
+                pending_ref_check = True
 
         # Check positional args (skip sub-subcommand and flags)
         positionals: List[str] = []
@@ -864,6 +896,10 @@ def validate_branch_isolation(
     # --- ref-reading commands (log, show, diff, blame, etc.) ---
     if subcommand in _REF_READING_CMDS:
         return _validate_ref_reading_isolation(sub_args, sandbox_branch)
+
+    # --- tag with commit-ish argument ---
+    if subcommand == "tag":
+        return _validate_tag_isolation(sub_args, sandbox_branch)
 
     return None
 
@@ -947,6 +983,12 @@ def _validate_fetch_isolation(
             skip_next = False
             continue
 
+        # Block --all (fetches all remotes, exposing all branches)
+        if a == "--all":
+            return ValidationError(
+                "Branch isolation: 'fetch --all' not allowed (exposes all branches)"
+            )
+
         # Skip flags that consume the next argument
         if a in _FETCH_VALUE_FLAGS:
             skip_next = True
@@ -1002,6 +1044,53 @@ def _validate_worktree_add_isolation(
             return ValidationError(
                 f"Branch isolation: commit-ish '{commit_ish}' not allowed "
                 f"in worktree add"
+            )
+
+    return None
+
+
+_TAG_VALUE_FLAGS: FrozenSet[str] = frozenset({
+    "-m", "--message", "-F", "--file", "-u", "--local-user",
+    "--cleanup", "--sort",
+})
+
+
+def _validate_tag_isolation(
+    sub_args: List[str], sandbox_branch: str,
+) -> Optional[ValidationError]:
+    """Validate tag args for branch isolation.
+
+    ``git tag <tagname> [<commit-ish>]`` -- the commit-ish (if present)
+    must be an allowed ref.  We also block ``-d`` on tags we do not own
+    (handled elsewhere), but the main concern here is the commit-ish
+    argument that lets a sandbox read from another branch.
+    """
+    skip_next = False
+    positionals: List[str] = []
+
+    for a in sub_args:
+        if a == "--":
+            break
+        if skip_next:
+            skip_next = False
+            continue
+        if a in _TAG_VALUE_FLAGS:
+            skip_next = True
+            continue
+        if "=" in a and a.split("=", 1)[0] in _TAG_VALUE_FLAGS:
+            continue
+        if a.startswith("-"):
+            continue
+        positionals.append(a)
+
+    # tag <tagname> [<commit-ish>]
+    # First positional is the tag name (always allowed), second is commit-ish
+    if len(positionals) >= 2:
+        commit_ish = positionals[1]
+        if not _is_allowed_ref(commit_ish, sandbox_branch):
+            return ValidationError(
+                f"Branch isolation: commit-ish '{commit_ish}' not allowed "
+                f"in tag creation"
             )
 
     return None
@@ -1077,11 +1166,22 @@ def _extract_sha_args(sub_args: List[str]) -> List[str]:
     Handles range operators (``..``, ``...``) and strips revision
     suffixes before checking whether a token looks like a SHA.
     Stops at ``--`` (pathspec separator).
+    Skips values consumed by known option flags (mirrors
+    ``_validate_ref_reading_isolation`` behaviour).
     """
     shas: List[str] = []
+    skip_next = False
     for arg in sub_args:
         if arg == "--":
             break
+        if skip_next:
+            skip_next = False
+            continue
+        if arg in _REF_READING_VALUE_FLAGS:
+            skip_next = True
+            continue
+        if "=" in arg and arg.split("=", 1)[0] in _REF_READING_VALUE_FLAGS:
+            continue
         if arg.startswith("-"):
             continue
         # Expand range operators
@@ -1256,10 +1356,13 @@ def validate_sha_reachability(
     if not shas:
         return None
 
-    # Resolve bare repo
+    # Resolve bare repo — fail closed if resolution fails
     bare_repo = _resolve_bare_repo_path(repo_root)
     if not bare_repo:
-        return None  # Cannot check — allow (fail open for resolution failure)
+        return ValidationError(
+            "Branch isolation: cannot resolve bare repo path for SHA "
+            "reachability check"
+        )
 
     # Shallow repo: skip checks (log warning)
     shallow_file = os.path.join(bare_repo, "shallow")
@@ -1314,7 +1417,7 @@ def _filter_branch_output(output: str, sandbox_branch: str) -> str:
     Handles plain, verbose (-v/-vv), and remote (-a) branch listing formats.
     Drops lines where the branch is not allowed.
     Preserves current-branch indicator (*).
-    Keeps unrecognized format lines (safe default).
+    Drops unrecognized format lines (fail-closed).
 
     Args:
         output: Raw stdout from a ``git branch`` command.
@@ -1329,6 +1432,11 @@ def _filter_branch_output(output: str, sandbox_branch: str) -> str:
     filtered_lines: List[str] = []
     for line in output.splitlines(True):
         stripped = line.rstrip("\n\r")
+
+        # Empty lines are kept
+        if not stripped:
+            filtered_lines.append(line)
+            continue
 
         # Try remote branch pattern first (more specific)
         m = _REMOTE_BRANCH_LINE_RE.match(stripped)
@@ -1352,8 +1460,9 @@ def _filter_branch_output(output: str, sandbox_branch: str) -> str:
                 filtered_lines.append(line)
             continue
 
-        # Unrecognized format — keep (safe default)
-        filtered_lines.append(line)
+        # Unrecognized format — drop (fail-closed to prevent leaking
+        # branch names if git changes its output format)
+        logger.debug("branch output filter: dropping unrecognized line: %r", stripped)
 
     return "".join(filtered_lines)
 
@@ -1379,9 +1488,10 @@ def _is_allowed_short_ref_token(token: str, sandbox_branch: str) -> bool:
         return _is_allowed_branch_name(token[len("refs/heads/"):], sandbox_branch)
     if token.startswith("refs/remotes/"):
         parts = token.split("/", 3)
-        if len(parts) == 4:
+        if len(parts) >= 4:
             return _is_allowed_branch_name(parts[3], sandbox_branch)
-        return True
+        # Incomplete path (e.g. "refs/remotes/origin") — deny
+        return False
     # First treat token as a branch name (supports slashed branch names like
     # "sandbox/alice" and "release/1.0").
     if _is_allowed_branch_name(token, sandbox_branch):
@@ -1465,8 +1575,9 @@ def _filter_ref_enum_output(output: str, sandbox_branch: str) -> str:
                 filtered_lines.append(line)
             continue
 
-        # Unrecognized format — keep (safe default)
-        filtered_lines.append(line)
+        # Unrecognized format — drop (fail-closed to prevent leaking
+        # branch names if git changes its output format)
+        logger.debug("ref enum output filter: dropping unrecognized line: %r", stripped)
 
     return "".join(filtered_lines)
 
@@ -1709,6 +1820,38 @@ def _filter_log_source_refs(output: str, sandbox_branch: str) -> str:
         filtered_lines.append(new_stripped + trailing)
 
     return "".join(filtered_lines)
+
+
+# ---------------------------------------------------------------------------
+# Output Filtering: Stderr Redaction
+# ---------------------------------------------------------------------------
+
+# Patterns that may contain branch names in stderr output
+_STDERR_REF_RE = re.compile(
+    r"refs/heads/(?P<branch>[^\s'\"]+)"
+    r"|refs/remotes/[^/]+/(?P<remote_branch>[^\s'\"]+)"
+)
+
+
+def _filter_stderr_branch_refs(stderr: str, sandbox_branch: str) -> str:
+    """Redact disallowed branch names from stderr output.
+
+    Git error messages, hints, and verbose output may contain branch names
+    (e.g. ``error: pathspec 'sandbox/other' did not match``).  This function
+    replaces disallowed branch ref paths with a generic placeholder.
+    """
+    if not stderr or not sandbox_branch:
+        return stderr
+
+    def _redact_match(m: re.Match) -> str:
+        branch = m.group("branch") or m.group("remote_branch")
+        if branch and not _is_allowed_branch_name(branch, sandbox_branch):
+            # Replace entire match with redacted version
+            full = m.group(0)
+            return full[:full.rfind(branch)] + "<redacted>"
+        return m.group(0)
+
+    return _STDERR_REF_RE.sub(_redact_match, stderr)
 
 
 # ---------------------------------------------------------------------------
@@ -2763,6 +2906,8 @@ def execute_git(
     sandbox_branch = metadata.get("sandbox_branch") if metadata else None
     if sandbox_branch and stdout_str:
         stdout_str = _filter_ref_listing_output(stdout_str, request.args, sandbox_branch)
+    if sandbox_branch and stderr_str:
+        stderr_str = _filter_stderr_branch_refs(stderr_str, sandbox_branch)
 
     response = GitExecResponse(
         exit_code=result.returncode,
