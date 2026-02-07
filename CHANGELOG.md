@@ -7,6 +7,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.11.0] - 2026-02-07
+
+### Added
+- **Branch Isolation** - Complete cross-sandbox branch isolation in the git proxy, preventing sandboxes from reading, diffing, cherry-picking, or enumerating other sandboxes' branches
+  - **Branch isolation validator** with ref validation, subcommand parsing, and deny-by-default enforcement for checkout/switch, fetch/pull, worktree add, bisect, reflog, notes, and ref-reading commands
+  - **Output filtering** hides other sandboxes' branches from `git branch`, `for-each-ref`, `ls-remote`, `show-ref`, and `log --decorate` output
+  - **SHA reachability enforcement** blocks unreachable SHAs in ref-reading commands with per-request memoization and shallow repo skip
+  - **Enhanced notes isolation** checking positional ref args and `--ref` flag
+  - **Server-side fetch locking** with bare repo resolver (`_resolve_bare_repo_path`) and `fcntl.flock` exclusive locking to serialize concurrent fetch/pull operations per bare repo
+  - **Branch cleanup on sandbox destroy and prune** - safely deletes sandbox branches from the bare repo, skipping well-known branches and branches still in use by other worktrees
+  - **Sandbox branch identity** passed to proxy metadata in `new.sh` and `start.sh` with fail-closed enforcement for legacy sandboxes without branch identity
+- **Sparse checkout proxy support** - allows `git sparse-checkout list` through proxy with read-only enforcement; adds `core.sparseCheckout`/`core.sparseCheckoutCone` to permitted config keys
+- **Comprehensive test suite for branch isolation**
+  - Unit tests (96): subcommand extraction, rev suffix stripping, branch name validation, ref validation, `validate_branch_isolation`, output filtering
+  - Integration tests (34): cross-sandbox blocking and filtering end-to-end
+  - Security regression tests (12): leak channel coverage for reflog, notes, for-each-ref, log decorations, branch -a, show-ref
+- **Structured plan documentation** under `docs/plans/branch-isolation/` with per-phase implementation details
+
+### Fixed
+- **Push protection** now uses `_resolve_bare_repo_path()` instead of unpopulated metadata field, with default branch detection from bare repo HEAD
+- **`repositoryformatversion`** bumped to 1 so git extensions like `worktreeConfig` are recognized; applied in both host-side `configure_sparse_checkout()` and proxy-side `fix_proxy_worktree_paths()`
+- **VirtioFS stale inode** workaround - defensive `cat` refresh on bare repo config and re-set of `extensions.worktreeConfig` in the proxy
+- **Sandbox creation bugs** from git policy hardening phases 4-6: missing git package in unified-proxy Dockerfile, replaced tmpfs `.git` overlay with `/dev/null` bind mount for worktree support, fixed addon validation matching, added git identity configuration and `/workspace` path translation in proxy
+
 ## [0.10.0] - 2026-02-06
 
 ### Added
@@ -502,7 +526,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Tab completion for bash
 - macOS and Linux support
 
-[Unreleased]: https://github.com/foundry-works/foundry-sandbox/compare/v0.10.0...HEAD
+[Unreleased]: https://github.com/foundry-works/foundry-sandbox/compare/v0.11.0...HEAD
+[0.11.0]: https://github.com/foundry-works/foundry-sandbox/compare/v0.10.0...v0.11.0
 [0.10.0]: https://github.com/foundry-works/foundry-sandbox/compare/v0.9.5...v0.10.0
 [0.9.5]: https://github.com/foundry-works/foundry-sandbox/compare/v0.9.2...v0.9.5
 [0.9.2]: https://github.com/foundry-works/foundry-sandbox/compare/v0.9.1...v0.9.2

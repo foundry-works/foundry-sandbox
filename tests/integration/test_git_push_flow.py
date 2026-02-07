@@ -11,6 +11,8 @@ import json
 import os
 import sys
 import time
+from dataclasses import dataclass
+from unittest.mock import patch
 
 import pytest
 
@@ -24,6 +26,35 @@ from git_api import (
     compute_signature,
     create_git_api,
 )
+
+
+# ---------------------------------------------------------------------------
+# Mock registry for providing sandbox metadata (sandbox_branch required by
+# the fail-closed check in execute_git)
+# ---------------------------------------------------------------------------
+
+TEST_SANDBOX_METADATA = {"sandbox_branch": "sandbox/test-sandbox"}
+
+
+@dataclass
+class _MockContainerConfig:
+    container_id: str
+    metadata: dict
+
+
+class _MockRegistry:
+    """Returns sandbox metadata with sandbox_branch for test-sandbox."""
+
+    def get_by_container_id(self, container_id):
+        if container_id == "test-sandbox":
+            return _MockContainerConfig(
+                container_id=container_id,
+                metadata=TEST_SANDBOX_METADATA,
+            )
+        return None
+
+    def get_by_ip(self, ip):
+        return None
 
 
 # ---------------------------------------------------------------------------
@@ -59,7 +90,13 @@ def repo_root(tmp_path):
 
 @pytest.fixture
 def git_api_app(secrets_dir, repo_root):
-    """Create a test Flask app with the git API."""
+    """Create a test Flask app with the git API.
+
+    Patches ContainerRegistry so that _get_sandbox_metadata returns metadata
+    with sandbox_branch (required by the fail-closed branch-isolation gate).
+    The patch stays active for the lifetime of the app so that request-time
+    lookups also use the mock registry.
+    """
     secret_store = SecretStore(secrets_path=secrets_dir)
     nonce_store = NonceStore()
     rate_limiter = RateLimiter()
@@ -67,14 +104,15 @@ def git_api_app(secrets_dir, repo_root):
     def repo_root_resolver(sandbox_id, metadata):
         return repo_root
 
-    app = create_git_api(
-        secret_store=secret_store,
-        nonce_store=nonce_store,
-        rate_limiter=rate_limiter,
-        repo_root_resolver=repo_root_resolver,
-    )
-    app.config["TESTING"] = True
-    return app
+    with patch("registry.ContainerRegistry", return_value=_MockRegistry()):
+        app = create_git_api(
+            secret_store=secret_store,
+            nonce_store=nonce_store,
+            rate_limiter=rate_limiter,
+            repo_root_resolver=repo_root_resolver,
+        )
+        app.config["TESTING"] = True
+        yield app
 
 
 @pytest.fixture
