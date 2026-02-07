@@ -410,6 +410,7 @@ class TestResponseHandling:
         with tempfile.TemporaryDirectory() as tmpdir:
             # Mock subprocess.run to return large stdout
             large_output = b"x" * (MAX_RESPONSE_SIZE + 1000)
+            metadata = {"sandbox_branch": "test-branch"}
 
             with patch("git_operations.subprocess.run") as mock_run:
                 mock_run.return_value = MagicMock(
@@ -419,7 +420,7 @@ class TestResponseHandling:
                 )
 
                 request = GitExecRequest(args=["log"])
-                response, error = execute_git(request, tmpdir)
+                response, error = execute_git(request, tmpdir, metadata=metadata)
 
                 assert error is None
                 assert response.truncated is True
@@ -431,6 +432,7 @@ class TestResponseHandling:
         with tempfile.TemporaryDirectory() as tmpdir:
             # Create a git repo
             os.system(f"cd {tmpdir} && git init >/dev/null 2>&1")
+            metadata = {"sandbox_branch": "test-branch"}
 
             # Client requests cwd of "evil/path"
             request = GitExecRequest(args=["status"], cwd="evil/path")
@@ -442,7 +444,7 @@ class TestResponseHandling:
                     stderr=b"",
                 )
 
-                response, error = execute_git(request, tmpdir)
+                response, error = execute_git(request, tmpdir, metadata=metadata)
 
                 # Should call subprocess with resolved cwd (not client's cwd)
                 called_cwd = mock_run.call_args[1]["cwd"]
@@ -569,9 +571,10 @@ class TestProtectedBranchPushValidation:
 
     def test_execute_git_blocks_implicit_push_before_subprocess(self):
         """Implicit push should be denied before running git subprocess."""
+        metadata = {"sandbox_branch": "test-branch"}
         request = GitExecRequest(args=["push", "origin"])
         with patch("git_operations.subprocess.run") as mock_run:
-            response, err = execute_git(request, "/tmp", metadata=None)
+            response, err = execute_git(request, "/tmp", metadata=metadata)
             assert response is None
             assert err is not None
             assert "explicit refspecs" in err.reason.lower()
@@ -579,9 +582,10 @@ class TestProtectedBranchPushValidation:
 
     def test_execute_git_blocks_wildcard_refspec_before_subprocess(self):
         """Wildcard refspec push should be denied before running git subprocess."""
+        metadata = {"sandbox_branch": "test-branch"}
         request = GitExecRequest(args=["push", "origin", "refs/heads/*:refs/heads/*"])
         with patch("git_operations.subprocess.run") as mock_run:
-            response, err = execute_git(request, "/tmp", metadata=None)
+            response, err = execute_git(request, "/tmp", metadata=metadata)
             assert response is None
             assert err is not None
             assert "wildcard" in err.reason.lower()
@@ -816,6 +820,524 @@ class TestEdgeCases:
             )
 
             assert response.status_code == 400
+
+
+# ---------------------------------------------------------------------------
+# Branch Isolation Tests
+# ---------------------------------------------------------------------------
+
+
+class TestBranchIsolationValidator:
+    """Tests for validate_branch_isolation() input validation."""
+
+    SANDBOX_BRANCH = "sandbox-abc123"
+    META = {"sandbox_branch": "sandbox-abc123"}
+
+    def test_no_metadata_passes(self):
+        """No metadata means isolation not enforced."""
+        from git_operations import validate_branch_isolation
+        err = validate_branch_isolation(["checkout", "evil-branch"], None)
+        assert err is None
+
+    def test_no_sandbox_branch_passes(self):
+        """Metadata without sandbox_branch means isolation not enforced."""
+        from git_operations import validate_branch_isolation
+        err = validate_branch_isolation(["checkout", "evil-branch"], {})
+        assert err is None
+
+    def test_checkout_own_branch_allowed(self):
+        from git_operations import validate_branch_isolation
+        err = validate_branch_isolation(["checkout", self.SANDBOX_BRANCH], self.META)
+        assert err is None
+
+    def test_checkout_main_allowed(self):
+        from git_operations import validate_branch_isolation
+        err = validate_branch_isolation(["checkout", "main"], self.META)
+        assert err is None
+
+    def test_checkout_other_sandbox_blocked(self):
+        from git_operations import validate_branch_isolation
+        err = validate_branch_isolation(["checkout", "sandbox-other999"], self.META)
+        assert err is not None
+        assert "branch isolation" in err.reason.lower()
+
+    def test_switch_other_sandbox_blocked(self):
+        from git_operations import validate_branch_isolation
+        err = validate_branch_isolation(["switch", "sandbox-other999"], self.META)
+        assert err is not None
+
+    def test_log_other_branch_blocked(self):
+        from git_operations import validate_branch_isolation
+        err = validate_branch_isolation(["log", "sandbox-other999"], self.META)
+        assert err is not None
+
+    def test_log_own_branch_allowed(self):
+        from git_operations import validate_branch_isolation
+        err = validate_branch_isolation(["log", self.SANDBOX_BRANCH], self.META)
+        assert err is None
+
+    def test_log_head_allowed(self):
+        from git_operations import validate_branch_isolation
+        err = validate_branch_isolation(["log", "HEAD~3"], self.META)
+        assert err is None
+
+    def test_log_all_blocked(self):
+        from git_operations import validate_branch_isolation
+        err = validate_branch_isolation(["log", "--all"], self.META)
+        assert err is not None
+        assert "--all" in err.reason
+
+    def test_fetch_other_branch_blocked(self):
+        from git_operations import validate_branch_isolation
+        err = validate_branch_isolation(
+            ["fetch", "origin", "sandbox-other999"], self.META
+        )
+        assert err is not None
+
+    def test_fetch_own_branch_allowed(self):
+        from git_operations import validate_branch_isolation
+        err = validate_branch_isolation(
+            ["fetch", "origin", self.SANDBOX_BRANCH], self.META
+        )
+        assert err is None
+
+    def test_fetch_main_allowed(self):
+        from git_operations import validate_branch_isolation
+        err = validate_branch_isolation(["fetch", "origin", "main"], self.META)
+        assert err is None
+
+    def test_cherry_pick_fetch_head_blocked(self):
+        from git_operations import validate_branch_isolation
+        err = validate_branch_isolation(["cherry-pick", "FETCH_HEAD"], self.META)
+        assert err is not None
+
+    def test_branch_delete_other_blocked(self):
+        from git_operations import validate_branch_isolation
+        err = validate_branch_isolation(
+            ["branch", "-d", "sandbox-other999"], self.META
+        )
+        assert err is not None
+        assert "cannot delete" in err.reason.lower()
+
+    def test_branch_delete_own_allowed(self):
+        from git_operations import validate_branch_isolation
+        err = validate_branch_isolation(
+            ["branch", "-d", self.SANDBOX_BRANCH], self.META
+        )
+        assert err is None
+
+    def test_checkout_create_branch_with_bad_startpoint_blocked(self):
+        from git_operations import validate_branch_isolation
+        err = validate_branch_isolation(
+            ["checkout", "-b", "new-branch", "sandbox-other999"], self.META
+        )
+        assert err is not None
+
+    def test_worktree_add_other_branch_blocked(self):
+        from git_operations import validate_branch_isolation
+        err = validate_branch_isolation(
+            ["worktree", "add", "../path", "sandbox-other999"], self.META
+        )
+        assert err is not None
+
+    def test_bisect_start_other_branch_blocked(self):
+        from git_operations import validate_branch_isolation
+        err = validate_branch_isolation(
+            ["bisect", "start", "sandbox-other999", "main"], self.META
+        )
+        assert err is not None
+
+    def test_rev_parse_other_branch_blocked(self):
+        """rev-parse is a ref-reading cmd, so other branches are blocked."""
+        from git_operations import validate_branch_isolation
+        err = validate_branch_isolation(["rev-parse", "sandbox-other999"], self.META)
+        assert err is not None
+        assert "branch isolation" in err.reason.lower()
+
+    def test_for_each_ref_passes_through(self):
+        """Ref enum commands are handled by output filtering, not input validation."""
+        from git_operations import validate_branch_isolation
+        err = validate_branch_isolation(
+            ["for-each-ref", "refs/heads/"], self.META
+        )
+        assert err is None
+
+    def test_branch_listing_passes_through(self):
+        """Branch listing is handled by output filtering, not input validation."""
+        from git_operations import validate_branch_isolation
+        err = validate_branch_isolation(["branch", "-a"], self.META)
+        assert err is None
+
+    def test_log_path_after_double_dash_allowed(self):
+        """Paths after -- should not be checked as refs."""
+        from git_operations import validate_branch_isolation
+        err = validate_branch_isolation(
+            ["log", self.SANDBOX_BRANCH, "--", "src/file.py"], self.META
+        )
+        assert err is None
+
+    def test_sha_hash_allowed(self):
+        from git_operations import validate_branch_isolation
+        err = validate_branch_isolation(
+            ["show", "abcdef1234567890"], self.META
+        )
+        assert err is None
+
+    def test_tag_ref_allowed(self):
+        from git_operations import validate_branch_isolation
+        err = validate_branch_isolation(
+            ["checkout", "refs/tags/v1.0"], self.META
+        )
+        assert err is None
+
+    def test_release_branch_allowed(self):
+        from git_operations import validate_branch_isolation
+        err = validate_branch_isolation(
+            ["checkout", "release/1.0"], self.META
+        )
+        assert err is None
+
+    def test_reflog_other_branch_blocked(self):
+        from git_operations import validate_branch_isolation
+        err = validate_branch_isolation(
+            ["reflog", "show", "sandbox-other999"], self.META
+        )
+        assert err is not None
+
+    def test_notes_ref_other_branch_blocked(self):
+        from git_operations import validate_branch_isolation
+        err = validate_branch_isolation(
+            ["notes", "--ref=sandbox-other999", "list"], self.META
+        )
+        assert err is not None
+
+
+class TestFilterBranchOutput:
+    """Tests for _filter_branch_output()."""
+
+    SANDBOX = "sandbox-abc123"
+
+    def test_plain_branch_listing(self):
+        from git_operations import _filter_branch_output
+        output = (
+            "* sandbox-abc123\n"
+            "  main\n"
+            "  sandbox-other999\n"
+            "  develop\n"
+        )
+        result = _filter_branch_output(output, self.SANDBOX)
+        assert "sandbox-abc123" in result
+        assert "main" in result
+        assert "develop" in result
+        assert "sandbox-other999" not in result
+
+    def test_current_branch_indicator_preserved(self):
+        from git_operations import _filter_branch_output
+        output = "* sandbox-abc123\n  main\n"
+        result = _filter_branch_output(output, self.SANDBOX)
+        assert result.startswith("* sandbox-abc123")
+
+    def test_verbose_branch_listing(self):
+        from git_operations import _filter_branch_output
+        output = (
+            "* sandbox-abc123 abc1234 commit message\n"
+            "  main              def5678 another commit\n"
+            "  sandbox-other999  111aaaa bad branch\n"
+        )
+        result = _filter_branch_output(output, self.SANDBOX)
+        assert "sandbox-abc123" in result
+        assert "main" in result
+        assert "sandbox-other999" not in result
+
+    def test_remote_branch_listing(self):
+        from git_operations import _filter_branch_output
+        output = (
+            "* sandbox-abc123\n"
+            "  main\n"
+            "  remotes/origin/sandbox-abc123\n"
+            "  remotes/origin/main\n"
+            "  remotes/origin/sandbox-other999\n"
+            "  remotes/origin/HEAD -> origin/main\n"
+        )
+        result = _filter_branch_output(output, self.SANDBOX)
+        assert "remotes/origin/sandbox-abc123" in result
+        assert "remotes/origin/main" in result
+        assert "remotes/origin/sandbox-other999" not in result
+        assert "remotes/origin/HEAD -> origin/main" in result
+
+    def test_empty_output(self):
+        from git_operations import _filter_branch_output
+        assert _filter_branch_output("", self.SANDBOX) == ""
+
+    def test_unrecognized_format_kept(self):
+        from git_operations import _filter_branch_output
+        output = "Some unrecognized line\n* main\n"
+        result = _filter_branch_output(output, self.SANDBOX)
+        assert "Some unrecognized line" in result
+
+    def test_well_known_prefix_branch_kept(self):
+        from git_operations import _filter_branch_output
+        output = "  release/1.0\n  hotfix/urgent\n  sandbox-other999\n"
+        result = _filter_branch_output(output, self.SANDBOX)
+        assert "release/1.0" in result
+        assert "hotfix/urgent" in result
+        assert "sandbox-other999" not in result
+
+
+class TestFilterRefEnumOutput:
+    """Tests for _filter_ref_enum_output()."""
+
+    SANDBOX = "sandbox-abc123"
+
+    def test_for_each_ref_output(self):
+        from git_operations import _filter_ref_enum_output
+        output = (
+            "abc1234 commit\trefs/heads/sandbox-abc123\n"
+            "def5678 commit\trefs/heads/main\n"
+            "111aaaa commit\trefs/heads/sandbox-other999\n"
+            "222bbbb commit\trefs/tags/v1.0\n"
+        )
+        result = _filter_ref_enum_output(output, self.SANDBOX)
+        assert "sandbox-abc123" in result
+        assert "main" in result
+        assert "sandbox-other999" not in result
+        assert "refs/tags/v1.0" in result
+
+    def test_show_ref_output(self):
+        from git_operations import _filter_ref_enum_output
+        output = (
+            "abc1234 refs/heads/main\n"
+            "def5678 refs/heads/sandbox-other999\n"
+        )
+        result = _filter_ref_enum_output(output, self.SANDBOX)
+        assert "main" in result
+        assert "sandbox-other999" not in result
+
+    def test_ls_remote_output(self):
+        from git_operations import _filter_ref_enum_output
+        output = (
+            "abc1234\trefs/heads/main\n"
+            "def5678\trefs/heads/sandbox-other999\n"
+            "111aaaa\trefs/tags/v1.0\n"
+        )
+        result = _filter_ref_enum_output(output, self.SANDBOX)
+        assert "main" in result
+        assert "sandbox-other999" not in result
+        assert "refs/tags/v1.0" in result
+
+    def test_custom_format_short_refname(self):
+        from git_operations import _filter_ref_enum_output
+        output = (
+            "main\n"
+            "sandbox-other999\n"
+            "sandbox-abc123\n"
+        )
+        result = _filter_ref_enum_output(output, self.SANDBOX)
+        assert "main" in result
+        assert "sandbox-abc123" in result
+        assert "sandbox-other999" not in result
+
+    def test_empty_output(self):
+        from git_operations import _filter_ref_enum_output
+        assert _filter_ref_enum_output("", self.SANDBOX) == ""
+
+    def test_remote_refs_filtered(self):
+        from git_operations import _filter_ref_enum_output
+        output = (
+            "abc1234\trefs/remotes/origin/main\n"
+            "def5678\trefs/remotes/origin/sandbox-other999\n"
+        )
+        result = _filter_ref_enum_output(output, self.SANDBOX)
+        assert "main" in result
+        assert "sandbox-other999" not in result
+
+
+class TestFilterLogDecorations:
+    """Tests for log decoration filtering functions."""
+
+    SANDBOX = "sandbox-abc123"
+
+    def test_sha_anchored_decorations(self):
+        from git_operations import _filter_log_decorations
+        output = (
+            "abc1234 (HEAD -> sandbox-abc123, origin/main, origin/sandbox-other999) commit msg\n"
+            "def5678 (tag: v1.0, main) another commit\n"
+        )
+        result = _filter_log_decorations(output, self.SANDBOX)
+        assert "sandbox-abc123" in result
+        assert "origin/main" in result
+        assert "sandbox-other999" not in result
+        assert "tag: v1.0" in result
+        assert "main" in result
+
+    def test_empty_decorations_stripped(self):
+        from git_operations import _filter_log_decorations
+        # All decoration refs removed — should not have empty parens
+        output = "abc1234 (origin/sandbox-other999) commit msg\n"
+        result = _filter_log_decorations(output, self.SANDBOX)
+        assert "()" not in result
+        assert "sandbox-other999" not in result
+        assert "abc1234" in result
+
+    def test_head_always_kept(self):
+        from git_operations import _filter_log_decorations
+        output = "abc1234 (HEAD) commit msg\n"
+        result = _filter_log_decorations(output, self.SANDBOX)
+        assert "HEAD" in result
+
+    def test_non_decoration_lines_preserved(self):
+        from git_operations import _filter_log_decorations
+        output = "abc1234 regular commit message\ndef5678 another message\n"
+        result = _filter_log_decorations(output, self.SANDBOX)
+        assert result == output
+
+    def test_custom_d_format(self):
+        from git_operations import _filter_custom_format_decorations
+        output = " (HEAD -> sandbox-abc123, origin/sandbox-other999)\n"
+        result = _filter_custom_format_decorations(output, self.SANDBOX)
+        assert "sandbox-abc123" in result
+        assert "sandbox-other999" not in result
+
+    def test_log_has_custom_decoration_format(self):
+        from git_operations import _log_has_custom_decoration_format
+        assert _log_has_custom_decoration_format(["--format=%H %d"]) is True
+        assert _log_has_custom_decoration_format(["--format=%H %D"]) is True
+        assert _log_has_custom_decoration_format(["--format=%H %s"]) is False
+        assert _log_has_custom_decoration_format(["--pretty=format:%d"]) is True
+
+    def test_log_has_source_flag(self):
+        from git_operations import _log_has_source_flag
+        assert _log_has_source_flag(["--source", "--oneline"]) is True
+        assert _log_has_source_flag(["--oneline"]) is False
+
+    def test_source_ref_redaction(self):
+        from git_operations import _filter_log_source_refs
+        output = (
+            "abc1234\trefs/heads/main\tcommit msg\n"
+            "def5678\trefs/heads/sandbox-other999\tanother msg\n"
+            "111aaaa\trefs/heads/sandbox-abc123\tmy msg\n"
+        )
+        result = _filter_log_source_refs(output, self.SANDBOX)
+        assert "refs/heads/main" in result
+        assert "refs/heads/sandbox-abc123" in result
+        assert "refs/heads/sandbox-other999" not in result
+        assert "refs/heads/[redacted]" in result
+
+
+class TestFilterRefListingDispatch:
+    """Tests for _filter_ref_listing_output() dispatch."""
+
+    SANDBOX = "sandbox-abc123"
+
+    def test_dispatches_to_branch_filter(self):
+        from git_operations import _filter_ref_listing_output
+        output = "* sandbox-abc123\n  sandbox-other999\n"
+        result = _filter_ref_listing_output(output, ["branch"], self.SANDBOX)
+        assert "sandbox-abc123" in result
+        assert "sandbox-other999" not in result
+
+    def test_dispatches_to_ref_enum_filter(self):
+        from git_operations import _filter_ref_listing_output
+        output = "abc1234 refs/heads/sandbox-other999\n"
+        result = _filter_ref_listing_output(output, ["for-each-ref"], self.SANDBOX)
+        assert "sandbox-other999" not in result
+
+    def test_dispatches_to_log_filter(self):
+        from git_operations import _filter_ref_listing_output
+        output = "abc1234 (origin/sandbox-other999) msg\n"
+        result = _filter_ref_listing_output(output, ["log"], self.SANDBOX)
+        assert "sandbox-other999" not in result
+
+    def test_empty_output_passthrough(self):
+        from git_operations import _filter_ref_listing_output
+        assert _filter_ref_listing_output("", ["branch"], self.SANDBOX) == ""
+
+    def test_no_sandbox_branch_passthrough(self):
+        from git_operations import _filter_ref_listing_output
+        output = "* sandbox-other999\n"
+        assert _filter_ref_listing_output(output, ["branch"], "") == output
+
+    def test_non_filtered_command_passthrough(self):
+        from git_operations import _filter_ref_listing_output
+        output = "some output\n"
+        assert _filter_ref_listing_output(output, ["status"], self.SANDBOX) == output
+
+    def test_log_with_source_flag(self):
+        from git_operations import _filter_ref_listing_output
+        output = "abc1234\trefs/heads/sandbox-other999\tmsg\n"
+        result = _filter_ref_listing_output(
+            output, ["log", "--source"], self.SANDBOX
+        )
+        assert "refs/heads/[redacted]" in result
+
+    def test_log_with_custom_format(self):
+        from git_operations import _filter_ref_listing_output
+        output = " (HEAD -> sandbox-abc123, origin/sandbox-other999)\n"
+        result = _filter_ref_listing_output(
+            output, ["log", "--format=%H %d"], self.SANDBOX
+        )
+        assert "sandbox-abc123" in result
+        assert "sandbox-other999" not in result
+
+
+class TestOutputFilteringInExecuteGit:
+    """Tests that output filtering is wired into execute_git()."""
+
+    SANDBOX_BRANCH = "sandbox-abc123"
+    META = {"sandbox_branch": "sandbox-abc123"}
+
+    def test_branch_output_filtered_in_execute_git(self):
+        """git branch output should have other sandbox branches removed."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            branch_output = (
+                b"* sandbox-abc123\n"
+                b"  main\n"
+                b"  sandbox-other999\n"
+            )
+            with patch("git_operations.subprocess.run") as mock_run:
+                mock_run.return_value = MagicMock(
+                    returncode=0,
+                    stdout=branch_output,
+                    stderr=b"",
+                )
+                request = GitExecRequest(args=["branch"])
+                response, error = execute_git(request, tmpdir, metadata=self.META)
+
+                assert error is None
+                assert "sandbox-abc123" in response.stdout
+                assert "main" in response.stdout
+                assert "sandbox-other999" not in response.stdout
+
+    def test_log_decorations_filtered_in_execute_git(self):
+        """git log decorations should have other sandbox branches removed."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            log_output = (
+                b"abc1234 (HEAD -> sandbox-abc123, origin/sandbox-other999) msg\n"
+            )
+            with patch("git_operations.subprocess.run") as mock_run:
+                mock_run.return_value = MagicMock(
+                    returncode=0,
+                    stdout=log_output,
+                    stderr=b"",
+                )
+                request = GitExecRequest(args=["log"])
+                response, error = execute_git(request, tmpdir, metadata=self.META)
+
+                assert error is None
+                assert "sandbox-abc123" in response.stdout
+                assert "sandbox-other999" not in response.stdout
+
+    def test_no_filtering_without_sandbox_branch(self):
+        """Without sandbox_branch in metadata, output should not be filtered.
+
+        Note: execute_git now requires sandbox_branch, so this actually
+        returns an error. Testing the fail-closed behavior.
+        """
+        with tempfile.TemporaryDirectory() as tmpdir:
+            request = GitExecRequest(args=["branch"])
+            response, error = execute_git(request, tmpdir, metadata={})
+            assert error is not None
+            assert "sandbox branch identity missing" in error.reason.lower()
 
 
 if __name__ == "__main__":

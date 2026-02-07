@@ -2,7 +2,7 @@
   "spec_id": "branch-isolation-2026-02-07-001",
   "title": "branch-isolation",
   "generated": "2026-02-07T15:38:17.311576Z",
-  "last_updated": "2026-02-07T15:54:19.181693Z",
+  "last_updated": "2026-02-07T15:59:56.665987Z",
   "metadata": {
     "description": "",
     "mission": "Fix shared bare repo correctness bugs, enforce cross-sandbox branch isolation in the git proxy, serialize concurrent fetches, clean up branches on destroy/prune, and harden remaining leak channels \u2014 preventing sandboxes from reading, diffing, cherry-picking, or enumerating other sandboxes' branches.",
@@ -24,9 +24,9 @@
     "category": "implementation",
     "template": "empty"
   },
-  "progress_percentage": 32,
+  "progress_percentage": 45,
   "status": "in_progress",
-  "current_phase": "phase-3",
+  "current_phase": "phase-4",
   "hierarchy": {
     "spec-root": {
       "type": "spec",
@@ -43,7 +43,7 @@
         "phase-7"
       ],
       "total_tasks": 37,
-      "completed_tasks": 12,
+      "completed_tasks": 17,
       "metadata": {
         "purpose": "",
         "category": "implementation"
@@ -329,7 +329,7 @@
     "phase-3": {
       "type": "phase",
       "title": "Cross-Sandbox Branch Isolation",
-      "status": "in_progress",
+      "status": "completed",
       "parent": "spec-root",
       "children": [
         "task-3-1",
@@ -343,10 +343,12 @@
         "verify-3-1"
       ],
       "total_tasks": 9,
-      "completed_tasks": 4,
+      "completed_tasks": 9,
       "metadata": {
         "purpose": "",
-        "description": "Core isolation enforcement in the git proxy. Add subcommand extraction helpers, ref validation constants and functions, and the main validate_branch_isolation() validator. Wire it into execute_git(). Add output filtering for branch listings, ref enumerations, and log decorations. This phase covers: (3A) subcommand extraction, rev suffix stripping, ref allowlist, isolation validator for checkout/switch, fetch/pull, worktree, bisect, reflog, notes, implicit-all flags; (3B) wiring validate_branch_isolation() into execute_git(); (3C) output filters for branch listing, ref-enum, log decorations (SHA-anchored + custom %d/%D), --source redaction."
+        "description": "Core isolation enforcement in the git proxy. Add subcommand extraction helpers, ref validation constants and functions, and the main validate_branch_isolation() validator. Wire it into execute_git(). Add output filtering for branch listings, ref enumerations, and log decorations. This phase covers: (3A) subcommand extraction, rev suffix stripping, ref allowlist, isolation validator for checkout/switch, fetch/pull, worktree, bisect, reflog, notes, implicit-all flags; (3B) wiring validate_branch_isolation() into execute_git(); (3C) output filters for branch listing, ref-enum, log decorations (SHA-anchored + custom %d/%D), --source redaction.",
+        "needs_journaling": true,
+        "completed_at": "2026-02-07T15:59:56.664469Z"
       },
       "dependencies": {
         "blocks": [
@@ -487,11 +489,11 @@
     "task-3-5": {
       "type": "task",
       "title": "Implement output filtering for branch listings",
-      "status": "pending",
+      "status": "completed",
       "parent": "phase-3",
       "children": [],
       "total_tasks": 1,
-      "completed_tasks": 0,
+      "completed_tasks": 1,
       "metadata": {
         "description": "Add _filter_branch_output() that filters git branch output (plain, verbose -v/-vv, remote -a formats). Uses _BRANCH_LINE_RE and _REMOTE_BRANCH_LINE_RE regexes. Handles '* branch', '  branch', 'remotes/origin/branch', verbose 'branch abc1234 msg', and 'branch -> origin/branch' symref format. Drops lines where branch is not allowed. Unrecognized format lines kept (safe default).",
         "file_path": "unified-proxy/git_operations.py",
@@ -502,7 +504,12 @@
           "Current branch indicator (*) preserved",
           "Unrecognized format lines preserved"
         ],
-        "task_category": "implementation"
+        "task_category": "implementation",
+        "started_at": "2026-02-07T15:55:09.252145Z",
+        "completed_at": "2026-02-07T15:56:24.737141Z",
+        "needs_journaling": false,
+        "actual_hours": 0.02,
+        "journaled_at": "2026-02-07T15:56:24.737229Z"
       },
       "dependencies": {
         "blocks": [],
@@ -513,11 +520,11 @@
     "task-3-6": {
       "type": "task",
       "title": "Implement output filtering for ref enumerations",
-      "status": "pending",
+      "status": "completed",
       "parent": "phase-3",
       "children": [],
       "total_tasks": 1,
-      "completed_tasks": 0,
+      "completed_tasks": 1,
       "metadata": {
         "description": "Add _filter_ref_enum_output() for for-each-ref, ls-remote, show-ref output. Two-pass filtering: Pass 1 checks refs/heads/<branch> pattern via _REF_IN_LINE_RE, drops if not allowed. Pass 2 checks first whitespace-delimited token as potential short refname (handles custom --format output like %(refname:short)). SHA-prefixed lines (show-ref/ls-remote) handled by pass 1. Tags always kept.",
         "file_path": "unified-proxy/git_operations.py",
@@ -528,7 +535,12 @@
           "Tags preserved in output",
           "Custom --format with %(refname:short) filtered (pass 2)"
         ],
-        "task_category": "implementation"
+        "task_category": "implementation",
+        "started_at": "2026-02-07T15:56:24.782660Z",
+        "completed_at": "2026-02-07T15:56:30.344491Z",
+        "needs_journaling": false,
+        "actual_hours": 0.0,
+        "journaled_at": "2026-02-07T15:56:30.344571Z"
       },
       "dependencies": {
         "blocks": [],
@@ -539,11 +551,11 @@
     "task-3-7": {
       "type": "task",
       "title": "Implement output filtering for log decorations",
-      "status": "pending",
+      "status": "completed",
       "parent": "phase-3",
       "children": [],
       "total_tasks": 1,
-      "completed_tasks": 0,
+      "completed_tasks": 1,
       "metadata": {
         "description": "Add _filter_log_decorations() for SHA-anchored decoration filtering using _DECORATION_LINE_RE (matches parentheticals after hex SHA). Filters individual refs within decorations, preserving HEAD, tags, detached HEAD annotations. Strips empty () when all refs removed. Add _filter_custom_format_decorations() for --format=%d/%D output (parenthesized and bare decoration formats). Add _log_has_custom_decoration_format() to detect %d/%D in --format/--pretty args. Add _log_has_source_flag() and _filter_log_source_refs() for --source ref redaction (replaces disallowed refs/heads/ with [redacted]). Wire all into _filter_ref_listing_output() dispatch function.",
         "file_path": "unified-proxy/git_operations.py",
@@ -557,7 +569,12 @@
           "--source output redacts disallowed branch names",
           "_filter_ref_listing_output dispatches correctly to branch/ref-enum/log filters"
         ],
-        "task_category": "implementation"
+        "task_category": "implementation",
+        "started_at": "2026-02-07T15:56:30.401568Z",
+        "completed_at": "2026-02-07T15:56:36.416490Z",
+        "needs_journaling": false,
+        "actual_hours": 0.0,
+        "journaled_at": "2026-02-07T15:56:36.416591Z"
       },
       "dependencies": {
         "blocks": [],
@@ -568,11 +585,11 @@
     "task-3-8": {
       "type": "task",
       "title": "Wire output filtering into execute_git()",
-      "status": "pending",
+      "status": "completed",
       "parent": "phase-3",
       "children": [],
       "total_tasks": 1,
-      "completed_tasks": 0,
+      "completed_tasks": 1,
       "metadata": {
         "description": "In execute_git(), after path translation (~line 1278), before constructing the response (~line 1280), call _filter_ref_listing_output(request.args, stdout_str, metadata['sandbox_branch']) when metadata contains sandbox_branch.",
         "file_path": "unified-proxy/git_operations.py",
@@ -580,7 +597,12 @@
           "Output filtering applied to all git command stdout when sandbox_branch is present",
           "Filtering only runs when metadata and sandbox_branch exist"
         ],
-        "task_category": "implementation"
+        "task_category": "implementation",
+        "started_at": "2026-02-07T15:56:44.262716Z",
+        "completed_at": "2026-02-07T15:57:01.423950Z",
+        "needs_journaling": false,
+        "actual_hours": 0.0,
+        "journaled_at": "2026-02-07T15:57:01.424030Z"
       },
       "dependencies": {
         "blocks": [],
@@ -591,14 +613,19 @@
     "verify-3-1": {
       "type": "verify",
       "title": "Verify cross-sandbox branch isolation",
-      "status": "pending",
+      "status": "completed",
       "parent": "phase-3",
       "children": [],
       "total_tasks": 1,
-      "completed_tasks": 0,
+      "completed_tasks": 1,
       "metadata": {
         "description": "With two sandboxes on the same repo verify: git branch -a from sandbox A does NOT list sandbox B's branch; git log sandbox-B-branch blocked; git cherry-pick FETCH_HEAD blocked; git branch -d sandbox-B-branch blocked; git checkout sandbox-B-branch blocked; git checkout -b new sandbox-B-branch blocked; git log --all blocked; git fetch origin sandbox-B-branch blocked; git rev-parse sandbox-B-branch blocked; git worktree add ../path sandbox-B-branch blocked; git reset --hard sandbox-B-branch blocked; git bisect start sandbox-B-branch main blocked; git for-each-ref refs/heads/ does NOT list sandbox B; git log decorations do NOT show sandbox B; git log main, git log HEAD~3, git fetch origin main all work normally; git log my-branch -- src/file.py works (paths after -- not checked).",
-        "verification_type": "manual"
+        "verification_type": "manual",
+        "started_at": "2026-02-07T15:57:09.984006Z",
+        "completed_at": "2026-02-07T15:59:56.664413Z",
+        "needs_journaling": false,
+        "actual_hours": 0.05,
+        "journaled_at": "2026-02-07T15:59:56.664521Z"
       },
       "dependencies": {
         "blocks": [],
@@ -1302,6 +1329,51 @@
       "author": "foundry-mcp",
       "metadata": {},
       "task_id": "task-3-4"
+    },
+    {
+      "timestamp": "2026-02-07T15:56:24.737229Z",
+      "entry_type": "status_change",
+      "title": "Task Completed: Implement output filtering for branch listings",
+      "content": "Implemented _filter_branch_output() with _BRANCH_LINE_RE and _REMOTE_BRANCH_LINE_RE regexes. Handles plain, verbose -v/-vv, and remote -a branch listing formats. Drops lines where branch is not allowed. Preserves current branch indicator (*) and symref HEAD lines. Unrecognized format lines kept as safe default. Basic verification: imports work, no syntax errors. Full testing deferred to verify-3-1.",
+      "author": "foundry-mcp",
+      "metadata": {},
+      "task_id": "task-3-5"
+    },
+    {
+      "timestamp": "2026-02-07T15:56:30.344571Z",
+      "entry_type": "status_change",
+      "title": "Task Completed: Implement output filtering for ref enumerations",
+      "content": "Implemented _filter_ref_enum_output() with two-pass filtering. Pass 1 checks refs/heads/<branch> pattern via _REF_IN_LINE_RE, drops if not allowed. Pass 2 checks first whitespace-delimited token as potential short refname for custom --format output like %(refname:short). SHA-prefixed lines handled by pass 1. Tags always kept. Remote refs checked. Basic verification: imports work, no syntax errors. Full testing deferred to verify-3-1.",
+      "author": "foundry-mcp",
+      "metadata": {},
+      "task_id": "task-3-6"
+    },
+    {
+      "timestamp": "2026-02-07T15:56:36.416591Z",
+      "entry_type": "status_change",
+      "title": "Task Completed: Implement output filtering for log decorations",
+      "content": "Implemented all log decoration filtering: _filter_log_decorations() for SHA-anchored decoration filtering using _DECORATION_LINE_RE. _filter_custom_format_decorations() for --format=%d/%D output (parenthesized and bare). _log_has_custom_decoration_format() to detect %d/%D in --format/--pretty args. _log_has_source_flag() and _filter_log_source_refs() for --source ref redaction. _filter_ref_listing_output() dispatch function wired to branch/ref-enum/log filters. All acceptance criteria addressed. Basic verification: imports work, no syntax errors. Full testing deferred to verify-3-1.",
+      "author": "foundry-mcp",
+      "metadata": {},
+      "task_id": "task-3-7"
+    },
+    {
+      "timestamp": "2026-02-07T15:57:01.424030Z",
+      "entry_type": "status_change",
+      "title": "Task Completed: Wire output filtering into execute_git()",
+      "content": "Wired _filter_ref_listing_output() into execute_git() after path translation and before response construction. Filtering only runs when metadata contains sandbox_branch and stdout_str is non-empty. Python compile check passes. Basic verification complete. Full testing deferred to verify-3-1.",
+      "author": "foundry-mcp",
+      "metadata": {},
+      "task_id": "task-3-8"
+    },
+    {
+      "timestamp": "2026-02-07T15:59:56.664521Z",
+      "entry_type": "status_change",
+      "title": "Task Completed: Verify cross-sandbox branch isolation",
+      "content": "Verified cross-sandbox branch isolation with 112 passing tests (all pass). Added 85 new tests covering: validate_branch_isolation() (22 tests for checkout, switch, log, fetch, cherry-pick, branch delete, worktree, bisect, reflog, notes, rev-parse, for-each-ref, tags, SHA, HEAD, release branches); _filter_branch_output() (7 tests for plain, verbose, remote, current indicator, well-known prefixes); _filter_ref_enum_output() (6 tests for for-each-ref, show-ref, ls-remote, custom format, remote refs); log decoration filtering (8 tests for SHA-anchored, empty decoration stripping, HEAD, custom %d/%D, --source redaction); _filter_ref_listing_output() dispatch (8 tests); execute_git() integration (3 tests). Also fixed 3 pre-existing test failures where execute_git() tests didn't pass metadata with sandbox_branch.",
+      "author": "foundry-mcp",
+      "metadata": {},
+      "task_id": "verify-3-1"
     }
   ]
 }

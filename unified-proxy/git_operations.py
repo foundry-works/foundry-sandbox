@@ -993,6 +993,452 @@ def _validate_ref_reading_isolation(
     return None
 
 
+# ---------------------------------------------------------------------------
+# Output Filtering: Branch Listings
+# ---------------------------------------------------------------------------
+
+# Matches plain and verbose branch output lines:
+#   "* main"  /  "  feature/x"  /  "  feature abc1234 commit msg"
+#   "  feature   abc1234 [origin/feature] commit msg"  (verbose -vv)
+# Groups: indicator (* or spaces), branch_name, rest (optional)
+_BRANCH_LINE_RE = re.compile(
+    r"^(?P<indicator>[* ] )"           # "* " or "  "
+    r"(?P<branch>\S+)"                 # branch name
+    r"(?P<rest>.*)$"                   # optional verbose info
+)
+
+# Matches remote branch lines from `git branch -a`:
+#   "  remotes/origin/main"
+#   "  remotes/origin/HEAD -> origin/main"
+_REMOTE_BRANCH_LINE_RE = re.compile(
+    r"^(?P<indent>\s+)"
+    r"remotes/(?P<remote>[^/]+)/"
+    r"(?P<branch>\S+)"
+    r"(?P<rest>.*)$"
+)
+
+
+def _filter_branch_output(output: str, sandbox_branch: str) -> str:
+    """Filter git branch output to hide other sandbox branches.
+
+    Handles plain, verbose (-v/-vv), and remote (-a) branch listing formats.
+    Drops lines where the branch is not allowed.
+    Preserves current-branch indicator (*).
+    Keeps unrecognized format lines (safe default).
+
+    Args:
+        output: Raw stdout from a ``git branch`` command.
+        sandbox_branch: This sandbox's branch name.
+
+    Returns:
+        Filtered output with disallowed branches removed.
+    """
+    if not output:
+        return output
+
+    filtered_lines: List[str] = []
+    for line in output.splitlines(True):
+        stripped = line.rstrip("\n\r")
+
+        # Try remote branch pattern first (more specific)
+        m = _REMOTE_BRANCH_LINE_RE.match(stripped)
+        if m:
+            branch_name = m.group("branch")
+            rest = m.group("rest")
+            # Handle symref format: "HEAD -> origin/main"
+            if branch_name == "HEAD" and "->" in rest:
+                # Always keep HEAD symref lines
+                filtered_lines.append(line)
+                continue
+            if _is_allowed_branch_name(branch_name, sandbox_branch):
+                filtered_lines.append(line)
+            continue
+
+        # Try local branch pattern
+        m = _BRANCH_LINE_RE.match(stripped)
+        if m:
+            branch_name = m.group("branch")
+            if _is_allowed_branch_name(branch_name, sandbox_branch):
+                filtered_lines.append(line)
+            continue
+
+        # Unrecognized format — keep (safe default)
+        filtered_lines.append(line)
+
+    return "".join(filtered_lines)
+
+
+# ---------------------------------------------------------------------------
+# Output Filtering: Ref Enumerations
+# ---------------------------------------------------------------------------
+
+# Matches lines containing full ref paths (for-each-ref, show-ref, ls-remote)
+# e.g. "abc123 refs/heads/feature" or "refs/heads/feature abc123 commit msg"
+_REF_IN_LINE_RE = re.compile(r"refs/heads/([^\s]+)")
+
+
+def _filter_ref_enum_output(output: str, sandbox_branch: str) -> str:
+    """Filter ref enumeration output (for-each-ref, ls-remote, show-ref).
+
+    Two-pass filtering:
+      Pass 1: Check refs/heads/<branch> patterns via _REF_IN_LINE_RE.
+              Drop if branch not allowed. Tags always kept.
+      Pass 2: For lines not matched by pass 1, check first whitespace-
+              delimited token as a potential short refname (handles custom
+              --format output like %(refname:short)).
+
+    Args:
+        output: Raw stdout from a ref enumeration command.
+        sandbox_branch: This sandbox's branch name.
+
+    Returns:
+        Filtered output with disallowed branch refs removed.
+    """
+    if not output:
+        return output
+
+    filtered_lines: List[str] = []
+    for line in output.splitlines(True):
+        stripped = line.rstrip("\n\r")
+        if not stripped:
+            filtered_lines.append(line)
+            continue
+
+        # Pass 1: Check for refs/heads/<branch> or refs/tags/ patterns
+        ref_match = _REF_IN_LINE_RE.search(stripped)
+        if ref_match:
+            branch_name = ref_match.group(1)
+            if _is_allowed_branch_name(branch_name, sandbox_branch):
+                filtered_lines.append(line)
+            continue
+
+        # Check for tags — always keep
+        if "refs/tags/" in stripped:
+            filtered_lines.append(line)
+            continue
+
+        # Check for remote refs
+        remote_match = re.search(r"refs/remotes/[^/]+/([^\s]+)", stripped)
+        if remote_match:
+            branch_name = remote_match.group(1)
+            if _is_allowed_branch_name(branch_name, sandbox_branch):
+                filtered_lines.append(line)
+            continue
+
+        # Pass 2: Check first token as potential short refname
+        # This handles custom --format output like %(refname:short)
+        tokens = stripped.split()
+        if tokens:
+            first_token = tokens[0]
+            # If it looks like a SHA (hex, >= 12 chars), check second token
+            if (
+                len(first_token) >= _MIN_SHA_LENGTH
+                and all(c in "0123456789abcdefABCDEF" for c in first_token)
+            ):
+                # SHA-prefixed line not caught by pass 1 — no ref to filter
+                filtered_lines.append(line)
+                continue
+
+            # First token might be a short branch name
+            # Only filter if it looks like a branch name (no slashes that
+            # would indicate a path or complex ref not caught above)
+            if "/" not in first_token and not first_token.startswith("("):
+                if _is_allowed_branch_name(first_token, sandbox_branch):
+                    filtered_lines.append(line)
+                continue
+
+        # Unrecognized format — keep (safe default)
+        filtered_lines.append(line)
+
+    return "".join(filtered_lines)
+
+
+# ---------------------------------------------------------------------------
+# Output Filtering: Log Decorations
+# ---------------------------------------------------------------------------
+
+# Matches SHA-anchored decoration lines in git log output:
+#   "abc1234 (HEAD -> main, tag: v1.0, origin/feature)"
+_DECORATION_LINE_RE = re.compile(
+    r"^(?P<prefix>[0-9a-fA-F]+\s+)"   # SHA + whitespace
+    r"\((?P<decorations>[^)]+)\)"       # parenthesized decorations
+    r"(?P<suffix>.*)$"                  # rest of line
+)
+
+# Matches custom %d format decorations (parenthesized):
+#   " (HEAD -> main, tag: v1.0, origin/feature)"
+_CUSTOM_D_RE = re.compile(
+    r"\((?P<decorations>[^)]+)\)"
+)
+
+# Matches custom %D format decorations (bare, no parens):
+#   "HEAD -> main, tag: v1.0, origin/feature"
+# Used when the entire line is decorations (--format=%D)
+
+
+def _is_decoration_ref_allowed(ref: str, sandbox_branch: str) -> bool:
+    """Check if a single decoration ref should be kept.
+
+    Always keeps: HEAD, HEAD -> branch (if branch allowed), tags,
+    detached HEAD annotations.
+    """
+    ref = ref.strip()
+    if not ref:
+        return True
+
+    # HEAD is always kept
+    if ref == "HEAD":
+        return True
+
+    # "HEAD -> branch" form
+    if ref.startswith("HEAD -> "):
+        branch = ref[len("HEAD -> "):]
+        return _is_allowed_branch_name(branch, sandbox_branch)
+
+    # Tags are always kept
+    if ref.startswith("tag: "):
+        return True
+
+    # Remote tracking refs: "origin/branch"
+    if "/" in ref:
+        parts = ref.split("/", 1)
+        if len(parts) == 2:
+            # Could be origin/branch
+            branch_name = parts[1]
+            return _is_allowed_branch_name(branch_name, sandbox_branch)
+
+    # Bare branch name
+    return _is_allowed_branch_name(ref, sandbox_branch)
+
+
+def _filter_decoration_refs(decorations: str, sandbox_branch: str) -> Optional[str]:
+    """Filter individual refs within a decoration string.
+
+    Args:
+        decorations: Comma-separated decoration refs (without parens).
+        sandbox_branch: This sandbox's branch name.
+
+    Returns:
+        Filtered decoration string, or None if all refs were removed.
+    """
+    refs = [r.strip() for r in decorations.split(",")]
+    allowed = [r for r in refs if _is_decoration_ref_allowed(r, sandbox_branch)]
+    if not allowed:
+        return None
+    return ", ".join(allowed)
+
+
+def _filter_log_decorations(output: str, sandbox_branch: str) -> str:
+    """Filter SHA-anchored decoration lines in git log output.
+
+    Handles standard ``git log --decorate`` format where decorations
+    appear in parentheses after the commit SHA.
+
+    Args:
+        output: Raw stdout from a ``git log`` command.
+        sandbox_branch: This sandbox's branch name.
+
+    Returns:
+        Filtered output with disallowed branch refs removed from decorations.
+    """
+    if not output:
+        return output
+
+    filtered_lines: List[str] = []
+    for line in output.splitlines(True):
+        stripped = line.rstrip("\n\r")
+
+        m = _DECORATION_LINE_RE.match(stripped)
+        if m:
+            prefix = m.group("prefix")
+            decorations = m.group("decorations")
+            suffix = m.group("suffix")
+            filtered = _filter_decoration_refs(decorations, sandbox_branch)
+            if filtered:
+                filtered_lines.append(
+                    prefix + "(" + filtered + ")" + suffix
+                    + (line[len(stripped):])  # preserve trailing newline
+                )
+            else:
+                # All decorations removed — emit line without parens
+                filtered_lines.append(
+                    prefix.rstrip() + suffix
+                    + (line[len(stripped):])
+                )
+            continue
+
+        # Not a decoration line — keep as-is
+        filtered_lines.append(line)
+
+    return "".join(filtered_lines)
+
+
+def _filter_custom_format_decorations(output: str, sandbox_branch: str) -> str:
+    """Filter custom --format=%d/%D decoration output.
+
+    Handles both %d (parenthesized) and %D (bare) formats.
+
+    Args:
+        output: Raw stdout from a ``git log --format`` command with %d or %D.
+        sandbox_branch: This sandbox's branch name.
+
+    Returns:
+        Filtered output with disallowed refs removed from decorations.
+    """
+    if not output:
+        return output
+
+    filtered_lines: List[str] = []
+    for line in output.splitlines(True):
+        stripped = line.rstrip("\n\r")
+        trailing = line[len(stripped):]
+
+        # Try parenthesized format (%d): " (HEAD -> main, origin/feature)"
+        m = _CUSTOM_D_RE.search(stripped)
+        if m:
+            decorations = m.group("decorations")
+            filtered = _filter_decoration_refs(decorations, sandbox_branch)
+            if filtered:
+                new_line = (
+                    stripped[:m.start()]
+                    + "(" + filtered + ")"
+                    + stripped[m.end():]
+                )
+                filtered_lines.append(new_line + trailing)
+            else:
+                # Remove empty decoration entirely
+                new_line = stripped[:m.start()] + stripped[m.end():]
+                filtered_lines.append(new_line.rstrip() + trailing)
+            continue
+
+        # Try bare format (%D): "HEAD -> main, origin/feature"
+        # Only if line contains comma-separated ref-like tokens
+        if "," in stripped or stripped.startswith("HEAD"):
+            # Heuristic: if the line looks like a decoration list
+            tokens = [t.strip() for t in stripped.split(",")]
+            looks_like_refs = any(
+                t.startswith("HEAD") or t.startswith("tag: ")
+                or "/" in t or _is_allowed_branch_name(t, sandbox_branch)
+                for t in tokens if t
+            )
+            if looks_like_refs:
+                filtered = _filter_decoration_refs(stripped, sandbox_branch)
+                if filtered:
+                    filtered_lines.append(filtered + trailing)
+                else:
+                    filtered_lines.append(trailing)
+                continue
+
+        filtered_lines.append(line)
+
+    return "".join(filtered_lines)
+
+
+def _log_has_custom_decoration_format(args: List[str]) -> bool:
+    """Detect if git log args use --format/--pretty with %d or %D."""
+    for arg in args:
+        for prefix in ("--format=", "--pretty=", "--pretty=format:"):
+            if arg.startswith(prefix):
+                fmt = arg[len(prefix):]
+                if "%d" in fmt or "%D" in fmt:
+                    return True
+        # Also check --format <value> (space-separated)
+        # Handled by the caller checking the next arg
+    return False
+
+
+def _log_has_source_flag(args: List[str]) -> bool:
+    """Detect if git log args include --source."""
+    return "--source" in args
+
+
+def _filter_log_source_refs(output: str, sandbox_branch: str) -> str:
+    """Redact disallowed branch refs from --source output.
+
+    --source adds a ref name column to log output. Disallowed refs/heads/
+    branch names are replaced with [redacted].
+
+    Args:
+        output: Raw stdout from a ``git log --source`` command.
+        sandbox_branch: This sandbox's branch name.
+
+    Returns:
+        Output with disallowed source refs redacted.
+    """
+    if not output:
+        return output
+
+    filtered_lines: List[str] = []
+    for line in output.splitlines(True):
+        stripped = line.rstrip("\n\r")
+        trailing = line[len(stripped):]
+
+        # --source output has ref as a tab-separated column, typically:
+        # "abc1234\trefs/heads/branch\trest..."
+        # or it appears as a space-separated token after the SHA
+        new_stripped = re.sub(
+            r"refs/heads/([^\s]+)",
+            lambda m: (
+                m.group(0)
+                if _is_allowed_branch_name(m.group(1), sandbox_branch)
+                else "refs/heads/[redacted]"
+            ),
+            stripped,
+        )
+        filtered_lines.append(new_stripped + trailing)
+
+    return "".join(filtered_lines)
+
+
+# ---------------------------------------------------------------------------
+# Output Filtering: Dispatch
+# ---------------------------------------------------------------------------
+
+
+def _filter_ref_listing_output(
+    output: str,
+    args: List[str],
+    sandbox_branch: str,
+) -> str:
+    """Dispatch to the appropriate output filter based on git subcommand.
+
+    Called after git command execution for commands that enumerate refs.
+    Routes to branch listing, ref enumeration, or log decoration filters.
+
+    Args:
+        output: Raw stdout from the git command.
+        args: The original git command args (without 'git' prefix).
+        sandbox_branch: This sandbox's branch name.
+
+    Returns:
+        Filtered output.
+    """
+    if not output or not sandbox_branch:
+        return output
+
+    subcommand, sub_args, _ = _get_subcommand_args(args)
+    if subcommand is None:
+        return output
+
+    # Branch listing
+    if subcommand == "branch":
+        return _filter_branch_output(output, sandbox_branch)
+
+    # Ref enumeration commands
+    if subcommand in _REF_ENUM_CMDS:
+        return _filter_ref_enum_output(output, sandbox_branch)
+
+    # Log with decorations
+    if subcommand == "log":
+        if _log_has_source_flag(sub_args):
+            output = _filter_log_source_refs(output, sandbox_branch)
+        if _log_has_custom_decoration_format(sub_args):
+            return _filter_custom_format_decorations(output, sandbox_branch)
+        return _filter_log_decorations(output, sandbox_branch)
+
+    return output
+
+
 def validate_command(
     args: List[str],
     extra_allowed: Optional[Set[str]] = None,
@@ -1780,6 +2226,11 @@ def execute_git(
             stdout_str = stdout_str.replace(real_repo, client_root)
         if stderr_str:
             stderr_str = stderr_str.replace(real_repo, client_root)
+
+    # Apply branch isolation output filtering
+    sandbox_branch = metadata.get("sandbox_branch") if metadata else None
+    if sandbox_branch and stdout_str:
+        stdout_str = _filter_ref_listing_output(stdout_str, request.args, sandbox_branch)
 
     response = GitExecResponse(
         exit_code=result.returncode,
