@@ -20,12 +20,12 @@ USER root
 COPY requirements.txt /opt/proxy/requirements.txt
 RUN pip install --no-cache-dir -r /opt/proxy/requirements.txt
 
-# Ensure curl and gosu are available (curl for host-driven registration via docker exec,
-# gosu for privilege dropping at runtime)
+# Ensure curl, gosu, and git are available (curl for host-driven registration via docker exec,
+# gosu for privilege dropping at runtime, git for credential helper configuration)
 RUN if command -v apt-get >/dev/null 2>&1; then \
-        apt-get update && apt-get install -y curl gosu && rm -rf /var/lib/apt/lists/*; \
+        apt-get update && apt-get install -y curl gosu git && rm -rf /var/lib/apt/lists/*; \
     elif command -v apk >/dev/null 2>&1; then \
-        apk add --no-cache curl gosu; \
+        apk add --no-cache curl gosu git; \
     else \
         echo "ERROR: No supported package manager (apt-get or apk) found" >&2 && exit 1; \
     fi
@@ -52,6 +52,11 @@ COPY gemini-token-manager.py /opt/proxy/gemini_token_manager.py
 # Copy the GitHub API security filter and its configuration
 COPY github-api-filter.py /opt/proxy/github-api-filter.py
 COPY github_config.py /opt/proxy/github_config.py
+
+# Copy the git API server and git policy modules (used when git shadow mode is enabled)
+COPY git_api.py /opt/proxy/git_api.py
+COPY git_operations.py /opt/proxy/git_operations.py
+COPY git_policies.py /opt/proxy/git_policies.py
 
 # Copy addon modules (mitmproxy addons)
 COPY addons/ /opt/proxy/addons/

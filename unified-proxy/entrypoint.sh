@@ -225,7 +225,7 @@ validate_addon_load_order() {
         # Skip dns_filter — it's conditionally loaded based on PROXY_ENABLE_DNS
         [[ "${basename}" == "dns_filter.py" ]] && continue
         # Skip legacy addons (not part of dependency chain)
-        [[ "${actual}" == "${LEGACY_ADDON_DIR}"* ]] && continue
+        # Note: can't use "${LEGACY_ADDON_DIR}"* — it matches /opt/proxy/addons/* too
         [[ "${actual}" == "${GITHUB_FILTER_PATH}" ]] && continue
 
         if [[ ${expected_idx} -ge ${#expected_order[@]} ]]; then
@@ -269,6 +269,46 @@ start_internal_api() {
 
     log_error "Internal API socket not ready after 5 seconds"
     return 1
+}
+
+configure_git_identity() {
+    # Set git user identity so commits made via the proxy have correct authorship.
+    # Priority: explicit env vars > GitHub API discovery
+    local name="${GIT_USER_NAME:-}"
+    local email="${GIT_USER_EMAIL:-}"
+
+    # Fallback: discover identity from GitHub API if we have a token
+    if [[ -z "${name}" || -z "${email}" ]]; then
+        local token="${GITHUB_TOKEN:-${GH_TOKEN:-}}"
+        if [[ -n "${token}" ]]; then
+            log "Discovering git identity from GitHub API..."
+            local gh_user
+            gh_user=$(curl -sf -H "Authorization: token ${token}" \
+                "https://api.github.com/user" 2>/dev/null) || true
+            if [[ -n "${gh_user}" ]]; then
+                if [[ -z "${name}" ]]; then
+                    name=$(printf '%s' "${gh_user}" | python3 -c \
+                        "import sys,json; print(json.load(sys.stdin).get('name',''))" 2>/dev/null) || true
+                fi
+                if [[ -z "${email}" ]]; then
+                    email=$(printf '%s' "${gh_user}" | python3 -c \
+                        "import sys,json; print(json.load(sys.stdin).get('email',''))" 2>/dev/null) || true
+                fi
+            fi
+        fi
+    fi
+
+    if [[ -n "${name}" ]]; then
+        git config --global user.name "${name}"
+        log "Git identity: user.name = ${name}"
+    fi
+    if [[ -n "${email}" ]]; then
+        git config --global user.email "${email}"
+        log "Git identity: user.email = ${email}"
+    fi
+    if [[ -z "${name}" && -z "${email}" ]]; then
+        log "Warning: No git identity configured; commits may fail with 'Author identity unknown'"
+    fi
 }
 
 configure_git_credentials() {
@@ -478,6 +518,7 @@ main() {
     fi
 
     # Start git API server if git shadow mode is enabled
+    configure_git_identity
     configure_git_credentials
     if ! start_git_api; then
         log_error "Failed to start git API server"

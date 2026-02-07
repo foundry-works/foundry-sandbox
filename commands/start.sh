@@ -159,6 +159,7 @@ cmd_start() {
     # Register container with unified-proxy on restart (credential isolation)
     if [ "$isolate_credentials" = "true" ]; then
         export SANDBOX_GATEWAY_ENABLED=true
+        fix_proxy_worktree_paths "${container}-unified-proxy-1" "$(whoami)"
         local repo_spec="${SANDBOX_REPO_URL:-}"
         repo_spec=$(echo "$repo_spec" | sed -E 's#^(https?://)?github\.com/##; s#^git@github\.com:##; s#\.git$##')
         local metadata_json=""

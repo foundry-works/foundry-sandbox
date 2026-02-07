@@ -2031,6 +2031,44 @@ copy_file_to_container_quiet() {
     copy_file_to_container "$@" 2>/dev/null
 }
 
+fix_proxy_worktree_paths() {
+    local proxy_container="$1"
+    local host_user="$2"
+
+    if [ -z "$host_user" ] || [ -z "$proxy_container" ]; then
+        return 0
+    fi
+
+    # Validate host_user contains only safe characters
+    if ! printf '%s' "$host_user" | grep -qE '^[a-zA-Z0-9._-]+$'; then
+        log_warn "Skipping proxy worktree path fix: username contains unsafe characters"
+        return 0
+    fi
+
+    # The proxy mounts bare repos at /home/ubuntu/.sandboxes/repos, but the
+    # worktree's .git file points to /home/<host_user>/.sandboxes/repos/...
+    # Create a symlink so git can follow the gitdir pointer.
+    # Also handle macOS paths (/Users/<host_user>).
+    docker exec "$proxy_container" sh -c "
+        if [ ! -e '/home/$host_user' ] && [ -d '/home/ubuntu' ]; then
+            ln -s /home/ubuntu '/home/$host_user' 2>/dev/null || true
+        fi
+        if [ ! -e '/Users/$host_user' ] && [ -d '/home/ubuntu' ]; then
+            mkdir -p /Users 2>/dev/null || true
+            ln -s /home/ubuntu '/Users/$host_user' 2>/dev/null || true
+        fi
+
+        # Set core.worktree so git knows the working tree location
+        if [ -f /git-workspace/.git ]; then
+            GITDIR_PATH=\$(grep 'gitdir:' /git-workspace/.git | sed 's/gitdir: //')
+            if [ -d \"\$GITDIR_PATH\" ]; then
+                touch \"\$GITDIR_PATH/config.worktree\" 2>/dev/null || true
+                git config --file \"\$GITDIR_PATH/config.worktree\" core.worktree /git-workspace
+            fi
+        fi
+    " 2>/dev/null || true
+}
+
 fix_worktree_paths() {
     local container_id="$1"
     local host_user="$2"

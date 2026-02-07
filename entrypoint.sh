@@ -182,15 +182,18 @@ if [ "${SANDBOX_GIT_HOOKS_ENABLED:-0}" != "1" ]; then
     git config --global receive.denyCurrentBranch refuse
 fi
 
-# Git shadow mode: /workspace/.git is a tmpfs overlay hiding real git metadata
+# Git shadow mode: /workspace/.git is hidden from the sandbox
 # The git wrapper at /usr/local/bin/git proxies all commands to the git API server
 if [ "${GIT_SHADOW_ENABLED:-}" = "true" ]; then
-    # Ensure /workspace/.git is a tmpfs overlay (this is the security boundary).
-    if [ ! -d "/workspace/.git" ] || ! mountpoint -q /workspace/.git 2>/dev/null; then
-        echo "Error: Git shadow mode requires /workspace/.git tmpfs overlay"
-        exit 1
+    # Verify .git is hidden. Worktrees use a .git file (gitdir pointer) which is
+    # overlaid with /dev/null via bind mount. Non-worktree repos would use tmpfs.
+    if [ -f "/workspace/.git" ] && [ ! -s "/workspace/.git" ]; then
+        echo "Git shadow mode active: /workspace/.git hidden (bind mount)"
+    elif [ -d "/workspace/.git" ] && mountpoint -q /workspace/.git 2>/dev/null; then
+        echo "Git shadow mode active: /workspace/.git hidden (tmpfs overlay)"
+    else
+        echo "Warning: Git shadow mode enabled but /workspace/.git may be accessible"
     fi
-    echo "Git shadow mode active: /workspace/.git is tmpfs overlay"
 
     # Verify git wrapper is installed (bind-mounted by docker-compose).
     if [ -x "/usr/local/bin/git" ] && head -1 /usr/local/bin/git 2>/dev/null | grep -q "bash"; then

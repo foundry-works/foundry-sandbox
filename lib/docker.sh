@@ -71,6 +71,9 @@ compose_up() {
         export STUBS_VOLUME_NAME="${container}_stubs"
         # Export REPOS_DIR for docker-compose volume substitution
         export REPOS_DIR="${REPOS_DIR}"
+        # Export git identity for unified-proxy (commits run inside proxy container)
+        export GIT_USER_NAME="${GIT_USER_NAME:-$(git config --global user.name 2>/dev/null || true)}"
+        export GIT_USER_EMAIL="${GIT_USER_EMAIL:-$(git config --global user.email 2>/dev/null || true)}"
         # Git shadow mode: provision HMAC secret for git API authentication
         if [ -n "${SANDBOX_ID:-}" ]; then
             provision_hmac_secret "$container" "$SANDBOX_ID"

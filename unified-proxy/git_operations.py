@@ -768,6 +768,10 @@ def validate_path(
 def validate_path_args(args: List[str], repo_root: str) -> Optional[ValidationError]:
     """Check that path-like arguments don't contain traversal."""
     real_root = os.path.realpath(repo_root)
+    # Translate /workspace paths to repo_root (proxy mounts at /git-workspace)
+    client_root = os.path.realpath(
+        os.environ.get("GIT_CLIENT_WORKSPACE_ROOT", "/workspace")
+    )
 
     for arg in args:
         # Skip flags
@@ -779,6 +783,13 @@ def validate_path_args(args: List[str], repo_root: str) -> Optional[ValidationEr
         # If it looks like a path (contains / or \), validate it
         if os.sep in arg or "/" in arg:
             resolved = os.path.realpath(os.path.join(real_root, arg))
+            # Translate client workspace paths to server repo root
+            if os.path.isabs(arg) and (
+                resolved == client_root
+                or resolved.startswith(client_root + os.sep)
+            ):
+                rel = os.path.relpath(resolved, client_root)
+                resolved = os.path.realpath(os.path.join(real_root, rel))
             if not resolved.startswith(real_root + os.sep) and resolved != real_root:
                 return ValidationError(f"Path outside repo root: {arg}")
 
@@ -1170,8 +1181,18 @@ def execute_git(
         except Exception:
             return None, ValidationError("Invalid base64 in stdin_b64")
 
+    # Translate client-side paths (/workspace/...) to server-side (/git-workspace/...)
+    client_root = os.environ.get("GIT_CLIENT_WORKSPACE_ROOT", "/workspace")
+    real_repo = os.path.realpath(repo_root)
+    translated_args = []
+    for arg in request.args:
+        if not arg.startswith("-") and os.path.isabs(arg):
+            if arg == client_root or arg.startswith(client_root + "/"):
+                arg = real_repo + arg[len(client_root):]
+        translated_args.append(arg)
+
     # Build command
-    cmd = [GIT_BINARY] + request.args
+    cmd = [GIT_BINARY] + translated_args
 
     # Build clean environment
     env = build_clean_env()
@@ -1216,6 +1237,16 @@ def execute_git(
 
     # Stderr is always best-effort UTF-8
     stderr_str = result.stderr.decode("utf-8", errors="replace")
+
+    # Translate proxy-side paths back to client-side paths in output
+    # (e.g., /git-workspace → /workspace for rev-parse --show-toplevel)
+    client_root = os.environ.get("GIT_CLIENT_WORKSPACE_ROOT", "/workspace")
+    if repo_root and client_root and repo_root != client_root:
+        real_repo = os.path.realpath(repo_root)
+        if stdout_str:
+            stdout_str = stdout_str.replace(real_repo, client_root)
+        if stderr_str:
+            stderr_str = stderr_str.replace(real_repo, client_root)
 
     response = GitExecResponse(
         exit_code=result.returncode,

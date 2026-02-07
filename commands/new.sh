@@ -1172,6 +1172,10 @@ OVERRIDES
         # Export gateway enabled flag for container_config.sh (credential isolation mode)
         export SANDBOX_GATEWAY_ENABLED=true
 
+        # Fix worktree gitdir paths in proxy container so git can resolve the
+        # .git file's gitdir pointer (host path → container mount path)
+        fix_proxy_worktree_paths "${container}-unified-proxy-1" "$(whoami)"
+
         # Extract repo owner/name from repo_url for metadata
         local repo_spec
         repo_spec=$(echo "$repo_url" | sed -E 's#^(https?://)?github\.com/##; s#^git@github\.com:##; s#\.git$##')
