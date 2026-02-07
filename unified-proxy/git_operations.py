@@ -18,6 +18,7 @@ import asyncio
 import base64
 import logging
 import os
+import re
 import subprocess
 import uuid
 from dataclasses import dataclass
@@ -205,6 +206,15 @@ GLOBAL_BLOCKED_FLAGS: FrozenSet[str] = frozenset({
     "--receive-pack",
 })
 
+# Global flags that consume the next argument as their value.
+# Used by _get_subcommand_args() to skip over value arguments.
+_GLOBAL_VALUE_FLAGS: FrozenSet[str] = frozenset({
+    "-C",
+    "--git-dir",
+    "--work-tree",
+    "--namespace",
+})
+
 # Per-command destructive flag blocking
 _PUSH_BLOCKED_FLAGS: FrozenSet[str] = frozenset({
     "--force", "-f", "--force-with-lease", "--force-if-includes",
@@ -245,6 +255,127 @@ COMMAND_BLOCKED_FLAGS: Dict[str, FrozenSet[str]] = {
     "branch": _BRANCH_BLOCKED_FLAGS,
     "clean": _CLEAN_BLOCKED_FLAGS,
 }
+
+# ---------------------------------------------------------------------------
+# Branch Isolation Constants
+# ---------------------------------------------------------------------------
+
+WELL_KNOWN_BRANCHES: FrozenSet[str] = frozenset({
+    "main", "master", "develop", "production",
+})
+
+WELL_KNOWN_BRANCH_PREFIXES: Tuple[str, ...] = (
+    "release/", "hotfix/",
+)
+
+# Commands that accept ref arguments for reading (not switching branches)
+_REF_READING_CMDS: FrozenSet[str] = frozenset({
+    "log", "show", "diff", "blame", "cherry-pick", "merge", "rebase",
+    "reset", "rev-list", "diff-tree", "rev-parse", "shortlog", "describe",
+    "name-rev", "archive", "format-patch",
+})
+
+# Commands that enumerate refs
+_REF_ENUM_CMDS: FrozenSet[str] = frozenset({
+    "for-each-ref", "ls-remote", "show-ref",
+})
+
+# Flags that implicitly reference all branches/refs
+_IMPLICIT_ALL_REF_FLAGS: FrozenSet[str] = frozenset({
+    "--all", "--branches", "--remotes", "--glob",
+})
+
+# Flag prefixes that implicitly reference refs with patterns
+_IMPLICIT_REF_FLAG_PREFIXES: Tuple[str, ...] = (
+    "--branches=", "--remotes=", "--glob=",
+)
+
+# Regex to strip revision suffixes (~N, ^N, @{...}) from ref names
+_REV_SUFFIX_RE = re.compile(r"([~^]\d*|@\{[^}]*\})+$")
+
+# Minimum length for a hex string to be treated as a SHA hash
+_MIN_SHA_LENGTH = 12
+
+
+def _strip_rev_suffixes(ref: str) -> str:
+    """Strip trailing ~N, ^N, @{...} chains from a ref string.
+
+    Examples:
+        HEAD~3       -> HEAD
+        main^^       -> main
+        HEAD~2^3     -> HEAD
+        main@{1}     -> main
+        abc123~2^3   -> abc123
+    """
+    return _REV_SUFFIX_RE.sub("", ref)
+
+
+def _is_allowed_branch_name(name: str, sandbox_branch: str) -> bool:
+    """Check if a bare branch name is allowed for this sandbox.
+
+    Allowed: the sandbox's own branch, well-known branches,
+    and branches matching well-known prefixes.
+    """
+    if name == sandbox_branch:
+        return True
+    if name in WELL_KNOWN_BRANCHES:
+        return True
+    for prefix in WELL_KNOWN_BRANCH_PREFIXES:
+        if name.startswith(prefix):
+            return True
+    return False
+
+
+def _is_allowed_ref(ref: str, sandbox_branch: str) -> bool:
+    """Check if a ref argument is allowed under branch isolation.
+
+    Allows: HEAD, @{...} forms, own sandbox branch, well-known branches,
+    tags, SHA hashes (>= 12 hex chars), range operators (checked recursively).
+    Blocks: FETCH_HEAD, other sandbox branches, short hex strings.
+    """
+    # Handle range operators recursively
+    for sep in ("...", ".."):
+        if sep in ref:
+            parts = ref.split(sep, 1)
+            return all(_is_allowed_ref(p, sandbox_branch) for p in parts if p)
+
+    # Strip revision suffixes
+    base = _strip_rev_suffixes(ref)
+
+    # FETCH_HEAD is always blocked (could contain cross-branch data)
+    if base == "FETCH_HEAD":
+        return False
+
+    # HEAD and @{} forms are always allowed
+    if base == "HEAD" or base.startswith("@{"):
+        return True
+
+    # Stash refs are allowed
+    if base == "stash" or base.startswith("stash@{"):
+        return True
+
+    # Tags are always allowed (refs/tags/... or tag name checked by git)
+    if base.startswith("refs/tags/") or base.startswith("tags/"):
+        return True
+
+    # Remote tracking refs: apply branch name isolation to the branch part
+    for remote_prefix in ("refs/remotes/origin/", "origin/"):
+        if base.startswith(remote_prefix):
+            branch_name = base[len(remote_prefix):]
+            return _is_allowed_branch_name(branch_name, sandbox_branch)
+
+    # Full ref paths
+    if base.startswith("refs/heads/"):
+        branch_name = base[len("refs/heads/"):]
+        return _is_allowed_branch_name(branch_name, sandbox_branch)
+
+    # SHA hashes (hex strings of sufficient length) are always allowed
+    if len(base) >= _MIN_SHA_LENGTH and all(c in "0123456789abcdefABCDEF" for c in base):
+        return True
+
+    # Bare branch names
+    return _is_allowed_branch_name(base, sandbox_branch)
+
 
 # ---------------------------------------------------------------------------
 # Remote Subcommand Validation
@@ -488,6 +619,380 @@ def validate_request(raw: dict) -> Tuple[Optional[GitExecRequest], Optional[Vali
     return GitExecRequest(args=args, cwd=cwd, stdin_b64=stdin_b64), None
 
 
+def _get_subcommand_args(
+    args: List[str],
+) -> Tuple[Optional[str], List[str], List[str]]:
+    """Extract the git subcommand and its arguments from a full arg list.
+
+    Handles global flags (-c key=val, -C <path>, --git-dir, --work-tree,
+    --namespace) and the ``--`` global-options terminator.
+
+    Args:
+        args: Git command arguments (without the ``git`` prefix).
+
+    Returns:
+        (subcommand, subcommand_args, config_pairs) where subcommand is
+        None if no subcommand was found.  config_pairs contains any
+        ``-c key=value`` strings encountered before the subcommand.
+    """
+    idx = 0
+    config_pairs: List[str] = []
+
+    while idx < len(args):
+        arg = args[idx]
+
+        # '--' terminates global options; next arg is the subcommand
+        if arg == "--":
+            idx += 1
+            break
+
+        # Collect -c key=value pairs
+        if arg == "-c" and idx + 1 < len(args):
+            config_pairs.append(args[idx + 1])
+            idx += 2
+            continue
+        elif arg.startswith("-c") and len(arg) > 2:
+            # Compact -ckey=value form
+            config_pairs.append(arg[2:])
+            idx += 1
+            continue
+
+        # Skip global value flags and their argument
+        if arg in _GLOBAL_VALUE_FLAGS and idx + 1 < len(args):
+            idx += 2
+            continue
+        # Handle --flag=value form for global value flags
+        flag_name = arg.split("=", 1)[0]
+        if flag_name in _GLOBAL_VALUE_FLAGS and "=" in arg:
+            idx += 1
+            continue
+
+        # First non-flag argument is the subcommand
+        if not arg.startswith("-"):
+            break
+
+        idx += 1
+
+    if idx >= len(args):
+        return None, [], config_pairs
+
+    return args[idx], args[idx + 1:], config_pairs
+
+
+def _get_subcommand(args: List[str]) -> Optional[str]:
+    """Return the git subcommand from *args*, or None."""
+    subcmd, _, _ = _get_subcommand_args(args)
+    return subcmd
+
+
+# ---------------------------------------------------------------------------
+# Branch Isolation Validator
+# ---------------------------------------------------------------------------
+
+# fetch/pull flags that consume the next argument as a value
+_FETCH_VALUE_FLAGS: FrozenSet[str] = frozenset({
+    "--depth", "--deepen", "--shallow-since", "--shallow-exclude",
+    "-j", "--jobs", "--negotiation-tip", "--server-option", "-o",
+    "--upload-pack", "--refmap", "--recurse-submodules-default",
+    "--filter",
+})
+
+# checkout/switch flags that consume the next argument as a value
+_CHECKOUT_VALUE_FLAGS: FrozenSet[str] = frozenset({
+    "-b", "-B",       # checkout: create branch
+    "-c", "-C",       # switch: create branch
+    "--orphan",       # checkout: create orphan branch
+    "--conflict",     # checkout: conflict style
+    "--pathspec-from-file",
+})
+
+# checkout/switch flags that indicate branch creation (next arg is new branch name)
+_BRANCH_CREATE_FLAGS: FrozenSet[str] = frozenset({
+    "-b", "-B", "-c", "-C", "--orphan",
+})
+
+
+def validate_branch_isolation(
+    args: List[str],
+    metadata: Optional[dict],
+) -> Optional[ValidationError]:
+    """Validate git command args for branch isolation.
+
+    Enforces that a sandbox can only access its own branch, well-known
+    branches, tags, and SHA hashes.  Commands that enumerate refs
+    (for-each-ref, ls-remote, show-ref, branch --list) return None here
+    and are handled by output filtering instead.
+
+    Args:
+        args: Git command arguments (without ``git`` prefix).
+        metadata: Container metadata dict (must contain ``sandbox_branch``).
+
+    Returns:
+        None if allowed, ValidationError if blocked.
+    """
+    if not metadata:
+        return None
+    sandbox_branch = metadata.get("sandbox_branch")
+    if not sandbox_branch:
+        return None
+
+    subcommand, sub_args, _ = _get_subcommand_args(args)
+    if subcommand is None:
+        return None  # will be caught by validate_command
+
+    # --- branch deletion guard ---
+    if subcommand == "branch":
+        delete_mode = False
+        i = 0
+        while i < len(sub_args):
+            a = sub_args[i]
+            if a in ("-d", "-D", "--delete"):
+                delete_mode = True
+            elif delete_mode and not a.startswith("-"):
+                if not _is_allowed_branch_name(a, sandbox_branch):
+                    return ValidationError(
+                        f"Branch isolation: cannot delete branch '{a}'"
+                    )
+            i += 1
+        return None  # branch listing handled by output filtering
+
+    # --- ref enum commands (handled by output filtering) ---
+    if subcommand in _REF_ENUM_CMDS:
+        return None
+
+    # --- checkout / switch ---
+    if subcommand in ("checkout", "switch"):
+        return _validate_checkout_isolation(sub_args, sandbox_branch)
+
+    # --- fetch / pull ---
+    if subcommand in ("fetch", "pull"):
+        return _validate_fetch_isolation(sub_args, sandbox_branch)
+
+    # --- worktree add ---
+    if subcommand == "worktree" and sub_args and sub_args[0] == "add":
+        return _validate_worktree_add_isolation(sub_args[1:], sandbox_branch)
+
+    # --- bisect start ---
+    if subcommand == "bisect" and sub_args and sub_args[0] == "start":
+        for a in sub_args[1:]:
+            if a == "--":
+                break
+            if not a.startswith("-") and not _is_allowed_ref(a, sandbox_branch):
+                return ValidationError(
+                    f"Branch isolation: ref '{a}' not allowed in bisect"
+                )
+        return None
+
+    # --- reflog ---
+    if subcommand == "reflog":
+        # reflog show <ref> — check the ref
+        reflog_args = sub_args
+        if reflog_args and reflog_args[0] in ("show", "expire", "delete"):
+            reflog_args = reflog_args[1:]
+        for a in reflog_args:
+            if a == "--":
+                break
+            if not a.startswith("-") and not _is_allowed_ref(a, sandbox_branch):
+                return ValidationError(
+                    f"Branch isolation: ref '{a}' not allowed in reflog"
+                )
+        return None
+
+    # --- notes ---
+    if subcommand == "notes":
+        # notes --ref=<ref> — check the ref
+        for a in sub_args:
+            if a.startswith("--ref="):
+                ref_val = a[len("--ref="):]
+                if not _is_allowed_ref(ref_val, sandbox_branch):
+                    return ValidationError(
+                        f"Branch isolation: ref '{ref_val}' not allowed in notes"
+                    )
+        return None
+
+    # --- ref-reading commands (log, show, diff, blame, etc.) ---
+    if subcommand in _REF_READING_CMDS:
+        return _validate_ref_reading_isolation(sub_args, sandbox_branch)
+
+    return None
+
+
+def _validate_checkout_isolation(
+    sub_args: List[str], sandbox_branch: str,
+) -> Optional[ValidationError]:
+    """Validate checkout/switch args for branch isolation."""
+    creating_branch = False
+    skip_next = False
+    positionals: List[str] = []
+    start_point: Optional[str] = None
+
+    i = 0
+    while i < len(sub_args):
+        a = sub_args[i]
+        if a == "--":
+            break  # rest are pathspecs
+        if skip_next:
+            skip_next = False
+            i += 1
+            continue
+
+        if a in _BRANCH_CREATE_FLAGS:
+            creating_branch = True
+            # Next arg is the new branch name (skip it)
+            skip_next = True
+            i += 1
+            continue
+
+        if a in _CHECKOUT_VALUE_FLAGS:
+            skip_next = True
+            i += 1
+            continue
+
+        # Handle --flag=value form
+        flag_name = a.split("=", 1)[0]
+        if flag_name in _CHECKOUT_VALUE_FLAGS:
+            if flag_name in _BRANCH_CREATE_FLAGS:
+                creating_branch = True
+            i += 1
+            continue
+
+        if not a.startswith("-"):
+            positionals.append(a)
+
+        i += 1
+
+    if creating_branch:
+        # When creating a branch, the start-point (if any) is the last positional
+        if positionals:
+            start_point = positionals[-1]
+            if not _is_allowed_ref(start_point, sandbox_branch):
+                return ValidationError(
+                    f"Branch isolation: start-point '{start_point}' not allowed"
+                )
+    else:
+        # Switching to a branch: first positional is the target
+        if positionals:
+            target = positionals[0]
+            if not _is_allowed_ref(target, sandbox_branch):
+                return ValidationError(
+                    f"Branch isolation: cannot switch to '{target}'. "
+                    f"If this is a file path, use -- to separate paths from refs."
+                )
+
+    return None
+
+
+def _validate_fetch_isolation(
+    sub_args: List[str], sandbox_branch: str,
+) -> Optional[ValidationError]:
+    """Validate fetch/pull args for branch isolation."""
+    skip_next = False
+    positionals: List[str] = []
+
+    for i, a in enumerate(sub_args):
+        if a == "--":
+            break
+        if skip_next:
+            skip_next = False
+            continue
+
+        # Skip flags that consume the next argument
+        if a in _FETCH_VALUE_FLAGS:
+            skip_next = True
+            continue
+        # Handle --flag=value form
+        if "=" in a and a.split("=", 1)[0] in _FETCH_VALUE_FLAGS:
+            continue
+
+        if not a.startswith("-"):
+            positionals.append(a)
+
+    # First positional is the remote name (always allowed), rest are refspecs
+    for refspec in positionals[1:]:
+        # Handle +src:dst refspec format
+        spec = refspec.lstrip("+")
+        src, _, dst = spec.partition(":")
+        if src and not _is_allowed_ref(src, sandbox_branch):
+            return ValidationError(
+                f"Branch isolation: refspec source '{src}' not allowed"
+            )
+        if dst and not _is_allowed_ref(dst, sandbox_branch):
+            return ValidationError(
+                f"Branch isolation: refspec destination '{dst}' not allowed"
+            )
+
+    return None
+
+
+def _validate_worktree_add_isolation(
+    sub_args: List[str], sandbox_branch: str,
+) -> Optional[ValidationError]:
+    """Validate worktree add args for branch isolation."""
+    skip_next = False
+    positionals: List[str] = []
+
+    for a in sub_args:
+        if a == "--":
+            break
+        if skip_next:
+            skip_next = False
+            continue
+        if a in ("-b", "-B"):
+            skip_next = True  # next is branch name (new, allowed)
+            continue
+        if not a.startswith("-"):
+            positionals.append(a)
+
+    # worktree add <path> [<commit-ish>]
+    # First positional is path, second is commit-ish
+    if len(positionals) >= 2:
+        commit_ish = positionals[1]
+        if not _is_allowed_ref(commit_ish, sandbox_branch):
+            return ValidationError(
+                f"Branch isolation: commit-ish '{commit_ish}' not allowed "
+                f"in worktree add"
+            )
+
+    return None
+
+
+def _validate_ref_reading_isolation(
+    sub_args: List[str], sandbox_branch: str,
+) -> Optional[ValidationError]:
+    """Validate ref-reading command args for branch isolation.
+
+    Blocks --all/--branches/--remotes/--glob flags and checks each
+    positional ref argument.
+    """
+    for a in sub_args:
+        if a == "--":
+            break  # rest are pathspecs
+        if a in _IMPLICIT_ALL_REF_FLAGS:
+            return ValidationError(
+                f"Branch isolation: flag '{a}' not allowed (exposes all branches)"
+            )
+        for prefix in _IMPLICIT_REF_FLAG_PREFIXES:
+            if a.startswith(prefix):
+                return ValidationError(
+                    f"Branch isolation: flag '{a}' not allowed "
+                    f"(exposes multiple branches)"
+                )
+
+    # Check positional ref args (before --)
+    for a in sub_args:
+        if a == "--":
+            break
+        if a.startswith("-"):
+            continue
+        if not _is_allowed_ref(a, sandbox_branch):
+            return ValidationError(
+                f"Branch isolation: ref '{a}' not allowed. "
+                f"If this is a file path, use -- to separate paths from refs."
+            )
+
+    return None
+
+
 def validate_command(
     args: List[str],
     extra_allowed: Optional[Set[str]] = None,
@@ -504,40 +1009,19 @@ def validate_command(
     if not args:
         return ValidationError("Empty command")
 
-    # Parse out any global flags and -c options before the subcommand
-    idx = 0
-    config_pairs: List[str] = []
-
-    while idx < len(args):
-        arg = args[idx]
-
-        # Check global blocked flags
+    # Check global blocked flags before parsing
+    for arg in args:
         flag_name = arg.split("=", 1)[0]
         if flag_name in GLOBAL_BLOCKED_FLAGS:
             return ValidationError(f"Blocked flag: {flag_name}")
-
-        # Collect -c key=value pairs for later validation
-        if arg == "-c" and idx + 1 < len(args):
-            config_pairs.append(args[idx + 1])
-            idx += 2
-            continue
-        elif arg.startswith("-c") and len(arg) > 2:
-            # -ckey=value form
-            config_pairs.append(arg[2:])
-            idx += 1
-            continue
-
-        # Stop at first non-flag argument (the subcommand)
+        # Stop scanning after first non-flag (subcommand)
         if not arg.startswith("-"):
             break
 
-        idx += 1
-
-    if idx >= len(args):
+    # Extract subcommand and args using shared helper
+    subcommand, subcommand_args, config_pairs = _get_subcommand_args(args)
+    if subcommand is None:
         return ValidationError("No subcommand found")
-
-    subcommand = args[idx]
-    subcommand_args = args[idx + 1:]
 
     # Check subcommand against allowlist
     allowed = ALLOWED_COMMANDS
@@ -1178,6 +1662,20 @@ def execute_git(
             command_args=request.args,
             reason=err.reason,
             matched_rule="command_validation",
+            request_id=req_id,
+        )
+        return None, err
+
+    # Validate branch isolation
+    err = validate_branch_isolation(request.args, metadata)
+    if err:
+        audit_log(
+            event="branch_isolation_blocked",
+            action=" ".join(request.args[:3]),
+            decision="deny",
+            command_args=request.args,
+            reason=err.reason,
+            matched_rule="branch_isolation",
             request_id=req_id,
         )
         return None, err

@@ -2,7 +2,7 @@
   "spec_id": "branch-isolation-2026-02-07-001",
   "title": "branch-isolation",
   "generated": "2026-02-07T15:38:17.311576Z",
-  "last_updated": "2026-02-07T15:49:51.196318Z",
+  "last_updated": "2026-02-07T15:54:19.181693Z",
   "metadata": {
     "description": "",
     "mission": "Fix shared bare repo correctness bugs, enforce cross-sandbox branch isolation in the git proxy, serialize concurrent fetches, clean up branches on destroy/prune, and harden remaining leak channels \u2014 preventing sandboxes from reading, diffing, cherry-picking, or enumerating other sandboxes' branches.",
@@ -24,7 +24,7 @@
     "category": "implementation",
     "template": "empty"
   },
-  "progress_percentage": 21,
+  "progress_percentage": 32,
   "status": "in_progress",
   "current_phase": "phase-3",
   "hierarchy": {
@@ -43,7 +43,7 @@
         "phase-7"
       ],
       "total_tasks": 37,
-      "completed_tasks": 8,
+      "completed_tasks": 12,
       "metadata": {
         "purpose": "",
         "category": "implementation"
@@ -329,7 +329,7 @@
     "phase-3": {
       "type": "phase",
       "title": "Cross-Sandbox Branch Isolation",
-      "status": "pending",
+      "status": "in_progress",
       "parent": "spec-root",
       "children": [
         "task-3-1",
@@ -343,7 +343,7 @@
         "verify-3-1"
       ],
       "total_tasks": 9,
-      "completed_tasks": 0,
+      "completed_tasks": 4,
       "metadata": {
         "purpose": "",
         "description": "Core isolation enforcement in the git proxy. Add subcommand extraction helpers, ref validation constants and functions, and the main validate_branch_isolation() validator. Wire it into execute_git(). Add output filtering for branch listings, ref enumerations, and log decorations. This phase covers: (3A) subcommand extraction, rev suffix stripping, ref allowlist, isolation validator for checkout/switch, fetch/pull, worktree, bisect, reflog, notes, implicit-all flags; (3B) wiring validate_branch_isolation() into execute_git(); (3C) output filters for branch listing, ref-enum, log decorations (SHA-anchored + custom %d/%D), --source redaction."
@@ -361,11 +361,11 @@
     "task-3-1": {
       "type": "task",
       "title": "Add _get_subcommand() and _get_subcommand_args() helpers",
-      "status": "pending",
+      "status": "completed",
       "parent": "phase-3",
       "children": [],
       "total_tasks": 1,
-      "completed_tasks": 0,
+      "completed_tasks": 1,
       "metadata": {
         "description": "Add _get_subcommand_args() that extracts the git subcommand and its args from the full arg list, handling global flags (-c key=val, -C <path>, --git-dir, --work-tree, --namespace) and the '--' global-options terminator. Add _get_subcommand() wrapper. Refactor validate_command() (lines 507-540) to call _get_subcommand_args() internally, eliminating duplicated global-flag parsing logic. Define _GLOBAL_VALUE_FLAGS frozenset.",
         "file_path": "unified-proxy/git_operations.py",
@@ -375,7 +375,12 @@
           "Handles -- global-options terminator",
           "validate_command() refactored to use _get_subcommand_args() internally"
         ],
-        "task_category": "implementation"
+        "task_category": "implementation",
+        "started_at": "2026-02-07T15:50:08.212492Z",
+        "completed_at": "2026-02-07T15:51:17.237559Z",
+        "needs_journaling": false,
+        "actual_hours": 0.02,
+        "journaled_at": "2026-02-07T15:51:17.237646Z"
       },
       "dependencies": {
         "blocks": [],
@@ -386,11 +391,11 @@
     "task-3-2": {
       "type": "task",
       "title": "Add isolation constants and ref validation helpers",
-      "status": "pending",
+      "status": "completed",
       "parent": "phase-3",
       "children": [],
       "total_tasks": 1,
-      "completed_tasks": 0,
+      "completed_tasks": 1,
       "metadata": {
         "description": "Add constants: WELL_KNOWN_BRANCHES (main, master, develop, production), WELL_KNOWN_BRANCH_PREFIXES (release/, hotfix/), _REF_READING_CMDS (log, show, diff, blame, cherry-pick, merge, rebase, reset, rev-list, diff-tree, rev-parse, shortlog, describe, name-rev, archive, format-patch), _REF_ENUM_CMDS (for-each-ref, ls-remote, show-ref), _IMPLICIT_ALL_REF_FLAGS (--all, --branches, --remotes, --glob), _IMPLICIT_REF_FLAG_PREFIXES (--branches=, --remotes=, --glob=). Add _strip_rev_suffixes() using regex to strip ~N/^N chains. Add _is_allowed_ref() that checks: FETCH_HEAD blocked, HEAD/@{} allowed, range operators checked recursively, tags allowed, remote tracking refs apply branch-name isolation, SHA hashes >= 12 hex chars allowed. Add _is_allowed_branch_name() for bare branch name checks against well-known list and own sandbox branch.",
         "file_path": "unified-proxy/git_operations.py",
@@ -402,7 +407,12 @@
           "_is_allowed_ref handles range operators (.., ...) recursively",
           "Remote tracking refs (origin/X, refs/remotes/origin/X) apply branch-name isolation"
         ],
-        "task_category": "implementation"
+        "task_category": "implementation",
+        "started_at": "2026-02-07T15:51:25.596279Z",
+        "completed_at": "2026-02-07T15:52:23.895120Z",
+        "needs_journaling": false,
+        "actual_hours": 0.02,
+        "journaled_at": "2026-02-07T15:52:23.895193Z"
       },
       "dependencies": {
         "blocks": [],
@@ -413,11 +423,11 @@
     "task-3-3": {
       "type": "task",
       "title": "Implement validate_branch_isolation() validator",
-      "status": "pending",
+      "status": "completed",
       "parent": "phase-3",
       "children": [],
       "total_tasks": 1,
-      "completed_tasks": 0,
+      "completed_tasks": 1,
       "metadata": {
         "description": "Implement validate_branch_isolation(args, metadata) that returns Optional[ValidationError]. Early return if no metadata or no sandbox_branch. Handles: (1) branch deletion guard - blocks -d/-D/--delete of non-allowed branches; (2) ref enum commands - returns None (handled by output filtering); (3) checkout/switch - parses -b/-B/-c/-C/--orphan create flags, checks start-point or target; (4) fetch/pull - parses _FETCH_VALUE_FLAGS to correctly count positionals, first positional is remote name, remaining are refspecs with +src:dst handling; (5) worktree add - checks second positional (commit-ish); (6) bisect start - checks all ref positionals; (7) ref-reading commands - blocks _IMPLICIT_ALL_REF_FLAGS and _IMPLICIT_REF_FLAG_PREFIXES, then checks each positional arg before -- against _is_allowed_ref. Error messages suggest using -- for path separation.",
         "file_path": "unified-proxy/git_operations.py",
@@ -432,7 +442,12 @@
           "Args after -- not checked (pathspecs)",
           "Error messages include suggestion to use -- separator"
         ],
-        "task_category": "implementation"
+        "task_category": "implementation",
+        "started_at": "2026-02-07T15:52:32.231272Z",
+        "completed_at": "2026-02-07T15:53:47.837035Z",
+        "needs_journaling": false,
+        "actual_hours": 0.02,
+        "journaled_at": "2026-02-07T15:53:47.837141Z"
       },
       "dependencies": {
         "blocks": [],
@@ -443,11 +458,11 @@
     "task-3-4": {
       "type": "task",
       "title": "Wire validate_branch_isolation() into execute_git()",
-      "status": "pending",
+      "status": "completed",
       "parent": "phase-3",
       "children": [],
       "total_tasks": 1,
-      "completed_tasks": 0,
+      "completed_tasks": 1,
       "metadata": {
         "description": "In execute_git(), after path args validation (~line 1193), before push check (~line 1195), call validate_branch_isolation(request.args, metadata). On error, emit audit_log with event='branch_isolation_blocked', decision='deny', matched_rule='branch_isolation', and return None, err.",
         "file_path": "unified-proxy/git_operations.py",
@@ -456,7 +471,12 @@
           "Audit log emitted on denial with correct event/decision/rule fields",
           "Blocked commands return ValidationError to caller"
         ],
-        "task_category": "implementation"
+        "task_category": "implementation",
+        "started_at": "2026-02-07T15:53:53.592803Z",
+        "completed_at": "2026-02-07T15:54:19.181501Z",
+        "needs_journaling": false,
+        "actual_hours": 0.01,
+        "journaled_at": "2026-02-07T15:54:19.181576Z"
       },
       "dependencies": {
         "blocks": [],
@@ -1246,6 +1266,42 @@
       "author": "foundry-mcp",
       "metadata": {},
       "task_id": "verify-2-1"
+    },
+    {
+      "timestamp": "2026-02-07T15:51:17.237646Z",
+      "entry_type": "status_change",
+      "title": "Task Completed: Add _get_subcommand() and _get_subcommand_args() helpers",
+      "content": "Added _GLOBAL_VALUE_FLAGS frozenset, _get_subcommand_args(), and _get_subcommand() helpers to git_operations.py. Refactored validate_command() to use _get_subcommand_args() internally, eliminating duplicated global-flag parsing. The helpers properly handle -c key=val (both forms), -C, --git-dir, --work-tree, --namespace flags, and the -- terminator. All 50 existing tests pass. Full testing deferred to verify-3-1.",
+      "author": "foundry-mcp",
+      "metadata": {},
+      "task_id": "task-3-1"
+    },
+    {
+      "timestamp": "2026-02-07T15:52:23.895193Z",
+      "entry_type": "status_change",
+      "title": "Task Completed: Add isolation constants and ref validation helpers",
+      "content": "Added branch isolation constants and ref validation helpers to git_operations.py. Constants: WELL_KNOWN_BRANCHES, WELL_KNOWN_BRANCH_PREFIXES, _REF_READING_CMDS, _REF_ENUM_CMDS, _IMPLICIT_ALL_REF_FLAGS, _IMPLICIT_REF_FLAG_PREFIXES, _REV_SUFFIX_RE, _MIN_SHA_LENGTH. Helpers: _strip_rev_suffixes() (regex-based ~N/^N/@{} stripping), _is_allowed_branch_name() (checks own branch, well-known, prefixes), _is_allowed_ref() (handles HEAD, FETCH_HEAD blocking, tags, remote tracking refs, SHA hashes >= 12 chars, range operators recursively). All 50 existing tests pass. Full testing deferred to verify-3-1.",
+      "author": "foundry-mcp",
+      "metadata": {},
+      "task_id": "task-3-2"
+    },
+    {
+      "timestamp": "2026-02-07T15:53:47.837141Z",
+      "entry_type": "status_change",
+      "title": "Task Completed: Implement validate_branch_isolation() validator",
+      "content": "Implemented validate_branch_isolation() and its sub-validators in git_operations.py. Added _FETCH_VALUE_FLAGS, _CHECKOUT_VALUE_FLAGS, _BRANCH_CREATE_FLAGS constants. Implemented: validate_branch_isolation() dispatcher, _validate_checkout_isolation() (handles -b/-B/-c/-C/--orphan, start-point checks), _validate_fetch_isolation() (parses fetch value flags, checks refspecs with +src:dst), _validate_worktree_add_isolation() (checks commit-ish), _validate_ref_reading_isolation() (blocks --all/--branches/--remotes/--glob, checks positional refs). Branch deletion guard, bisect start, reflog, and notes handlers included. All 50 existing tests pass. Full testing deferred to verify-3-1.",
+      "author": "foundry-mcp",
+      "metadata": {},
+      "task_id": "task-3-3"
+    },
+    {
+      "timestamp": "2026-02-07T15:54:19.181576Z",
+      "entry_type": "status_change",
+      "title": "Task Completed: Wire validate_branch_isolation() into execute_git()",
+      "content": "Wired validate_branch_isolation() into execute_git() in git_operations.py:1669-1679. Added after command validation, before path validation. Includes audit_log with event=branch_isolation_blocked. All 50 tests pass.",
+      "author": "foundry-mcp",
+      "metadata": {},
+      "task_id": "task-3-4"
     }
   ]
 }
