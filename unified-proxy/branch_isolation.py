@@ -12,8 +12,12 @@ Security model:
 
 Also defines shared symbols used by git_operations:
 - ValidationError: dataclass for validation failures
-- _get_subcommand_args / _get_subcommand: arg parsing helpers
+- get_subcommand_args / get_subcommand: arg parsing helpers
 - GIT_BINARY: path to git executable
+- GLOBAL_VALUE_FLAGS: global flags consuming a value argument
+- resolve_bare_repo_path: worktree→bare-repo chain resolver
+- SHA_CHECK_TIMEOUT: timeout for SHA reachability subprocess calls
+- filter_ref_listing_output / filter_stderr_branch_refs: output filters
 """
 
 import logging
@@ -47,8 +51,8 @@ class ValidationError:
 
 
 # Global flags that consume the next argument as their value.
-# Used by _get_subcommand_args() to skip over value arguments.
-_GLOBAL_VALUE_FLAGS: FrozenSet[str] = frozenset({
+# Used by get_subcommand_args() to skip over value arguments.
+GLOBAL_VALUE_FLAGS: FrozenSet[str] = frozenset({
     "-C",
     "--git-dir",
     "--work-tree",
@@ -56,7 +60,7 @@ _GLOBAL_VALUE_FLAGS: FrozenSet[str] = frozenset({
 })
 
 
-def _get_subcommand_args(
+def get_subcommand_args(
     args: List[str],
 ) -> Tuple[Optional[str], List[str], List[str]]:
     """Extract the git subcommand and its arguments from a full arg list.
@@ -95,12 +99,12 @@ def _get_subcommand_args(
             continue
 
         # Skip global value flags and their argument
-        if arg in _GLOBAL_VALUE_FLAGS and idx + 1 < len(args):
+        if arg in GLOBAL_VALUE_FLAGS and idx + 1 < len(args):
             idx += 2
             continue
         # Handle --flag=value form for global value flags
         flag_name = arg.split("=", 1)[0]
-        if flag_name in _GLOBAL_VALUE_FLAGS and "=" in arg:
+        if flag_name in GLOBAL_VALUE_FLAGS and "=" in arg:
             idx += 1
             continue
 
@@ -116,13 +120,13 @@ def _get_subcommand_args(
     return args[idx], args[idx + 1:], config_pairs
 
 
-def _get_subcommand(args: List[str]) -> Optional[str]:
+def get_subcommand(args: List[str]) -> Optional[str]:
     """Return the git subcommand from *args*, or None."""
-    subcmd, _, _ = _get_subcommand_args(args)
+    subcmd, _, _ = get_subcommand_args(args)
     return subcmd
 
 
-def _resolve_bare_repo_path(repo_root: str) -> Optional[str]:
+def resolve_bare_repo_path(repo_root: str) -> Optional[str]:
     """Follow the worktree .git -> gitdir -> commondir chain to find the bare repo.
 
     Git worktrees have a ``.git`` *file* (not directory) that contains a
@@ -255,7 +259,17 @@ _REF_READING_VALUE_FLAGS: FrozenSet[str] = frozenset({
 # Regex to strip revision suffixes (~N, ^N, @{...}) from ref names
 _REV_SUFFIX_RE = re.compile(r"([~^]\d*|@\{[^}]*\})+$")
 
-# Minimum length for a hex string to be treated as a SHA hash
+# Minimum length for a hex string to be treated as a SHA hash.
+#
+# Why 12?  Git's default `core.abbrev` is "auto" which typically produces
+# 7-12 character abbreviations depending on the number of objects.  Using 12
+# as the floor avoids false-positives on short hex tokens (config values,
+# color codes, partial file names) while still accepting the longest default
+# abbreviations.  Collision risk: 12 hex chars = 48 bits ≈ 2.8 × 10^14
+# possible prefixes, making accidental collisions negligible for repos under
+# ~10^7 objects.  As defense-in-depth, SHA arguments passing this check are
+# also verified via `_check_sha_reachability` to confirm they are ancestors
+# of allowed branches, so a false-positive here cannot leak data.
 _MIN_SHA_LENGTH = 12
 
 # fetch/pull flags that consume the next argument as a value
@@ -295,7 +309,7 @@ _PUSH_VALUE_FLAGS: FrozenSet[str] = frozenset({
 # ---------------------------------------------------------------------------
 
 # Timeout for SHA reachability git subprocess calls (seconds).
-_SHA_CHECK_TIMEOUT = 10
+SHA_CHECK_TIMEOUT = 10
 
 _HEX_CHARS = frozenset("0123456789abcdefABCDEF")
 
@@ -447,7 +461,8 @@ def _is_allowed_ref(ref: str, sandbox_branch: str) -> bool:
             if branch_part:
                 return _is_allowed_branch_name(branch_part, sandbox_branch)
             return False
-        # Allowed as a slashed branch name (e.g. "release/1.0"); fall through
+        # Allowed as a slashed branch name (e.g. "release/1.0")
+        return True
 
     # Full ref paths
     if base.startswith("refs/heads/"):
@@ -493,7 +508,7 @@ def validate_branch_isolation(
             "Branch isolation: metadata present but missing sandbox_branch"
         )
 
-    subcommand, sub_args, _ = _get_subcommand_args(args)
+    subcommand, sub_args, _ = get_subcommand_args(args)
     if subcommand is None:
         return None  # will be caught by validate_command
 
@@ -931,7 +946,13 @@ def _validate_ref_reading_isolation(
 
 
 def _is_sha_like(token: str) -> bool:
-    """Return True if *token* looks like a SHA hash (12-40 hex chars)."""
+    """Return True if *token* looks like a SHA hash (12-40 hex chars).
+
+    The 12-char minimum (``_MIN_SHA_LENGTH``) balances false-positive
+    avoidance against accepting git's default abbreviated SHAs.  See the
+    comment on ``_MIN_SHA_LENGTH`` for collision analysis.  Callers that
+    need stronger assurance should follow up with ``_check_sha_reachability``.
+    """
     return (
         _MIN_SHA_LENGTH <= len(token) <= 40
         and all(c in _HEX_CHARS for c in token)
@@ -1005,7 +1026,7 @@ def _get_allowed_refs(bare_repo: str, sandbox_branch: str) -> List[str]:
                 [GIT_BINARY, "--git-dir", bare_repo,
                  "for-each-ref", "--format=%(refname)",
                  f"refs/heads/{prefix}"],
-                capture_output=True, timeout=_SHA_CHECK_TIMEOUT,
+                capture_output=True, timeout=SHA_CHECK_TIMEOUT,
             )
             if result.returncode == 0 and result.stdout:
                 for line in result.stdout.decode().splitlines():
@@ -1052,13 +1073,16 @@ def _check_sha_reachability(
     # Check each allowed ref (tags prefix handled specially)
     for ref in allowed_refs:
         if ref.endswith("/"):
-            # Tag prefix — single `git tag --contains` call instead of
-            # enumerating all tags and checking each with merge-base.
+            # Tag prefix — use for-each-ref --contains with --count=1
+            # for early exit after first match (faster than `git tag
+            # --contains` which enumerates all matching tags).
             try:
                 result = subprocess.run(
                     [GIT_BINARY, "--git-dir", bare_repo,
-                     "tag", "--contains", sha],
-                    capture_output=True, timeout=_SHA_CHECK_TIMEOUT,
+                     "for-each-ref", f"--contains={sha}",
+                     "refs/tags/", "--count=1",
+                     "--format=%(refname)"],
+                    capture_output=True, timeout=SHA_CHECK_TIMEOUT,
                 )
                 if result.returncode == 0 and result.stdout.strip():
                     cache[sha] = True
@@ -1072,7 +1096,7 @@ def _check_sha_reachability(
             result = subprocess.run(
                 [GIT_BINARY, "--git-dir", bare_repo,
                  "merge-base", "--is-ancestor", sha, ref],
-                capture_output=True, timeout=_SHA_CHECK_TIMEOUT,
+                capture_output=True, timeout=SHA_CHECK_TIMEOUT,
             )
             if result.returncode == 0:
                 cache[sha] = True
@@ -1108,7 +1132,7 @@ def validate_sha_reachability(
     if not sandbox_branch:
         return None
 
-    subcommand, sub_args, _ = _get_subcommand_args(args)
+    subcommand, sub_args, _ = get_subcommand_args(args)
     if subcommand is None:
         return None
 
@@ -1122,7 +1146,7 @@ def validate_sha_reachability(
         return None
 
     # Resolve bare repo — fail closed if resolution fails
-    bare_repo = _resolve_bare_repo_path(repo_root)
+    bare_repo = resolve_bare_repo_path(repo_root)
     if not bare_repo:
         return ValidationError(
             "Branch isolation: cannot resolve bare repo path for SHA "
@@ -1245,6 +1269,25 @@ def _is_allowed_short_ref_token(token: str, sandbox_branch: str) -> bool:
     return False
 
 
+def _looks_like_ref_token(token: str) -> bool:
+    """Heuristic: return True if *token* plausibly looks like a git ref.
+
+    Used in pass-2 of ``_filter_ref_enum_output`` to avoid applying ref
+    filtering to non-ref data (commit messages, dates, etc.) that may
+    appear as a second token on SHA-prefixed lines in custom formats.
+    """
+    if not token or len(token) > 256:
+        return False
+    # Tokens starting with a digit (but not a SHA) are likely dates, counts
+    if token[0].isdigit() and not _is_sha_like(token):
+        return False
+    # Tokens containing revision traversal operators are not bare ref names
+    for ch in ("..", "~", "^", ":"):
+        if ch in token:
+            return False
+    return True
+
+
 def _filter_ref_enum_output(output: str, sandbox_branch: str) -> str:
     """Filter ref enumeration output (for-each-ref, ls-remote, show-ref).
 
@@ -1302,7 +1345,13 @@ def _filter_ref_enum_output(output: str, sandbox_branch: str) -> str:
             if _is_sha_like(first_token):
                 # SHA-prefixed line with optional ref token (custom format)
                 if len(tokens) >= 2:
-                    if _is_allowed_short_ref_token(tokens[1], sandbox_branch):
+                    second = tokens[1]
+                    if _looks_like_ref_token(second):
+                        # Looks like a ref — apply isolation filter
+                        if _is_allowed_short_ref_token(second, sandbox_branch):
+                            filtered_lines.append(line)
+                    else:
+                        # Non-ref data (date, commit message, etc.) — keep
                         filtered_lines.append(line)
                 else:
                     filtered_lines.append(line)
@@ -1470,14 +1519,23 @@ def _filter_custom_format_decorations(
         # Try bare format (%D): "HEAD -> main, origin/feature"
         # Only apply this heuristic when %D is actually in the format string;
         # %d always produces parenthesized output handled above.
+        #
+        # Best-effort: input validation is the primary defense; this heuristic
+        # catches residual decoration lines.  A majority of comma-separated
+        # tokens must look ref-like to trigger filtering, and tokens longer
+        # than 256 chars are assumed to be non-ref data (commit messages, etc.).
         if has_bare_D and ("," in stripped or stripped.startswith("HEAD")):
-            # Heuristic: if the line looks like a decoration list
             tokens = [t.strip() for t in stripped.split(",")]
-            looks_like_refs = any(
-                t.startswith("HEAD") or t.startswith("tag: ")
-                or "/" in t or _is_allowed_branch_name(t, sandbox_branch)
-                for t in tokens if t
+            non_empty = [t for t in tokens if t]
+            ref_like_count = sum(
+                1 for t in non_empty
+                if len(t) <= 256 and (
+                    t.startswith("HEAD") or t.startswith("tag: ")
+                    or "/" in t or _is_allowed_branch_name(t, sandbox_branch)
+                )
             )
+            total_count = len(non_empty)
+            looks_like_refs = total_count > 0 and ref_like_count > total_count // 2
             if looks_like_refs:
                 filtered = _filter_decoration_refs(stripped, sandbox_branch)
                 if filtered:
@@ -1570,7 +1628,7 @@ def _filter_log_source_refs(output: str, sandbox_branch: str) -> str:
 # ---------------------------------------------------------------------------
 
 
-def _filter_stderr_branch_refs(stderr: str, sandbox_branch: str) -> str:
+def filter_stderr_branch_refs(stderr: str, sandbox_branch: str) -> str:
     """Redact disallowed branch names from stderr output.
 
     Git error messages, hints, and verbose output may contain branch names
@@ -1605,7 +1663,7 @@ def _filter_stderr_branch_refs(stderr: str, sandbox_branch: str) -> str:
 # ---------------------------------------------------------------------------
 
 
-def _filter_ref_listing_output(
+def filter_ref_listing_output(
     output: str,
     args: List[str],
     sandbox_branch: str,
@@ -1626,7 +1684,7 @@ def _filter_ref_listing_output(
     if not output or not sandbox_branch:
         return output
 
-    subcommand, sub_args, _ = _get_subcommand_args(args)
+    subcommand, sub_args, _ = get_subcommand_args(args)
     if subcommand is None:
         return output
 

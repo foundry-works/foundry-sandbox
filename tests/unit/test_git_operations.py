@@ -1232,55 +1232,55 @@ class TestFilterLogDecorations:
 
 
 class TestFilterRefListingDispatch:
-    """Tests for _filter_ref_listing_output() dispatch."""
+    """Tests for filter_ref_listing_output() dispatch."""
 
     SANDBOX = "sandbox-abc123"
 
     def test_dispatches_to_branch_filter(self):
-        from git_operations import _filter_ref_listing_output
+        from git_operations import filter_ref_listing_output
         output = "* sandbox-abc123\n  sandbox-other999\n"
-        result = _filter_ref_listing_output(output, ["branch"], self.SANDBOX)
+        result = filter_ref_listing_output(output, ["branch"], self.SANDBOX)
         assert "sandbox-abc123" in result
         assert "sandbox-other999" not in result
 
     def test_dispatches_to_ref_enum_filter(self):
-        from git_operations import _filter_ref_listing_output
+        from git_operations import filter_ref_listing_output
         output = "abc1234 refs/heads/sandbox-other999\n"
-        result = _filter_ref_listing_output(output, ["for-each-ref"], self.SANDBOX)
+        result = filter_ref_listing_output(output, ["for-each-ref"], self.SANDBOX)
         assert "sandbox-other999" not in result
 
     def test_dispatches_to_log_filter(self):
-        from git_operations import _filter_ref_listing_output
+        from git_operations import filter_ref_listing_output
         output = "abc1234 (origin/sandbox-other999) msg\n"
-        result = _filter_ref_listing_output(output, ["log"], self.SANDBOX)
+        result = filter_ref_listing_output(output, ["log"], self.SANDBOX)
         assert "sandbox-other999" not in result
 
     def test_empty_output_passthrough(self):
-        from git_operations import _filter_ref_listing_output
-        assert _filter_ref_listing_output("", ["branch"], self.SANDBOX) == ""
+        from git_operations import filter_ref_listing_output
+        assert filter_ref_listing_output("", ["branch"], self.SANDBOX) == ""
 
     def test_no_sandbox_branch_passthrough(self):
-        from git_operations import _filter_ref_listing_output
+        from git_operations import filter_ref_listing_output
         output = "* sandbox-other999\n"
-        assert _filter_ref_listing_output(output, ["branch"], "") == output
+        assert filter_ref_listing_output(output, ["branch"], "") == output
 
     def test_non_filtered_command_passthrough(self):
-        from git_operations import _filter_ref_listing_output
+        from git_operations import filter_ref_listing_output
         output = "some output\n"
-        assert _filter_ref_listing_output(output, ["status"], self.SANDBOX) == output
+        assert filter_ref_listing_output(output, ["status"], self.SANDBOX) == output
 
     def test_log_with_source_flag(self):
-        from git_operations import _filter_ref_listing_output
+        from git_operations import filter_ref_listing_output
         output = "abc1234\trefs/heads/sandbox-other999\tmsg\n"
-        result = _filter_ref_listing_output(
+        result = filter_ref_listing_output(
             output, ["log", "--source"], self.SANDBOX
         )
         assert "refs/heads/[redacted]" in result
 
     def test_log_with_custom_format(self):
-        from git_operations import _filter_ref_listing_output
+        from git_operations import filter_ref_listing_output
         output = " (HEAD -> sandbox-abc123, origin/sandbox-other999)\n"
-        result = _filter_ref_listing_output(
+        result = filter_ref_listing_output(
             output, ["log", "--format=%H %d"], self.SANDBOX
         )
         assert "sandbox-abc123" in result
@@ -1353,20 +1353,20 @@ class TestOutputFilteringInExecuteGit:
 
 
 class TestResolveBareRepoPath:
-    """Tests for _resolve_bare_repo_path()."""
+    """Tests for resolve_bare_repo_path()."""
 
     def test_dot_git_directory(self):
         """When .git is a directory (normal repo), return normalized .git path."""
-        from git_operations import _resolve_bare_repo_path
+        from git_operations import resolve_bare_repo_path
         with tempfile.TemporaryDirectory() as tmpdir:
             dot_git = os.path.join(tmpdir, ".git")
             os.makedirs(dot_git)
-            result = _resolve_bare_repo_path(tmpdir)
+            result = resolve_bare_repo_path(tmpdir)
             assert result == os.path.normpath(dot_git)
 
     def test_dot_git_directory_with_commondir(self):
         """When .git dir has a commondir file, follow it."""
-        from git_operations import _resolve_bare_repo_path
+        from git_operations import resolve_bare_repo_path
         with tempfile.TemporaryDirectory() as tmpdir:
             bare = os.path.join(tmpdir, "bare.git")
             os.makedirs(bare)
@@ -1374,12 +1374,12 @@ class TestResolveBareRepoPath:
             os.makedirs(dot_git)
             with open(os.path.join(dot_git, "commondir"), "w") as f:
                 f.write(bare)
-            result = _resolve_bare_repo_path(os.path.join(tmpdir, "work"))
+            result = resolve_bare_repo_path(os.path.join(tmpdir, "work"))
             assert result == os.path.normpath(bare)
 
     def test_dot_git_file_worktree(self):
         """When .git is a file with gitdir pointer, follow the chain."""
-        from git_operations import _resolve_bare_repo_path
+        from git_operations import resolve_bare_repo_path
         with tempfile.TemporaryDirectory() as tmpdir:
             # Set up bare repo
             bare = os.path.join(tmpdir, "bare.git")
@@ -1397,28 +1397,28 @@ class TestResolveBareRepoPath:
             with open(os.path.join(wt, ".git"), "w") as f:
                 f.write(f"gitdir: {wt_gitdir}")
 
-            result = _resolve_bare_repo_path(wt)
+            result = resolve_bare_repo_path(wt)
             assert result == os.path.normpath(bare)
 
     def test_no_dot_git(self):
         """Returns None when .git does not exist."""
-        from git_operations import _resolve_bare_repo_path
+        from git_operations import resolve_bare_repo_path
         with tempfile.TemporaryDirectory() as tmpdir:
-            result = _resolve_bare_repo_path(tmpdir)
+            result = resolve_bare_repo_path(tmpdir)
             assert result is None
 
     def test_invalid_dot_git_file_content(self):
         """Returns None when .git file has unexpected content."""
-        from git_operations import _resolve_bare_repo_path
+        from git_operations import resolve_bare_repo_path
         with tempfile.TemporaryDirectory() as tmpdir:
             with open(os.path.join(tmpdir, ".git"), "w") as f:
                 f.write("garbage content")
-            result = _resolve_bare_repo_path(tmpdir)
+            result = resolve_bare_repo_path(tmpdir)
             assert result is None
 
     def test_relative_commondir(self):
         """Handles relative commondir path correctly."""
-        from git_operations import _resolve_bare_repo_path
+        from git_operations import resolve_bare_repo_path
         with tempfile.TemporaryDirectory() as tmpdir:
             bare = os.path.join(tmpdir, "repos", "bare.git")
             os.makedirs(bare)
@@ -1428,7 +1428,7 @@ class TestResolveBareRepoPath:
             rel = os.path.relpath(bare, dot_git)
             with open(os.path.join(dot_git, "commondir"), "w") as f:
                 f.write(rel)
-            result = _resolve_bare_repo_path(tmpdir)
+            result = resolve_bare_repo_path(tmpdir)
             assert result == os.path.normpath(bare)
 
 
@@ -1534,6 +1534,124 @@ class TestFetchLockingInExecuteGit:
                 response, error = execute_git(request, tmpdir, metadata=self.META)
                 assert error is None
                 assert response is not None
+
+
+# ---------------------------------------------------------------------------
+# S5: Default Branch Detection Helpers
+# ---------------------------------------------------------------------------
+
+
+class TestDetectDefaultBranch:
+    """Tests for _detect_default_branch()."""
+
+    def test_detects_main_branch(self):
+        from git_operations import _detect_default_branch
+        with tempfile.TemporaryDirectory() as tmpdir:
+            # Create a fake bare repo with HEAD pointing to main
+            os.makedirs(tmpdir, exist_ok=True)
+            with patch("git_operations.subprocess.run") as mock_run:
+                mock_run.return_value = MagicMock(
+                    returncode=0,
+                    stdout=b"refs/heads/main\n",
+                )
+                result = _detect_default_branch(tmpdir)
+                assert result == "main"
+
+    def test_detects_master_branch(self):
+        from git_operations import _detect_default_branch
+        with patch("git_operations.subprocess.run") as mock_run:
+            mock_run.return_value = MagicMock(
+                returncode=0,
+                stdout=b"refs/heads/master\n",
+            )
+            result = _detect_default_branch("/fake")
+            assert result == "master"
+
+    def test_returns_none_on_failure(self):
+        from git_operations import _detect_default_branch
+        with patch("git_operations.subprocess.run") as mock_run:
+            mock_run.return_value = MagicMock(
+                returncode=1,
+                stdout=b"",
+            )
+            result = _detect_default_branch("/fake")
+            assert result is None
+
+    def test_returns_none_on_detached_head(self):
+        from git_operations import _detect_default_branch
+        with patch("git_operations.subprocess.run") as mock_run:
+            mock_run.return_value = MagicMock(
+                returncode=0,
+                stdout=b"HEAD\n",  # Not refs/heads/...
+            )
+            result = _detect_default_branch("/fake")
+            assert result is None
+
+    def test_returns_none_on_timeout(self):
+        from git_operations import _detect_default_branch
+        import subprocess as sp
+        with patch("git_operations.subprocess.run", side_effect=sp.TimeoutExpired("git", 10)):
+            result = _detect_default_branch("/fake")
+            assert result is None
+
+
+class TestInjectDefaultBranchProtection:
+    """Tests for _inject_default_branch_protection()."""
+
+    def test_adds_pattern_to_empty_metadata(self):
+        from git_operations import _inject_default_branch_protection
+        meta = {}
+        result = _inject_default_branch_protection(meta, "main")
+        assert result["git"]["protected_branches"]["patterns"] == ["refs/heads/main"]
+        # Original metadata must not be mutated
+        assert "git" not in meta
+
+    def test_adds_pattern_to_existing_patterns(self):
+        from git_operations import _inject_default_branch_protection
+        meta = {"git": {"protected_branches": {"patterns": ["refs/heads/production"]}}}
+        result = _inject_default_branch_protection(meta, "main")
+        assert "refs/heads/main" in result["git"]["protected_branches"]["patterns"]
+        assert "refs/heads/production" in result["git"]["protected_branches"]["patterns"]
+
+    def test_no_duplicate_pattern(self):
+        from git_operations import _inject_default_branch_protection
+        meta = {"git": {"protected_branches": {"patterns": ["refs/heads/main"]}}}
+        result = _inject_default_branch_protection(meta, "main")
+        assert result["git"]["protected_branches"]["patterns"].count("refs/heads/main") == 1
+
+    def test_does_not_mutate_caller_metadata(self):
+        from git_operations import _inject_default_branch_protection
+        original_patterns = ["refs/heads/production"]
+        meta = {"git": {"protected_branches": {"patterns": original_patterns}}}
+        _inject_default_branch_protection(meta, "main")
+        # Original must be unchanged
+        assert meta["git"]["protected_branches"]["patterns"] == ["refs/heads/production"]
+
+
+# ---------------------------------------------------------------------------
+# S8: Blocked flag after subcommand
+# ---------------------------------------------------------------------------
+
+
+class TestBlockedFlagAfterSubcommand:
+    """Test that global blocked flags are caught even after the subcommand."""
+
+    def test_git_dir_after_subcommand_blocked(self):
+        """--git-dir appearing after the subcommand should be caught."""
+        result = validate_command(["status", "--git-dir=/etc"])
+        assert result is not None
+        assert "blocked flag" in result.reason.lower()
+        assert "--git-dir" in result.reason
+
+    def test_work_tree_after_subcommand_blocked(self):
+        result = validate_command(["log", "--work-tree=/tmp/evil"])
+        assert result is not None
+        assert "blocked flag" in result.reason.lower()
+
+    def test_exec_after_subcommand_blocked(self):
+        result = validate_command(["fetch", "--exec=evil"])
+        assert result is not None
+        assert "blocked flag" in result.reason.lower()
 
 
 if __name__ == "__main__":

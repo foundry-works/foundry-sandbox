@@ -30,16 +30,16 @@ from typing import Any, Dict, FrozenSet, Generator, List, Optional, Set, Tuple
 from git_policies import check_protected_branches
 from branch_isolation import (
     GIT_BINARY,
+    GLOBAL_VALUE_FLAGS,
+    SHA_CHECK_TIMEOUT,
     ValidationError,
-    _get_subcommand,
-    _get_subcommand_args,
-    _GLOBAL_VALUE_FLAGS,
-    _resolve_bare_repo_path,
-    _SHA_CHECK_TIMEOUT,
+    filter_ref_listing_output,
+    filter_stderr_branch_refs,
+    get_subcommand,
+    get_subcommand_args,
+    resolve_bare_repo_path,
     validate_branch_isolation,
     validate_sha_reachability,
-    _filter_ref_listing_output,
-    _filter_stderr_branch_refs,
 )
 
 logger = logging.getLogger(__name__)
@@ -506,17 +506,16 @@ def validate_command(
     if not args:
         return ValidationError("Empty command")
 
-    # Check global blocked flags before parsing
+    # Check global blocked flags across ALL args (not just pre-subcommand).
+    # This catches blocked flags appearing after the subcommand, e.g.
+    # ["status", "--git-dir=/etc"] which would otherwise be missed.
     for arg in args:
         flag_name = arg.split("=", 1)[0]
         if flag_name in GLOBAL_BLOCKED_FLAGS:
             return ValidationError(f"Blocked flag: {flag_name}")
-        # Stop scanning after first non-flag (subcommand)
-        if not arg.startswith("-"):
-            break
 
     # Extract subcommand and args using shared helper
-    subcommand, subcommand_args, config_pairs = _get_subcommand_args(args)
+    subcommand, subcommand_args, config_pairs = get_subcommand_args(args)
     if subcommand is None:
         return ValidationError("No subcommand found")
 
@@ -978,6 +977,66 @@ def _extract_push_args(args: List[str]) -> Optional[List[str]]:
     return None
 
 
+def _detect_default_branch(bare_repo_path: str) -> Optional[str]:
+    """Detect the default branch name from a bare repo's HEAD symref.
+
+    Runs ``git symbolic-ref HEAD`` against the bare repo and extracts
+    the branch name from the ``refs/heads/`` prefix.
+
+    Args:
+        bare_repo_path: Path to the bare git repository.
+
+    Returns:
+        The branch name (e.g. ``"main"``), or None if detection fails.
+    """
+    try:
+        result = subprocess.run(
+            [GIT_BINARY, "--git-dir", bare_repo_path,
+             "symbolic-ref", "HEAD"],
+            capture_output=True, timeout=SHA_CHECK_TIMEOUT,
+        )
+        if result.returncode == 0:
+            head_ref = result.stdout.decode().strip()
+            if head_ref.startswith("refs/heads/"):
+                return head_ref[len("refs/heads/"):]
+    except (subprocess.TimeoutExpired, OSError):
+        pass
+    return None
+
+
+def _inject_default_branch_protection(
+    metadata: dict, default_branch: str,
+) -> dict:
+    """Return a shallow copy of *metadata* with the default branch added to protected patterns.
+
+    Adds ``refs/heads/<default_branch>`` to
+    ``metadata["git"]["protected_branches"]["patterns"]`` if not already present.
+    Never mutates the caller's metadata dict.
+
+    Args:
+        metadata: Container metadata dict.
+        default_branch: The default branch name to protect.
+
+    Returns:
+        A (possibly shallow-copied) metadata dict with the pattern added.
+    """
+    default_pattern = f"refs/heads/{default_branch}"
+    git_config = metadata.get("git", {})
+    if not isinstance(git_config, dict):
+        git_config = {}
+    pb_config = git_config.get("protected_branches", {})
+    if not isinstance(pb_config, dict):
+        pb_config = {}
+    patterns = list(pb_config.get("patterns", []))
+    if default_pattern not in patterns:
+        patterns.append(default_pattern)
+        metadata = dict(metadata)
+        metadata["git"] = dict(git_config)
+        metadata["git"]["protected_branches"] = dict(pb_config)
+        metadata["git"]["protected_branches"]["patterns"] = patterns
+    return metadata
+
+
 def check_push_protected_branches(
     args: List[str],
     repo_root: str,
@@ -1001,42 +1060,15 @@ def check_push_protected_branches(
     Returns:
         None if allowed, ValidationError if a protected branch would be pushed to.
     """
-    bare_repo_path = _resolve_bare_repo_path(repo_root)
+    bare_repo_path = resolve_bare_repo_path(repo_root)
 
-    # Detect default branch from bare repo HEAD and inject into a shallow
-    # copy of the metadata so that load_branch_policy() (which reads
-    # metadata["git"]["protected_branches"]["patterns"]) can protect it.
-    # We never mutate the caller's metadata dict.
+    # Detect default branch from bare repo HEAD and inject into metadata
+    # so that load_branch_policy() protects it.  Best-effort: if detection
+    # fails, the existing protected set still applies.
     if bare_repo_path and metadata is not None:
-        try:
-            result = subprocess.run(
-                [GIT_BINARY, "--git-dir", bare_repo_path,
-                 "symbolic-ref", "HEAD"],
-                capture_output=True, timeout=_SHA_CHECK_TIMEOUT,
-            )
-            if result.returncode == 0:
-                head_ref = result.stdout.decode().strip()
-                # e.g. "refs/heads/main" -> "main"
-                if head_ref.startswith("refs/heads/"):
-                    default_branch = head_ref[len("refs/heads/"):]
-                    default_pattern = f"refs/heads/{default_branch}"
-                    # Build the correct nested path that load_branch_policy reads
-                    git_config = metadata.get("git", {})
-                    if not isinstance(git_config, dict):
-                        git_config = {}
-                    pb_config = git_config.get("protected_branches", {})
-                    if not isinstance(pb_config, dict):
-                        pb_config = {}
-                    patterns = list(pb_config.get("patterns", []))
-                    if default_pattern not in patterns:
-                        patterns.append(default_pattern)
-                        # Shallow-copy the dict tree to avoid caller mutation
-                        metadata = dict(metadata)
-                        metadata["git"] = dict(git_config)
-                        metadata["git"]["protected_branches"] = dict(pb_config)
-                        metadata["git"]["protected_branches"]["patterns"] = patterns
-        except (subprocess.TimeoutExpired, OSError):
-            pass  # Best-effort; existing protected set still applies
+        default_branch = _detect_default_branch(bare_repo_path)
+        if default_branch:
+            metadata = _inject_default_branch_protection(metadata, default_branch)
 
     if _has_push_flag(args, "--all") or _has_push_flag(args, "--mirror"):
         return ValidationError(
@@ -1164,6 +1196,14 @@ def _fetch_lock(
 
     Creates ``.foundry-fetch.lock`` in the bare repo directory and holds
     an ``fcntl.flock`` exclusive lock for the duration of the context.
+
+    Note: ``fcntl.flock`` is an **advisory** lock on Linux — it is only
+    enforced among cooperating processes that also call ``flock`` on the
+    same file.  This is sufficient here because all fetch/pull operations
+    are routed through this proxy and therefore serialized by this lock.
+    External processes (e.g., cron maintenance) are not serialized, but
+    they are already constrained by branch isolation and cannot write to
+    sandbox branches.
 
     Args:
         bare_repo_dir: Path to the bare repository directory.
@@ -1331,12 +1371,12 @@ def execute_git(
     env = build_clean_env()
 
     # Fetch locking: serialize concurrent fetch/pull per bare repo
-    subcommand = _get_subcommand(request.args)
+    subcommand = get_subcommand(request.args)
     fetch_lock_ctx: Optional[contextlib.AbstractContextManager] = None
     if subcommand in ("fetch", "pull"):
         # Check break-glass override
         allow_unlocked = os.environ.get("FOUNDRY_ALLOW_UNLOCKED_FETCH") == "1"
-        bare_repo = _resolve_bare_repo_path(resolved_cwd)
+        bare_repo = resolve_bare_repo_path(resolved_cwd)
         if bare_repo is None and not allow_unlocked:
             audit_log(
                 event="fetch_lock_unavailable",
@@ -1433,9 +1473,9 @@ def execute_git(
     # Apply branch isolation output filtering
     sandbox_branch = metadata.get("sandbox_branch") if metadata else None
     if sandbox_branch and stdout_str:
-        stdout_str = _filter_ref_listing_output(stdout_str, request.args, sandbox_branch)
+        stdout_str = filter_ref_listing_output(stdout_str, request.args, sandbox_branch)
     if sandbox_branch and stderr_str:
-        stderr_str = _filter_stderr_branch_refs(stderr_str, sandbox_branch)
+        stderr_str = filter_stderr_branch_refs(stderr_str, sandbox_branch)
 
     response = GitExecResponse(
         exit_code=result.returncode,

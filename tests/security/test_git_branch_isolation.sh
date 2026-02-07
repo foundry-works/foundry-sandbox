@@ -40,7 +40,7 @@ for mod in ('mitmproxy', 'mitmproxy.http', 'mitmproxy.ctx', 'mitmproxy.flow', 'm
     if mod not in sys.modules:
         sys.modules[mod] = mock.MagicMock()
 sys.path.insert(0, os.path.join('${REPO_ROOT}', 'unified-proxy'))
-from branch_isolation import validate_branch_isolation, _filter_ref_listing_output
+from branch_isolation import validate_branch_isolation, filter_ref_listing_output
 SANDBOX_A = 'sandbox/alice'
 SANDBOX_B = 'sandbox/bob'
 META_A = {'sandbox_branch': SANDBOX_A}
@@ -99,7 +99,7 @@ echo "[for-each-ref Output Filtering]"
 
 run_check "for-each-ref: output hides cross-sandbox branch" "
 output = 'abc1234 refs/heads/' + SANDBOX_A + '\ndef5678 refs/heads/' + SANDBOX_B + '\n111aaaa refs/tags/v1.0\n'
-result = _filter_ref_listing_output(output, ['for-each-ref'], SANDBOX_A)
+result = filter_ref_listing_output(output, ['for-each-ref'], SANDBOX_A)
 assert 'refs/heads/' + SANDBOX_B not in result, 'for-each-ref should hide cross-sandbox'
 assert 'refs/heads/' + SANDBOX_A in result, 'for-each-ref should keep own branch'
 assert 'refs/tags/v1.0' in result, 'for-each-ref should keep tags'
@@ -107,7 +107,7 @@ assert 'refs/tags/v1.0' in result, 'for-each-ref should keep tags'
 
 run_check "for-each-ref: full refs/heads path hides cross-sandbox" "
 output = 'refs/heads/' + SANDBOX_A + '\nrefs/heads/' + SANDBOX_B + '\nrefs/heads/main\n'
-result = _filter_ref_listing_output(output, ['for-each-ref', '--format=%(refname)'], SANDBOX_A)
+result = filter_ref_listing_output(output, ['for-each-ref', '--format=%(refname)'], SANDBOX_A)
 assert 'refs/heads/' + SANDBOX_B not in result, 'for-each-ref full path should hide cross-sandbox'
 assert 'refs/heads/' + SANDBOX_A in result, 'for-each-ref full path should keep own branch'
 "
@@ -120,14 +120,14 @@ echo "[log --source Filtering]"
 
 run_check "log --source: redacts cross-sandbox branch name" "
 output = 'abc1234\trefs/heads/' + SANDBOX_B + '\tcommit msg\n'
-result = _filter_ref_listing_output(output, ['log', '--source'], SANDBOX_A)
+result = filter_ref_listing_output(output, ['log', '--source'], SANDBOX_A)
 assert SANDBOX_B not in result, 'log --source should redact cross-sandbox'
 assert '[redacted]' in result, 'log --source should replace with [redacted]'
 "
 
 run_check "log --source: preserves own branch" "
 output = 'abc1234\trefs/heads/' + SANDBOX_A + '\tcommit msg\n'
-result = _filter_ref_listing_output(output, ['log', '--source'], SANDBOX_A)
+result = filter_ref_listing_output(output, ['log', '--source'], SANDBOX_A)
 assert SANDBOX_A in result, 'log --source should preserve own branch'
 "
 
@@ -139,7 +139,7 @@ echo "[log --decorate Filtering]"
 
 run_check "log --decorate: hides cross-sandbox decoration" "
 output = 'abc1234 (HEAD -> ' + SANDBOX_A + ', origin/' + SANDBOX_B + ') msg\n'
-result = _filter_ref_listing_output(output, ['log', '--oneline', '--decorate'], SANDBOX_A)
+result = filter_ref_listing_output(output, ['log', '--oneline', '--decorate'], SANDBOX_A)
 assert SANDBOX_B not in result, 'log --decorate should hide cross-sandbox'
 assert 'HEAD -> ' + SANDBOX_A in result, 'log --decorate should keep own branch'
 "
@@ -152,7 +152,7 @@ echo "[branch -a Output Filtering]"
 
 run_check "branch -a: hides cross-sandbox branch" "
 output = '* ' + SANDBOX_A + '\n  ' + SANDBOX_B + '\n  main\n'
-result = _filter_ref_listing_output(output, ['branch', '-a'], SANDBOX_A)
+result = filter_ref_listing_output(output, ['branch', '-a'], SANDBOX_A)
 assert SANDBOX_B not in result, 'branch -a should hide cross-sandbox'
 assert SANDBOX_A in result, 'branch -a should keep own branch'
 assert 'main' in result, 'branch -a should keep well-known branches'
@@ -166,7 +166,7 @@ echo "[show-ref Output Filtering]"
 
 run_check "show-ref: hides cross-sandbox ref" "
 output = 'abc1234 refs/heads/' + SANDBOX_A + '\ndef5678 refs/heads/' + SANDBOX_B + '\n'
-result = _filter_ref_listing_output(output, ['show-ref'], SANDBOX_A)
+result = filter_ref_listing_output(output, ['show-ref'], SANDBOX_A)
 assert 'refs/heads/' + SANDBOX_B not in result, 'show-ref should hide cross-sandbox'
 assert 'refs/heads/' + SANDBOX_A in result, 'show-ref should keep own branch'
 "

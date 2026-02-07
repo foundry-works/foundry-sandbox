@@ -147,7 +147,7 @@ cleanup_sandbox_branch() {
 
     # Skip if another worktree still uses this branch
     if git -C "$bare_path" worktree list --porcelain 2>/dev/null \
-        | grep -qxF "branch refs/heads/$branch"; then
+        | grep -qF "branch refs/heads/$branch"; then
         log_info "Branch '$branch' still in use by another worktree, skipping cleanup"
         return 0
     fi

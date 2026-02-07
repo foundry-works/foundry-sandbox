@@ -20,7 +20,7 @@ import pytest
 # conftest.py handles mitmproxy mocking and path setup
 
 from branch_isolation import (
-    _filter_ref_listing_output,
+    filter_ref_listing_output,
     validate_branch_isolation,
 )
 
@@ -99,7 +99,7 @@ class TestCrossSandboxOutputFiltering:
             "  main\n"
             "  develop\n"
         )
-        result = _filter_ref_listing_output(output, ["branch", "-a"], SANDBOX_A)
+        result = filter_ref_listing_output(output, ["branch", "-a"], SANDBOX_A)
         assert SANDBOX_A in result
         assert "main" in result
         assert "develop" in result
@@ -111,7 +111,7 @@ class TestCrossSandboxOutputFiltering:
             f"* {SANDBOX_B}\n"
             "  main\n"
         )
-        result = _filter_ref_listing_output(output, ["branch", "-a"], SANDBOX_B)
+        result = filter_ref_listing_output(output, ["branch", "-a"], SANDBOX_B)
         assert SANDBOX_B in result
         assert "main" in result
         assert SANDBOX_A not in result
@@ -123,12 +123,12 @@ class TestCrossSandboxOutputFiltering:
             "111aaaa refs/heads/main\n"
             "222bbbb refs/tags/v1.0\n"
         )
-        result_a = _filter_ref_listing_output(output, ["show-ref", "--heads"], SANDBOX_A)
+        result_a = filter_ref_listing_output(output, ["show-ref", "--heads"], SANDBOX_A)
         assert f"refs/heads/{SANDBOX_A}" in result_a
         assert f"refs/heads/{SANDBOX_B}" not in result_a
         assert "refs/heads/main" in result_a
 
-        result_b = _filter_ref_listing_output(output, ["show-ref", "--heads"], SANDBOX_B)
+        result_b = filter_ref_listing_output(output, ["show-ref", "--heads"], SANDBOX_B)
         assert f"refs/heads/{SANDBOX_B}" in result_b
         assert f"refs/heads/{SANDBOX_A}" not in result_b
 
@@ -138,7 +138,7 @@ class TestCrossSandboxOutputFiltering:
             f"def5678 refs/heads/{SANDBOX_B}\n"
             "111aaaa refs/tags/v1.0\n"
         )
-        result = _filter_ref_listing_output(output, ["for-each-ref"], SANDBOX_A)
+        result = filter_ref_listing_output(output, ["for-each-ref"], SANDBOX_A)
         assert f"refs/heads/{SANDBOX_A}" in result
         assert "refs/tags/v1.0" in result
         assert f"refs/heads/{SANDBOX_B}" not in result
@@ -148,7 +148,7 @@ class TestCrossSandboxOutputFiltering:
             f"abc1234 (HEAD -> {SANDBOX_A}, origin/{SANDBOX_B}) commit msg\n"
             "def5678 normal commit\n"
         )
-        result = _filter_ref_listing_output(output, ["log", "--oneline", "--decorate"], SANDBOX_A)
+        result = filter_ref_listing_output(output, ["log", "--oneline", "--decorate"], SANDBOX_A)
         assert f"HEAD -> {SANDBOX_A}" in result
         assert SANDBOX_B not in result
         assert "normal commit" in result

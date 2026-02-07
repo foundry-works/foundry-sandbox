@@ -2,12 +2,12 @@
 Unit tests for branch isolation helpers in git_operations.
 
 Tests cover:
-- _get_subcommand_args: subcommand extraction with global flags
+- get_subcommand_args: subcommand extraction with global flags
 - _strip_rev_suffixes: revision suffix stripping from ref strings
 - _is_allowed_branch_name: bare branch name validation
 - _is_allowed_ref: full ref validation with ranges, suffixes, SHA hashes
 - validate_branch_isolation: command-level branch isolation enforcement
-- _filter_ref_listing_output: output filtering for branch/ref listings and log decorations
+- filter_ref_listing_output: output filtering for branch/ref listings and log decorations
 """
 
 import sys
@@ -23,20 +23,20 @@ for mod in ("mitmproxy", "mitmproxy.http", "mitmproxy.ctx", "mitmproxy.flow"):
 
 from branch_isolation import (
     _extract_sha_args,
-    _filter_ref_listing_output,
-    _filter_stderr_branch_refs,
-    _get_subcommand_args,
     _is_allowed_branch_name,
     _is_allowed_ref,
     _is_allowed_short_ref_token,
     _strip_rev_suffixes,
+    filter_ref_listing_output,
+    filter_stderr_branch_refs,
+    get_subcommand_args,
     validate_branch_isolation,
     validate_sha_reachability,
 )
 
 
 # ---------------------------------------------------------------------------
-# _get_subcommand_args
+# get_subcommand_args
 # ---------------------------------------------------------------------------
 
 
@@ -44,13 +44,13 @@ class TestGetSubcommandArgs:
     """Test extraction of git subcommand and its arguments."""
 
     def test_simple_command(self):
-        subcmd, args, configs = _get_subcommand_args(["push", "origin", "main"])
+        subcmd, args, configs = get_subcommand_args(["push", "origin", "main"])
         assert subcmd == "push"
         assert args == ["origin", "main"]
         assert configs == []
 
     def test_global_c_flag(self):
-        subcmd, args, configs = _get_subcommand_args(
+        subcmd, args, configs = get_subcommand_args(
             ["-c", "user.name=Test", "commit", "-m", "msg"]
         )
         assert subcmd == "commit"
@@ -58,7 +58,7 @@ class TestGetSubcommandArgs:
         assert configs == ["user.name=Test"]
 
     def test_compact_c_flag(self):
-        subcmd, args, configs = _get_subcommand_args(
+        subcmd, args, configs = get_subcommand_args(
             ["-cuser.name=Test", "commit", "-m", "msg"]
         )
         assert subcmd == "commit"
@@ -66,7 +66,7 @@ class TestGetSubcommandArgs:
         assert configs == ["user.name=Test"]
 
     def test_double_dash_terminator(self):
-        subcmd, args, configs = _get_subcommand_args(
+        subcmd, args, configs = get_subcommand_args(
             ["--", "push", "origin", "main"]
         )
         assert subcmd == "push"
@@ -74,13 +74,13 @@ class TestGetSubcommandArgs:
         assert configs == []
 
     def test_empty_args(self):
-        subcmd, args, configs = _get_subcommand_args([])
+        subcmd, args, configs = get_subcommand_args([])
         assert subcmd is None
         assert args == []
         assert configs == []
 
     def test_only_flags(self):
-        subcmd, args, configs = _get_subcommand_args(
+        subcmd, args, configs = get_subcommand_args(
             ["-c", "foo=bar", "--"]
         )
         assert subcmd is None
@@ -88,7 +88,7 @@ class TestGetSubcommandArgs:
         assert configs == ["foo=bar"]
 
     def test_capital_c_path_flag(self):
-        subcmd, args, configs = _get_subcommand_args(
+        subcmd, args, configs = get_subcommand_args(
             ["-C", "/some/path", "status"]
         )
         assert subcmd == "status"
@@ -96,7 +96,7 @@ class TestGetSubcommandArgs:
         assert configs == []
 
     def test_git_dir_flag(self):
-        subcmd, args, configs = _get_subcommand_args(
+        subcmd, args, configs = get_subcommand_args(
             ["--git-dir", "/repo/.git", "log", "--oneline"]
         )
         assert subcmd == "log"
@@ -104,7 +104,7 @@ class TestGetSubcommandArgs:
         assert configs == []
 
     def test_work_tree_flag(self):
-        subcmd, args, configs = _get_subcommand_args(
+        subcmd, args, configs = get_subcommand_args(
             ["--work-tree", "/repo", "diff"]
         )
         assert subcmd == "diff"
@@ -112,7 +112,7 @@ class TestGetSubcommandArgs:
         assert configs == []
 
     def test_flag_equals_value_form(self):
-        subcmd, args, configs = _get_subcommand_args(
+        subcmd, args, configs = get_subcommand_args(
             ["--git-dir=/repo/.git", "log"]
         )
         assert subcmd == "log"
@@ -120,7 +120,7 @@ class TestGetSubcommandArgs:
         assert configs == []
 
     def test_multiple_global_flags(self):
-        subcmd, args, configs = _get_subcommand_args(
+        subcmd, args, configs = get_subcommand_args(
             [
                 "-c", "a=1",
                 "-C", "/path",
@@ -556,7 +556,7 @@ class TestValidateBranchIsolation:
 
 
 # ---------------------------------------------------------------------------
-# _filter_ref_listing_output
+# filter_ref_listing_output
 # ---------------------------------------------------------------------------
 
 
@@ -571,7 +571,7 @@ class TestFilterRefListingOutput:
             f"  sandbox/other\n"
             "  main\n"
         )
-        result = _filter_ref_listing_output(output, ["branch"], SANDBOX)
+        result = filter_ref_listing_output(output, ["branch"], SANDBOX)
         assert f"* {SANDBOX}" in result
         assert "main" in result
         assert "sandbox/other" not in result
@@ -582,7 +582,7 @@ class TestFilterRefListingOutput:
             f"  sandbox/other abc1234 another commit\n"
             "  main          abc1234 third commit\n"
         )
-        result = _filter_ref_listing_output(output, ["branch", "-v"], SANDBOX)
+        result = filter_ref_listing_output(output, ["branch", "-v"], SANDBOX)
         assert SANDBOX in result
         assert "main" in result
         assert "sandbox/other" not in result
@@ -596,7 +596,7 @@ class TestFilterRefListingOutput:
             "abc1234 refs/tags/v1.0\n"
             "abc1234 refs/heads/main\n"
         )
-        result = _filter_ref_listing_output(output, ["for-each-ref"], SANDBOX)
+        result = filter_ref_listing_output(output, ["for-each-ref"], SANDBOX)
         assert f"refs/heads/{SANDBOX}" in result
         assert "refs/tags/v1.0" in result
         assert "refs/heads/main" in result
@@ -608,7 +608,7 @@ class TestFilterRefListingOutput:
             "sandbox/other\n"
             "main\n"
         )
-        result = _filter_ref_listing_output(
+        result = filter_ref_listing_output(
             output, ["for-each-ref", "--format=%(refname:short)"], SANDBOX
         )
         assert SANDBOX in result
@@ -620,7 +620,7 @@ class TestFilterRefListingOutput:
             f"abcdef123456 {SANDBOX}\n"
             "abcdef123456 sandbox/other\n"
         )
-        result = _filter_ref_listing_output(
+        result = filter_ref_listing_output(
             output, ["for-each-ref", "--format=%(objectname) %(refname:short)"], SANDBOX
         )
         assert f"abcdef123456 {SANDBOX}" in result
@@ -633,7 +633,7 @@ class TestFilterRefListingOutput:
             f"abc1234 refs/heads/{SANDBOX}\n"
             "abc1234 refs/heads/sandbox/other\n"
         )
-        result = _filter_ref_listing_output(output, ["show-ref"], SANDBOX)
+        result = filter_ref_listing_output(output, ["show-ref"], SANDBOX)
         assert f"refs/heads/{SANDBOX}" in result
         assert "refs/heads/sandbox/other" not in result
 
@@ -643,7 +643,7 @@ class TestFilterRefListingOutput:
         output = (
             f"abc1234 (HEAD -> {SANDBOX}, origin/sandbox/other, tag: v1.0) commit msg\n"
         )
-        result = _filter_ref_listing_output(output, ["log", "--oneline"], SANDBOX)
+        result = filter_ref_listing_output(output, ["log", "--oneline"], SANDBOX)
         assert "HEAD" in result
         assert "tag: v1.0" in result
         assert "sandbox/other" not in result
@@ -652,33 +652,33 @@ class TestFilterRefListingOutput:
         output = (
             "abc1234 (HEAD, tag: v2.0) commit msg\n"
         )
-        result = _filter_ref_listing_output(output, ["log", "--oneline"], SANDBOX)
+        result = filter_ref_listing_output(output, ["log", "--oneline"], SANDBOX)
         assert "HEAD" in result
         assert "tag: v2.0" in result
 
     def test_log_decoration_strips_empty_parens(self):
         # When all decorations are removed, parens should be gone
         output = "abc1234 (origin/sandbox/other) commit msg\n"
-        result = _filter_ref_listing_output(output, ["log", "--oneline"], SANDBOX)
+        result = filter_ref_listing_output(output, ["log", "--oneline"], SANDBOX)
         assert "()" not in result
         assert "sandbox/other" not in result
 
     def test_log_decoration_ignores_commit_message_parens(self):
         # Commit message parens should not be parsed as decorations
         output = "abc1234 some commit (with parens)\n"
-        result = _filter_ref_listing_output(output, ["log", "--oneline"], SANDBOX)
+        result = filter_ref_listing_output(output, ["log", "--oneline"], SANDBOX)
         assert "(with parens)" in result
 
     def test_log_decoration_preserves_detached_head(self):
         output = "abc1234 (HEAD) detached commit\n"
-        result = _filter_ref_listing_output(output, ["log", "--oneline"], SANDBOX)
+        result = filter_ref_listing_output(output, ["log", "--oneline"], SANDBOX)
         assert "(HEAD)" in result
 
     # --- Log --format=%d (parenthesized) ---
 
     def test_log_format_d_hides_other(self):
         output = f" (HEAD -> {SANDBOX}, origin/sandbox/other)\n"
-        result = _filter_ref_listing_output(
+        result = filter_ref_listing_output(
             output, ["log", "--format=%d"], SANDBOX
         )
         assert f"HEAD -> {SANDBOX}" in result
@@ -688,7 +688,7 @@ class TestFilterRefListingOutput:
 
     def test_log_format_D_hides_other(self):
         output = f"HEAD -> {SANDBOX}, origin/sandbox/other\n"
-        result = _filter_ref_listing_output(
+        result = filter_ref_listing_output(
             output, ["log", "--format=%D"], SANDBOX
         )
         assert f"HEAD -> {SANDBOX}" in result
@@ -696,7 +696,7 @@ class TestFilterRefListingOutput:
 
     def test_log_format_split_D_hides_other(self):
         output = f"HEAD -> {SANDBOX}, origin/sandbox/other\n"
-        result = _filter_ref_listing_output(
+        result = filter_ref_listing_output(
             output, ["log", "--format", "%D"], SANDBOX
         )
         assert f"HEAD -> {SANDBOX}" in result
@@ -704,7 +704,7 @@ class TestFilterRefListingOutput:
 
     def test_log_pretty_split_d_hides_other(self):
         output = f" (HEAD -> {SANDBOX}, origin/sandbox/other)\n"
-        result = _filter_ref_listing_output(
+        result = filter_ref_listing_output(
             output, ["log", "--pretty", "%d"], SANDBOX
         )
         assert f"HEAD -> {SANDBOX}" in result
@@ -716,7 +716,7 @@ class TestFilterRefListingOutput:
         """With %d (not %D), commit messages with commas should not be mangled."""
         # A commit message that looks like a bare decoration list but isn't
         output = "HEAD, something/else\n"
-        result = _filter_ref_listing_output(
+        result = filter_ref_listing_output(
             output, ["log", "--format=%d"], SANDBOX
         )
         # %d produces parenthesized output; bare lines should pass through
@@ -725,7 +725,7 @@ class TestFilterRefListingOutput:
     def test_log_format_D_triggers_bare_heuristic(self):
         """With %D, bare decoration lines should be filtered."""
         output = f"HEAD -> {SANDBOX}, origin/sandbox/other\n"
-        result = _filter_ref_listing_output(
+        result = filter_ref_listing_output(
             output, ["log", "--format=%D"], SANDBOX
         )
         assert f"HEAD -> {SANDBOX}" in result
@@ -736,7 +736,7 @@ class TestFilterRefListingOutput:
     def test_log_format_without_d_uses_sha_anchored(self):
         # Without %d/%D, falls through to standard log decoration filter
         output = f"abc1234 (HEAD -> {SANDBOX}, origin/sandbox/other) msg\n"
-        result = _filter_ref_listing_output(
+        result = filter_ref_listing_output(
             output, ["log", "--format=%H %s"], SANDBOX
         )
         assert "HEAD" in result
@@ -913,7 +913,7 @@ class TestRemoteBranchOutputFiltering:
             f"  remotes/origin/{SANDBOX}\n"
             "  remotes/origin/sandbox/other\n"
         )
-        result = _filter_ref_listing_output(output, ["branch", "-a"], SANDBOX)
+        result = filter_ref_listing_output(output, ["branch", "-a"], SANDBOX)
         assert f"* {SANDBOX}" in result
         assert "main" in result
         assert "sandbox/other" not in result
@@ -966,7 +966,7 @@ class TestExtractShaArgs:
 
 
 # ---------------------------------------------------------------------------
-# _filter_stderr_branch_refs
+# filter_stderr_branch_refs
 # ---------------------------------------------------------------------------
 
 
@@ -975,59 +975,59 @@ class TestFilterStderrBranchRefs:
 
     def test_redacts_disallowed_heads_ref(self):
         stderr = "error: pathspec 'refs/heads/sandbox/other' did not match"
-        result = _filter_stderr_branch_refs(stderr, SANDBOX)
+        result = filter_stderr_branch_refs(stderr, SANDBOX)
         assert "sandbox/other" not in result
         assert "<redacted>" in result
 
     def test_keeps_allowed_heads_ref(self):
         stderr = f"hint: refs/heads/{SANDBOX} is up to date"
-        result = _filter_stderr_branch_refs(stderr, SANDBOX)
+        result = filter_stderr_branch_refs(stderr, SANDBOX)
         assert SANDBOX in result
         assert "<redacted>" not in result
 
     def test_redacts_disallowed_remote_ref(self):
         stderr = "error: refs/remotes/origin/sandbox/other not found"
-        result = _filter_stderr_branch_refs(stderr, SANDBOX)
+        result = filter_stderr_branch_refs(stderr, SANDBOX)
         assert "sandbox/other" not in result
         assert "<redacted>" in result
 
     def test_keeps_well_known_branch(self):
         stderr = "hint: refs/heads/main is up to date"
-        result = _filter_stderr_branch_refs(stderr, SANDBOX)
+        result = filter_stderr_branch_refs(stderr, SANDBOX)
         assert "main" in result
         assert "<redacted>" not in result
 
     def test_empty_stderr(self):
-        assert _filter_stderr_branch_refs("", SANDBOX) == ""
+        assert filter_stderr_branch_refs("", SANDBOX) == ""
 
     def test_none_sandbox_branch(self):
         stderr = "error: refs/heads/sandbox/other"
-        assert _filter_stderr_branch_refs(stderr, None) == stderr
+        assert filter_stderr_branch_refs(stderr, None) == stderr
 
     # --- Bare branch names in single-quoted contexts ---
 
     def test_redacts_bare_branch_in_single_quotes(self):
         stderr = "error: pathspec 'sandbox/other' did not match"
-        result = _filter_stderr_branch_refs(stderr, SANDBOX)
+        result = filter_stderr_branch_refs(stderr, SANDBOX)
         assert "sandbox/other" not in result
         assert "'<redacted>'" in result
 
     def test_keeps_allowed_bare_branch_in_single_quotes(self):
         stderr = f"hint: '{SANDBOX}' is up to date"
-        result = _filter_stderr_branch_refs(stderr, SANDBOX)
+        result = filter_stderr_branch_refs(stderr, SANDBOX)
         assert SANDBOX in result
         assert "<redacted>" not in result
 
     def test_keeps_well_known_bare_branch_in_single_quotes(self):
         stderr = "error: pathspec 'release/1.0' did not match"
-        result = _filter_stderr_branch_refs(stderr, SANDBOX)
+        result = filter_stderr_branch_refs(stderr, SANDBOX)
         assert "release/1.0" in result
         assert "<redacted>" not in result
 
     def test_bare_branch_no_slash_not_matched(self):
         """Single-word tokens in quotes should not be matched (no false-positives)."""
         stderr = "error: pathspec 'main' did not match"
-        result = _filter_stderr_branch_refs(stderr, SANDBOX)
+        result = filter_stderr_branch_refs(stderr, SANDBOX)
         assert "main" in result
         assert "<redacted>" not in result
 
@@ -1129,7 +1129,7 @@ class TestOutputFilterDropsUnrecognized:
             "  main\n"
             "WEIRD UNRECOGNIZED FORMAT\n"
         )
-        result = _filter_ref_listing_output(output, ["branch"], SANDBOX)
+        result = filter_ref_listing_output(output, ["branch"], SANDBOX)
         assert SANDBOX in result
         assert "main" in result
         assert "WEIRD UNRECOGNIZED FORMAT" not in result
@@ -1140,7 +1140,7 @@ class TestOutputFilterDropsUnrecognized:
             "\n"
             "  main\n"
         )
-        result = _filter_ref_listing_output(output, ["branch"], SANDBOX)
+        result = filter_ref_listing_output(output, ["branch"], SANDBOX)
         assert SANDBOX in result
         assert "main" in result
 
@@ -1149,7 +1149,7 @@ class TestOutputFilterDropsUnrecognized:
             "abc123456789 refs/heads/main\n"
             "WEIRD LINE NO REF\n"
         )
-        result = _filter_ref_listing_output(output, ["for-each-ref"], SANDBOX)
+        result = filter_ref_listing_output(output, ["for-each-ref"], SANDBOX)
         assert "main" in result
         # The weird line has no recognizable ref format — it should be dropped
         # unless its first token passes the short ref check
@@ -1162,7 +1162,7 @@ class TestOutputFilterDropsUnrecognized:
             "\n"
             "def456789012 refs/tags/v1.0\n"
         )
-        result = _filter_ref_listing_output(output, ["for-each-ref"], SANDBOX)
+        result = filter_ref_listing_output(output, ["for-each-ref"], SANDBOX)
         assert "main" in result
         assert "v1.0" in result
 
@@ -1176,7 +1176,7 @@ class TestShaReachabilityFailClosed:
     """Test that SHA reachability denies when bare repo cannot be resolved."""
 
     def test_returns_error_when_no_bare_repo(self, tmp_path):
-        """When _resolve_bare_repo_path returns None, should return error."""
+        """When resolve_bare_repo_path returns None, should return error."""
         # Create a directory without .git
         repo = tmp_path / "not-a-repo"
         repo.mkdir()
@@ -1353,7 +1353,7 @@ class TestLsRemoteOutputFiltering:
             f"fed987654321\trefs/heads/{SANDBOX}\n"
             "111222333444\trefs/tags/v1.0\n"
         )
-        result = _filter_ref_listing_output(output, ["ls-remote"], SANDBOX)
+        result = filter_ref_listing_output(output, ["ls-remote"], SANDBOX)
         assert "main" in result
         assert SANDBOX in result
         assert "v1.0" in result
@@ -1364,7 +1364,7 @@ class TestLsRemoteOutputFiltering:
             "abc123456789 refs/heads/main\n"
             "def456789012 refs/heads/sandbox/other\n"
         )
-        result = _filter_ref_listing_output(output, ["show-ref"], SANDBOX)
+        result = filter_ref_listing_output(output, ["show-ref"], SANDBOX)
         assert "main" in result
         assert "sandbox/other" not in result
 
@@ -1473,3 +1473,75 @@ class TestPushIsolation:
         assert validate_branch_isolation(
             ["push", "origin", f"refs/heads/{SANDBOX}"], META
         ) is None
+
+
+# ---------------------------------------------------------------------------
+# S3: Tightened bare %D heuristic tests
+# ---------------------------------------------------------------------------
+
+
+class TestCustomFormatDecorationHeuristic:
+    """Test tightened bare %D heuristic (majority check + token length guard)."""
+
+    def test_long_non_ref_tokens_pass_through(self):
+        """A line with very long non-ref tokens should not trigger decoration filtering."""
+        long_token = "x" * 300
+        output = f"HEAD -> main, {long_token}\n"
+        result = filter_ref_listing_output(
+            output, ["log", "--format=%D"], SANDBOX
+        )
+        # Long token makes majority non-ref-like, so line passes through unfiltered
+        assert long_token in result
+
+    def test_minority_ref_tokens_pass_through(self):
+        """When minority of tokens look like refs, line should pass through."""
+        # 1 ref-like out of 4 tokens = 25% < 50%, should not trigger filtering
+        output = "HEAD, some text, another thing, not a ref\n"
+        result = filter_ref_listing_output(
+            output, ["log", "--format=%D"], SANDBOX
+        )
+        # Should pass through unfiltered since minority are ref-like
+        assert result == output
+
+    def test_majority_ref_tokens_filtered(self):
+        """When majority of tokens look like refs, filtering should apply."""
+        output = f"HEAD -> {SANDBOX}, origin/sandbox/other, tag: v1.0\n"
+        result = filter_ref_listing_output(
+            output, ["log", "--format=%D"], SANDBOX
+        )
+        assert f"HEAD -> {SANDBOX}" in result
+        assert "sandbox/other" not in result
+        assert "tag: v1.0" in result
+
+
+# ---------------------------------------------------------------------------
+# S7: Pass-2 ref-enum fallback with _looks_like_ref_token
+# ---------------------------------------------------------------------------
+
+
+class TestRefEnumPass2Fallback:
+    """Test that SHA-prefixed lines with non-ref second tokens are kept."""
+
+    def test_sha_followed_by_date_kept(self):
+        """SHA followed by a date-like token should be kept (not filtered as ref)."""
+        output = "abcdef123456 2024-01-15\n"
+        result = filter_ref_listing_output(output, ["for-each-ref"], SANDBOX)
+        assert "2024-01-15" in result
+
+    def test_sha_followed_by_commit_message_kept(self):
+        """SHA followed by non-ref text (commit message) should be kept."""
+        output = "abcdef123456 fix: resolve merge conflict\n"
+        result = filter_ref_listing_output(output, ["for-each-ref"], SANDBOX)
+        assert "fix: resolve merge conflict" in result
+
+    def test_sha_followed_by_disallowed_ref_filtered(self):
+        """SHA followed by a disallowed ref token should still be filtered."""
+        output = "abcdef123456 sandbox/other\n"
+        result = filter_ref_listing_output(output, ["for-each-ref"], SANDBOX)
+        assert "sandbox/other" not in result
+
+    def test_sha_followed_by_allowed_ref_kept(self):
+        """SHA followed by an allowed ref token should be kept."""
+        output = f"abcdef123456 {SANDBOX}\n"
+        result = filter_ref_listing_output(output, ["for-each-ref"], SANDBOX)
+        assert SANDBOX in result
