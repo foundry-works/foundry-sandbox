@@ -16,13 +16,16 @@ Security model:
 
 import asyncio
 import base64
+import contextlib
+import fcntl
 import logging
 import os
 import re
 import subprocess
+import time
 import uuid
 from dataclasses import dataclass
-from typing import Any, Dict, FrozenSet, List, Optional, Set, Tuple
+from typing import Any, Dict, FrozenSet, Generator, List, Optional, Set, Tuple
 
 from git_policies import check_protected_branches
 
@@ -2061,6 +2064,134 @@ def build_clean_env() -> Dict[str, str]:
 
 
 # ---------------------------------------------------------------------------
+# Fetch Locking
+# ---------------------------------------------------------------------------
+
+# Lock file name placed in bare repo directory
+_FETCH_LOCK_FILENAME = ".foundry-fetch.lock"
+
+# Default timeout and poll interval for fetch lock acquisition
+_FETCH_LOCK_TIMEOUT = 30.0
+_FETCH_LOCK_POLL_INTERVAL = 1.0
+
+
+def _resolve_bare_repo_path(repo_root: str) -> Optional[str]:
+    """Follow the worktree .git -> gitdir -> commondir chain to find the bare repo.
+
+    Git worktrees have a ``.git`` *file* (not directory) that contains a
+    ``gitdir:`` pointer to the worktree's gitdir directory.  That gitdir
+    in turn has a ``commondir`` file pointing (absolute or relative) to the
+    shared bare repo.
+
+    Args:
+        repo_root: The worktree's working directory root.
+
+    Returns:
+        Normalized absolute path to the bare repo directory, or None if
+        the chain cannot be resolved.
+    """
+    try:
+        dot_git = os.path.join(repo_root, ".git")
+
+        # If .git is a directory, this IS the git dir (not a worktree)
+        if os.path.isdir(dot_git):
+            # Check for commondir inside .git
+            commondir_file = os.path.join(dot_git, "commondir")
+            if os.path.isfile(commondir_file):
+                with open(commondir_file, "r") as f:
+                    commondir = f.read().strip()
+                if os.path.isabs(commondir):
+                    return os.path.normpath(commondir)
+                return os.path.normpath(os.path.join(dot_git, commondir))
+            # No commondir — .git itself is the git dir
+            return os.path.normpath(dot_git)
+
+        # .git is a file — read gitdir pointer
+        if not os.path.isfile(dot_git):
+            return None
+
+        with open(dot_git, "r") as f:
+            content = f.read().strip()
+
+        if not content.startswith("gitdir:"):
+            return None
+
+        gitdir = content[len("gitdir:"):].strip()
+        if not os.path.isabs(gitdir):
+            gitdir = os.path.join(repo_root, gitdir)
+        gitdir = os.path.normpath(gitdir)
+
+        if not os.path.isdir(gitdir):
+            return None
+
+        # Read commondir from gitdir
+        commondir_file = os.path.join(gitdir, "commondir")
+        if not os.path.isfile(commondir_file):
+            # No commondir — gitdir itself is the bare repo
+            return gitdir
+
+        with open(commondir_file, "r") as f:
+            commondir = f.read().strip()
+
+        if os.path.isabs(commondir):
+            bare_path = os.path.normpath(commondir)
+        else:
+            bare_path = os.path.normpath(os.path.join(gitdir, commondir))
+
+        if not os.path.isdir(bare_path):
+            return None
+
+        return bare_path
+
+    except (OSError, IOError):
+        return None
+
+
+@contextlib.contextmanager
+def _fetch_lock(
+    bare_repo_dir: str, timeout: float = _FETCH_LOCK_TIMEOUT,
+) -> Generator[None, None, None]:
+    """Acquire an exclusive file lock for fetch serialization.
+
+    Creates ``.foundry-fetch.lock`` in the bare repo directory and holds
+    an ``fcntl.flock`` exclusive lock for the duration of the context.
+
+    Args:
+        bare_repo_dir: Path to the bare repository directory.
+        timeout: Maximum seconds to wait for the lock (default 30).
+
+    Raises:
+        TimeoutError: If the lock cannot be acquired within *timeout*.
+    """
+    lock_path = os.path.join(bare_repo_dir, _FETCH_LOCK_FILENAME)
+    fd = None
+    try:
+        fd = os.open(lock_path, os.O_CREAT | os.O_RDWR, 0o644)
+        deadline = time.monotonic() + timeout
+
+        while True:
+            try:
+                fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                break  # Lock acquired
+            except (OSError, IOError):
+                if time.monotonic() >= deadline:
+                    raise TimeoutError(
+                        f"Could not acquire fetch lock within {timeout}s"
+                    )
+                time.sleep(_FETCH_LOCK_POLL_INTERVAL)
+
+        yield
+
+    finally:
+        if fd is not None:
+            try:
+                fcntl.flock(fd, fcntl.LOCK_UN)
+            except (OSError, IOError):
+                pass
+            os.close(fd)
+
+
+# ---------------------------------------------------------------------------
 # Git Execution
 # ---------------------------------------------------------------------------
 
@@ -2176,15 +2307,64 @@ def execute_git(
     # Build clean environment
     env = build_clean_env()
 
-    # Execute
+    # Fetch locking: serialize concurrent fetch/pull per bare repo
+    subcommand = _get_subcommand(request.args)
+    fetch_lock_ctx: Optional[contextlib.AbstractContextManager] = None
+    if subcommand in ("fetch", "pull"):
+        # Check break-glass override
+        allow_unlocked = os.environ.get("FOUNDRY_ALLOW_UNLOCKED_FETCH") == "1"
+        bare_repo = _resolve_bare_repo_path(resolved_cwd)
+        if bare_repo is None and not allow_unlocked:
+            audit_log(
+                event="fetch_lock_unavailable",
+                action=subcommand,
+                decision="deny",
+                command_args=request.args,
+                reason="Cannot resolve bare repo path for fetch locking",
+                matched_rule="fetch_lock",
+                request_id=req_id,
+            )
+            return None, ValidationError(
+                "Cannot resolve bare repo for fetch locking; "
+                "contact admin or set FOUNDRY_ALLOW_UNLOCKED_FETCH=1"
+            )
+        if bare_repo is not None:
+            fetch_lock_ctx = _fetch_lock(bare_repo)
+        elif allow_unlocked:
+            audit_log(
+                event="fetch_lock_bypassed",
+                action=subcommand,
+                decision="allow",
+                command_args=request.args,
+                reason="FOUNDRY_ALLOW_UNLOCKED_FETCH=1 override",
+                matched_rule="fetch_lock_bypass",
+                request_id=req_id,
+            )
+
+    # Execute (with optional fetch lock)
     try:
-        result = subprocess.run(
-            cmd,
-            cwd=resolved_cwd,
-            input=stdin_data,
-            capture_output=True,
-            timeout=SUBPROCESS_TIMEOUT,
-            env=env,
+        ctx = fetch_lock_ctx or contextlib.nullcontext()
+        with ctx:
+            result = subprocess.run(
+                cmd,
+                cwd=resolved_cwd,
+                input=stdin_data,
+                capture_output=True,
+                timeout=SUBPROCESS_TIMEOUT,
+                env=env,
+            )
+    except TimeoutError as exc:
+        audit_log(
+            event="fetch_lock_timeout",
+            action=subcommand or " ".join(request.args[:3]),
+            decision="deny",
+            command_args=request.args,
+            reason=str(exc),
+            matched_rule="fetch_lock",
+            request_id=req_id,
+        )
+        return None, ValidationError(
+            "Fetch lock timed out; another fetch may be in progress"
         )
     except subprocess.TimeoutExpired:
         audit_log(event="command_timeout", action=" ".join(request.args[:3]),

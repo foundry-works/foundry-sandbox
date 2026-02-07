@@ -1340,5 +1340,194 @@ class TestOutputFilteringInExecuteGit:
             assert "sandbox branch identity missing" in error.reason.lower()
 
 
+# ---------------------------------------------------------------------------
+# Fetch Locking Tests
+# ---------------------------------------------------------------------------
+
+
+class TestResolveBareRepoPath:
+    """Tests for _resolve_bare_repo_path()."""
+
+    def test_dot_git_directory(self):
+        """When .git is a directory (normal repo), return normalized .git path."""
+        from git_operations import _resolve_bare_repo_path
+        with tempfile.TemporaryDirectory() as tmpdir:
+            dot_git = os.path.join(tmpdir, ".git")
+            os.makedirs(dot_git)
+            result = _resolve_bare_repo_path(tmpdir)
+            assert result == os.path.normpath(dot_git)
+
+    def test_dot_git_directory_with_commondir(self):
+        """When .git dir has a commondir file, follow it."""
+        from git_operations import _resolve_bare_repo_path
+        with tempfile.TemporaryDirectory() as tmpdir:
+            bare = os.path.join(tmpdir, "bare.git")
+            os.makedirs(bare)
+            dot_git = os.path.join(tmpdir, "work", ".git")
+            os.makedirs(dot_git)
+            with open(os.path.join(dot_git, "commondir"), "w") as f:
+                f.write(bare)
+            result = _resolve_bare_repo_path(os.path.join(tmpdir, "work"))
+            assert result == os.path.normpath(bare)
+
+    def test_dot_git_file_worktree(self):
+        """When .git is a file with gitdir pointer, follow the chain."""
+        from git_operations import _resolve_bare_repo_path
+        with tempfile.TemporaryDirectory() as tmpdir:
+            # Set up bare repo
+            bare = os.path.join(tmpdir, "bare.git")
+            os.makedirs(bare)
+
+            # Set up worktree gitdir
+            wt_gitdir = os.path.join(bare, "worktrees", "wt1")
+            os.makedirs(wt_gitdir)
+            with open(os.path.join(wt_gitdir, "commondir"), "w") as f:
+                f.write("../..")  # relative to wt_gitdir -> bare.git
+
+            # Set up worktree
+            wt = os.path.join(tmpdir, "wt1")
+            os.makedirs(wt)
+            with open(os.path.join(wt, ".git"), "w") as f:
+                f.write(f"gitdir: {wt_gitdir}")
+
+            result = _resolve_bare_repo_path(wt)
+            assert result == os.path.normpath(bare)
+
+    def test_no_dot_git(self):
+        """Returns None when .git does not exist."""
+        from git_operations import _resolve_bare_repo_path
+        with tempfile.TemporaryDirectory() as tmpdir:
+            result = _resolve_bare_repo_path(tmpdir)
+            assert result is None
+
+    def test_invalid_dot_git_file_content(self):
+        """Returns None when .git file has unexpected content."""
+        from git_operations import _resolve_bare_repo_path
+        with tempfile.TemporaryDirectory() as tmpdir:
+            with open(os.path.join(tmpdir, ".git"), "w") as f:
+                f.write("garbage content")
+            result = _resolve_bare_repo_path(tmpdir)
+            assert result is None
+
+    def test_relative_commondir(self):
+        """Handles relative commondir path correctly."""
+        from git_operations import _resolve_bare_repo_path
+        with tempfile.TemporaryDirectory() as tmpdir:
+            bare = os.path.join(tmpdir, "repos", "bare.git")
+            os.makedirs(bare)
+            dot_git = os.path.join(tmpdir, ".git")
+            os.makedirs(dot_git)
+            # Relative path from .git to bare
+            rel = os.path.relpath(bare, dot_git)
+            with open(os.path.join(dot_git, "commondir"), "w") as f:
+                f.write(rel)
+            result = _resolve_bare_repo_path(tmpdir)
+            assert result == os.path.normpath(bare)
+
+
+class TestFetchLock:
+    """Tests for _fetch_lock() context manager."""
+
+    def test_lock_acquired_and_released(self):
+        """Basic lock acquire and release."""
+        from git_operations import _fetch_lock, _FETCH_LOCK_FILENAME
+        with tempfile.TemporaryDirectory() as tmpdir:
+            with _fetch_lock(tmpdir, timeout=5.0):
+                lock_path = os.path.join(tmpdir, _FETCH_LOCK_FILENAME)
+                assert os.path.exists(lock_path)
+            # After context exit, lock should be released (fd closed)
+
+    def test_lock_timeout(self):
+        """TimeoutError raised when lock cannot be acquired."""
+        from git_operations import _fetch_lock, _FETCH_LOCK_FILENAME
+        with tempfile.TemporaryDirectory() as tmpdir:
+            lock_path = os.path.join(tmpdir, _FETCH_LOCK_FILENAME)
+            # Hold an exclusive lock from outside
+            fd = os.open(lock_path, os.O_CREAT | os.O_RDWR, 0o644)
+            try:
+                import fcntl
+                fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                # Now try to acquire via _fetch_lock — should timeout
+                with pytest.raises(TimeoutError):
+                    with _fetch_lock(tmpdir, timeout=1.5):
+                        pass
+            finally:
+                fcntl.flock(fd, fcntl.LOCK_UN)
+                os.close(fd)
+
+    def test_fd_closed_on_exception(self):
+        """File descriptor is closed even on exception inside context."""
+        from git_operations import _fetch_lock
+        with tempfile.TemporaryDirectory() as tmpdir:
+            with pytest.raises(ValueError):
+                with _fetch_lock(tmpdir, timeout=5.0):
+                    raise ValueError("test error")
+            # Should not leave stale lock — verify by acquiring again
+            with _fetch_lock(tmpdir, timeout=2.0):
+                pass  # Should succeed if fd was properly closed
+
+
+class TestFetchLockingInExecuteGit:
+    """Tests that fetch locking is wired into execute_git()."""
+
+    META = {"sandbox_branch": "test-branch"}
+
+    def test_fetch_denied_without_bare_repo(self):
+        """Fetch should be denied when bare repo cannot be resolved."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            # No .git dir — bare repo unresolvable
+            request = GitExecRequest(args=["fetch", "origin", "main"])
+            response, error = execute_git(request, tmpdir, metadata=self.META)
+            assert response is None
+            assert error is not None
+            assert "bare repo" in error.reason.lower()
+
+    def test_fetch_allowed_with_break_glass(self):
+        """FOUNDRY_ALLOW_UNLOCKED_FETCH=1 allows fetch without lock."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            with patch.dict(os.environ, {"FOUNDRY_ALLOW_UNLOCKED_FETCH": "1"}):
+                with patch("git_operations.subprocess.run") as mock_run:
+                    mock_run.return_value = MagicMock(
+                        returncode=0,
+                        stdout=b"",
+                        stderr=b"",
+                    )
+                    request = GitExecRequest(args=["fetch", "origin", "main"])
+                    response, error = execute_git(request, tmpdir, metadata=self.META)
+                    assert error is None
+                    mock_run.assert_called_once()
+
+    def test_fetch_with_lock_when_bare_repo_exists(self):
+        """Fetch acquires lock when bare repo is resolvable."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            # Create .git directory to make bare repo resolvable
+            os.makedirs(os.path.join(tmpdir, ".git"))
+            with patch("git_operations.subprocess.run") as mock_run:
+                mock_run.return_value = MagicMock(
+                    returncode=0,
+                    stdout=b"",
+                    stderr=b"",
+                )
+                request = GitExecRequest(args=["fetch", "origin", "main"])
+                response, error = execute_git(request, tmpdir, metadata=self.META)
+                assert error is None
+                mock_run.assert_called_once()
+
+    def test_non_fetch_commands_not_locked(self):
+        """Non-fetch commands should not require fetch locking."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            # No .git — would fail for fetch, but should work for status
+            with patch("git_operations.subprocess.run") as mock_run:
+                mock_run.return_value = MagicMock(
+                    returncode=0,
+                    stdout=b"On branch main",
+                    stderr=b"",
+                )
+                request = GitExecRequest(args=["status"])
+                response, error = execute_git(request, tmpdir, metadata=self.META)
+                assert error is None
+                assert response is not None
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
