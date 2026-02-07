@@ -142,6 +142,8 @@ def _get_subcommand_args(args: List[str]) -> Tuple[Optional[str], List[str]]:
     return None, []
 ```
 
+**Refactoring note:** `validate_command()` (lines 507-540) has the same global-flag/`-c` parsing loop. Refactor it to call `_get_subcommand_args()` internally, eliminating the triplicated logic. This ensures future changes to global flag handling are made in one place.
+
 Add new constants:
 
 ```python
@@ -158,6 +160,16 @@ WELL_KNOWN_BRANCH_PREFIXES: Tuple[str, ...] = (
 _REF_READING_CMDS: FrozenSet[str] = frozenset({
     "log", "show", "diff", "blame", "cherry-pick", "merge",
     "rebase", "rev-list", "diff-tree",
+})
+
+# Commands that enumerate refs — output filtering only (3C), not input-blocked
+_REF_ENUM_CMDS: FrozenSet[str] = frozenset({
+    "for-each-ref", "ls-remote",
+})
+
+# Flags that implicitly expand to all refs — blocked on ref-reading commands
+_IMPLICIT_ALL_REF_FLAGS: FrozenSet[str] = frozenset({
+    "--all", "--branches", "--remotes",
 })
 ```
 
@@ -222,12 +234,30 @@ def _is_allowed_branch_name(name: str, sandbox_branch: str) -> bool:
         return True
     # Everything else is potentially another sandbox's branch
     return False
+
+
+_PATHSPEC_EXT_RE = re.compile(r'\.\w{1,10}$')
+
+def _looks_like_pathspec(arg: str) -> bool:
+    """Heuristic: does this argument look like a file path rather than a ref?
+
+    Conservative — only matches obvious pathspecs to avoid creating bypasses.
+    Ambiguous cases (directory paths, extension-less files like Makefile)
+    require the standard `--` separator.
+    """
+    # Starts with ./ or ../ (explicit relative path)
+    if arg.startswith("./") or arg.startswith("../"):
+        return True
+    # Contains a file extension (e.g., foo.py, src/bar.ts, README.md)
+    if _PATHSPEC_EXT_RE.search(arg):
+        return True
+    return False
 ```
 
-**Key changes from v1:**
+**Key changes from v2:**
 - Remote tracking refs (`origin/*`, `refs/remotes/*`) are now filtered through the same isolation logic instead of being unconditionally allowed. This closes the bypass where sandbox A could `git log origin/sandbox-B-branch`.
 - SHA minimum length raised from 7 to 12 to avoid false positives on hex-like branch names (e.g., `deadbeef`, `cafebabe`). Git's default abbreviated SHA is 12+ chars.
-- Removed the fragile file-path heuristic (`"." in ref and "/" in ref`). Pathspecs are handled by `--` detection in the caller instead.
+- Added `_looks_like_pathspec()` heuristic as a fallback before denying — avoids false denials on `git log branch file.py`. Conservative: only matches file extensions and `./`/`../` prefixes. Ambiguous cases (directory paths, extension-less files) require the `--` separator, which is standard git practice.
 - Tags remain unconditionally allowed (accepted low risk — tagging requires write access).
 - Extracted `_is_allowed_branch_name()` to share logic between local and remote ref checks.
 
@@ -238,7 +268,13 @@ def validate_branch_isolation(
     args: List[str],
     metadata: Optional[dict] = None,
 ) -> Optional[ValidationError]:
-    """Block access to other sandboxes' branches."""
+    """Block access to other sandboxes' branches.
+
+    Checks input refs for ref-reading commands, checkout/switch targets,
+    and branch deletion. Blocks implicit-all flags (--all, --branches,
+    --remotes). Output filtering for branch/for-each-ref/ls-remote listing
+    is handled separately in 3C.
+    """
     if not metadata:
         return None
     sandbox_branch = metadata.get("sandbox_branch", "")
@@ -249,7 +285,7 @@ def validate_branch_isolation(
     if subcommand is None:
         return None
 
-    # Branch deletion guard
+    # --- Branch deletion guard ---
     if subcommand == "branch":
         if any(a in ("-d", "-D", "--delete") for a in subcommand_args):
             for arg in subcommand_args:
@@ -261,40 +297,85 @@ def validate_branch_isolation(
                     )
         return None  # branch listing handled by output filtering (3C)
 
-    # Checkout/switch to another sandbox's branch
-    if subcommand in ("checkout", "switch"):
-        # Only check the first non-flag arg (the branch target)
-        for arg in subcommand_args:
-            if arg == "--":
-                break  # Pathspecs after --
-            if arg.startswith("-"):
-                continue
-            if not _is_allowed_ref(arg, sandbox_branch):
-                return ValidationError(
-                    f"Cannot checkout branch '{arg}': belongs to another sandbox"
-                )
-            break  # Only check the first positional (the target ref)
+    # --- Ref enumeration commands (for-each-ref, ls-remote) ---
+    # Input args are glob patterns (refs/heads/*), not individual refs.
+    # Blocking them here would break legitimate usage. Output is filtered
+    # in 3C instead. Return early.
+    if subcommand in _REF_ENUM_CMDS:
         return None
 
-    # Ref-reading commands
+    # --- Checkout/switch to another sandbox's branch ---
+    if subcommand in ("checkout", "switch"):
+        _BRANCH_CREATE_FLAGS = {"-b", "-B", "-c", "-C"}
+        creating_branch = False
+        skip_next = False
+        positionals = []
+
+        for arg in subcommand_args:
+            if skip_next:
+                skip_next = False
+                continue
+            if arg == "--":
+                break  # Pathspecs after --
+            if arg in _BRANCH_CREATE_FLAGS:
+                creating_branch = True
+                skip_next = True  # Next arg is the new branch name (skip it)
+                continue
+            if arg.startswith("-"):
+                continue
+            positionals.append(arg)
+
+        if creating_branch:
+            # `checkout -b new-branch start-point` or `switch -c new start`
+            # positionals[0] is the start-point — must be isolation-checked
+            if positionals and not _is_allowed_ref(positionals[0], sandbox_branch):
+                return ValidationError(
+                    f"Cannot use start-point '{positionals[0]}': "
+                    f"belongs to another sandbox"
+                )
+        else:
+            # `checkout <branch>` — first positional is the target
+            if positionals and not _is_allowed_ref(positionals[0], sandbox_branch):
+                return ValidationError(
+                    f"Cannot checkout branch '{positionals[0]}': "
+                    f"belongs to another sandbox"
+                )
+        return None
+
+    # --- Ref-reading commands ---
     if subcommand not in _REF_READING_CMDS:
         return None
+
+    # Block flags that implicitly expand to all refs
+    for arg in subcommand_args:
+        if arg in _IMPLICIT_ALL_REF_FLAGS:
+            return ValidationError(
+                f"Flag '{arg}' not allowed: exposes branches from other "
+                f"sandboxes. Specify refs explicitly instead."
+            )
 
     for arg in subcommand_args:
         if arg.startswith("-"):
             continue
         if arg == "--":
             break  # Everything after -- is pathspecs, not refs
-        if not _is_allowed_ref(arg, sandbox_branch):
-            return ValidationError(
-                f"Access denied: ref '{arg}' belongs to another sandbox"
-            )
+        if _is_allowed_ref(arg, sandbox_branch):
+            continue
+        # Before denying, check if it looks like a pathspec (file path)
+        if _looks_like_pathspec(arg):
+            continue
+        return ValidationError(
+            f"Access denied: ref '{arg}' belongs to another sandbox"
+        )
     return None
 ```
 
-**Changes from v1:**
+**Changes from v2:**
 - Uses `_get_subcommand_args()` helper instead of inline parsing.
-- Added `checkout`/`switch` to isolation (sandbox A shouldn't be able to switch to sandbox B's branch).
+- Checkout/switch now handles `-b`/`-B`/`-c`/`-C` start-point args. Previously only the first positional was checked, missing the case where `git checkout -b new-branch other-sandbox-branch` uses another sandbox's branch as a start-point.
+- `for-each-ref` and `ls-remote` return early — handled by output filtering (3C), not input-blocked.
+- `--all`, `--branches`, `--remotes` flags are blocked on ref-reading commands to prevent implicit expansion to all refs (e.g., `git log --all` would show commits from all sandboxes).
+- Pathspec heuristic (`_looks_like_pathspec`) used as fallback before denying, avoiding false denials on `git log branch file.py`.
 
 ### 3B. Wire isolation into `execute_git()`
 
@@ -311,32 +392,39 @@ if err:
     return None, err
 ```
 
-### 3C. Output filtering for branch listing
+### 3C. Output filtering for ref listings
 
 **File:** `unified-proxy/git_operations.py` — in `execute_git()`, after path translation (line 1278), before constructing the response (line 1280):
 
 ```python
-# Post-process branch listing output for isolation
+# Post-process ref listing output for isolation
 if metadata and metadata.get("sandbox_branch"):
-    stdout_str = _filter_branch_listing(
+    stdout_str = _filter_ref_listing_output(
         request.args, stdout_str, metadata["sandbox_branch"]
     )
 ```
 
-Add `_filter_branch_listing()`:
+Add output filtering functions:
 
 ```python
 _BRANCH_LINE_RE = re.compile(r'^([* ] +)(.+)$')
 _REMOTE_BRANCH_LINE_RE = re.compile(r'^( +)(remotes/\S+)(.*)$')
+_REF_IN_LINE_RE = re.compile(r'refs/heads/(\S+)')
 
-def _filter_branch_listing(
+def _filter_ref_listing_output(
     args: List[str], stdout: str, sandbox_branch: str,
 ) -> str:
-    """Filter branch listing output to hide other sandboxes' branches."""
+    """Dispatch to the appropriate output filter based on subcommand."""
     subcommand = _get_subcommand(args)
-    if subcommand != "branch":
-        return stdout
+    if subcommand == "branch":
+        return _filter_branch_output(stdout, sandbox_branch)
+    if subcommand in _REF_ENUM_CMDS:
+        return _filter_ref_enum_output(stdout, sandbox_branch)
+    return stdout
 
+
+def _filter_branch_output(stdout: str, sandbox_branch: str) -> str:
+    """Filter `git branch` output to hide other sandboxes' branches."""
     lines = stdout.split("\n")
     filtered = []
     for line in lines:
@@ -367,14 +455,38 @@ def _filter_branch_listing(
         filtered.append(line)
 
     return "\n".join(filtered)
+
+
+def _filter_ref_enum_output(stdout: str, sandbox_branch: str) -> str:
+    """Filter `git for-each-ref` and `git ls-remote` output.
+
+    Scans each line for refs/heads/<branch> patterns. Lines containing
+    a non-allowed branch ref are dropped. Lines without branch refs
+    (tags, HEAD, etc.) are kept.
+    """
+    lines = stdout.split("\n")
+    filtered = []
+    for line in lines:
+        if not line.strip():
+            filtered.append(line)
+            continue
+        m = _REF_IN_LINE_RE.search(line)
+        if m:
+            branch_name = m.group(1)
+            if not _is_allowed_branch_name(branch_name, sandbox_branch):
+                continue  # Drop line — belongs to another sandbox
+        filtered.append(line)
+    return "\n".join(filtered)
 ```
 
-**Changes from v1:**
+**Changes from v2:**
 - Uses regex for branch name parsing instead of fragile `lstrip("* ")`.
 - Handles remote branch format (`remotes/origin/foo`) separately.
 - Handles `branch -> origin/branch` symref format.
-- Dropped `for-each-ref` filtering — over-engineered for now; `git branch` covers the primary use case. Can add later if needed.
+- Now filters `for-each-ref` and `ls-remote` output via `_filter_ref_enum_output()`. These commands enumerate all refs and would otherwise leak other sandboxes' branch names. The filter scans each line for `refs/heads/<branch>` patterns and drops lines with non-allowed branches.
 - Unrecognized lines are kept (fail-open for display, since isolation is enforced at the command level in 3A/3B).
+
+**Limitation:** `for-each-ref` with custom `--format` strings could produce output where the ref isn't in `refs/heads/<name>` format (e.g., `%(refname:short)`). The regex won't catch these. This is an accepted gap — custom format output is hard to filter generically, and the branch name leak is low-severity (code access is already blocked by input validation).
 
 ---
 
@@ -420,7 +532,7 @@ class _RepoFetchLock:
 _fetch_lock = _RepoFetchLock()
 ```
 
-**Lock path note:** The lock must be placed in the **bare repo directory**, not the worktree. The bare repo path is available via `metadata.get("bare_repo_path")` (already used in `check_push_protected_branches()` at line 1023-1025). If not available in metadata, fall back to resolving it from the worktree's `.git/commondir` file.
+**Lock path note:** The lock file is placed in the **bare repo directory**, not the worktree. Git ignores unknown files in bare repos (no working tree means no `git status` pollution), so this is harmless. The bare repo path is available via `metadata.get("bare_repo_path")` (already used in `check_push_protected_branches()` at line 1023-1025). If not available in metadata, fall back to resolving it from the worktree's `.git/commondir` file.
 
 **Sleep interval:** Set to 1.0s (up from 0.5s). Fetches take seconds; polling faster just wastes CPU. The 30s timeout is generous enough to absorb this.
 
@@ -470,30 +582,31 @@ finally:
 
 ```bash
 cleanup_sandbox_branch() {
-    local name="$1"
-    if [ -z "${SANDBOX_BRANCH:-}" ] || [ -z "${SANDBOX_REPO_URL:-}" ]; then
+    local branch="${1:-}"
+    local repo_url="${2:-}"
+    if [ -z "$branch" ] || [ -z "$repo_url" ]; then
         return 0
     fi
 
     local bare_path
-    bare_path=$(repo_to_path "$SANDBOX_REPO_URL")
+    bare_path=$(repo_to_path "$repo_url")
     [ -d "$bare_path" ] || return 0
 
     # Don't delete well-known branches
-    case "$SANDBOX_BRANCH" in
+    case "$branch" in
         main|master|develop|production) return 0 ;;
     esac
-    case "$SANDBOX_BRANCH" in
+    case "$branch" in
         release/*|hotfix/*) return 0 ;;
     esac
 
     # Don't delete if another worktree still uses this branch
     if git -C "$bare_path" worktree list --porcelain 2>/dev/null \
-        | grep -q "branch refs/heads/$SANDBOX_BRANCH"; then
+        | grep -q "branch refs/heads/$branch"; then
         return 0
     fi
 
-    git -C "$bare_path" branch -D "$SANDBOX_BRANCH" 2>/dev/null || true
+    git -C "$bare_path" branch -D "$branch" 2>/dev/null || true
 }
 ```
 
@@ -506,7 +619,7 @@ cleanup_sandbox_branch() {
 ```bash
 # Clean up sandbox branch from bare repo
 load_sandbox_metadata "$name" 2>/dev/null || true
-cleanup_sandbox_branch "$name"
+cleanup_sandbox_branch "${SANDBOX_BRANCH:-}" "${SANDBOX_REPO_URL:-}"
 ```
 
 ### 5C. Call cleanup from prune
@@ -517,14 +630,14 @@ In the orphaned configs loop (before `remove_path "$config_dir"` at line 39):
 
 ```bash
 load_sandbox_metadata "$name" 2>/dev/null || true
-cleanup_sandbox_branch "$name"
+cleanup_sandbox_branch "${SANDBOX_BRANCH:-}" "${SANDBOX_REPO_URL:-}"
 ```
 
 In the no-container loop (before `remove_worktree "$worktree_dir"` at line 65):
 
 ```bash
 load_sandbox_metadata "$name" 2>/dev/null || true
-cleanup_sandbox_branch "$name"
+cleanup_sandbox_branch "${SANDBOX_BRANCH:-}" "${SANDBOX_REPO_URL:-}"
 ```
 
 **Limitation:** If the metadata file is already gone (common for orphaned sandboxes), `SANDBOX_BRANCH` won't be populated and cleanup silently no-ops. Orphaned branches from corrupted sandboxes accumulate until manual cleanup. This is the safe default — we don't want to guess which branches to delete.
@@ -533,13 +646,20 @@ cleanup_sandbox_branch "$name"
 
 ## Phase 6: Unit Tests
 
-### 6A. Test `_is_allowed_ref` and `_is_allowed_branch_name`
+### 6A. Test setup
 
-**File:** `unified-proxy/test_git_operations.py` (or existing test file)
+**File:** `unified-proxy/test_branch_isolation.py`
+
+The proxy directory has no existing test infrastructure. Add this test file and run with `cd unified-proxy && python -m pytest test_branch_isolation.py -v`. No `conftest.py` is needed — the imports are relative to the directory.
+
+### 6B. Test `_is_allowed_ref` and `_is_allowed_branch_name`
 
 ```python
 import pytest
-from git_operations import _is_allowed_ref, _is_allowed_branch_name
+from git_operations import (
+    _is_allowed_ref, _is_allowed_branch_name, _looks_like_pathspec,
+    validate_branch_isolation, _filter_ref_listing_output,
+)
 
 class TestIsAllowedRef:
     """Unit tests for branch isolation ref checking."""
@@ -599,53 +719,179 @@ class TestIsAllowedRef:
         assert _is_allowed_ref("^main..my-branch", "my-branch")
 
 
+### 6C. Test `_looks_like_pathspec`
+
+class TestLooksLikePathspec:
+    """Unit tests for the pathspec heuristic."""
+
+    def test_file_with_extension(self):
+        assert _looks_like_pathspec("file.py")
+        assert _looks_like_pathspec("src/file.py")
+        assert _looks_like_pathspec("README.md")
+        assert _looks_like_pathspec("path/to/module.ts")
+
+    def test_relative_paths(self):
+        assert _looks_like_pathspec("./src/file.py")
+        assert _looks_like_pathspec("../other/file.py")
+        assert _looks_like_pathspec("./Makefile")
+
+    def test_branch_names_not_pathspecs(self):
+        """Branch names should NOT be mistaken for pathspecs."""
+        assert not _looks_like_pathspec("my-branch")
+        assert not _looks_like_pathspec("feature/my-feature")
+        assert not _looks_like_pathspec("main")
+        assert not _looks_like_pathspec("origin/main")
+
+    def test_ambiguous_cases_not_matched(self):
+        """Ambiguous args should NOT match — require -- separator."""
+        assert not _looks_like_pathspec("src/components")  # no extension
+        assert not _looks_like_pathspec("Makefile")  # no extension, no ./
+
+
+### 6D. Test `validate_branch_isolation`
+
 class TestValidateBranchIsolation:
     """Unit tests for the full isolation validator."""
 
+    META = {"sandbox_branch": "my-branch"}
+
     def test_no_metadata_allows_all(self):
-        from git_operations import validate_branch_isolation
         assert validate_branch_isolation(["log", "anything"], None) is None
 
     def test_no_sandbox_branch_allows_all(self):
-        from git_operations import validate_branch_isolation
         assert validate_branch_isolation(
             ["log", "anything"], {"sandbox_branch": ""}
         ) is None
 
     def test_blocks_other_branch_in_log(self):
-        from git_operations import validate_branch_isolation
         err = validate_branch_isolation(
-            ["log", "other-sandbox"], {"sandbox_branch": "my-branch"}
+            ["log", "other-sandbox"], self.META
         )
         assert err is not None
         assert "other-sandbox" in err.reason
 
     def test_allows_own_branch(self):
-        from git_operations import validate_branch_isolation
         assert validate_branch_isolation(
-            ["log", "my-branch"], {"sandbox_branch": "my-branch"}
+            ["log", "my-branch"], self.META
         ) is None
 
     def test_pathspecs_after_double_dash(self):
-        from git_operations import validate_branch_isolation
         # Args after -- are pathspecs, not refs — should not be checked
         assert validate_branch_isolation(
-            ["log", "--", "other-sandbox"], {"sandbox_branch": "my-branch"}
+            ["log", "--", "other-sandbox"], self.META
+        ) is None
+
+    def test_pathspec_heuristic_allows_files(self):
+        # file.py looks like a pathspec — should not be blocked
+        assert validate_branch_isolation(
+            ["log", "my-branch", "src/file.py"], self.META
+        ) is None
+
+    def test_pathspec_heuristic_allows_relative(self):
+        assert validate_branch_isolation(
+            ["log", "./some-other-branch-name.py"], self.META
         ) is None
 
     def test_blocks_branch_deletion(self):
-        from git_operations import validate_branch_isolation
         err = validate_branch_isolation(
-            ["branch", "-D", "other-sandbox"], {"sandbox_branch": "my-branch"}
+            ["branch", "-D", "other-sandbox"], self.META
         )
         assert err is not None
 
     def test_blocks_checkout_other_branch(self):
-        from git_operations import validate_branch_isolation
         err = validate_branch_isolation(
-            ["checkout", "other-sandbox"], {"sandbox_branch": "my-branch"}
+            ["checkout", "other-sandbox"], self.META
         )
         assert err is not None
+
+    def test_blocks_checkout_b_startpoint(self):
+        """checkout -b new-branch start-point: start-point must be checked."""
+        err = validate_branch_isolation(
+            ["checkout", "-b", "new-branch", "other-sandbox"], self.META
+        )
+        assert err is not None
+        assert "other-sandbox" in err.reason
+
+    def test_allows_checkout_b_from_own_branch(self):
+        assert validate_branch_isolation(
+            ["checkout", "-b", "new-branch", "my-branch"], self.META
+        ) is None
+
+    def test_blocks_switch_c_startpoint(self):
+        err = validate_branch_isolation(
+            ["switch", "-c", "new-branch", "other-sandbox"], self.META
+        )
+        assert err is not None
+
+    def test_blocks_log_all_flag(self):
+        """--all exposes all branches — must be blocked."""
+        err = validate_branch_isolation(
+            ["log", "--all"], self.META
+        )
+        assert err is not None
+        assert "--all" in err.reason
+
+    def test_blocks_log_branches_flag(self):
+        err = validate_branch_isolation(
+            ["log", "--branches"], self.META
+        )
+        assert err is not None
+
+    def test_blocks_log_remotes_flag(self):
+        err = validate_branch_isolation(
+            ["log", "--remotes"], self.META
+        )
+        assert err is not None
+
+    def test_for_each_ref_not_input_blocked(self):
+        """for-each-ref is handled by output filtering, not input blocking."""
+        assert validate_branch_isolation(
+            ["for-each-ref", "refs/heads/"], self.META
+        ) is None
+
+    def test_ls_remote_not_input_blocked(self):
+        assert validate_branch_isolation(
+            ["ls-remote", ".", "refs/heads/*"], self.META
+        ) is None
+
+
+### 6E. Test output filtering
+
+class TestFilterRefListingOutput:
+    """Unit tests for ref listing output filtering."""
+
+    def test_branch_listing_hides_other(self):
+        stdout = "* my-branch\n  main\n  other-sandbox\n"
+        result = _filter_ref_listing_output(
+            ["branch"], stdout, "my-branch"
+        )
+        assert "my-branch" in result
+        assert "main" in result
+        assert "other-sandbox" not in result
+
+    def test_for_each_ref_hides_other(self):
+        stdout = (
+            "abc123 commit refs/heads/main\n"
+            "def456 commit refs/heads/my-branch\n"
+            "789abc commit refs/heads/other-sandbox\n"
+        )
+        result = _filter_ref_listing_output(
+            ["for-each-ref", "refs/heads/"], stdout, "my-branch"
+        )
+        assert "refs/heads/main" in result
+        assert "refs/heads/my-branch" in result
+        assert "refs/heads/other-sandbox" not in result
+
+    def test_for_each_ref_keeps_tags(self):
+        stdout = (
+            "abc123 commit refs/tags/v1.0\n"
+            "def456 commit refs/heads/other-sandbox\n"
+        )
+        result = _filter_ref_listing_output(
+            ["for-each-ref"], stdout, "my-branch"
+        )
+        assert "refs/tags/v1.0" in result
+        assert "other-sandbox" not in result
 ```
 
 ---
@@ -658,10 +904,10 @@ class TestValidateBranchIsolation:
 | `lib/container_config.sh` | VirtioFS cache refresh + defensive extensions set (1B) |
 | `commands/new.sh` | Add `sandbox_branch` to proxy metadata (2A) |
 | `commands/start.sh` | Add `sandbox_branch` to proxy metadata (2A) |
-| `unified-proxy/git_operations.py` | Subcommand helpers (3A), branch isolation validator (3A), ref checker (3A), output filter (3C), wiring (3B), fetch lock (4A) |
+| `unified-proxy/git_operations.py` | Subcommand helpers (3A), pathspec heuristic (3A), branch isolation validator (3A), ref checker (3A), ref listing output filters (3C), wiring (3B), fetch lock (4A). Refactor `validate_command()` to use shared helpers. |
 | `commands/destroy.sh` | Load metadata + branch cleanup (5B) |
 | `commands/prune.sh` | Load metadata + branch cleanup (5C) |
-| `unified-proxy/test_git_operations.py` | Unit tests for isolation logic (6A) |
+| `unified-proxy/test_branch_isolation.py` | Unit tests for isolation logic (6B-6E) |
 
 ---
 
@@ -671,6 +917,9 @@ class TestValidateBranchIsolation:
 2. **Tag bypass:** Any sandbox can access any tag. Low risk — tagging requires write access that is already separately controlled.
 3. **Orphaned branch accumulation:** If metadata is lost before destroy/prune, the sandbox branch can't be cleaned up automatically. Manual `git branch -D` in the bare repo is the escape hatch.
 4. **Race in cleanup:** Between `load_sandbox_metadata` and `git branch -D`, another sandbox could theoretically start using the same branch. Mitigated by the `worktree list | grep` check; residual risk is negligible in practice.
+5. **Pathspec ambiguity:** Args that don't look like files (no extension, no `./` prefix) and aren't recognized refs will be blocked. Users must use `--` to separate ambiguous pathspecs from refs. This matches standard git practice. Example: `git log branch Makefile` may fail; `git log branch -- Makefile` works.
+6. **`for-each-ref --format` bypass:** Custom format strings (e.g., `%(refname:short)`) can produce output where branch names aren't in `refs/heads/<name>` format. The regex-based output filter won't catch these. Low severity — branch name visibility is an information leak, not a code access issue.
+7. **`git reflog` leak:** Reflog entries may contain branch names and SHAs from other sandboxes. Not addressed in this plan. Each worktree has its own reflog, but the shared bare repo's reflog (e.g., `refs/heads/<branch>`) is accessible. Low priority — reflog access is uncommon in sandbox workflows.
 
 ---
 
@@ -691,11 +940,15 @@ class TestValidateBranchIsolation:
    - `git cherry-pick <sandbox-B-commit>` by branch name should be blocked
    - `git branch -d <sandbox-B-branch>` should be blocked
    - `git checkout sandbox-B-branch` should be blocked
+   - `git checkout -b new-branch sandbox-B-branch` should be blocked (start-point)
+   - `git log --all` should be blocked (implicit ref expansion)
+   - `git for-each-ref refs/heads/` should NOT list sandbox B's branch (output filtered)
    - `git log main`, `git log origin/main`, `git log HEAD~3` should all work
    - `git log <12-char-sha>` should work
+   - `git log my-branch src/file.py` should work (pathspec heuristic)
 
 4. **Fetch locking (Phase 4):** Run concurrent fetches from two sandbox proxies — no lock contention errors. Also test `git pull` is serialized.
 
 5. **Branch cleanup (Phase 5):** Destroy a sandbox, verify its branch is removed from the bare repo. Prune orphans, verify their branches are cleaned up.
 
-6. **Unit tests (Phase 6):** `pytest unified-proxy/test_git_operations.py` — all tests pass covering ref checking, isolation validation, edge cases (SHAs, ranges, remote refs, pathspecs).
+6. **Unit tests (Phase 6):** `cd unified-proxy && python -m pytest test_branch_isolation.py -v` — all tests pass covering ref checking, pathspec heuristic, isolation validation, checkout -b start-points, --all flag blocking, output filtering for branch/for-each-ref.
