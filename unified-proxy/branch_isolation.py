@@ -121,6 +121,78 @@ def _get_subcommand(args: List[str]) -> Optional[str]:
     subcmd, _, _ = _get_subcommand_args(args)
     return subcmd
 
+
+def _resolve_bare_repo_path(repo_root: str) -> Optional[str]:
+    """Follow the worktree .git -> gitdir -> commondir chain to find the bare repo.
+
+    Git worktrees have a ``.git`` *file* (not directory) that contains a
+    ``gitdir:`` pointer to the worktree's gitdir directory.  That gitdir
+    in turn has a ``commondir`` file pointing (absolute or relative) to the
+    shared bare repo.
+
+    Args:
+        repo_root: The worktree's working directory root.
+
+    Returns:
+        Normalized absolute path to the bare repo directory, or None if
+        the chain cannot be resolved.
+    """
+    try:
+        dot_git = os.path.join(repo_root, ".git")
+
+        # If .git is a directory, this IS the git dir (not a worktree)
+        if os.path.isdir(dot_git):
+            # Check for commondir inside .git
+            commondir_file = os.path.join(dot_git, "commondir")
+            if os.path.isfile(commondir_file):
+                with open(commondir_file, "r") as f:
+                    commondir = f.read().strip()
+                if os.path.isabs(commondir):
+                    return os.path.normpath(commondir)
+                return os.path.normpath(os.path.join(dot_git, commondir))
+            # No commondir — .git itself is the git dir
+            return os.path.normpath(dot_git)
+
+        # .git is a file — read gitdir pointer
+        if not os.path.isfile(dot_git):
+            return None
+
+        with open(dot_git, "r") as f:
+            content = f.read().strip()
+
+        if not content.startswith("gitdir:"):
+            return None
+
+        gitdir = content[len("gitdir:"):].strip()
+        if not os.path.isabs(gitdir):
+            gitdir = os.path.join(repo_root, gitdir)
+        gitdir = os.path.normpath(gitdir)
+
+        if not os.path.isdir(gitdir):
+            return None
+
+        # Read commondir from gitdir
+        commondir_file = os.path.join(gitdir, "commondir")
+        if not os.path.isfile(commondir_file):
+            # No commondir — gitdir itself is the bare repo
+            return gitdir
+
+        with open(commondir_file, "r") as f:
+            commondir = f.read().strip()
+
+        if os.path.isabs(commondir):
+            bare_path = os.path.normpath(commondir)
+        else:
+            bare_path = os.path.normpath(os.path.join(gitdir, commondir))
+
+        if not os.path.isdir(bare_path):
+            return None
+
+        return bare_path
+
+    except (OSError, IOError):
+        return None
+
 # ---------------------------------------------------------------------------
 # Branch Isolation Constants
 # ---------------------------------------------------------------------------
@@ -211,6 +283,11 @@ _BRANCH_CREATE_FLAGS: FrozenSet[str] = frozenset({
 _TAG_VALUE_FLAGS: FrozenSet[str] = frozenset({
     "-m", "--message", "-F", "--file", "-u", "--local-user",
     "--cleanup", "--sort",
+})
+
+# push flags that consume the next argument as a value
+_PUSH_VALUE_FLAGS: FrozenSet[str] = frozenset({
+    "--repo", "--receive-pack", "--exec", "--push-option", "-o",
 })
 
 # ---------------------------------------------------------------------------
@@ -370,6 +447,7 @@ def _is_allowed_ref(ref: str, sandbox_branch: str) -> bool:
             if branch_part:
                 return _is_allowed_branch_name(branch_part, sandbox_branch)
             return False
+        # Allowed as a slashed branch name (e.g. "release/1.0"); fall through
 
     # Full ref paths
     if base.startswith("refs/heads/"):
@@ -377,7 +455,7 @@ def _is_allowed_ref(ref: str, sandbox_branch: str) -> bool:
         return _is_allowed_branch_name(branch_name, sandbox_branch)
 
     # SHA hashes (hex strings of sufficient length) are always allowed
-    if len(base) >= _MIN_SHA_LENGTH and all(c in "0123456789abcdefABCDEF" for c in base):
+    if _is_sha_like(base):
         return True
 
     # Bare branch names
@@ -446,6 +524,10 @@ def validate_branch_isolation(
     # --- fetch / pull ---
     if subcommand in ("fetch", "pull"):
         return _validate_fetch_isolation(sub_args, sandbox_branch)
+
+    # --- push ---
+    if subcommand == "push":
+        return _validate_push_isolation(sub_args, sandbox_branch)
 
     # --- worktree add ---
     if subcommand == "worktree" and sub_args and sub_args[0] == "add":
@@ -647,6 +729,79 @@ def _validate_fetch_isolation(
             return ValidationError(
                 f"Branch isolation: refspec destination '{dst}' not allowed"
             )
+
+    return None
+
+
+def _validate_push_isolation(
+    sub_args: List[str], sandbox_branch: str,
+) -> Optional[ValidationError]:
+    """Validate push args for branch isolation.
+
+    Ensures that a sandbox can only push to its own branch and well-known
+    branches.  Blocks --all and --mirror (defense-in-depth; also blocked
+    by check_push_protected_branches).
+    """
+    skip_next = False
+    positionals: List[str] = []
+
+    for a in sub_args:
+        if a == "--":
+            break
+        if skip_next:
+            skip_next = False
+            continue
+
+        # Block --all and --mirror (expose/overwrite all branches)
+        if a in ("--all", "--mirror"):
+            return ValidationError(
+                f"Branch isolation: 'push {a}' not allowed (affects all branches)"
+            )
+
+        # Skip flags that consume the next argument
+        if a in _PUSH_VALUE_FLAGS:
+            skip_next = True
+            continue
+        # Handle --flag=value form
+        if "=" in a and a.split("=", 1)[0] in _PUSH_VALUE_FLAGS:
+            continue
+
+        # Handle compact -o<value> form
+        if a.startswith("-o") and a != "-o":
+            continue
+
+        if not a.startswith("-"):
+            positionals.append(a)
+
+    # First positional is the remote name (always allowed), rest are refspecs
+    for refspec in positionals[1:]:
+        # Strip force prefix
+        spec = refspec.lstrip("+")
+
+        if ":" in spec:
+            src, dst = spec.split(":", 1)
+            if not src and dst:
+                # Delete refspec (:dst) — check dst as branch name
+                if not _is_allowed_branch_name(dst, sandbox_branch):
+                    return ValidationError(
+                        f"Branch isolation: cannot delete remote branch '{dst}'"
+                    )
+            else:
+                # src:dst — check both sides
+                if src and not _is_allowed_ref(src, sandbox_branch):
+                    return ValidationError(
+                        f"Branch isolation: push source '{src}' not allowed"
+                    )
+                if dst and not _is_allowed_ref(dst, sandbox_branch):
+                    return ValidationError(
+                        f"Branch isolation: push destination '{dst}' not allowed"
+                    )
+        else:
+            # Bare refspec — check as ref
+            if spec and not _is_allowed_ref(spec, sandbox_branch):
+                return ValidationError(
+                    f"Branch isolation: push ref '{spec}' not allowed"
+                )
 
     return None
 
@@ -947,9 +1102,6 @@ def validate_sha_reachability(
     Returns:
         None if allowed, ValidationError if a SHA is unreachable.
     """
-    # Import here to avoid circular import at module level
-    from git_operations import _resolve_bare_repo_path
-
     if not metadata:
         return None
     sandbox_branch = metadata.get("sandbox_branch")
@@ -1147,10 +1299,7 @@ def _filter_ref_enum_output(output: str, sandbox_branch: str) -> str:
         if tokens:
             first_token = tokens[0]
             # If it looks like a SHA (hex, >= 12 chars), check second token
-            if (
-                len(first_token) >= _MIN_SHA_LENGTH
-                and all(c in "0123456789abcdefABCDEF" for c in first_token)
-            ):
+            if _is_sha_like(first_token):
                 # SHA-prefixed line with optional ref token (custom format)
                 if len(tokens) >= 2:
                     if _is_allowed_short_ref_token(tokens[1], sandbox_branch):

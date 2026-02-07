@@ -172,13 +172,13 @@ def make_authenticated_request(
 class TestFullPushFlow:
     """Test the complete git push flow through all security layers."""
 
-    def test_push_to_feature_branch_allowed(self, client, hmac_secret):
-        """Push to a feature branch should pass all validation layers."""
+    def test_push_to_own_branch_allowed(self, client, hmac_secret):
+        """Push to the sandbox's own branch should pass all validation layers."""
         response = make_authenticated_request(
             client,
             sandbox_id="test-sandbox",
             hmac_secret=hmac_secret,
-            args=["push", "origin", "feature-branch:feature-branch"],
+            args=["push", "origin", "sandbox/test-sandbox:sandbox/test-sandbox"],
         )
         # Command validation passes, but actual git execution may fail
         # (no real remote) — we check it gets past auth + validation
@@ -187,6 +187,7 @@ class TestFullPushFlow:
         # If 422, it should be a git execution error, not a policy block
         if response.status_code == 422:
             assert "protected branch" not in data.get("error", "").lower()
+            assert "isolation" not in data.get("error", "").lower()
 
     def test_push_to_protected_branch_blocked(self, client, hmac_secret):
         """Push to main should be blocked by policy engine."""
@@ -246,7 +247,8 @@ class TestFullPushFlow:
         )
         assert response.status_code == 422
         data = response.get_json()
-        assert "wildcard" in data.get("error", "").lower()
+        error_msg = data.get("error", "").lower()
+        assert "wildcard" in error_msg or "not allowed" in error_msg
 
     def test_push_delete_protected_branch_blocked(self, client, hmac_secret):
         """Push --delete for a protected branch should be blocked."""

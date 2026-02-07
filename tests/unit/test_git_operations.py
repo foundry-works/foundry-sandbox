@@ -581,14 +581,18 @@ class TestProtectedBranchPushValidation:
             mock_run.assert_not_called()
 
     def test_execute_git_blocks_wildcard_refspec_before_subprocess(self):
-        """Wildcard refspec push should be denied before running git subprocess."""
+        """Wildcard refspec push should be denied before running git subprocess.
+
+        May be caught by branch isolation (disallowed ref) or by push policy
+        (wildcard refspec).  Either way, subprocess must not be called.
+        """
         metadata = {"sandbox_branch": "test-branch"}
         request = GitExecRequest(args=["push", "origin", "refs/heads/*:refs/heads/*"])
         with patch("git_operations.subprocess.run") as mock_run:
             response, err = execute_git(request, "/tmp", metadata=metadata)
             assert response is None
             assert err is not None
-            assert "wildcard" in err.reason.lower()
+            assert "not allowed" in err.reason.lower() or "wildcard" in err.reason.lower()
             mock_run.assert_not_called()
 
     def test_push_tags_only_is_allowed(self):

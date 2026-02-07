@@ -204,3 +204,54 @@ class TestFetchPullDeny:
         assert validate_branch_isolation(
             ["fetch", "origin"], META_A
         ) is None
+
+
+class TestPushCrossSandboxBlocking:
+    """Push isolation: sandbox A cannot push to sandbox B's branch."""
+
+    def test_push_cross_sandbox_blocked(self):
+        err = validate_branch_isolation(
+            ["push", "origin", SANDBOX_B], META_A
+        )
+        assert err is not None
+        assert SANDBOX_B in err.reason
+
+    def test_push_own_branch_allowed(self):
+        assert validate_branch_isolation(
+            ["push", "origin", SANDBOX_A], META_A
+        ) is None
+
+    def test_push_refspec_cross_sandbox_blocked(self):
+        err = validate_branch_isolation(
+            ["push", "origin", f"{SANDBOX_A}:{SANDBOX_B}"], META_A
+        )
+        assert err is not None
+
+    def test_push_delete_cross_sandbox_blocked(self):
+        err = validate_branch_isolation(
+            ["push", "origin", f":{SANDBOX_B}"], META_A
+        )
+        assert err is not None
+
+    def test_push_all_blocked(self):
+        err = validate_branch_isolation(
+            ["push", "--all", "origin"], META_A
+        )
+        assert err is not None
+
+    def test_push_mirror_blocked(self):
+        err = validate_branch_isolation(
+            ["push", "--mirror", "origin"], META_A
+        )
+        assert err is not None
+
+    def test_push_bidirectional_blocking(self):
+        """Both directions are blocked."""
+        err_a = validate_branch_isolation(
+            ["push", "origin", SANDBOX_B], META_A
+        )
+        err_b = validate_branch_isolation(
+            ["push", "origin", SANDBOX_A], META_B
+        )
+        assert err_a is not None
+        assert err_b is not None

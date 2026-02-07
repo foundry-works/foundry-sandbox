@@ -1367,3 +1367,109 @@ class TestLsRemoteOutputFiltering:
         result = _filter_ref_listing_output(output, ["show-ref"], SANDBOX)
         assert "main" in result
         assert "sandbox/other" not in result
+
+
+# ---------------------------------------------------------------------------
+# Push Isolation
+# ---------------------------------------------------------------------------
+
+
+class TestPushIsolation:
+    """Test push command branch isolation enforcement."""
+
+    def test_push_own_branch_allowed(self):
+        assert validate_branch_isolation(
+            ["push", "origin", SANDBOX], META
+        ) is None
+
+    def test_push_cross_sandbox_blocked(self):
+        err = validate_branch_isolation(["push", "origin", OTHER], META)
+        assert err is not None
+        assert OTHER in err.reason
+
+    def test_push_well_known_allowed_by_isolation(self):
+        """Well-known branches pass isolation; protected-branch policy blocks separately."""
+        assert validate_branch_isolation(
+            ["push", "origin", "main"], META
+        ) is None
+
+    def test_push_refspec_src_dst_cross_sandbox_blocked(self):
+        err = validate_branch_isolation(
+            ["push", "origin", f"{SANDBOX}:{OTHER}"], META
+        )
+        assert err is not None
+        assert OTHER in err.reason
+
+    def test_push_refspec_src_cross_sandbox_blocked(self):
+        err = validate_branch_isolation(
+            ["push", "origin", f"{OTHER}:{SANDBOX}"], META
+        )
+        assert err is not None
+        assert OTHER in err.reason
+
+    def test_push_delete_cross_sandbox_blocked(self):
+        err = validate_branch_isolation(
+            ["push", "origin", f":{OTHER}"], META
+        )
+        assert err is not None
+        assert OTHER in err.reason
+
+    def test_push_delete_own_branch_allowed(self):
+        assert validate_branch_isolation(
+            ["push", "origin", f":{SANDBOX}"], META
+        ) is None
+
+    def test_push_all_blocked(self):
+        err = validate_branch_isolation(["push", "--all", "origin"], META)
+        assert err is not None
+        assert "--all" in err.reason
+
+    def test_push_mirror_blocked(self):
+        err = validate_branch_isolation(["push", "--mirror", "origin"], META)
+        assert err is not None
+        assert "--mirror" in err.reason
+
+    def test_push_no_refspec_allowed(self):
+        """Bare 'push origin' is allowed (isolation defers to push policy)."""
+        assert validate_branch_isolation(["push", "origin"], META) is None
+
+    def test_push_own_branch_refspec_allowed(self):
+        assert validate_branch_isolation(
+            ["push", "origin", f"{SANDBOX}:{SANDBOX}"], META
+        ) is None
+
+    def test_push_force_prefix_stripped(self):
+        """Force prefix (+) is stripped before checking refspec."""
+        err = validate_branch_isolation(
+            ["push", "origin", f"+{OTHER}:{OTHER}"], META
+        )
+        assert err is not None
+
+    def test_push_tags_allowed(self):
+        """Pushing tags is allowed."""
+        assert validate_branch_isolation(
+            ["push", "origin", "refs/tags/v1.0"], META
+        ) is None
+
+    def test_push_value_flag_skipped(self):
+        """Value flags like --push-option should not be treated as refspecs."""
+        assert validate_branch_isolation(
+            ["push", "--push-option", "ci.skip", "origin", SANDBOX], META
+        ) is None
+
+    def test_push_compact_o_flag_skipped(self):
+        """Compact -oci.skip should not be treated as a refspec."""
+        assert validate_branch_isolation(
+            ["push", "-oci.skip", "origin", SANDBOX], META
+        ) is None
+
+    def test_push_refs_heads_cross_sandbox_blocked(self):
+        err = validate_branch_isolation(
+            ["push", "origin", f"refs/heads/{OTHER}"], META
+        )
+        assert err is not None
+
+    def test_push_refs_heads_own_branch_allowed(self):
+        assert validate_branch_isolation(
+            ["push", "origin", f"refs/heads/{SANDBOX}"], META
+        ) is None

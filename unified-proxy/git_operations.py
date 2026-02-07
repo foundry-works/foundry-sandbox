@@ -34,6 +34,8 @@ from branch_isolation import (
     _get_subcommand,
     _get_subcommand_args,
     _GLOBAL_VALUE_FLAGS,
+    _resolve_bare_repo_path,
+    _SHA_CHECK_TIMEOUT,
     validate_branch_isolation,
     validate_sha_reachability,
     _filter_ref_listing_output,
@@ -1152,78 +1154,6 @@ _FETCH_LOCK_FILENAME = ".foundry-fetch.lock"
 # Default timeout and poll interval for fetch lock acquisition
 _FETCH_LOCK_TIMEOUT = 30.0
 _FETCH_LOCK_POLL_INTERVAL = 0.1
-
-
-def _resolve_bare_repo_path(repo_root: str) -> Optional[str]:
-    """Follow the worktree .git -> gitdir -> commondir chain to find the bare repo.
-
-    Git worktrees have a ``.git`` *file* (not directory) that contains a
-    ``gitdir:`` pointer to the worktree's gitdir directory.  That gitdir
-    in turn has a ``commondir`` file pointing (absolute or relative) to the
-    shared bare repo.
-
-    Args:
-        repo_root: The worktree's working directory root.
-
-    Returns:
-        Normalized absolute path to the bare repo directory, or None if
-        the chain cannot be resolved.
-    """
-    try:
-        dot_git = os.path.join(repo_root, ".git")
-
-        # If .git is a directory, this IS the git dir (not a worktree)
-        if os.path.isdir(dot_git):
-            # Check for commondir inside .git
-            commondir_file = os.path.join(dot_git, "commondir")
-            if os.path.isfile(commondir_file):
-                with open(commondir_file, "r") as f:
-                    commondir = f.read().strip()
-                if os.path.isabs(commondir):
-                    return os.path.normpath(commondir)
-                return os.path.normpath(os.path.join(dot_git, commondir))
-            # No commondir — .git itself is the git dir
-            return os.path.normpath(dot_git)
-
-        # .git is a file — read gitdir pointer
-        if not os.path.isfile(dot_git):
-            return None
-
-        with open(dot_git, "r") as f:
-            content = f.read().strip()
-
-        if not content.startswith("gitdir:"):
-            return None
-
-        gitdir = content[len("gitdir:"):].strip()
-        if not os.path.isabs(gitdir):
-            gitdir = os.path.join(repo_root, gitdir)
-        gitdir = os.path.normpath(gitdir)
-
-        if not os.path.isdir(gitdir):
-            return None
-
-        # Read commondir from gitdir
-        commondir_file = os.path.join(gitdir, "commondir")
-        if not os.path.isfile(commondir_file):
-            # No commondir — gitdir itself is the bare repo
-            return gitdir
-
-        with open(commondir_file, "r") as f:
-            commondir = f.read().strip()
-
-        if os.path.isabs(commondir):
-            bare_path = os.path.normpath(commondir)
-        else:
-            bare_path = os.path.normpath(os.path.join(gitdir, commondir))
-
-        if not os.path.isdir(bare_path):
-            return None
-
-        return bare_path
-
-    except (OSError, IOError):
-        return None
 
 
 @contextlib.contextmanager
