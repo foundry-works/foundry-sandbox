@@ -21,7 +21,7 @@ for mod in ("mitmproxy", "mitmproxy.http", "mitmproxy.ctx", "mitmproxy.flow"):
     if mod not in sys.modules:
         sys.modules[mod] = mock.MagicMock()
 
-from git_operations import (
+from branch_isolation import (
     _extract_sha_args,
     _filter_ref_listing_output,
     _filter_stderr_branch_refs,

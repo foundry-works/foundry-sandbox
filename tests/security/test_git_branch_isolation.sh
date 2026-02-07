@@ -40,7 +40,7 @@ for mod in ('mitmproxy', 'mitmproxy.http', 'mitmproxy.ctx', 'mitmproxy.flow', 'm
     if mod not in sys.modules:
         sys.modules[mod] = mock.MagicMock()
 sys.path.insert(0, os.path.join('${REPO_ROOT}', 'unified-proxy'))
-from git_operations import validate_branch_isolation, _filter_ref_listing_output
+from branch_isolation import validate_branch_isolation, _filter_ref_listing_output
 SANDBOX_A = 'sandbox/alice'
 SANDBOX_B = 'sandbox/bob'
 META_A = {'sandbox_branch': SANDBOX_A}

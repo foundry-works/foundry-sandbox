@@ -19,7 +19,7 @@ import pytest
 
 # conftest.py handles mitmproxy mocking and path setup
 
-from git_operations import (
+from branch_isolation import (
     _filter_ref_listing_output,
     validate_branch_isolation,
 )
