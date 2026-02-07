@@ -168,6 +168,11 @@ _CONFIG_CMDS = frozenset({
     "config",
 })
 
+# Sparse checkout (read-only subcommands enforced separately)
+_SPARSE_CHECKOUT_CMDS = frozenset({
+    "sparse-checkout",
+})
+
 # Plumbing commands
 _PLUMBING_CMDS = frozenset({
     "rev-parse", "symbolic-ref", "for-each-ref", "ls-tree",
@@ -184,6 +189,7 @@ ALLOWED_COMMANDS: FrozenSet[str] = (
     | _PATCH_CMDS
     | _NOTES_CMDS
     | _CONFIG_CMDS
+    | _SPARSE_CHECKOUT_CMDS
     | _PLUMBING_CMDS
 )
 
@@ -292,6 +298,8 @@ CONFIG_PERMITTED_PREFIXES: Tuple[str, ...] = (
     "core.autocrlf",
     "core.eol",
     "core.whitespace",
+    "core.sparseCheckout",
+    "core.sparseCheckoutCone",
     "diff.",
     "merge.",
     "format.",
@@ -568,6 +576,12 @@ def validate_command(
         if err:
             return err
 
+    # Sparse checkout: only allow 'list'
+    if subcommand == "sparse-checkout":
+        err = _validate_sparse_checkout_subcommand(subcommand_args)
+        if err:
+            return err
+
     # Clean: only allow --dry-run
     if subcommand == "clean":
         err = _validate_clean_flags(subcommand_args)
@@ -699,6 +713,21 @@ def _validate_notes_subcommand(args: List[str]) -> Optional[ValidationError]:
     write_subcmds = {"add", "append", "copy", "edit", "merge", "remove", "prune"}
     if args and args[0] in write_subcmds:
         return ValidationError(f"Notes subcommand not allowed: {args[0]}")
+    return None
+
+
+def _validate_sparse_checkout_subcommand(args: List[str]) -> Optional[ValidationError]:
+    """Validate git sparse-checkout — only read-only 'list' subcommand allowed."""
+    if not args:
+        # bare 'git sparse-checkout' shows help — allowed
+        return None
+
+    subcmd = args[0]
+    if subcmd != "list":
+        return ValidationError(
+            f"Sparse-checkout subcommand not allowed: {subcmd} (only 'list' is permitted)"
+        )
+
     return None
 
 

@@ -2059,11 +2059,24 @@ fix_proxy_worktree_paths() {
         fi
 
         # Set core.worktree so git knows the working tree location
+        # Also set core.bare=false to override the shared bare repo config,
+        # and refresh the VirtioFS directory cache so git sees the latest
+        # bare repo config (git config does atomic rename which can leave
+        # stale inodes in VirtioFS).
         if [ -f /git-workspace/.git ]; then
             GITDIR_PATH=\$(grep 'gitdir:' /git-workspace/.git | sed 's/gitdir: //')
             if [ -d \"\$GITDIR_PATH\" ]; then
+                # Force VirtioFS to refresh directory cache for bare repo config
+                BARE_DIR=\$(cat \"\$GITDIR_PATH/commondir\" 2>/dev/null || echo '..')
+                case \"\$BARE_DIR\" in
+                    /*) ;;
+                    *)  BARE_DIR=\"\$GITDIR_PATH/\$BARE_DIR\" ;;
+                esac
+                ls \"\$BARE_DIR\" >/dev/null 2>&1 || true
+
                 touch \"\$GITDIR_PATH/config.worktree\" 2>/dev/null || true
                 git config --file \"\$GITDIR_PATH/config.worktree\" core.worktree /git-workspace
+                git config --file \"\$GITDIR_PATH/config.worktree\" core.bare false
             fi
         fi
     " 2>/dev/null || true
