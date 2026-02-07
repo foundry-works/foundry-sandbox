@@ -411,6 +411,16 @@ class TestValidateBranchIsolation:
         err = validate_branch_isolation(["log", "--glob=refs/*"], META)
         assert err is not None
 
+    def test_log_max_count_value_not_treated_as_ref(self):
+        # -n consumes the next argument; numeric value should not be parsed as ref
+        err = validate_branch_isolation(["log", "-n", "5"], META)
+        assert err is None
+
+    def test_log_format_value_not_treated_as_ref(self):
+        # --format consumes the next argument
+        err = validate_branch_isolation(["log", "--format", "%h %s"], META)
+        assert err is None
+
     # --- ref enum commands (handled by output filtering, not blocked here) ---
 
     def test_for_each_ref_not_input_blocked(self):
@@ -580,6 +590,30 @@ class TestFilterRefListingOutput:
         assert "refs/heads/main" in result
         assert "refs/heads/sandbox/other" not in result
 
+    def test_for_each_ref_short_format_hides_other_slashed_branch(self):
+        output = (
+            f"{SANDBOX}\n"
+            "sandbox/other\n"
+            "main\n"
+        )
+        result = _filter_ref_listing_output(
+            output, ["for-each-ref", "--format=%(refname:short)"], SANDBOX
+        )
+        assert SANDBOX in result
+        assert "main" in result
+        assert "sandbox/other" not in result
+
+    def test_for_each_ref_objectname_short_ref_filters_second_token(self):
+        output = (
+            f"abcdef123456 {SANDBOX}\n"
+            "abcdef123456 sandbox/other\n"
+        )
+        result = _filter_ref_listing_output(
+            output, ["for-each-ref", "--format=%(objectname) %(refname:short)"], SANDBOX
+        )
+        assert f"abcdef123456 {SANDBOX}" in result
+        assert "sandbox/other" not in result
+
     # --- show-ref ---
 
     def test_show_ref_hides_other(self):
@@ -644,6 +678,22 @@ class TestFilterRefListingOutput:
         output = f"HEAD -> {SANDBOX}, origin/sandbox/other\n"
         result = _filter_ref_listing_output(
             output, ["log", "--format=%D"], SANDBOX
+        )
+        assert f"HEAD -> {SANDBOX}" in result
+        assert "sandbox/other" not in result
+
+    def test_log_format_split_D_hides_other(self):
+        output = f"HEAD -> {SANDBOX}, origin/sandbox/other\n"
+        result = _filter_ref_listing_output(
+            output, ["log", "--format", "%D"], SANDBOX
+        )
+        assert f"HEAD -> {SANDBOX}" in result
+        assert "sandbox/other" not in result
+
+    def test_log_pretty_split_d_hides_other(self):
+        output = f" (HEAD -> {SANDBOX}, origin/sandbox/other)\n"
+        result = _filter_ref_listing_output(
+            output, ["log", "--pretty", "%d"], SANDBOX
         )
         assert f"HEAD -> {SANDBOX}" in result
         assert "sandbox/other" not in result

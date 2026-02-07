@@ -293,6 +293,24 @@ _IMPLICIT_REF_FLAG_PREFIXES: Tuple[str, ...] = (
     "--branches=", "--remotes=", "--glob=",
 )
 
+# Ref-reading flags that consume the next argument as a value.
+# This prevents option values (e.g. ``-n 5``) from being misclassified as refs.
+_REF_READING_VALUE_FLAGS: FrozenSet[str] = frozenset({
+    "-n", "--max-count", "--skip",
+    "--since", "--until", "--after", "--before",
+    "--author", "--committer", "--grep",
+    "-G", "-S",
+    "--date", "--format", "--pretty",
+    "--decorate-refs", "--decorate-refs-exclude",
+    "--output", "-o",
+    "--word-diff-regex",
+    "--find-object",
+    "--min-parents", "--max-parents",
+    "--diff-merges",
+    "--relative", "--src-prefix", "--dst-prefix",
+    "-L",
+})
+
 # Regex to strip revision suffixes (~N, ^N, @{...}) from ref names
 _REV_SUFFIX_RE = re.compile(r"([~^]\d*|@\{[^}]*\})+$")
 
@@ -1011,10 +1029,19 @@ def _validate_ref_reading_isolation(
                     f"(exposes multiple branches)"
                 )
 
-    # Check positional ref args (before --)
+    # Check positional ref args (before --), skipping known option values.
+    skip_next = False
     for a in sub_args:
         if a == "--":
             break
+        if skip_next:
+            skip_next = False
+            continue
+        if a in _REF_READING_VALUE_FLAGS:
+            skip_next = True
+            continue
+        if "=" in a and a.split("=", 1)[0] in _REF_READING_VALUE_FLAGS:
+            continue
         if a.startswith("-"):
             continue
         if not _is_allowed_ref(a, sandbox_branch):
@@ -1340,6 +1367,33 @@ def _filter_branch_output(output: str, sandbox_branch: str) -> str:
 _REF_IN_LINE_RE = re.compile(r"refs/heads/([^\s]+)")
 
 
+def _is_allowed_short_ref_token(token: str, sandbox_branch: str) -> bool:
+    """Check whether a short/custom ref token from ref-enum output is allowed."""
+    if not token:
+        return True
+    if token.startswith("("):
+        return True
+    if token.startswith("refs/tags/") or token.startswith("tags/"):
+        return True
+    if token.startswith("refs/heads/"):
+        return _is_allowed_branch_name(token[len("refs/heads/"):], sandbox_branch)
+    if token.startswith("refs/remotes/"):
+        parts = token.split("/", 3)
+        if len(parts) == 4:
+            return _is_allowed_branch_name(parts[3], sandbox_branch)
+        return True
+    # First treat token as a branch name (supports slashed branch names like
+    # "sandbox/alice" and "release/1.0").
+    if _is_allowed_branch_name(token, sandbox_branch):
+        return True
+    # Then try remote-short form ("origin/main", "upstream/feature").
+    if "/" in token:
+        remote, _, branch = token.partition("/")
+        if remote and branch:
+            return _is_allowed_branch_name(branch, sandbox_branch)
+    return False
+
+
 def _filter_ref_enum_output(output: str, sandbox_branch: str) -> str:
     """Filter ref enumeration output (for-each-ref, ls-remote, show-ref).
 
@@ -1398,17 +1452,18 @@ def _filter_ref_enum_output(output: str, sandbox_branch: str) -> str:
                 len(first_token) >= _MIN_SHA_LENGTH
                 and all(c in "0123456789abcdefABCDEF" for c in first_token)
             ):
-                # SHA-prefixed line not caught by pass 1 — no ref to filter
-                filtered_lines.append(line)
-                continue
-
-            # First token might be a short branch name
-            # Only filter if it looks like a branch name (no slashes that
-            # would indicate a path or complex ref not caught above)
-            if "/" not in first_token and not first_token.startswith("("):
-                if _is_allowed_branch_name(first_token, sandbox_branch):
+                # SHA-prefixed line with optional ref token (custom format)
+                if len(tokens) >= 2:
+                    if _is_allowed_short_ref_token(tokens[1], sandbox_branch):
+                        filtered_lines.append(line)
+                else:
                     filtered_lines.append(line)
                 continue
+
+            # First token might be a short/custom ref token.
+            if _is_allowed_short_ref_token(first_token, sandbox_branch):
+                filtered_lines.append(line)
+            continue
 
         # Unrecognized format — keep (safe default)
         filtered_lines.append(line)
@@ -1599,14 +1654,17 @@ def _filter_custom_format_decorations(output: str, sandbox_branch: str) -> str:
 
 def _log_has_custom_decoration_format(args: List[str]) -> bool:
     """Detect if git log args use --format/--pretty with %d or %D."""
-    for arg in args:
+    for idx, arg in enumerate(args):
         for prefix in ("--format=", "--pretty=", "--pretty=format:"):
             if arg.startswith(prefix):
                 fmt = arg[len(prefix):]
                 if "%d" in fmt or "%D" in fmt:
                     return True
-        # Also check --format <value> (space-separated)
-        # Handled by the caller checking the next arg
+        # Also check --format <value> and --pretty <value>
+        if arg in ("--format", "--pretty") and idx + 1 < len(args):
+            fmt = args[idx + 1]
+            if "%d" in fmt or "%D" in fmt:
+                return True
     return False
 
 
