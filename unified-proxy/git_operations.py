@@ -402,12 +402,11 @@ def _is_allowed_ref(ref: str, sandbox_branch: str) -> bool:
     # refs/heads/ or refs/tags/ path (handled below/above).
     # We detect this by checking for a "/" and confirming the prefix
     # is not a known ref namespace.
+    # Precedence: try as a slashed branch name first (e.g. "release/1.0"),
+    # then fall back to interpreting as <remote>/<branch>.  This avoids
+    # misclassifying legitimate branch names that contain "/" as remote refs.
     if "/" in base and not base.startswith("refs/"):
         prefix, _, branch_part = base.partition("/")
-        # If prefix looks like a remote name (not a branch namespace),
-        # check the branch part.  We test this by checking if the whole
-        # base passes _is_allowed_branch_name — if it does, we allow it
-        # as a slashed branch name first (e.g. "release/1.0").
         if not _is_allowed_branch_name(base, sandbox_branch):
             # Not an allowed branch name as-is, try as remote/branch
             if branch_part:
@@ -780,11 +779,13 @@ def validate_branch_isolation(
     Returns:
         None if allowed, ValidationError if blocked.
     """
-    if not metadata:
+    if metadata is None:
         return None
     sandbox_branch = metadata.get("sandbox_branch")
     if not sandbox_branch:
-        return None
+        return ValidationError(
+            "Branch isolation: metadata present but missing sandbox_branch"
+        )
 
     subcommand, sub_args, _ = _get_subcommand_args(args)
     if subcommand is None:
@@ -1274,30 +1275,17 @@ def _check_sha_reachability(
     # Check each allowed ref (tags prefix handled specially)
     for ref in allowed_refs:
         if ref.endswith("/"):
-            # Tag prefix — use for-each-ref to enumerate, then check
+            # Tag prefix — single `git tag --contains` call instead of
+            # enumerating all tags and checking each with merge-base.
             try:
                 result = subprocess.run(
                     [GIT_BINARY, "--git-dir", bare_repo,
-                     "for-each-ref", "--format=%(refname)",
-                     ref],
+                     "tag", "--contains", sha],
                     capture_output=True, timeout=_SHA_CHECK_TIMEOUT,
                 )
-                if result.returncode == 0 and result.stdout:
-                    for tag_ref in result.stdout.decode().splitlines():
-                        tag_ref = tag_ref.strip()
-                        if not tag_ref:
-                            continue
-                        try:
-                            r = subprocess.run(
-                                [GIT_BINARY, "--git-dir", bare_repo,
-                                 "merge-base", "--is-ancestor", sha, tag_ref],
-                                capture_output=True, timeout=_SHA_CHECK_TIMEOUT,
-                            )
-                            if r.returncode == 0:
-                                cache[sha] = True
-                                return True
-                        except (subprocess.TimeoutExpired, OSError):
-                            continue
+                if result.returncode == 0 and result.stdout.strip():
+                    cache[sha] = True
+                    return True
             except (subprocess.TimeoutExpired, OSError):
                 pass
             continue
@@ -1702,7 +1690,11 @@ def _filter_log_decorations(output: str, sandbox_branch: str) -> str:
     return "".join(filtered_lines)
 
 
-def _filter_custom_format_decorations(output: str, sandbox_branch: str) -> str:
+def _filter_custom_format_decorations(
+    output: str,
+    sandbox_branch: str,
+    has_bare_D: bool = True,
+) -> str:
     """Filter custom --format=%d/%D decoration output.
 
     Handles both %d (parenthesized) and %D (bare) formats.
@@ -1710,6 +1702,9 @@ def _filter_custom_format_decorations(output: str, sandbox_branch: str) -> str:
     Args:
         output: Raw stdout from a ``git log --format`` command with %d or %D.
         sandbox_branch: This sandbox's branch name.
+        has_bare_D: Whether the format string contains bare %D.  When False,
+            the bare (non-parenthesized) heuristic is skipped to avoid
+            false-positives on commit messages containing commas or "HEAD".
 
     Returns:
         Filtered output with disallowed refs removed from decorations.
@@ -1741,8 +1736,9 @@ def _filter_custom_format_decorations(output: str, sandbox_branch: str) -> str:
             continue
 
         # Try bare format (%D): "HEAD -> main, origin/feature"
-        # Only if line contains comma-separated ref-like tokens
-        if "," in stripped or stripped.startswith("HEAD"):
+        # Only apply this heuristic when %D is actually in the format string;
+        # %d always produces parenthesized output handled above.
+        if has_bare_D and ("," in stripped or stripped.startswith("HEAD")):
             # Heuristic: if the line looks like a decoration list
             tokens = [t.strip() for t in stripped.split(",")]
             looks_like_refs = any(
@@ -1775,6 +1771,21 @@ def _log_has_custom_decoration_format(args: List[str]) -> bool:
         if arg in ("--format", "--pretty") and idx + 1 < len(args):
             fmt = args[idx + 1]
             if "%d" in fmt or "%D" in fmt:
+                return True
+    return False
+
+
+def _log_has_bare_D_format(args: List[str]) -> bool:
+    """Detect if git log args use --format/--pretty with bare %D (not %d)."""
+    for idx, arg in enumerate(args):
+        for prefix in ("--format=", "--pretty=", "--pretty=format:"):
+            if arg.startswith(prefix):
+                fmt = arg[len(prefix):]
+                if "%D" in fmt:
+                    return True
+        if arg in ("--format", "--pretty") and idx + 1 < len(args):
+            fmt = args[idx + 1]
+            if "%D" in fmt:
                 return True
     return False
 
@@ -1832,6 +1843,13 @@ _STDERR_REF_RE = re.compile(
     r"|refs/remotes/[^/]+/(?P<remote_branch>[^\s'\"]+)"
 )
 
+# Bare branch names in single-quoted contexts (e.g. 'sandbox/other').
+# Only matches tokens containing "/" to avoid false-positives on file paths
+# and other single-quoted strings.
+_STDERR_BARE_BRANCH_RE = re.compile(
+    r"'(?P<bare_branch>[^\s'\"]+/[^\s'\"]+)'"
+)
+
 
 def _filter_stderr_branch_refs(stderr: str, sandbox_branch: str) -> str:
     """Redact disallowed branch names from stderr output.
@@ -1851,7 +1869,16 @@ def _filter_stderr_branch_refs(stderr: str, sandbox_branch: str) -> str:
             return full[:full.rfind(branch)] + "<redacted>"
         return m.group(0)
 
-    return _STDERR_REF_RE.sub(_redact_match, stderr)
+    result = _STDERR_REF_RE.sub(_redact_match, stderr)
+
+    # Second pass: redact bare branch names in single-quoted contexts
+    def _redact_bare_match(m: re.Match) -> str:
+        branch = m.group("bare_branch")
+        if branch and not _is_allowed_branch_name(branch, sandbox_branch):
+            return "'<redacted>'"
+        return m.group(0)
+
+    return _STDERR_BARE_BRANCH_RE.sub(_redact_bare_match, result)
 
 
 # ---------------------------------------------------------------------------
@@ -1897,7 +1924,10 @@ def _filter_ref_listing_output(
         if _log_has_source_flag(sub_args):
             output = _filter_log_source_refs(output, sandbox_branch)
         if _log_has_custom_decoration_format(sub_args):
-            return _filter_custom_format_decorations(output, sandbox_branch)
+            return _filter_custom_format_decorations(
+                output, sandbox_branch,
+                has_bare_D=_log_has_bare_D_format(sub_args),
+            )
         return _filter_log_decorations(output, sandbox_branch)
 
     return output
@@ -2416,8 +2446,10 @@ def check_push_protected_branches(
     """
     bare_repo_path = _resolve_bare_repo_path(repo_root)
 
-    # Detect default branch from bare repo HEAD and inject into metadata
-    # so that check_protected_branches() can protect it.
+    # Detect default branch from bare repo HEAD and inject into a shallow
+    # copy of the metadata so that load_branch_policy() (which reads
+    # metadata["git"]["protected_branches"]["patterns"]) can protect it.
+    # We never mutate the caller's metadata dict.
     if bare_repo_path and metadata is not None:
         try:
             result = subprocess.run(
@@ -2430,11 +2462,22 @@ def check_push_protected_branches(
                 # e.g. "refs/heads/main" -> "main"
                 if head_ref.startswith("refs/heads/"):
                     default_branch = head_ref[len("refs/heads/"):]
-                    # Ensure protected_branches includes the default branch
-                    protected = metadata.get("protected_branches", [])
-                    if isinstance(protected, list) and default_branch not in protected:
-                        protected = list(protected) + [default_branch]
-                        metadata["protected_branches"] = protected
+                    default_pattern = f"refs/heads/{default_branch}"
+                    # Build the correct nested path that load_branch_policy reads
+                    git_config = metadata.get("git", {})
+                    if not isinstance(git_config, dict):
+                        git_config = {}
+                    pb_config = git_config.get("protected_branches", {})
+                    if not isinstance(pb_config, dict):
+                        pb_config = {}
+                    patterns = list(pb_config.get("patterns", []))
+                    if default_pattern not in patterns:
+                        patterns.append(default_pattern)
+                        # Shallow-copy the dict tree to avoid caller mutation
+                        metadata = dict(metadata)
+                        metadata["git"] = dict(git_config)
+                        metadata["git"]["protected_branches"] = dict(pb_config)
+                        metadata["git"]["protected_branches"]["patterns"] = patterns
         except (subprocess.TimeoutExpired, OSError):
             pass  # Best-effort; existing protected set still applies
 
@@ -2553,7 +2596,7 @@ _FETCH_LOCK_FILENAME = ".foundry-fetch.lock"
 
 # Default timeout and poll interval for fetch lock acquisition
 _FETCH_LOCK_TIMEOUT = 30.0
-_FETCH_LOCK_POLL_INTERVAL = 1.0
+_FETCH_LOCK_POLL_INTERVAL = 0.1
 
 
 def _resolve_bare_repo_path(repo_root: str) -> Optional[str]:

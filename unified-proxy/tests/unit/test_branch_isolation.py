@@ -330,13 +330,15 @@ OTHER = "sandbox/other"
 class TestValidateBranchIsolation:
     """Test the top-level branch isolation validator."""
 
-    # --- No metadata / no sandbox_branch → allow all ---
+    # --- No metadata → allow all; no sandbox_branch → fail closed ---
 
     def test_no_metadata_allows_all(self):
         assert validate_branch_isolation(["log", OTHER], None) is None
 
-    def test_no_sandbox_branch_allows_all(self):
-        assert validate_branch_isolation(["log", OTHER], {}) is None
+    def test_no_sandbox_branch_fails_closed(self):
+        err = validate_branch_isolation(["log", OTHER], {})
+        assert err is not None
+        assert "missing sandbox_branch" in err.reason
 
     # --- ref-reading commands ---
 
@@ -708,6 +710,27 @@ class TestFilterRefListingOutput:
         assert f"HEAD -> {SANDBOX}" in result
         assert "sandbox/other" not in result
 
+    # --- %d-only format skips bare heuristic ---
+
+    def test_log_format_d_does_not_trigger_bare_heuristic(self):
+        """With %d (not %D), commit messages with commas should not be mangled."""
+        # A commit message that looks like a bare decoration list but isn't
+        output = "HEAD, something/else\n"
+        result = _filter_ref_listing_output(
+            output, ["log", "--format=%d"], SANDBOX
+        )
+        # %d produces parenthesized output; bare lines should pass through
+        assert result == output
+
+    def test_log_format_D_triggers_bare_heuristic(self):
+        """With %D, bare decoration lines should be filtered."""
+        output = f"HEAD -> {SANDBOX}, origin/sandbox/other\n"
+        result = _filter_ref_listing_output(
+            output, ["log", "--format=%D"], SANDBOX
+        )
+        assert f"HEAD -> {SANDBOX}" in result
+        assert "sandbox/other" not in result
+
     # --- Log --format without %d/%D uses SHA-anchored regex ---
 
     def test_log_format_without_d_uses_sha_anchored(self):
@@ -980,6 +1003,33 @@ class TestFilterStderrBranchRefs:
     def test_none_sandbox_branch(self):
         stderr = "error: refs/heads/sandbox/other"
         assert _filter_stderr_branch_refs(stderr, None) == stderr
+
+    # --- Bare branch names in single-quoted contexts ---
+
+    def test_redacts_bare_branch_in_single_quotes(self):
+        stderr = "error: pathspec 'sandbox/other' did not match"
+        result = _filter_stderr_branch_refs(stderr, SANDBOX)
+        assert "sandbox/other" not in result
+        assert "'<redacted>'" in result
+
+    def test_keeps_allowed_bare_branch_in_single_quotes(self):
+        stderr = f"hint: '{SANDBOX}' is up to date"
+        result = _filter_stderr_branch_refs(stderr, SANDBOX)
+        assert SANDBOX in result
+        assert "<redacted>" not in result
+
+    def test_keeps_well_known_bare_branch_in_single_quotes(self):
+        stderr = "error: pathspec 'release/1.0' did not match"
+        result = _filter_stderr_branch_refs(stderr, SANDBOX)
+        assert "release/1.0" in result
+        assert "<redacted>" not in result
+
+    def test_bare_branch_no_slash_not_matched(self):
+        """Single-word tokens in quotes should not be matched (no false-positives)."""
+        stderr = "error: pathspec 'main' did not match"
+        result = _filter_stderr_branch_refs(stderr, SANDBOX)
+        assert "main" in result
+        assert "<redacted>" not in result
 
 
 # ---------------------------------------------------------------------------

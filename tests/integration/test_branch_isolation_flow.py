@@ -155,18 +155,22 @@ class TestCrossSandboxOutputFiltering:
 
 
 class TestLegacyFailClosed:
-    """Legacy startup without sandbox_branch should allow all (no isolation)."""
+    """Legacy startup without sandbox_branch fails closed (blocks all refs)."""
 
-    def test_no_sandbox_branch_allows_cross_sandbox(self):
-        # Without sandbox_branch in metadata, isolation is disabled
+    def test_no_sandbox_branch_fails_closed(self):
+        # Without sandbox_branch in metadata, isolation blocks commands
         meta_legacy = {"other_key": "value"}
-        assert validate_branch_isolation(["log", SANDBOX_B], meta_legacy) is None
+        err = validate_branch_isolation(["log", SANDBOX_B], meta_legacy)
+        assert err is not None
+        assert "missing sandbox_branch" in err.reason
 
     def test_none_metadata_allows_all(self):
         assert validate_branch_isolation(["log", SANDBOX_B], None) is None
 
-    def test_empty_metadata_allows_all(self):
-        assert validate_branch_isolation(["log", SANDBOX_B], {}) is None
+    def test_empty_metadata_fails_closed(self):
+        err = validate_branch_isolation(["log", SANDBOX_B], {})
+        assert err is not None
+        assert "missing sandbox_branch" in err.reason
 
 
 class TestFetchPullDeny:
