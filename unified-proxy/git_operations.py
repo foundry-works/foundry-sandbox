@@ -803,14 +803,44 @@ def validate_branch_isolation(
 
     # --- notes ---
     if subcommand == "notes":
-        # notes --ref=<ref> — check the ref
+        _NOTES_SUBCMDS = {
+            "list", "add", "copy", "append", "edit", "show",
+            "merge", "remove", "prune",
+        }
+        # Check --ref=<ref> flag value
+        notes_args = list(sub_args)
+        skip_next = False
         for a in sub_args:
+            if skip_next:
+                skip_next = False
+                continue
             if a.startswith("--ref="):
                 ref_val = a[len("--ref="):]
                 if not _is_allowed_ref(ref_val, sandbox_branch):
                     return ValidationError(
                         f"Branch isolation: ref '{ref_val}' not allowed in notes"
                     )
+            elif a == "--ref":
+                skip_next = True  # next arg is the ref value, handled above
+
+        # Check positional args (skip sub-subcommand and flags)
+        positionals: List[str] = []
+        seen_subcmd = False
+        for a in sub_args:
+            if a == "--":
+                break
+            if a.startswith("-"):
+                continue
+            if not seen_subcmd and a in _NOTES_SUBCMDS:
+                seen_subcmd = True
+                continue
+            positionals.append(a)
+
+        for a in positionals:
+            if not _is_allowed_ref(a, sandbox_branch):
+                return ValidationError(
+                    f"Branch isolation: ref '{a}' not allowed in notes"
+                )
         return None
 
     # --- ref-reading commands (log, show, diff, blame, etc.) ---
@@ -991,6 +1021,236 @@ def _validate_ref_reading_isolation(
             return ValidationError(
                 f"Branch isolation: ref '{a}' not allowed. "
                 f"If this is a file path, use -- to separate paths from refs."
+            )
+
+    return None
+
+
+# ---------------------------------------------------------------------------
+# SHA Reachability Enforcement
+# ---------------------------------------------------------------------------
+
+# Timeout for SHA reachability git subprocess calls (seconds).
+_SHA_CHECK_TIMEOUT = 10
+
+_HEX_CHARS = frozenset("0123456789abcdefABCDEF")
+
+
+def _is_sha_like(token: str) -> bool:
+    """Return True if *token* looks like a SHA hash (12-40 hex chars)."""
+    return (
+        _MIN_SHA_LENGTH <= len(token) <= 40
+        and all(c in _HEX_CHARS for c in token)
+    )
+
+
+def _extract_sha_args(sub_args: List[str]) -> List[str]:
+    """Collect SHA-like positional args from a ref-reading command.
+
+    Handles range operators (``..``, ``...``) and strips revision
+    suffixes before checking whether a token looks like a SHA.
+    Stops at ``--`` (pathspec separator).
+    """
+    shas: List[str] = []
+    for arg in sub_args:
+        if arg == "--":
+            break
+        if arg.startswith("-"):
+            continue
+        # Expand range operators
+        for sep in ("...", ".."):
+            if sep in arg:
+                parts = arg.split(sep, 1)
+                for part in parts:
+                    if part:
+                        base = _strip_rev_suffixes(part)
+                        if _is_sha_like(base):
+                            shas.append(base)
+                break
+        else:
+            base = _strip_rev_suffixes(arg)
+            if _is_sha_like(base):
+                shas.append(base)
+    return shas
+
+
+def _get_allowed_refs(bare_repo: str, sandbox_branch: str) -> List[str]:
+    """Build the list of fully-qualified refs this sandbox may access.
+
+    Includes the sandbox's own branch, well-known branches (matched via
+    ``for-each-ref``), and all tags.
+
+    Args:
+        bare_repo: Path to the bare git repository.
+        sandbox_branch: This sandbox's branch name.
+
+    Returns:
+        List of fully-qualified ref patterns for ``--stdin`` input.
+    """
+    refs: List[str] = [f"refs/heads/{sandbox_branch}"]
+
+    # Well-known branches
+    for name in WELL_KNOWN_BRANCHES:
+        refs.append(f"refs/heads/{name}")
+
+    # Well-known prefixes — enumerate matching refs via for-each-ref
+    for prefix in WELL_KNOWN_BRANCH_PREFIXES:
+        try:
+            result = subprocess.run(
+                [GIT_BINARY, "--git-dir", bare_repo,
+                 "for-each-ref", "--format=%(refname)",
+                 f"refs/heads/{prefix}"],
+                capture_output=True, timeout=_SHA_CHECK_TIMEOUT,
+            )
+            if result.returncode == 0 and result.stdout:
+                for line in result.stdout.decode().splitlines():
+                    line = line.strip()
+                    if line:
+                        refs.append(line)
+        except (subprocess.TimeoutExpired, OSError):
+            pass
+
+    # All tags
+    refs.append("refs/tags/")
+
+    return refs
+
+
+def _check_sha_reachability(
+    sha: str,
+    bare_repo: str,
+    allowed_refs: List[str],
+    cache: dict,
+) -> bool:
+    """Check whether *sha* is reachable from any allowed ref.
+
+    Strategy:
+      1. Check tag containment first (single ``merge-base --is-ancestor``
+         call against all tags is fast because tags share object storage).
+      2. Check branch reachability via ``merge-base --is-ancestor`` with
+         early exit on first match.
+
+    Results are memoized in *cache* for the duration of a single request.
+
+    Args:
+        sha: The SHA hex string to verify.
+        bare_repo: Path to the bare git repository.
+        allowed_refs: Fully-qualified ref list from ``_get_allowed_refs``.
+        cache: Per-request dict for memoization.
+
+    Returns:
+        True if reachable, False otherwise.
+    """
+    if sha in cache:
+        return cache[sha]
+
+    # Check each allowed ref (tags prefix handled specially)
+    for ref in allowed_refs:
+        if ref.endswith("/"):
+            # Tag prefix — use for-each-ref to enumerate, then check
+            try:
+                result = subprocess.run(
+                    [GIT_BINARY, "--git-dir", bare_repo,
+                     "for-each-ref", "--format=%(refname)",
+                     ref],
+                    capture_output=True, timeout=_SHA_CHECK_TIMEOUT,
+                )
+                if result.returncode == 0 and result.stdout:
+                    for tag_ref in result.stdout.decode().splitlines():
+                        tag_ref = tag_ref.strip()
+                        if not tag_ref:
+                            continue
+                        try:
+                            r = subprocess.run(
+                                [GIT_BINARY, "--git-dir", bare_repo,
+                                 "merge-base", "--is-ancestor", sha, tag_ref],
+                                capture_output=True, timeout=_SHA_CHECK_TIMEOUT,
+                            )
+                            if r.returncode == 0:
+                                cache[sha] = True
+                                return True
+                        except (subprocess.TimeoutExpired, OSError):
+                            continue
+            except (subprocess.TimeoutExpired, OSError):
+                pass
+            continue
+
+        # Branch ref — single merge-base check
+        try:
+            result = subprocess.run(
+                [GIT_BINARY, "--git-dir", bare_repo,
+                 "merge-base", "--is-ancestor", sha, ref],
+                capture_output=True, timeout=_SHA_CHECK_TIMEOUT,
+            )
+            if result.returncode == 0:
+                cache[sha] = True
+                return True
+        except (subprocess.TimeoutExpired, OSError):
+            continue
+
+    cache[sha] = False
+    return False
+
+
+def validate_sha_reachability(
+    args: List[str],
+    repo_root: str,
+    metadata: Optional[dict],
+) -> Optional[ValidationError]:
+    """Validate that SHA arguments are reachable from allowed branches.
+
+    Only applies to ref-reading commands (log, show, diff, etc.) when
+    branch isolation is active.  Skips checks for shallow repos.
+
+    Args:
+        args: Git command arguments (without ``git`` prefix).
+        repo_root: Server-side repository root path.
+        metadata: Container metadata dict (must contain ``sandbox_branch``).
+
+    Returns:
+        None if allowed, ValidationError if a SHA is unreachable.
+    """
+    if not metadata:
+        return None
+    sandbox_branch = metadata.get("sandbox_branch")
+    if not sandbox_branch:
+        return None
+
+    subcommand, sub_args, _ = _get_subcommand_args(args)
+    if subcommand is None:
+        return None
+
+    # Only check ref-reading commands
+    if subcommand not in _REF_READING_CMDS:
+        return None
+
+    # Extract SHA-like args
+    shas = _extract_sha_args(sub_args)
+    if not shas:
+        return None
+
+    # Resolve bare repo
+    bare_repo = _resolve_bare_repo_path(repo_root)
+    if not bare_repo:
+        return None  # Cannot check — allow (fail open for resolution failure)
+
+    # Shallow repo: skip checks (log warning)
+    shallow_file = os.path.join(bare_repo, "shallow")
+    if os.path.isfile(shallow_file):
+        logger.warning(
+            "SHA reachability check skipped: shallow repo at %s", bare_repo,
+        )
+        return None
+
+    # Build allowed refs and check each SHA
+    allowed_refs = _get_allowed_refs(bare_repo, sandbox_branch)
+    cache: dict = {}
+
+    for sha in shas:
+        if not _check_sha_reachability(sha, bare_repo, allowed_refs, cache):
+            return ValidationError(
+                f"Branch isolation: SHA '{sha}' is not reachable from "
+                f"allowed branches"
             )
 
     return None
@@ -1953,9 +2213,29 @@ def check_push_protected_branches(
     Returns:
         None if allowed, ValidationError if a protected branch would be pushed to.
     """
-    bare_repo_path = None
-    if metadata:
-        bare_repo_path = metadata.get("bare_repo_path")
+    bare_repo_path = _resolve_bare_repo_path(repo_root)
+
+    # Detect default branch from bare repo HEAD and inject into metadata
+    # so that check_protected_branches() can protect it.
+    if bare_repo_path and metadata is not None:
+        try:
+            result = subprocess.run(
+                [GIT_BINARY, "--git-dir", bare_repo_path,
+                 "symbolic-ref", "HEAD"],
+                capture_output=True, timeout=_SHA_CHECK_TIMEOUT,
+            )
+            if result.returncode == 0:
+                head_ref = result.stdout.decode().strip()
+                # e.g. "refs/heads/main" -> "main"
+                if head_ref.startswith("refs/heads/"):
+                    default_branch = head_ref[len("refs/heads/"):]
+                    # Ensure protected_branches includes the default branch
+                    protected = metadata.get("protected_branches", [])
+                    if isinstance(protected, list) and default_branch not in protected:
+                        protected = list(protected) + [default_branch]
+                        metadata["protected_branches"] = protected
+        except (subprocess.TimeoutExpired, OSError):
+            pass  # Best-effort; existing protected set still applies
 
     if _has_push_flag(args, "--all") or _has_push_flag(args, "--mirror"):
         return ValidationError(
@@ -2253,6 +2533,20 @@ def execute_git(
             command_args=request.args,
             reason=err.reason,
             matched_rule="branch_isolation",
+            request_id=req_id,
+        )
+        return None, err
+
+    # Validate SHA reachability (must follow branch isolation check)
+    err = validate_sha_reachability(request.args, repo_root, metadata)
+    if err:
+        audit_log(
+            event="sha_reachability_blocked",
+            action=" ".join(request.args[:3]),
+            decision="deny",
+            command_args=request.args,
+            reason=err.reason,
+            matched_rule="sha_reachability",
             request_id=req_id,
         )
         return None, err
