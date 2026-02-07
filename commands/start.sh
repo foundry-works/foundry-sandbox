@@ -158,6 +158,9 @@ cmd_start() {
 
     # Register container with unified-proxy on restart (credential isolation)
     if [ "$isolate_credentials" = "true" ]; then
+        if [ -z "${SANDBOX_BRANCH:-}" ]; then
+            die "Sandbox branch identity missing (created before branch isolation support). Recreate sandbox with 'cast new'."
+        fi
         export SANDBOX_GATEWAY_ENABLED=true
         fix_proxy_worktree_paths "${container}-unified-proxy-1" "$(whoami)"
         local repo_spec="${SANDBOX_REPO_URL:-}"
@@ -167,7 +170,8 @@ cmd_start() {
             metadata_json=$(jq -n \
                 --arg repo "$repo_spec" \
                 --arg allow_pr "${SANDBOX_ALLOW_PR:-0}" \
-                '{repo: $repo, allow_pr: ($allow_pr == "1")}')
+                --arg sandbox_branch "${SANDBOX_BRANCH:-}" \
+                '{repo: $repo, allow_pr: ($allow_pr == "1"), sandbox_branch: $sandbox_branch}')
         fi
         if ! setup_proxy_registration "$container_id" "$metadata_json"; then
             die "Failed to register container with unified-proxy"

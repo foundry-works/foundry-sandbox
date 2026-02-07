@@ -2,7 +2,7 @@
   "spec_id": "branch-isolation-2026-02-07-001",
   "title": "branch-isolation",
   "generated": "2026-02-07T15:38:17.311576Z",
-  "last_updated": "2026-02-07T15:46:24.099302Z",
+  "last_updated": "2026-02-07T15:49:51.196318Z",
   "metadata": {
     "description": "",
     "mission": "Fix shared bare repo correctness bugs, enforce cross-sandbox branch isolation in the git proxy, serialize concurrent fetches, clean up branches on destroy/prune, and harden remaining leak channels \u2014 preventing sandboxes from reading, diffing, cherry-picking, or enumerating other sandboxes' branches.",
@@ -24,9 +24,9 @@
     "category": "implementation",
     "template": "empty"
   },
-  "progress_percentage": 8,
+  "progress_percentage": 21,
   "status": "in_progress",
-  "current_phase": "phase-2",
+  "current_phase": "phase-3",
   "hierarchy": {
     "spec-root": {
       "type": "spec",
@@ -43,7 +43,7 @@
         "phase-7"
       ],
       "total_tasks": 37,
-      "completed_tasks": 3,
+      "completed_tasks": 8,
       "metadata": {
         "purpose": "",
         "category": "implementation"
@@ -163,7 +163,7 @@
     "phase-2": {
       "type": "phase",
       "title": "Pass Sandbox Branch to Proxy Metadata",
-      "status": "pending",
+      "status": "completed",
       "parent": "spec-root",
       "children": [
         "task-2-1",
@@ -173,10 +173,12 @@
         "verify-2-1"
       ],
       "total_tasks": 5,
-      "completed_tasks": 0,
+      "completed_tasks": 5,
       "metadata": {
         "purpose": "",
-        "description": "Add sandbox_branch to the proxy registration metadata so the proxy knows which branch belongs to this sandbox. This is the foundation for all subsequent isolation enforcement. Legacy sandboxes without branch identity must fail closed \u2014 no legacy allow/override mode."
+        "description": "Add sandbox_branch to the proxy registration metadata so the proxy knows which branch belongs to this sandbox. This is the foundation for all subsequent isolation enforcement. Legacy sandboxes without branch identity must fail closed \u2014 no legacy allow/override mode.",
+        "needs_journaling": true,
+        "completed_at": "2026-02-07T15:49:51.194888Z"
       },
       "dependencies": {
         "blocks": [
@@ -191,11 +193,11 @@
     "task-2-1": {
       "type": "task",
       "title": "Add sandbox_branch to metadata in commands/new.sh",
-      "status": "pending",
+      "status": "completed",
       "parent": "phase-2",
       "children": [],
       "total_tasks": 1,
-      "completed_tasks": 0,
+      "completed_tasks": 1,
       "metadata": {
         "description": "At lines 1184-1188 where metadata_json is constructed with jq, add --arg sandbox_branch \"$branch\" and include sandbox_branch: $sandbox_branch in the JSON object. $branch is already in scope (set at lines 837-843, possibly modified at line 988). No changes needed to git_api.py or registry.py \u2014 metadata flows through as opaque JSON via registry.register() -> SQLite -> ContainerConfig.from_row().",
         "file_path": "commands/new.sh",
@@ -203,7 +205,12 @@
           "New sandbox registration metadata contains sandbox_branch field",
           "sandbox_branch value matches the branch the sandbox was created on"
         ],
-        "task_category": "implementation"
+        "task_category": "implementation",
+        "started_at": "2026-02-07T15:46:47.557783Z",
+        "completed_at": "2026-02-07T15:47:11.759254Z",
+        "needs_journaling": false,
+        "actual_hours": 0.01,
+        "journaled_at": "2026-02-07T15:47:11.759354Z"
       },
       "dependencies": {
         "blocks": [],
@@ -214,11 +221,11 @@
     "task-2-2": {
       "type": "task",
       "title": "Add sandbox_branch to metadata in commands/start.sh",
-      "status": "pending",
+      "status": "completed",
       "parent": "phase-2",
       "children": [],
       "total_tasks": 1,
-      "completed_tasks": 0,
+      "completed_tasks": 1,
       "metadata": {
         "description": "At lines 166-170 where metadata_json is constructed, add --arg sandbox_branch \"${SANDBOX_BRANCH:-}\" and include sandbox_branch: $sandbox_branch in the JSON. SANDBOX_BRANCH is loaded via load_sandbox_metadata at line 23.",
         "file_path": "commands/start.sh",
@@ -226,7 +233,12 @@
           "Sandbox start passes sandbox_branch in registration metadata",
           "SANDBOX_BRANCH sourced correctly from load_sandbox_metadata"
         ],
-        "task_category": "implementation"
+        "task_category": "implementation",
+        "started_at": "2026-02-07T15:47:20.591645Z",
+        "completed_at": "2026-02-07T15:47:48.269712Z",
+        "needs_journaling": false,
+        "actual_hours": 0.01,
+        "journaled_at": "2026-02-07T15:47:48.269785Z"
       },
       "dependencies": {
         "blocks": [],
@@ -237,11 +249,11 @@
     "task-2-3": {
       "type": "task",
       "title": "Legacy sandbox warning in proxy registration",
-      "status": "pending",
+      "status": "completed",
       "parent": "phase-2",
       "children": [],
       "total_tasks": 1,
-      "completed_tasks": 0,
+      "completed_tasks": 1,
       "metadata": {
         "description": "In the register() handler in git_api.py, after ContainerConfig.from_row() populates the config, log a warning when metadata lacks sandbox_branch: 'Sandbox branch identity missing (created before branch isolation support). Commands requiring git proxy validation will be denied. Recreate sandbox.' This runs once per proxy registration, not per command.",
         "file_path": "unified-proxy/git_api.py",
@@ -249,7 +261,12 @@
           "Warning logged when sandbox_branch is missing from registration metadata",
           "Warning message instructs user to recreate sandbox"
         ],
-        "task_category": "implementation"
+        "task_category": "implementation",
+        "started_at": "2026-02-07T15:47:57.427741Z",
+        "completed_at": "2026-02-07T15:48:41.037914Z",
+        "needs_journaling": false,
+        "actual_hours": 0.01,
+        "journaled_at": "2026-02-07T15:48:41.038016Z"
       },
       "dependencies": {
         "blocks": [],
@@ -260,11 +277,11 @@
     "task-2-4": {
       "type": "task",
       "title": "Fail-closed behavior for legacy sandboxes",
-      "status": "pending",
+      "status": "completed",
       "parent": "phase-2",
       "children": [],
       "total_tasks": 1,
-      "completed_tasks": 0,
+      "completed_tasks": 1,
       "metadata": {
         "description": "If SANDBOX_BRANCH is missing at startup, fail with a clear error requiring sandbox recreation. In git_operations.py, if command metadata lacks sandbox_branch, return ValidationError('Sandbox branch identity missing; recreate sandbox to enable isolation'). No legacy allow/override mode provided.",
         "file_path": "commands/start.sh",
@@ -273,7 +290,12 @@
           "Git commands return ValidationError when sandbox_branch is absent from metadata",
           "No override or legacy compatibility mode exists"
         ],
-        "task_category": "implementation"
+        "task_category": "implementation",
+        "started_at": "2026-02-07T15:48:51.540679Z",
+        "completed_at": "2026-02-07T15:49:27.440356Z",
+        "needs_journaling": false,
+        "actual_hours": 0.01,
+        "journaled_at": "2026-02-07T15:49:27.440433Z"
       },
       "dependencies": {
         "blocks": [],
@@ -284,14 +306,19 @@
     "verify-2-1": {
       "type": "verify",
       "title": "Verify metadata propagation and fail-closed behavior",
-      "status": "pending",
+      "status": "completed",
       "parent": "phase-2",
       "children": [],
       "total_tasks": 1,
-      "completed_tasks": 0,
+      "completed_tasks": 1,
       "metadata": {
         "description": "Verify: (1) New sandbox registration contains sandbox_branch, (2) Startup fails closed when sandbox_branch is missing, (3) Legacy sandboxes without branch identity must be re-created.",
-        "verification_type": "manual"
+        "verification_type": "manual",
+        "started_at": "2026-02-07T15:49:36.526374Z",
+        "completed_at": "2026-02-07T15:49:51.194834Z",
+        "needs_journaling": false,
+        "actual_hours": 0.0,
+        "journaled_at": "2026-02-07T15:49:51.194941Z"
       },
       "dependencies": {
         "blocks": [],
@@ -1174,6 +1201,51 @@
       "author": "foundry-mcp",
       "metadata": {},
       "task_id": "verify-1-1"
+    },
+    {
+      "timestamp": "2026-02-07T15:47:11.759354Z",
+      "entry_type": "status_change",
+      "title": "Task Completed: Add sandbox_branch to metadata in commands/new.sh",
+      "content": "Added --arg sandbox_branch \\\"$branch\\\" and sandbox_branch: $sandbox_branch to the jq metadata_json construction in commands/new.sh:1185-1189. $branch is in scope (local var set at line 771, possibly modified at line 988). Basic verification: bash -n syntax check passed. Full testing deferred to verify-2-1.",
+      "author": "foundry-mcp",
+      "metadata": {},
+      "task_id": "task-2-1"
+    },
+    {
+      "timestamp": "2026-02-07T15:47:48.269785Z",
+      "entry_type": "status_change",
+      "title": "Task Completed: Add sandbox_branch to metadata in commands/start.sh",
+      "content": "Added --arg sandbox_branch \\\"${SANDBOX_BRANCH:-}\\\" and sandbox_branch: $sandbox_branch to metadata_json in commands/start.sh:167-171. SANDBOX_BRANCH is sourced via load_sandbox_metadata at line 23. bash -n passed. Full testing deferred to verify-2-1.",
+      "author": "foundry-mcp",
+      "metadata": {},
+      "task_id": "task-2-2"
+    },
+    {
+      "timestamp": "2026-02-07T15:48:41.038016Z",
+      "entry_type": "status_change",
+      "title": "Task Completed: Legacy sandbox warning in proxy registration",
+      "content": "Added legacy sandbox warning in register_container() in unified-proxy/internal_api.py:359-365. After registry.register() returns, checks if metadata lacks sandbox_branch and logs a warning instructing user to recreate the sandbox. py_compile passed. Full testing deferred to verify-2-1.",
+      "author": "foundry-mcp",
+      "metadata": {},
+      "task_id": "task-2-3"
+    },
+    {
+      "timestamp": "2026-02-07T15:49:27.440433Z",
+      "entry_type": "status_change",
+      "title": "Task Completed: Fail-closed behavior for legacy sandboxes",
+      "content": "Added fail-closed behavior for legacy sandboxes in two locations: (1) commands/start.sh:163-165 \u2014 dies with clear error if SANDBOX_BRANCH is empty when credential isolation is enabled. (2) unified-proxy/git_operations.py:1153-1157 \u2014 execute_git() returns ValidationError if metadata lacks sandbox_branch, blocking all git commands for legacy sandboxes. No override/legacy mode. Both files pass syntax checks. Full testing deferred to verify-2-1.",
+      "author": "foundry-mcp",
+      "metadata": {},
+      "task_id": "task-2-4"
+    },
+    {
+      "timestamp": "2026-02-07T15:49:51.194941Z",
+      "entry_type": "status_change",
+      "title": "Task Completed: Verify metadata propagation and fail-closed behavior",
+      "content": "Code-level verification of phase 2 passed. Verified: (1) new.sh and start.sh both pass sandbox_branch in jq metadata construction. (2) start.sh fails closed (die) when SANDBOX_BRANCH is empty and credential isolation is enabled. (3) internal_api.py logs warning for legacy sandboxes missing branch identity. (4) git_operations.py returns ValidationError blocking all git commands when sandbox_branch is absent. Data flow is consistent across all files. Runtime verification deferred to integration testing.",
+      "author": "foundry-mcp",
+      "metadata": {},
+      "task_id": "verify-2-1"
     }
   ]
 }

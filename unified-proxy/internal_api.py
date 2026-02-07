@@ -356,6 +356,15 @@ def create_app(registry: Optional[ContainerRegistry] = None) -> Flask:
                 metadata=metadata,
             )
 
+            # Warn about legacy sandboxes missing branch identity
+            if not (metadata and metadata.get("sandbox_branch")):
+                logger.warning(
+                    f"Container {container_id}: sandbox branch identity missing "
+                    f"(created before branch isolation support). Commands "
+                    f"requiring git proxy validation will be denied. "
+                    f"Recreate sandbox to enable branch isolation."
+                )
+
             logger.info(
                 f"Registered container {container_id} with IP {ip_address} "
                 f"(TTL: {ttl_seconds}s)"

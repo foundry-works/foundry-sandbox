@@ -1185,7 +1185,8 @@ OVERRIDES
             metadata_json=$(jq -n \
                 --arg repo "$repo_spec" \
                 --arg allow_pr "$allow_pr" \
-                '{repo: $repo, allow_pr: ($allow_pr == "true")}')
+                --arg sandbox_branch "$branch" \
+                '{repo: $repo, allow_pr: ($allow_pr == "true"), sandbox_branch: $sandbox_branch}')
         fi
 
         if ! setup_proxy_registration "$container_id" "$metadata_json"; then

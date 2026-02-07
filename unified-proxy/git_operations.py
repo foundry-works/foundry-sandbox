@@ -1150,6 +1150,12 @@ def execute_git(
     Returns:
         (response, None) on success, (None, error) on validation failure.
     """
+    # Fail closed if sandbox branch identity is missing (legacy sandbox)
+    if not (metadata and metadata.get("sandbox_branch")):
+        return None, ValidationError(
+            "Sandbox branch identity missing; recreate sandbox to enable isolation"
+        )
+
     # Resolve extra allowed commands from metadata
     extra_allowed = None
     if metadata:
