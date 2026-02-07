@@ -126,6 +126,40 @@ create_worktree() {
     fi
 }
 
+cleanup_sandbox_branch() {
+    local branch="$1"
+    local repo_url="$2"
+
+    # Early return if branch or repo_url empty
+    [ -z "$branch" ] && return 0
+    [ -z "$repo_url" ] && return 0
+
+    # Skip well-known branches
+    case "$branch" in
+        main|master|develop|production) return 0 ;;
+        release/*|hotfix/*) return 0 ;;
+    esac
+
+    # Resolve bare repo path
+    local bare_path
+    bare_path=$(repo_to_path "$repo_url")
+    [ -d "$bare_path" ] || return 0
+
+    # Skip if another worktree still uses this branch
+    if git -C "$bare_path" worktree list --porcelain 2>/dev/null \
+        | grep -qxF "branch refs/heads/$branch"; then
+        log_info "Branch '$branch' still in use by another worktree, skipping cleanup"
+        return 0
+    fi
+
+    # Delete the branch
+    if git -C "$bare_path" branch -D "$branch" >/dev/null 2>&1; then
+        log_info "Cleaned up sandbox branch: $branch"
+    fi
+
+    return 0
+}
+
 remove_worktree() {
     local worktree_path="$1"
     if [ -d "$worktree_path" ]; then

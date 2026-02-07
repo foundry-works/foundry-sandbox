@@ -36,7 +36,13 @@ cmd_prune() {
                     continue
                 fi
             fi
+            # Load metadata before removal, save to local vars
+            SANDBOX_BRANCH="" SANDBOX_REPO_URL=""
+            load_sandbox_metadata "$name" 2>/dev/null || true
+            local _prune_branch="${SANDBOX_BRANCH:-}"
+            local _prune_repo="${SANDBOX_REPO_URL:-}"
             remove_path "$config_dir"
+            cleanup_sandbox_branch "$_prune_branch" "$_prune_repo"
             removed+=("$name")
         fi
     done
@@ -61,10 +67,17 @@ cmd_prune() {
                         continue
                     fi
                 fi
+                # Load metadata before removal, save to local vars
+                SANDBOX_BRANCH="" SANDBOX_REPO_URL=""
+                load_sandbox_metadata "$name" 2>/dev/null || true
+                local _prune_branch="${SANDBOX_BRANCH:-}"
+                local _prune_repo="${SANDBOX_REPO_URL:-}"
                 # Remove worktree
                 remove_worktree "$worktree_dir"
                 # Remove config if it exists
                 [ -d "$config_dir" ] && remove_path "$config_dir"
+                # Clean up branch after worktree removal
+                cleanup_sandbox_branch "$_prune_branch" "$_prune_repo"
                 removed_no_container+=("$name")
             fi
         done

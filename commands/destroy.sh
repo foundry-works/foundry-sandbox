@@ -68,5 +68,10 @@ cmd_destroy() {
         fi
     fi
 
+    # Clean up sandbox branch from bare repo (after worktree removal so
+    # the worktree-in-use check doesn't find our own worktree)
+    load_sandbox_metadata "$name" 2>/dev/null || true
+    cleanup_sandbox_branch "${SANDBOX_BRANCH:-}" "${SANDBOX_REPO_URL:-}"
+
     echo "Sandbox '$name' destroyed."
 }
