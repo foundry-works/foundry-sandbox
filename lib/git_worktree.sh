@@ -13,6 +13,13 @@ configure_sparse_checkout() {
     # Enable per-worktree config at bare repo level
     git -C "$bare_path" config extensions.worktreeConfig true
 
+    # Bump repositoryformatversion to 1 if needed (extensions require version >= 1)
+    local repo_version
+    repo_version=$(git -C "$bare_path" config --get core.repositoryformatversion 2>/dev/null || echo "0")
+    if [ "$repo_version" -lt 1 ]; then
+        git -C "$bare_path" config core.repositoryformatversion 1
+    fi
+
     # Enable sparse checkout in worktree config (write directly to avoid "not a work tree" error)
     # Use cone mode which properly handles nested directories and always includes root files
     git config --file "$gitdir/config.worktree" core.sparseCheckout true

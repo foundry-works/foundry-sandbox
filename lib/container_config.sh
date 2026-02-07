@@ -2073,6 +2073,15 @@ fix_proxy_worktree_paths() {
                     *)  BARE_DIR=\"\$GITDIR_PATH/\$BARE_DIR\" ;;
                 esac
                 ls \"\$BARE_DIR\" >/dev/null 2>&1 || true
+                cat \"\$BARE_DIR/config\" >/dev/null 2>&1 || true
+
+                # Defensively re-set extensions.worktreeConfig (VirtioFS may lose host writes)
+                git config --file \"\$BARE_DIR/config\" extensions.worktreeConfig true
+                # Bump repositoryformatversion to 1 if needed (extensions require version >= 1)
+                REPO_VER=\$(git config --file \"\$BARE_DIR/config\" --get core.repositoryformatversion 2>/dev/null || echo 0)
+                if [ \"\$REPO_VER\" -lt 1 ] 2>/dev/null; then
+                    git config --file \"\$BARE_DIR/config\" core.repositoryformatversion 1
+                fi
 
                 touch \"\$GITDIR_PATH/config.worktree\" 2>/dev/null || true
                 git config --file \"\$GITDIR_PATH/config.worktree\" core.worktree /git-workspace
