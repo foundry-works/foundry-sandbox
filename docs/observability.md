@@ -186,7 +186,7 @@ clear_context()
 
 1. **Check circuit state**:
    ```bash
-   curl -s http://unified-proxy:9090/internal/metrics | grep circuit_breaker
+   curl -s http://unified-proxy:8080/internal/metrics | grep circuit_breaker
    ```
 2. **Review failure logs**:
    ```bash
@@ -201,7 +201,7 @@ clear_context()
 
 1. **Check remaining tokens**:
    ```bash
-   curl -s http://unified-proxy:9090/internal/metrics | grep rate_limit
+   curl -s http://unified-proxy:8080/internal/metrics | grep rate_limit
    ```
 2. **Review rate limit logs**:
    ```bash
@@ -216,7 +216,7 @@ clear_context()
 
 1. **Check DNS metrics**:
    ```bash
-   curl -s http://unified-proxy:9090/internal/metrics | grep dns
+   curl -s http://unified-proxy:8080/internal/metrics | grep dns
    ```
 2. **Review blocked queries**:
    ```bash
@@ -244,7 +244,7 @@ Access metrics at the internal API endpoint:
 
 ```bash
 # From inside Docker network
-curl http://unified-proxy:9090/internal/metrics
+curl http://unified-proxy:8080/internal/metrics
 
 # Sample output
 # HELP proxy_requests_total Total HTTP requests processed by the proxy

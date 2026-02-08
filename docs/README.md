@@ -35,6 +35,9 @@ claude
 | [Getting Started](getting-started.md) | Installation, setup, and first sandbox |
 | [Configuration](configuration.md) | API keys, plugins, and config files |
 | [Architecture](architecture.md) | Technical design and diagrams |
+| [Operations](operations.md) | Operational procedures and runbook |
+| [Observability](observability.md) | Metrics, logging, and alerting |
+| [Certificates](certificates.md) | CA certificate management |
 
 ### Security
 
@@ -57,6 +60,7 @@ claude
 
 | Document | Description |
 |----------|-------------|
+| [ADR-001: Unified Proxy Consolidation](adr/001-consolidation.md) | Consolidation of gateway and api-proxy into unified proxy |
 | [ADR-002: Container Identity](adr/002-container-identity.md) | Container identity design for proxy authentication |
 | [ADR-003: Policy Engine](adr/003-policy-engine.md) | Policy engine design for access control |
 | [ADR-004: DNS Integration](adr/004-dns-integration.md) | DNS filtering integration with unified proxy |

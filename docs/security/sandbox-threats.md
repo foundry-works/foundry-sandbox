@@ -46,10 +46,11 @@ Each pillar blocks specific threat categories. For implementation details, see [
 | Pillar | What It Blocks | What It Doesn't Block |
 |--------|----------------|----------------------|
 | **Read-only Filesystem** | Filesystem writes, system modification, persistent malware | Writes to tmpfs mounts (/tmp, /home/ubuntu) |
-| **Network Isolation** | Unauthorized egress, direct external access, DNS exfiltration | Traffic to allowed domains (GitHub, AI APIs) |
+| **Network Isolation** | Unauthorized egress, direct external access, DNS exfiltration, IP spoofing/ARP poisoning (CAP_NET_RAW dropped) | Traffic to allowed domains (GitHub, AI APIs); normal TCP/UDP networking |
 | **Sudoers Allowlist** | Arbitrary sudo commands, privilege escalation | Allowed commands (apt-get install, service management) |
 | **Credential Isolation** | Credential theft, API key exfiltration, env var scraping | Authorized API calls via proxy |
-| **CAP_NET_RAW Dropped** | IP spoofing, ARP poisoning, raw packet sniffing, L2 attacks | Normal TCP/UDP networking |
+| **Branch Isolation** | Cross-sandbox branch access, unauthorized ref checkout, branch listing leaks | Access to well-known branches (main, master, develop, etc.) and tags |
+| **Git Safety** | Force pushes to protected branches, branch/tag deletion, dangerous GitHub API operations | Git operations on sandbox's own branch |
 
 ---
 
@@ -67,7 +68,7 @@ Each pillar blocks specific threat categories. For implementation details, see [
 | Lateral movement | Network (ICC=false) | CAP_NET_RAW dropped | [Lateral Movement](#5-lateral-movement) |
 | Cross-sandbox branch access | Branch Isolation | Output filtering | [Branch Isolation](#branch-isolation) |
 | Session hijacking | IP binding | CAP_NET_RAW dropped | [Session Attacks](#6-session-token-attacks) |
-| DNS exfiltration | Network (dnsmasq) | Domain allowlist | [DNS Exfiltration](#7-dns-exfiltration) |
+| DNS exfiltration | Network (DNS filter) | Domain allowlist | [DNS Exfiltration](#7-dns-exfiltration) |
 | Sudo escalation | Sudoers Allowlist | Read-only Filesystem | [Sudo Escalation](#8-sudo-escalation) |
 
 ---

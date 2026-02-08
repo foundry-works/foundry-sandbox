@@ -22,7 +22,7 @@ Foundry Sandbox implements **defense in depth** with multiple security layers:
 |  +--------------------+   |    |                              |
 |  | .git hidden        |   |    |  • Credential injection     |
 |  +--------------------+   |    |  • Git API server (:8083)   |
-|  +--------------------+   |    |  • DNS filter (dnsmasq)     |
+|  +--------------------+   |    |  • DNS filter (mitmproxy)   |
 |  | No real creds      |   |    |  • Policy engine            |
 |  +--------------------+   |    |                              |
 |                           |    +-------------+----------------+

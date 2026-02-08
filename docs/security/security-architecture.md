@@ -17,7 +17,7 @@ AI Command ────────►│  ┌───────────�
                     │                                     │
                     │  ┌─────────────────────────────┐   │
                     │  │   Network Isolation         │   │
-                    │  │   (Docker + dnsmasq + ipt)  │   │
+                    │  │   (Docker + mitmproxy + ipt)│   │
                     │  └─────────────────────────────┘   │
                     │                                     │
                     │  ┌─────────────────────────────┐   │
@@ -87,7 +87,7 @@ See [Container Filesystem Write Capability](sandbox-threats.md#container-filesys
 
 ### Network Isolation
 
-**Enforced by:** Docker networking + dnsmasq + iptables
+**Enforced by:** Docker networking + mitmproxy DNS addon + iptables
 
 **Implementation:** `safety/network-firewall.sh`, `safety/network-mode`
 
@@ -226,7 +226,7 @@ python -c "import os; print(os.environ)"  # Different interpreter
 | Control | Enforced By | Bypassable? | Purpose |
 |---------|-------------|-------------|---------|
 | Read-only filesystem | Docker/kernel | No (from container) | Prevent filesystem writes |
-| Network isolation | Docker/dnsmasq/iptables | No (from container) | Control network egress |
+| Network isolation | Docker/mitmproxy/iptables | No (from container) | Control network egress |
 | Sudoers allowlist | Linux kernel | No (from userspace) | Restrict sudo commands |
 | Credential isolation | Unified-proxy architecture | No (without proxy compromise) | Protect credentials |
 | Operator approval | TTY check | No (from non-interactive) | Human-in-the-loop |

@@ -265,21 +265,21 @@ docker exec "$PROXY_CONTAINER" curl -X POST --unix-socket /var/run/proxy/interna
 
 **Check 1: Circuit breaker state**
 ```bash
-curl -s http://unified-proxy:9090/internal/metrics | grep circuit_breaker
+curl -s http://unified-proxy:8080/internal/metrics | grep circuit_breaker
 ```
 
 If state = 2 (OPEN), upstream is failing. See [Circuit Breaker Investigation](observability.md#circuit-breaker-investigation).
 
 **Check 2: Rate limit exhaustion**
 ```bash
-curl -s http://unified-proxy:9090/internal/metrics | grep rate_limit_remaining
+curl -s http://unified-proxy:8080/internal/metrics | grep rate_limit_remaining
 ```
 
 If remaining < 5, container is rate limited. Wait for refill.
 
 **Check 3: DNS resolution time**
 ```bash
-curl -s http://unified-proxy:9090/internal/metrics | grep dns_duration
+curl -s http://unified-proxy:8080/internal/metrics | grep dns_duration
 ```
 
 If p95 > 100ms, consider DNS fallback mode.

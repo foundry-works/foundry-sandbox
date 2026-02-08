@@ -326,18 +326,19 @@ The unified-proxy handles all credential isolation and API proxying for sandboxe
 │  │  (Unix sock)│    │  │          Addon Chain            │ │    │
 │  └──────┬──────┘    │  │                                 │ │    │
 │         │           │  │  container_identity (identify)  │ │    │
-│         ▼           │  │  credential_injector (inject)   │ │    │
-│  ┌─────────────┐    │  │  git_proxy (rewrite URLs)       │ │    │
-│  │  Container  │    │  │  rate_limiter (throttle)        │ │    │
-│  │  Registry   │────┼──│  circuit_breaker (resilience)   │ │    │
-│  │  (SQLite)   │    │  │  policy_engine (rules)          │ │    │
-│  └─────────────┘    │  │  metrics (observability)        │ │    │
+│         ▼           │  │  policy_engine (rules)          │ │    │
+│  ┌─────────────┐    │  │  dns_filter (DNS allowlist)     │ │    │
+│  │  Container  │    │  │  credential_injector (inject)   │ │    │
+│  │  Registry   │────┼──│  git_proxy (rewrite URLs)       │ │    │
+│  │  (SQLite)   │    │  │  rate_limiter (throttle)        │ │    │
+│  └─────────────┘    │  │  circuit_breaker (resilience)   │ │    │
+│                     │  │  metrics (observability)        │ │    │
 │                     │  └─────────────────────────────────┘ │    │
 │                     └─────────────────────────────────────┘    │
 │                                                                 │
 │  ┌─────────────┐                                                │
 │  │ DNS Filter  │  Allowlist-based DNS filtering                 │
-│  │  (dnsmasq)  │  Returns NXDOMAIN for blocked domains          │
+│  │ (mitmproxy) │  Returns NXDOMAIN for blocked domains          │
 │  └─────────────┘                                                │
 └─────────────────────────────────────────────────────────────────┘
 ```

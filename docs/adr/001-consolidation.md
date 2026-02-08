@@ -14,7 +14,7 @@ The unified-proxy has been fully implemented, consolidating the gateway and api-
 - **Container Registry** (`registry.py`) - SQLite-backed identity storage with TTL
 - **Internal API** (`internal_api.py`) - Flask REST API for container registration
 - **Addon Chain** - 7 addons handling identity, credentials, git, rate limiting, circuit breaker, policy, and metrics
-- **DNS Filter** - Integrated dnsmasq-based DNS filtering
+- **DNS Filter** - Integrated mitmproxy-based DNS filtering (dns_filter.py addon)
 
 The gateway/ directory and lib/gateway.sh have been deleted. All functionality migrated to unified-proxy/.
 
