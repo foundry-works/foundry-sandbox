@@ -1410,6 +1410,13 @@ def build_clean_env() -> Dict[str, str]:
     if "PATH" not in clean:
         clean["PATH"] = "/usr/local/bin:/usr/bin:/bin"
 
+    # Pass through our internal credential token for the git credential helper.
+    # This is NOT a git-recognized variable — it's only read by our own
+    # /var/run/proxy/git-credential-helper.sh script set up in entrypoint.sh.
+    token = os.environ.get("GIT_CREDENTIAL_TOKEN")
+    if token:
+        clean["GIT_CREDENTIAL_TOKEN"] = token
+
     return clean
 
 
