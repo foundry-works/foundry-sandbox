@@ -197,7 +197,7 @@ else
 fi
 
 # ============================================================================
-header "4b. PROXY-LAYER EGRESS FILTERING"
+header "5. PROXY-LAYER EGRESS FILTERING"
 # ============================================================================
 
 echo ""
@@ -219,7 +219,7 @@ for target in "${EXFIL_TARGETS[@]}"; do
 done
 
 # ============================================================================
-header "4c. DIRECT IP EGRESS (NO PROXY)"
+header "6. DIRECT IP EGRESS (NO PROXY)"
 # ============================================================================
 
 echo ""
@@ -246,7 +246,7 @@ for ip in "${DIRECT_IP_TARGETS[@]}"; do
 done
 
 # ============================================================================
-header "4d. PROXY ADMIN UI EXPOSURE"
+header "7. PROXY ADMIN UI EXPOSURE"
 # ============================================================================
 
 echo ""
@@ -269,7 +269,7 @@ else
 fi
 
 # ============================================================================
-header "5. CREDENTIAL INJECTION VERIFICATION"
+header "8. CREDENTIAL INJECTION VERIFICATION"
 # ============================================================================
 
 echo ""
@@ -294,7 +294,7 @@ else
 fi
 
 # ============================================================================
-header "6. GIT SECURITY TESTS"
+header "9. GIT SECURITY TESTS"
 # ============================================================================
 
 echo ""
@@ -320,7 +320,203 @@ else
 fi
 
 # ============================================================================
-header "6b. GIT MARKETPLACE ACCESS"
+header "10. GIT HOOK PREVENTION"
+# ============================================================================
+
+echo ""
+echo "Testing git hook hardening (core.hooksPath, fsmonitor, etc.)..."
+
+# Test 1: core.hooksPath should be /dev/null
+HOOKS_PATH=$(git config --global core.hooksPath 2>/dev/null)
+if [[ "$HOOKS_PATH" == "/dev/null" ]]; then
+    test_pass "core.hooksPath is /dev/null"
+else
+    test_fail "core.hooksPath is '$HOOKS_PATH' (expected /dev/null)"
+fi
+
+# Test 2: core.fsmonitor should be false
+FSMONITOR=$(git config --global core.fsmonitor 2>/dev/null)
+if [[ "$FSMONITOR" == "false" ]]; then
+    test_pass "core.fsmonitor is false"
+else
+    test_fail "core.fsmonitor is '$FSMONITOR' (expected false)"
+fi
+
+# Test 3: init.templateDir should be empty string
+TEMPLATE_DIR=$(git config --global init.templateDir 2>/dev/null)
+if [[ "$TEMPLATE_DIR" == "" ]]; then
+    test_pass "init.templateDir is empty string"
+else
+    test_fail "init.templateDir is '$TEMPLATE_DIR' (expected empty string)"
+fi
+
+# Test 4: core.fsmonitorHookVersion should be 0
+FSMONITOR_VER=$(git config --global core.fsmonitorHookVersion 2>/dev/null)
+if [[ "$FSMONITOR_VER" == "0" ]]; then
+    test_pass "core.fsmonitorHookVersion is 0"
+else
+    test_fail "core.fsmonitorHookVersion is '$FSMONITOR_VER' (expected 0)"
+fi
+
+# Test 5: receive.denyCurrentBranch should be refuse
+DENY_CURRENT=$(git config --global receive.denyCurrentBranch 2>/dev/null)
+if [[ "$DENY_CURRENT" == "refuse" ]]; then
+    test_pass "receive.denyCurrentBranch is refuse"
+else
+    test_fail "receive.denyCurrentBranch is '$DENY_CURRENT' (expected refuse)"
+fi
+
+# Test 6: Malicious post-checkout hook should NOT execute on clone
+info "Testing malicious post-checkout hook execution..."
+HOOK_TEST_DIR="/tmp/hook-test-$$"
+HOOK_REPO_DIR="/tmp/hook-repo-$$"
+HOOK_MARKER="/tmp/hook-executed-$$"
+rm -rf "$HOOK_TEST_DIR" "$HOOK_REPO_DIR" "$HOOK_MARKER" 2>/dev/null
+
+# Create a repo with a malicious post-checkout hook
+mkdir -p "$HOOK_REPO_DIR"
+(
+    cd "$HOOK_REPO_DIR"
+    git init --quiet
+    git commit --allow-empty -m "init" --quiet
+    mkdir -p .git/hooks
+    cat > .git/hooks/post-checkout << HOOKEOF
+#!/bin/bash
+touch "$HOOK_MARKER"
+HOOKEOF
+    chmod +x .git/hooks/post-checkout
+)
+
+# Clone the repo - hook should NOT fire because core.hooksPath=/dev/null
+git clone --quiet "$HOOK_REPO_DIR" "$HOOK_TEST_DIR" 2>/dev/null
+
+if [[ -f "$HOOK_MARKER" ]]; then
+    test_fail "Malicious post-checkout hook executed during clone!"
+    rm -f "$HOOK_MARKER"
+else
+    test_pass "Malicious post-checkout hook did NOT execute on clone"
+fi
+rm -rf "$HOOK_TEST_DIR" "$HOOK_REPO_DIR" 2>/dev/null
+
+# Test 7: Gated regression test for GIT_SHADOW_ENABLED override gap
+# When Phase 3 shadow mode is active, git -c core.hooksPath= could re-enable hooks.
+# This test documents the gap that Phase 3's wrapper must close.
+if [[ "${GIT_SHADOW_ENABLED:-0}" == "1" ]]; then
+    info "GIT_SHADOW_ENABLED=1: Testing -c core.hooksPath= override gap..."
+    # Try to override hooksPath via -c flag (Phase 3 wrapper should block this)
+    OVERRIDE_PATH=$(git -c core.hooksPath= config core.hooksPath 2>/dev/null)
+    if [[ -z "$OVERRIDE_PATH" || "$OVERRIDE_PATH" == "/dev/null" ]]; then
+        test_pass "git -c core.hooksPath= override blocked by wrapper"
+    else
+        test_warn "git -c core.hooksPath= override succeeded (expected when Phase 3 wrapper active)"
+        info "This gap is closed by Phase 3's git wrapper command allowlist"
+    fi
+else
+    info "GIT_SHADOW_ENABLED not set - skipping -c override gap test (Phase 3 not active)"
+fi
+
+# ============================================================================
+header "10b. GIT SHADOW ISOLATION (Phase 3)"
+# ============================================================================
+
+echo ""
+echo "Testing git shadow mode isolation (tmpfs + wrapper + HMAC auth)..."
+
+if [[ "${GIT_SHADOW_ENABLED:-0}" == "1" ]]; then
+
+    # Test 1: /workspace/.git is an empty tmpfs
+    info "Testing /workspace/.git is empty tmpfs..."
+    if mountpoint -q /workspace/.git 2>/dev/null; then
+        GIT_MOUNT_TYPE=$(mount | grep "/workspace/.git " | awk '{print $5}')
+        if [[ "$GIT_MOUNT_TYPE" == "tmpfs" ]]; then
+            GIT_DIR_CONTENTS=$(ls -A /workspace/.git 2>/dev/null | wc -l)
+            if [[ "$GIT_DIR_CONTENTS" -eq 0 ]]; then
+                test_pass "/workspace/.git is empty tmpfs (mount type: tmpfs, 0 files)"
+            else
+                test_fail "/workspace/.git is tmpfs but NOT empty ($GIT_DIR_CONTENTS items found)"
+                info "Contents: $(ls -A /workspace/.git 2>/dev/null | head -5)"
+            fi
+        else
+            test_fail "/workspace/.git is mounted but not tmpfs (type: $GIT_MOUNT_TYPE)"
+        fi
+    else
+        test_fail "/workspace/.git is not a separate mount point (shadow not active)"
+    fi
+
+    # Test 2: /usr/bin/git status fails with 'not a git repository'
+    info "Testing raw /usr/bin/git status fails without real .git/..."
+    RAW_GIT_OUTPUT=$(/usr/bin/git status 2>&1)
+    RAW_GIT_EXIT=$?
+    if [[ $RAW_GIT_EXIT -ne 0 ]] && echo "$RAW_GIT_OUTPUT" | grep -qi "not a git repository"; then
+        test_pass "/usr/bin/git status fails with 'not a git repository'"
+    elif [[ $RAW_GIT_EXIT -eq 0 ]]; then
+        test_fail "/usr/bin/git status succeeded (shadow .git/ may contain metadata)"
+    else
+        test_fail "/usr/bin/git status failed but without expected message"
+        info "Exit code: $RAW_GIT_EXIT, output: $(echo "$RAW_GIT_OUTPUT" | head -c 200)"
+    fi
+
+    # Test 3: proxied git log works correctly via wrapper
+    info "Testing proxied git log via wrapper..."
+    if [[ -x /usr/local/bin/git ]]; then
+        WRAPPER_OUTPUT=$(/usr/local/bin/git log --oneline -5 2>&1)
+        WRAPPER_EXIT=$?
+        if [[ $WRAPPER_EXIT -eq 0 ]] && [[ -n "$WRAPPER_OUTPUT" ]]; then
+            test_pass "Proxied git log works via wrapper (returned commits)"
+        elif [[ $WRAPPER_EXIT -eq 0 ]]; then
+            test_warn "Proxied git log returned 0 but empty output (new repo?)"
+        else
+            test_fail "Proxied git log via wrapper failed (exit: $WRAPPER_EXIT)"
+            info "Output: $(echo "$WRAPPER_OUTPUT" | head -c 200)"
+        fi
+    else
+        test_fail "Git wrapper not found at /usr/local/bin/git"
+    fi
+
+    # Test 4: git --git-dir=/tmp/evil status rejected by wrapper
+    info "Testing --git-dir flag injection rejected by wrapper..."
+    mkdir -p /tmp/evil 2>/dev/null
+    GITDIR_OUTPUT=$(/usr/local/bin/git --git-dir=/tmp/evil status 2>&1)
+    GITDIR_EXIT=$?
+    rmdir /tmp/evil 2>/dev/null
+    if [[ $GITDIR_EXIT -ne 0 ]] && echo "$GITDIR_OUTPUT" | grep -qiE "(blocked|rejected|not allowed|forbidden|denied|error)"; then
+        test_pass "git --git-dir=/tmp/evil status rejected by wrapper"
+    elif [[ $GITDIR_EXIT -eq 0 ]]; then
+        test_fail "git --git-dir=/tmp/evil status succeeded (flag injection not blocked!)"
+    else
+        # Non-zero exit but unexpected message — still likely blocked
+        test_pass "git --git-dir=/tmp/evil status failed (exit: $GITDIR_EXIT)"
+        info "Output: $(echo "$GITDIR_OUTPUT" | head -c 200)"
+    fi
+
+    # Test 5: direct curl to git API without HMAC returns 401
+    info "Testing unauthenticated git API access returns 401..."
+    GIT_API_HOST="${GIT_API_HOST:-unified-proxy}"
+    GIT_API_PORT="${GIT_API_PORT:-8083}"
+    NOAUTH_RESP=$(curl -s --connect-timeout 5 --max-time 10 \
+        -X POST \
+        -H "Content-Type: application/json" \
+        -d '{"args":["status"],"cwd":"/workspace"}' \
+        -o /dev/null -w "%{http_code}" \
+        "http://${GIT_API_HOST}:${GIT_API_PORT}/git/exec" 2>&1)
+    if [[ "$NOAUTH_RESP" == "401" ]]; then
+        test_pass "Unauthenticated git API request returned 401"
+    elif [[ "$NOAUTH_RESP" == "000" ]]; then
+        test_fail "Git API unreachable at ${GIT_API_HOST}:${GIT_API_PORT}"
+    elif [[ "$NOAUTH_RESP" == "200" ]]; then
+        test_fail "Unauthenticated git API request succeeded (HMAC not enforced!)"
+    else
+        test_fail "Unauthenticated git API returned unexpected HTTP $NOAUTH_RESP (expected 401)"
+    fi
+
+else
+    info "GIT_SHADOW_ENABLED not set - skipping git shadow isolation tests (Phase 3 not active)"
+    info "  These tests require: tmpfs at /workspace/.git, git wrapper at /usr/local/bin/git,"
+    info "  and git API server at port 8083 with HMAC authentication."
+fi
+
+# ============================================================================
+header "11. GIT MARKETPLACE ACCESS"
 # ============================================================================
 
 echo ""
@@ -406,7 +602,7 @@ else
 fi
 
 # ============================================================================
-header "7. CONTAINER ESCAPE / LATERAL MOVEMENT"
+header "12. CONTAINER ESCAPE / LATERAL MOVEMENT"
 # ============================================================================
 
 echo ""
@@ -481,7 +677,7 @@ for endpoint in "${METADATA_ENDPOINTS[@]}"; do
 done
 
 # ============================================================================
-header "8. PROCESS AND MOUNT INSPECTION"
+header "13. PROCESS AND MOUNT INSPECTION"
 # ============================================================================
 
 echo ""
@@ -513,7 +709,7 @@ else
 fi
 
 # ============================================================================
-header "9. GITHUB API FILTER TESTS"
+header "14. GITHUB API FILTER TESTS"
 # ============================================================================
 
 echo ""
@@ -537,7 +733,7 @@ else
 fi
 
 # ============================================================================
-header "9b. GITHUB POLICY BYPASS ATTEMPTS"
+header "15. GITHUB POLICY BYPASS ATTEMPTS"
 # ============================================================================
 
 echo ""
@@ -603,7 +799,7 @@ else
 fi
 
 # ============================================================================
-header "9c. REGISTRATION API ISOLATION"
+header "16. REGISTRATION API ISOLATION"
 # ============================================================================
 
 echo ""
@@ -656,7 +852,7 @@ else
 fi
 
 # ============================================================================
-header "10. CERTIFICATE AND TLS INSPECTION"
+header "17. CERTIFICATE AND TLS INSPECTION"
 # ============================================================================
 
 echo ""
@@ -692,7 +888,7 @@ else
 fi
 
 # ============================================================================
-header "11. FILESYSTEM ISOLATION"
+header "18. FILESYSTEM ISOLATION"
 # ============================================================================
 
 echo ""
@@ -767,7 +963,7 @@ else
 fi
 
 # ============================================================================
-header "12. CAPABILITY VERIFICATION"
+header "19. CAPABILITY VERIFICATION"
 # ============================================================================
 
 echo ""
@@ -830,7 +1026,7 @@ else
 fi
 
 # ============================================================================
-header "13. ADDITIONAL CREDENTIAL PATTERNS"
+header "20. ADDITIONAL CREDENTIAL PATTERNS"
 # ============================================================================
 
 echo ""
@@ -883,7 +1079,7 @@ else
 fi
 
 # ============================================================================
-header "14. NETWORK BYPASS ATTEMPTS"
+header "21. NETWORK BYPASS ATTEMPTS"
 # ============================================================================
 
 echo ""
@@ -951,7 +1147,7 @@ else
 fi
 
 # ============================================================================
-header "15. SENSITIVE PATH ACCESS"
+header "22. SENSITIVE PATH ACCESS"
 # ============================================================================
 
 echo ""

@@ -406,13 +406,13 @@ class TestAuthModeEnforcement:
         assert flow.response.status_code == 403
 
     def test_user_mode_any_branch_allowed(self, addon):
-        """Test user mode allows push to any branch."""
+        """Test user mode allows push to non-protected branches."""
         container_config = MockContainerConfig(
             repos=["owner/repo"], auth_mode="user"
         )
 
         refs = create_pktline_refs(
-            ("0" * 40, "a" * 40, "refs/heads/main")
+            ("0" * 40, "a" * 40, "refs/heads/feature/test")
         )
 
         flow = MockFlow(

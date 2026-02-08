@@ -130,7 +130,12 @@ from registry import ContainerConfig
 
 @pytest.fixture(autouse=True)
 def reset_mock_ctx():
-    """Reset mock ctx before each test."""
+    """Reset mock ctx before each test.
+
+    Reassigns git_proxy.ctx to handle cross-file mock interference
+    when pytest runs multiple test files in the same process.
+    """
+    git_proxy.ctx = mock_ctx
     mock_ctx.log.reset()
     yield
 
@@ -517,8 +522,8 @@ class TestAuthModeEnforcement:
         assert flow.response is not None
         assert flow.response.status_code == 403
 
-    def test_normal_mode_allows_all_branches(self):
-        """Test that normal mode allows pushes to any branch."""
+    def test_normal_mode_allows_non_protected_branches(self):
+        """Test that normal mode allows pushes to non-protected branches."""
         addon = git_proxy.GitProxyAddon()
         container = create_container_config(
             repos=["owner/repo"],
@@ -526,8 +531,8 @@ class TestAuthModeEnforcement:
         )
 
         all_branches = [
-            "refs/heads/main",
             "refs/heads/feature/test",
+            "refs/heads/develop",
             "refs/heads/sandbox/test",
         ]
 
@@ -560,8 +565,8 @@ class TestPushSizeLimitEnforcement:
         addon = git_proxy.GitProxyAddon(max_push_size=limit)
         container = create_container_config(repos=["owner/repo"])
 
-        # Create push at exactly the limit
-        refs = [("a" * 40, "b" * 40, "refs/heads/main")]
+        # Create push at exactly the limit (use non-protected branch)
+        refs = [("a" * 40, "b" * 40, "refs/heads/feature/size-test")]
         base_data = create_pktline_data(refs)
         padding = b"x" * (limit - len(base_data))
         content = base_data + padding

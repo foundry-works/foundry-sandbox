@@ -172,6 +172,63 @@ if [ -f "/etc/gitconfig" ] && grep -q "gateway:8080" /etc/gitconfig 2>/dev/null;
     sudo rm -f /etc/gitconfig 2>/dev/null || rm -f /etc/gitconfig 2>/dev/null || true
 fi
 
+# Git hardening: disable hooks and fsmonitor to prevent malicious repos from executing code
+# Gate behind SANDBOX_GIT_HOOKS_ENABLED (default 0 = hooks disabled for security)
+if [ "${SANDBOX_GIT_HOOKS_ENABLED:-0}" != "1" ]; then
+    git config --global core.hooksPath /dev/null
+    git config --global init.templateDir ''
+    git config --global core.fsmonitor false
+    git config --global core.fsmonitorHookVersion 0
+    git config --global receive.denyCurrentBranch refuse
+fi
+
+# Git shadow mode: /workspace/.git is hidden from the sandbox
+# The git wrapper at /usr/local/bin/git proxies all commands to the git API server
+if [ "${GIT_SHADOW_ENABLED:-}" = "true" ]; then
+    # Verify .git is hidden. Worktrees use a .git file (gitdir pointer) which is
+    # overlaid with /dev/null via bind mount. Non-worktree repos would use tmpfs.
+    if [ -f "/workspace/.git" ] && [ ! -s "/workspace/.git" ]; then
+        echo "Git shadow mode active: /workspace/.git hidden (bind mount)"
+    elif [ -d "/workspace/.git" ] && mountpoint -q /workspace/.git 2>/dev/null; then
+        echo "Git shadow mode active: /workspace/.git hidden (tmpfs overlay)"
+    else
+        echo "Warning: Git shadow mode enabled but /workspace/.git may be accessible"
+    fi
+
+    # Verify git wrapper is installed (bind-mounted by docker-compose).
+    if [ -x "/usr/local/bin/git" ] && head -1 /usr/local/bin/git 2>/dev/null | grep -q "bash"; then
+        echo "Git wrapper installed at /usr/local/bin/git"
+    else
+        echo "Error: Git wrapper not found or not executable at /usr/local/bin/git"
+        exit 1
+    fi
+
+    # Validate HMAC secret mount and configure wrapper secret discovery.
+    export GIT_HMAC_SECRETS_DIR="/run/secrets/sandbox-hmac"
+    if [ ! -d "${GIT_HMAC_SECRETS_DIR}" ]; then
+        echo "Error: HMAC secrets directory not found at ${GIT_HMAC_SECRETS_DIR}"
+        exit 1
+    fi
+
+    # Set HMAC secret file path for explicit SANDBOX_ID mode.
+    SANDBOX_ID="${SANDBOX_ID:-}"
+    if [ -n "${SANDBOX_ID}" ]; then
+        export GIT_HMAC_SECRET_FILE="${GIT_HMAC_SECRETS_DIR}/${SANDBOX_ID}"
+        if [ ! -r "${GIT_HMAC_SECRET_FILE}" ]; then
+            echo "Error: HMAC secret file is not readable at ${GIT_HMAC_SECRET_FILE}"
+            exit 1
+        fi
+        echo "HMAC secret accessible for sandbox ${SANDBOX_ID}"
+    else
+        secret_count=$(find "${GIT_HMAC_SECRETS_DIR}" -mindepth 1 -maxdepth 1 -type f | wc -l | tr -d '[:space:]')
+        if [ "${secret_count}" != "1" ]; then
+            echo "Error: Expected exactly 1 HMAC secret file in ${GIT_HMAC_SECRETS_DIR}, found ${secret_count}"
+            exit 1
+        fi
+        echo "HMAC secret discovery enabled (single secret file detected)"
+    fi
+fi
+
 # Configure DNS to use unified-proxy when in credential isolation mode
 # This enables domain allowlisting - only approved domains can be resolved
 # Note: In credential-isolation mode, DNS is configured by entrypoint-root.sh (as root)

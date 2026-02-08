@@ -25,9 +25,10 @@ PID_FILE="/var/run/proxy/mitmproxy.pid"
 # Legacy addon paths (still used alongside new addons)
 GITHUB_FILTER_PATH="${LEGACY_ADDON_DIR}/github-api-filter.py"
 
-# Track child process for graceful shutdown
+# Track child processes for graceful shutdown
 MITM_PID=""
 INTERNAL_API_PID=""
+GIT_API_PID=""
 
 log() {
     echo "[$(date -Iseconds)] $*"
@@ -71,6 +72,13 @@ cleanup() {
 
     # Remove readiness marker
     rm -f "${READINESS_FILE}"
+
+    # Stop git API if running
+    if [[ -n "${GIT_API_PID}" ]] && kill -0 "${GIT_API_PID}" 2>/dev/null; then
+        log "Stopping git API (PID ${GIT_API_PID})..."
+        kill -TERM "${GIT_API_PID}" 2>/dev/null || true
+        wait "${GIT_API_PID}" 2>/dev/null || true
+    fi
 
     # Stop internal API if running
     if [[ -n "${INTERNAL_API_PID}" ]] && kill -0 "${INTERNAL_API_PID}" 2>/dev/null; then
@@ -159,7 +167,20 @@ validate_config() {
         return 1
     fi
 
-    # Check new addons exist
+    # Addon dependency order: each addon may depend on addons loaded before it.
+    # This array defines the REQUIRED load order. Addons are loaded in this
+    # sequence in start_mitmproxy(). If a new addon is added, it must be placed
+    # in the correct position relative to its dependencies.
+    #
+    # Dependencies:
+    #   container_identity - no deps (identifies containers for all other addons)
+    #   policy_engine      - depends on: container_identity
+    #   dns_filter         - depends on: container_identity (optional, DNS mode)
+    #   credential_injector - depends on: container_identity, policy_engine
+    #   git_proxy          - depends on: container_identity, policy_engine
+    #   rate_limiter       - depends on: container_identity
+    #   circuit_breaker    - depends on: container_identity
+    #   metrics            - depends on: all above (observes everything, must be last)
     local required_addons=(
         "container_identity.py"
         "policy_engine.py"
@@ -178,7 +199,55 @@ validate_config() {
         fi
     done
 
-    log "Configuration validated successfully"
+    log "Configuration validated successfully (${#required_addons[@]} addons in dependency order)"
+    return 0
+}
+
+validate_addon_load_order() {
+    # Verify addons will be loaded in the correct dependency order.
+    # This catches mismatches between validate_config() and start_mitmproxy().
+    local expected_order=(
+        "container_identity.py"
+        "policy_engine.py"
+        "credential_injector.py"
+        "git_proxy.py"
+        "rate_limiter.py"
+        "circuit_breaker.py"
+        "metrics.py"
+    )
+
+    local actual_order=("$@")
+    local expected_idx=0
+
+    for actual in "${actual_order[@]}"; do
+        local basename="${actual##*/}"
+
+        # Skip dns_filter — it's conditionally loaded based on PROXY_ENABLE_DNS
+        [[ "${basename}" == "dns_filter.py" ]] && continue
+        # Skip legacy addons (not part of dependency chain)
+        # Note: can't use "${LEGACY_ADDON_DIR}"* — it matches /opt/proxy/addons/* too
+        [[ "${actual}" == "${GITHUB_FILTER_PATH}" ]] && continue
+
+        if [[ ${expected_idx} -ge ${#expected_order[@]} ]]; then
+            log_error "Addon load order: unexpected addon '${basename}' after all expected addons"
+            return 1
+        fi
+
+        if [[ "${basename}" != "${expected_order[${expected_idx}]}" ]]; then
+            log_error "Addon load order mismatch at position ${expected_idx}: expected '${expected_order[${expected_idx}]}', got '${basename}'"
+            log_error "Required order: ${expected_order[*]}"
+            return 1
+        fi
+
+        ((expected_idx++))
+    done
+
+    if [[ ${expected_idx} -ne ${#expected_order[@]} ]]; then
+        log_error "Addon load order: only ${expected_idx} of ${#expected_order[@]} required addons found"
+        return 1
+    fi
+
+    log "Addon load order validated (${expected_idx} addons in correct sequence)"
     return 0
 }
 
@@ -199,6 +268,126 @@ start_internal_api() {
     done
 
     log_error "Internal API socket not ready after 5 seconds"
+    return 1
+}
+
+configure_git_identity() {
+    # Set git user identity so commits made via the proxy have correct authorship.
+    # Priority: explicit env vars > GitHub API discovery
+    local name="${GIT_USER_NAME:-}"
+    local email="${GIT_USER_EMAIL:-}"
+
+    # Fallback: discover identity from GitHub API if we have a token
+    if [[ -z "${name}" || -z "${email}" ]]; then
+        local token="${GITHUB_TOKEN:-${GH_TOKEN:-}}"
+        if [[ -n "${token}" ]]; then
+            log "Discovering git identity from GitHub API..."
+            local gh_user
+            gh_user=$(curl -sf -H "Authorization: token ${token}" \
+                "https://api.github.com/user" 2>/dev/null) || true
+            if [[ -n "${gh_user}" ]]; then
+                if [[ -z "${name}" ]]; then
+                    name=$(printf '%s' "${gh_user}" | python3 -c \
+                        "import sys,json; print(json.load(sys.stdin).get('name',''))" 2>/dev/null) || true
+                fi
+                if [[ -z "${email}" ]]; then
+                    email=$(printf '%s' "${gh_user}" | python3 -c \
+                        "import sys,json; print(json.load(sys.stdin).get('email',''))" 2>/dev/null) || true
+                fi
+            fi
+        fi
+    fi
+
+    if [[ -n "${name}" ]]; then
+        git config --global user.name "${name}"
+        log "Git identity: user.name = ${name}"
+    fi
+    if [[ -n "${email}" ]]; then
+        git config --global user.email "${email}"
+        log "Git identity: user.email = ${email}"
+    fi
+    if [[ -z "${name}" && -z "${email}" ]]; then
+        log "Warning: No git identity configured; commits may fail with 'Author identity unknown'"
+    fi
+}
+
+configure_git_credentials() {
+    # Configure git credential helper so the proxy can push/fetch on behalf of sandboxes
+    # Uses GITHUB_TOKEN (already available in proxy environment from docker-compose)
+    local token="${GITHUB_TOKEN:-${GH_TOKEN:-}}"
+
+    if [[ -z "${token}" ]]; then
+        log "No GITHUB_TOKEN or GH_TOKEN set; git push/fetch will be unauthenticated"
+        return 0
+    fi
+
+    log "Configuring git credential helper for authenticated push/fetch..."
+
+    # Use a credential helper script that returns the token
+    local helper_script="/var/run/proxy/git-credential-helper.sh"
+    cat > "${helper_script}" <<'HELPER_EOF'
+#!/bin/bash
+# Git credential helper that provides GITHUB_TOKEN for GitHub operations
+case "$1" in
+    get)
+        host=""
+        protocol=""
+        while IFS= read -r line; do
+            [[ -z "$line" ]] && break
+            case "$line" in
+                host=*) host="${line#host=}" ;;
+                protocol=*) protocol="${line#protocol=}" ;;
+            esac
+        done
+
+        # Never return credentials for non-GitHub hosts.
+        if [[ "${protocol}" != "https" || "${host}" != "github.com" ]]; then
+            exit 0
+        fi
+
+        echo "protocol=https"
+        echo "host=github.com"
+        echo "username=x-access-token"
+        echo "password=${GIT_CREDENTIAL_TOKEN}"
+        echo ""
+        ;;
+esac
+HELPER_EOF
+    chmod +x "${helper_script}"
+
+    # Set the token as an env var for the helper and scope helper to github.com.
+    export GIT_CREDENTIAL_TOKEN="${token}"
+    git config --global --unset-all credential.helper 2>/dev/null || true
+    git config --global credential.https://github.com.helper "${helper_script}"
+
+    log "Git credential helper configured"
+}
+
+start_git_api() {
+    if [[ "${GIT_SHADOW_ENABLED:-false}" != "true" ]]; then
+        log "Git shadow mode disabled; skipping git API startup"
+        return 0
+    fi
+
+    log "Starting git API server (port ${GIT_API_PORT:-8083})..."
+
+    # Ensure PYTHONPATH includes the proxy module directory
+    export PYTHONPATH="/opt/proxy:${PYTHONPATH:-}"
+
+    python3 /opt/proxy/git_api.py &
+    GIT_API_PID=$!
+
+    # Wait briefly for the server to start listening
+    local port="${GIT_API_PORT:-8083}"
+    for i in {1..20}; do
+        if python3 -c "import socket; s=socket.socket(); s.settimeout(0.5); s.connect(('127.0.0.1', ${port})); s.close()" 2>/dev/null; then
+            log "Git API server ready on port ${port} (PID ${GIT_API_PID})"
+            return 0
+        fi
+        sleep 0.25
+    done
+
+    log_error "Git API server not ready after 5 seconds"
     return 1
 }
 
@@ -252,18 +441,29 @@ start_mitmproxy() {
     # 7. circuit_breaker - handles failures gracefully
     # 8. metrics - collects telemetry (last, observes all)
 
-    args+=(-s "${ADDON_DIR}/container_identity.py")
-    args+=(-s "${ADDON_DIR}/policy_engine.py")
+    local addon_paths=()
+    addon_paths+=("${ADDON_DIR}/container_identity.py")
+    addon_paths+=("${ADDON_DIR}/policy_engine.py")
 
     if [[ "${enable_dns}" == "true" ]]; then
-        args+=(-s "${ADDON_DIR}/dns_filter.py")
+        addon_paths+=("${ADDON_DIR}/dns_filter.py")
     fi
 
-    args+=(-s "${ADDON_DIR}/credential_injector.py")
-    args+=(-s "${ADDON_DIR}/git_proxy.py")
-    args+=(-s "${ADDON_DIR}/rate_limiter.py")
-    args+=(-s "${ADDON_DIR}/circuit_breaker.py")
-    args+=(-s "${ADDON_DIR}/metrics.py")
+    addon_paths+=("${ADDON_DIR}/credential_injector.py")
+    addon_paths+=("${ADDON_DIR}/git_proxy.py")
+    addon_paths+=("${ADDON_DIR}/rate_limiter.py")
+    addon_paths+=("${ADDON_DIR}/circuit_breaker.py")
+    addon_paths+=("${ADDON_DIR}/metrics.py")
+
+    # Validate load order before starting
+    if ! validate_addon_load_order "${addon_paths[@]}"; then
+        log_error "Addon load order validation failed — aborting"
+        exit 1
+    fi
+
+    for addon_path in "${addon_paths[@]}"; do
+        args+=(-s "${addon_path}")
+    done
 
     # Also load legacy addons for backward compatibility
     args+=(-s "${GITHUB_FILTER_PATH}")
@@ -314,6 +514,14 @@ main() {
     # Start internal API for container registration
     if ! start_internal_api; then
         log_error "Failed to start internal API"
+        exit 1
+    fi
+
+    # Start git API server if git shadow mode is enabled
+    configure_git_identity
+    configure_git_credentials
+    if ! start_git_api; then
+        log_error "Failed to start git API server"
         exit 1
     fi
 

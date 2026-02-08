@@ -371,6 +371,118 @@ unset HTTP_PROXY HTTPS_PROXY
 curl https://api.github.com  # Direct connection (no credential injection)
 ```
 
+## HMAC Secret Rotation
+
+Each sandbox has a per-sandbox HMAC secret used to authenticate git operations between the git wrapper (inside the sandbox) and the git API (in the proxy). Secrets are stored as files under `/run/secrets/sandbox-hmac/{sandbox_id}`.
+
+### When to Rotate
+
+- Suspected secret compromise
+- Routine security hygiene (recommended: on sandbox recreation)
+- After a security incident involving the proxy or sandbox containers
+
+### Pre-Rotation Checklist
+
+1. **Identify the sandbox** whose secret needs rotation:
+   ```bash
+   SANDBOX_ID="<your-sandbox-name>"
+   ```
+
+2. **Verify current secret exists**:
+   ```bash
+   docker exec unified-proxy ls -la /run/secrets/sandbox-hmac/${SANDBOX_ID}
+   ```
+
+3. **Ensure no git operations are in flight** from the target sandbox:
+   ```bash
+   docker logs unified-proxy 2>&1 | grep "${SANDBOX_ID}" | tail -5
+   ```
+
+### Rotation Procedure
+
+**Step 1: Generate a new secret**
+
+```bash
+NEW_SECRET=$(openssl rand -hex 32)
+```
+
+**Step 2: Write the new secret to the proxy's secrets mount**
+
+```bash
+# Write to the secrets volume (proxy side)
+echo -n "${NEW_SECRET}" | docker exec -i unified-proxy \
+  tee /run/secrets/sandbox-hmac/${SANDBOX_ID} > /dev/null
+```
+
+**Step 3: Write the new secret to the sandbox's secrets mount**
+
+```bash
+# Write to the secrets volume (sandbox side)
+echo -n "${NEW_SECRET}" | docker exec -i sandbox-${SANDBOX_ID} \
+  tee /run/secrets/sandbox-hmac/${SANDBOX_ID} > /dev/null
+```
+
+**Step 4: Flush the proxy's secret cache**
+
+The git API caches secrets in memory. Force a re-read by restarting the git API process, or call the rotation admin function:
+
+```bash
+# Option A: Restart the git API (brief interruption to git operations)
+docker exec unified-proxy kill -HUP $(docker exec unified-proxy cat /var/run/proxy/mitmproxy.pid)
+
+# Option B: Full proxy restart (if Option A is insufficient)
+docker compose -f docker-compose.credential-isolation.yml restart unified-proxy
+```
+
+### Post-Rotation Verification
+
+1. **Verify the sandbox can still perform git operations**:
+   ```bash
+   docker exec sandbox-${SANDBOX_ID} git -C /workspace status
+   ```
+
+2. **Check for authentication errors in proxy logs**:
+   ```bash
+   docker logs unified-proxy 2>&1 | grep -i "invalid.*signature\|auth.*fail" | tail -10
+   ```
+
+3. **Verify the nonce cache was cleared** (prevents stale nonce collisions):
+   ```bash
+   docker logs unified-proxy 2>&1 | grep -i "rotate\|revoke" | tail -5
+   ```
+
+### Bulk Rotation (All Sandboxes)
+
+For rotating all sandbox secrets at once (e.g., after a security incident):
+
+```bash
+# List all active sandboxes
+for secret_file in /run/secrets/sandbox-hmac/*; do
+  SANDBOX_ID=$(basename "$secret_file")
+  NEW_SECRET=$(openssl rand -hex 32)
+
+  # Update proxy side
+  echo -n "${NEW_SECRET}" | docker exec -i unified-proxy \
+    tee /run/secrets/sandbox-hmac/${SANDBOX_ID} > /dev/null
+
+  # Update sandbox side
+  echo -n "${NEW_SECRET}" | docker exec -i sandbox-${SANDBOX_ID} \
+    tee /run/secrets/sandbox-hmac/${SANDBOX_ID} > /dev/null 2>&1 || \
+    echo "Warning: Could not update sandbox ${SANDBOX_ID} (may be stopped)"
+done
+
+# Restart proxy to flush all cached secrets
+docker compose -f docker-compose.credential-isolation.yml restart unified-proxy
+```
+
+### Troubleshooting Rotation Issues
+
+| Symptom | Cause | Resolution |
+|---------|-------|------------|
+| `git proxy authentication failed` after rotation | Secret mismatch between proxy and sandbox | Verify both sides have identical secret content |
+| `Unknown sandbox or missing secret` | Secret file not written to proxy | Check `/run/secrets/sandbox-hmac/` contains the file |
+| Rotation works but reverts on restart | Secrets volume not persisted | Ensure secrets are on a Docker volume, not tmpfs |
+
 ## See Also
 
 - [Architecture](architecture.md) - System components

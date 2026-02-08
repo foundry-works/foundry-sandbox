@@ -1,5 +1,13 @@
 #!/bin/bash
 
+_load_prune_metadata() {
+    local name="$1"
+    SANDBOX_BRANCH="" SANDBOX_REPO_URL=""
+    load_sandbox_metadata "$name" 2>/dev/null || true
+    _prune_branch="${SANDBOX_BRANCH:-}"
+    _prune_repo="${SANDBOX_REPO_URL:-}"
+}
+
 cmd_prune() {
     local force=false
     local json_output=false
@@ -36,12 +44,15 @@ cmd_prune() {
                     continue
                 fi
             fi
+            local _prune_branch _prune_repo
+            _load_prune_metadata "$name"
             remove_path "$config_dir"
+            cleanup_sandbox_branch "$_prune_branch" "$_prune_repo"
             removed+=("$name")
         fi
     done
 
-    # Remove sandboxes with no container (worktree exists but container doesn't)
+    # Remove sandboxes with no running container (worktree exists but no running container)
     if [ "$no_container" = true ]; then
         for worktree_dir in "$WORKTREES_DIR"/*/; do
             [ -d "$worktree_dir" ] || continue
@@ -51,8 +62,8 @@ cmd_prune() {
             container=$(container_name "$name")
             local config_dir="$CLAUDE_CONFIGS_DIR/$name"
 
-            # Check if container exists (running or stopped)
-            if ! docker ps -a --filter "name=^${container}-dev-1$" -q 2>/dev/null | grep -q .; then
+            # Check if container is running (stopped containers count as "no container")
+            if ! docker ps --filter "name=^${container}-dev-1$" -q 2>/dev/null | grep -q .; then
                 if [ "$force" = false ]; then
                     format_header "No container: $name"
                     format_kv "Worktree" "$worktree_dir"
@@ -61,16 +72,20 @@ cmd_prune() {
                         continue
                     fi
                 fi
+                local _prune_branch _prune_repo
+                _load_prune_metadata "$name"
                 # Remove worktree
                 remove_worktree "$worktree_dir"
                 # Remove config if it exists
                 [ -d "$config_dir" ] && remove_path "$config_dir"
+                # Clean up branch after worktree removal
+                cleanup_sandbox_branch "$_prune_branch" "$_prune_repo"
                 removed_no_container+=("$name")
             fi
         done
     fi
 
-    # Remove orphaned Docker networks (sandbox networks with no active containers)
+    # Remove orphaned Docker networks (sandbox networks with no running containers)
     if [ "$networks" = true ]; then
         local network_name
         while IFS= read -r network_name; do
@@ -79,7 +94,8 @@ cmd_prune() {
             local sandbox_name="${network_name%_credential-isolation}"
             sandbox_name="${sandbox_name%_proxy-egress}"
 
-            # Check if any containers in this project are running
+            # Check if any RUNNING containers belong to this sandbox
+            # Stopped containers are not a reason to keep the network
             if ! docker ps -q --filter "name=^${sandbox_name}-" 2>/dev/null | grep -q .; then
                 if [ "$force" = false ]; then
                     format_header "Orphaned network: $network_name"
@@ -87,8 +103,22 @@ cmd_prune() {
                         continue
                     fi
                 fi
+                # Remove stopped containers that reference this sandbox before network removal
+                local stopped_id
+                while IFS= read -r stopped_id; do
+                    [ -z "$stopped_id" ] && continue
+                    docker rm "$stopped_id" 2>/dev/null || true
+                done < <(docker ps -aq --filter "status=exited" --filter "name=^${sandbox_name}-" 2>/dev/null)
+                # Disconnect any dangling endpoints before removal
+                local endpoint
+                while IFS= read -r endpoint; do
+                    [ -z "$endpoint" ] && continue
+                    docker network disconnect -f "$network_name" "$endpoint" 2>/dev/null || true
+                done < <(docker network inspect --format '{{range .Containers}}{{.Name}} {{end}}' "$network_name" 2>/dev/null | tr ' ' '\n')
                 if docker network rm "$network_name" 2>/dev/null; then
                     removed_networks+=("$network_name")
+                else
+                    log_warn "Failed to remove network: $network_name"
                 fi
             fi
         done < <(docker network ls --format '{{.Name}}' | grep -E '^sandbox-.*_(credential-isolation|proxy-egress)$')

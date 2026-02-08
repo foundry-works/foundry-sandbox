@@ -42,7 +42,6 @@ domains:
 
   # Node.js Package Repository
   - npmjs.org
-  - "*.npmjs.org"
   - registry.npmjs.org
 
   # Ruby Package Repository
@@ -69,11 +68,70 @@ domains:
 # HTTP endpoint allowlist for fine-grained API access control
 # Each endpoint specifies host, allowed methods, and allowed paths
 http_endpoints:
-  # GitHub API - general read operations
+  # GitHub API - segment-safe path patterns
+  # *  matches exactly one path segment (does not span /)
+  # ** matches one or more characters and may span /
   - host: api.github.com
     methods: [GET, POST, PUT, PATCH, DELETE]
     paths:
-      - "/repos/*"
+      # Repository root (owner/repo metadata)
+      - "/repos/*/*"
+      # Pull requests
+      - "/repos/*/*/pulls"
+      - "/repos/*/*/pulls/*"
+      # Issues
+      - "/repos/*/*/issues"
+      - "/repos/*/*/issues/*"
+      # Issue comments
+      - "/repos/*/*/issues/*/comments"
+      - "/repos/*/*/issues/*/comments/*"
+      - "/repos/*/*/issues/comments"
+      - "/repos/*/*/issues/comments/*"
+      # Git data (refs, trees, blobs, commits)
+      - "/repos/*/*/git/**"
+      # Branches
+      - "/repos/*/*/branches"
+      - "/repos/*/*/branches/**"
+      # Commits
+      - "/repos/*/*/commits"
+      - "/repos/*/*/commits/*"
+      # File contents
+      - "/repos/*/*/contents"
+      - "/repos/*/*/contents/**"
+      # Compare
+      - "/repos/*/*/compare/**"
+      # Releases
+      - "/repos/*/*/releases"
+      - "/repos/*/*/releases/*"
+      # Tags
+      - "/repos/*/*/tags"
+      # Collaborators
+      - "/repos/*/*/collaborators"
+      - "/repos/*/*/collaborators/*"
+      # Comments (PR/issue comments)
+      - "/repos/*/*/comments"
+      - "/repos/*/*/comments/*"
+      # Pull request review comments
+      - "/repos/*/*/pulls/*/comments"
+      - "/repos/*/*/pulls/*/comments/*"
+      - "/repos/*/*/pulls/comments"
+      - "/repos/*/*/pulls/comments/*"
+      # Pull request reviews
+      - "/repos/*/*/pulls/*/reviews"
+      - "/repos/*/*/pulls/*/reviews/*"
+      - "/repos/*/*/pulls/*/reviews/**"
+      # Commit statuses
+      - "/repos/*/*/statuses/*"
+      # Check runs / check suites
+      - "/repos/*/*/check-runs"
+      - "/repos/*/*/check-runs/*"
+      # Labels
+      - "/repos/*/*/labels"
+      - "/repos/*/*/labels/**"
+      # Milestones
+      - "/repos/*/*/milestones"
+      - "/repos/*/*/milestones/*"
+      # Non-repo endpoints
       - "/user/*"
       - "/users/*"
       - "/orgs/*"
@@ -146,11 +204,11 @@ http_endpoints:
     paths:
       - "/oauth/token"
 
-  # GitHub uploads
+  # GitHub uploads (release assets)
   - host: uploads.github.com
     methods: [POST, PUT, PATCH]
     paths:
-      - "/repos/*"
+      - "/repos/*/*/releases/*/assets"
 
   # Zhipu AI (OpenCode)
   - host: open.bigmodel.cn
@@ -167,3 +225,32 @@ http_endpoints:
     methods: [GET]
     paths:
       - "/*"
+
+# Blocked API paths - dangerous endpoints that must never be accessed
+# Uses segment-aware matching:
+# - *  matches exactly one path segment (not spanning /)
+# - ** matches one or more characters and may span /
+blocked_paths:
+  - host: api.github.com
+    patterns:
+      # Webhooks - could exfiltrate data to attacker-controlled servers
+      - "/repos/*/*/hooks"
+      - "/repos/*/*/hooks/*"
+      # SSH deploy keys - could grant persistent repo access
+      - "/repos/*/*/keys"
+      - "/repos/*/*/keys/*"
+      # Deploy keys (alternate endpoint)
+      - "/repos/*/*/deploy_keys"
+      - "/repos/*/*/deploy_keys/*"
+      # Environment deployment branch policy - could weaken protections
+      - "/repos/*/*/environments/*/deployment-branch-policy"
+      # Actions secrets - could expose or modify CI/CD secrets
+      - "/repos/*/*/actions/secrets"
+      - "/repos/*/*/actions/secrets/*"
+      # Actions variables - could modify CI/CD configuration
+      - "/repos/*/*/actions/variables"
+      - "/repos/*/*/actions/variables/*"
+      # Branch admin operations - could weaken branch protections
+      - "/repos/*/*/branches/**/protection"
+      - "/repos/*/*/branches/**/protection/**"
+      - "/repos/*/*/branches/**/rename"

@@ -13,6 +13,13 @@ configure_sparse_checkout() {
     # Enable per-worktree config at bare repo level
     git -C "$bare_path" config extensions.worktreeConfig true
 
+    # Bump repositoryformatversion to 1 if needed (extensions require version >= 1)
+    local repo_version
+    repo_version=$(git -C "$bare_path" config --get core.repositoryformatversion 2>/dev/null || echo "0")
+    if [ "$repo_version" -lt 1 ]; then
+        git -C "$bare_path" config core.repositoryformatversion 1
+    fi
+
     # Enable sparse checkout in worktree config (write directly to avoid "not a work tree" error)
     # Use cone mode which properly handles nested directories and always includes root files
     git config --file "$gitdir/config.worktree" core.sparseCheckout true
@@ -117,6 +124,40 @@ create_worktree() {
             git_with_retry -C "$worktree_path" pull --ff-only || log_warn "Could not fast-forward. You may need to pull manually."
         fi
     fi
+}
+
+cleanup_sandbox_branch() {
+    local branch="$1"
+    local repo_url="$2"
+
+    # Early return if branch or repo_url empty
+    [ -z "$branch" ] && return 0
+    [ -z "$repo_url" ] && return 0
+
+    # Skip well-known branches
+    case "$branch" in
+        main|master|develop|production) return 0 ;;
+        release/*|hotfix/*) return 0 ;;
+    esac
+
+    # Resolve bare repo path
+    local bare_path
+    bare_path=$(repo_to_path "$repo_url")
+    [ -d "$bare_path" ] || return 0
+
+    # Skip if another worktree still uses this branch
+    if git -C "$bare_path" worktree list --porcelain 2>/dev/null \
+        | grep -qF "branch refs/heads/$branch"; then
+        log_info "Branch '$branch' still in use by another worktree, skipping cleanup"
+        return 0
+    fi
+
+    # Delete the branch
+    if git -C "$bare_path" branch -D -- "$branch" >/dev/null 2>&1; then
+        log_info "Cleaned up sandbox branch: $branch"
+    fi
+
+    return 0
 }
 
 remove_worktree() {

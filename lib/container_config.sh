@@ -321,6 +321,67 @@ install_foundry_workspace_docs() {
     fi
 }
 
+# Inject sandbox branch context into /workspace/CLAUDE.md so Claude knows
+# which branch it is on and what base branch to target for PRs.
+#
+# Arguments:
+#   $1 - container_id: The container to modify
+#   $2 - repo_url: Repository URL (will be cleaned to owner/repo format)
+#   $3 - from_branch: The branch this sandbox was forked from
+#   $4 - branch: The sandbox's own branch name
+inject_sandbox_branch_context() {
+    local container_id="$1"
+    local repo_url="${2:-}"
+    local from_branch="${3:-}"
+    local branch="${4:-}"
+    local marker="<sandbox-context>"
+
+    # Guard: skip if branch info is missing
+    if [ -z "$branch" ] || [ -z "$from_branch" ]; then
+        return 0
+    fi
+
+    # Idempotency: skip if already injected
+    if docker exec "$container_id" grep -qF "$marker" /workspace/CLAUDE.md 2>/dev/null; then
+        return 0
+    fi
+
+    # Clean repo_url to owner/repo format
+    local repo_spec=""
+    if [ -n "$repo_url" ]; then
+        repo_spec=$(echo "$repo_url" | sed -E 's#^(https?://)?github\.com/##; s#^git@github\.com:##; s#\.git$##')
+    fi
+
+    log_info "Injecting sandbox branch context into CLAUDE.md..."
+
+    # Build repo line conditionally
+    local repo_line=""
+    if [ -n "$repo_spec" ]; then
+        repo_line="- **Repository**: ${repo_spec}"
+    fi
+
+    # Single docker exec — no pipes or heredocs to avoid set -e / subshell issues
+    docker exec -u "$CONTAINER_USER" \
+        -e "SBC_MARKER=$marker" \
+        -e "SBC_REPO_LINE=$repo_line" \
+        -e "SBC_BRANCH=$branch" \
+        -e "SBC_FROM=$from_branch" \
+        "$container_id" sh -c '
+            [ ! -f /workspace/CLAUDE.md ] && touch /workspace/CLAUDE.md
+            {
+                echo ""
+                echo "$SBC_MARKER"
+                echo "## Sandbox Context"
+                [ -n "$SBC_REPO_LINE" ] && echo "$SBC_REPO_LINE"
+                echo "- **Branch**: \`$SBC_BRANCH\`"
+                echo "- **Based on**: \`$SBC_FROM\`"
+                echo ""
+                echo "When creating PRs, target \`$SBC_FROM\` as the base branch."
+                echo "</sandbox-context>"
+            } >> /workspace/CLAUDE.md
+        '
+}
+
 # Merge host's Claude settings into container's settings without overwriting critical sandbox settings.
 # This preserves the hooks configuration and model defaults set up by prepopulate_foundry_global
 # while bringing in other user preferences from the host.
@@ -341,53 +402,38 @@ merge_claude_settings() {
         return 1
     }
 
-    # Merge settings in container
-    docker exec -u "$CONTAINER_USER" "$container_id" python3 - "$container_settings" "$temp_host" <<'PY'
-import json
-import sys
-import os
-
-container_path = sys.argv[1]
-host_path = sys.argv[2]
-
-# Load host settings
-try:
-    with open(host_path) as f:
-        host_data = json.load(f)
-except (FileNotFoundError, json.JSONDecodeError):
-    host_data = {}
-
-# Load existing container settings (may have hooks from prepopulate_foundry_global)
-try:
-    with open(container_path) as f:
-        container_data = json.load(f)
-except (FileNotFoundError, json.JSONDecodeError):
-    container_data = {}
-
-# Settings to preserve from container (sandbox defaults)
-preserve_keys = {"model", "subagentModel", "hooks"}
-preserved = {k: container_data[k] for k in preserve_keys if k in container_data}
-
-# Merge: host settings take precedence, except for preserved keys
+    # Merge settings in container using extracted Python module.
+    # Source: lib/python/merge_claude_settings.py (extracted for testability)
+    local merge_script="$SANDBOX_HOME/lib/python/merge_claude_settings.py"
+    if [ -f "$merge_script" ]; then
+        # Copy the Python modules to a temp dir in the container
+        local temp_pydir="/tmp/sandbox-python"
+        docker exec -u "$CONTAINER_USER" "$container_id" mkdir -p "$temp_pydir" 2>/dev/null || true
+        copy_file_to_container "$container_id" "$SANDBOX_HOME/lib/python/json_config.py" "$temp_pydir/json_config.py" || true
+        copy_file_to_container "$container_id" "$merge_script" "$temp_pydir/merge_claude_settings.py" || true
+        docker exec -u "$CONTAINER_USER" "$container_id" \
+            python3 "$temp_pydir/merge_claude_settings.py" "$container_settings" "$temp_host"
+        docker exec "$container_id" rm -rf "$temp_pydir" 2>/dev/null || true
+    else
+        # Fallback: inline script (kept for backward compatibility)
+        docker exec -u "$CONTAINER_USER" "$container_id" python3 - "$container_settings" "$temp_host" <<'PY'
+import json, sys, os
+container_path, host_path = sys.argv[1], sys.argv[2]
+def load(p):
+    try:
+        with open(p) as f: return json.load(f)
+    except: return {}
+host_data, container_data = load(host_path), load(container_path)
+preserved = {k: container_data[k] for k in ("model","subagentModel","hooks") if k in container_data}
 merged = {**container_data, **host_data}
-
-# Restore preserved settings (opus model, haiku subagent, hooks config)
 merged.update(preserved)
-
-# Remove foundry plugin from enabledPlugins - we use direct global install for it
-# This prevents "Plugin not found" errors from stale host config
-# But keep other plugins like pyright-lsp that use the normal plugin system
 if "enabledPlugins" in merged:
     merged["enabledPlugins"].pop("foundry@claude-foundry", None)
-    # Clean up empty dict
-    if not merged["enabledPlugins"]:
-        del merged["enabledPlugins"]
-
+    if not merged["enabledPlugins"]: del merged["enabledPlugins"]
 os.makedirs(os.path.dirname(container_path), exist_ok=True)
-with open(container_path, "w") as f:
-    json.dump(merged, f, indent=2)
-    f.write("\n")
+with open(container_path, "w") as f: json.dump(merged, f, indent=2); f.write("\n")
 PY
+    fi
 
     # Clean up temp file
     docker exec "$container_id" rm -f "$temp_host" 2>/dev/null || true
@@ -1020,7 +1066,7 @@ sync_opencode_local_plugins_on_first_attach() {
 
 # Ensure Claude model defaults and hooks are set in settings.json.
 # This runs AFTER host settings are copied, so it restores the hooks configuration.
-# Also installs pyright-lsp plugin (optional, uses normal plugin system).
+# Also pre-bakes pyright-lsp plugin (git clone is blocked by sandbox policy).
 ensure_claude_foundry_mcp() {
     local container_id="$1"
     local quiet="${2:-0}"
@@ -1153,21 +1199,64 @@ with open(path, "w") as f:
     f.write("\n")
 PY
 
-    # pyright-lsp is optional - install via normal plugin system
+    # pyright-lsp - pre-bake plugin cache (git clone is blocked by sandbox policy)
     if [ "$quiet" != "1" ]; then
-        if docker exec "$container_id" sh -c \
-            "ls $CONTAINER_HOME/.claude/plugins/cache/claude-plugins-official/pyright-lsp/*/\.claude-plugin/plugin.json" \
-            >/dev/null 2>&1; then
-            log_debug "pyright-lsp already cached"
-            docker exec -u "$CONTAINER_USER" "$container_id" \
-                claude plugin enable pyright-lsp@claude-plugins-official >/dev/null 2>&1 || true
+        local pyright_version="1.0.0"
+        if ! "$run_fn" docker exec -u "$CONTAINER_USER" -i \
+            -e PYRIGHT_PLUGIN_VERSION="$pyright_version" \
+            -e CONTAINER_HOME="$CONTAINER_HOME" \
+            "$container_id" python3 - <<'PY'
+import json, os
+
+home = os.environ.get("CONTAINER_HOME", os.path.expanduser("~"))
+plugin_version = os.environ.get("PYRIGHT_PLUGIN_VERSION", "1.0.0")
+cache_dir = f"{home}/.claude/plugins/cache/claude-plugins-official/pyright-lsp/{plugin_version}/.claude-plugin"
+plugins_file = f"{home}/.claude/plugins/installed_plugins.json"
+
+# Create plugin.json in cache
+os.makedirs(cache_dir, exist_ok=True)
+plugin_json = {
+    "name": "pyright-lsp",
+    "description": "Python language server (Pyright) for type checking and code intelligence",
+    "version": plugin_version,
+    "author": {"name": "Anthropic", "email": "support@anthropic.com"},
+    "lspServers": {
+        "pyright": {
+            "command": "pyright-langserver",
+            "args": ["--stdio"],
+            "extensionToLanguage": {".py": "python", ".pyi": "python"}
+        }
+    }
+}
+with open(os.path.join(cache_dir, "plugin.json"), "w") as f:
+    json.dump(plugin_json, f, indent=2)
+    f.write("\n")
+
+# Update installed_plugins.json
+try:
+    with open(plugins_file) as f:
+        installed = json.load(f)
+except (FileNotFoundError, json.JSONDecodeError):
+    installed = {"version": 2, "plugins": {}}
+
+installed.setdefault("version", 2)
+installed.setdefault("plugins", {})
+installed["plugins"]["pyright-lsp@claude-plugins-official"] = [{
+    "scope": "user",
+    "installPath": f"{home}/.claude/plugins/cache/claude-plugins-official/pyright-lsp/{plugin_version}",
+    "version": plugin_version,
+    "isLocal": True
+}]
+
+os.makedirs(os.path.dirname(plugins_file), exist_ok=True)
+with open(plugins_file, "w") as f:
+    json.dump(installed, f, indent=2)
+    f.write("\n")
+PY
+        then
+            log_step "Pyright LSP: cached (v${pyright_version})"
         else
-            log_debug "Attempting pyright-lsp install (optional)..."
-            docker exec -u "$CONTAINER_USER" "$container_id" sh -c "
-                claude plugin marketplace add anthropics/claude-plugins-official && \
-                claude plugin install pyright-lsp@claude-plugins-official && \
-                claude plugin enable pyright-lsp@claude-plugins-official
-            " >/dev/null 2>&1 || log_debug "pyright-lsp not installed (optional)"
+            log_debug "pyright-lsp pre-bake failed (optional)"
         fi
     fi
 }
@@ -1408,8 +1497,28 @@ for path in paths:
     if "mcpServers" not in data:
         data["mcpServers"] = {}
 
-    # Only add if not already configured
+    # Mark official marketplace as already installed so Claude Code uses the
+    # pre-copied directory instead of trying to git-clone (which fails because
+    # the destination already exists).  Also clear any prior failure state.
     changed = False
+    marketplace_state = {
+        "officialMarketplaceAutoInstalled": True,
+        "officialMarketplaceAutoInstallAttempted": True,
+    }
+    # Remove stale failure/retry keys that would prevent loading
+    for key in ("officialMarketplaceAutoInstallFailReason",
+                "officialMarketplaceAutoInstallRetryCount",
+                "officialMarketplaceAutoInstallLastAttemptTime",
+                "officialMarketplaceAutoInstallNextRetryTime"):
+        if key in data:
+            del data[key]
+            changed = True
+    for key, val in marketplace_state.items():
+        if data.get(key) != val:
+            data[key] = val
+            changed = True
+
+    # Only add if not already configured
     if "foundry-mcp" not in data["mcpServers"]:
         data["mcpServers"]["foundry-mcp"] = {
             "command": "python",
@@ -1690,12 +1799,82 @@ ensure_foundry_mcp_workspace_dirs() {
     "
 }
 
+# Register marketplace in known_marketplaces.json, synthesise missing per-plugin
+# manifests, and commit them so they're visible via git tree reads.
+# Args: container_id plugins_dir [quiet]
+#   quiet: if "1", suppress docker exec stderr
+sync_marketplace_manifests() {
+    local container_id="$1"
+    local plugins_dir="$2"
+    local quiet="${3:-0}"
+    local stderr_redirect=""
+    if [ "$quiet" = "1" ]; then
+        stderr_redirect="2>/dev/null"
+    fi
+    eval docker exec -u "$CONTAINER_USER" -i "$container_id" python3 - \
+        "$plugins_dir" "$stderr_redirect" <<'PY'
+import json, os, sys
+
+plugins_dir = sys.argv[1]
+mkt_name = "claude-plugins-official"
+mkt_install = os.path.join(plugins_dir, "marketplaces", mkt_name)
+
+# 1. Register in known_marketplaces.json
+known_path = os.path.join(plugins_dir, "known_marketplaces.json")
+try:
+    with open(known_path) as f:
+        known = json.load(f)
+except (FileNotFoundError, json.JSONDecodeError):
+    known = {}
+known[mkt_name] = {
+    "source": {"source": "github", "repo": "anthropics/claude-plugins-official"},
+    "installLocation": mkt_install,
+    "lastUpdated": "2026-01-01T00:00:00.000Z",
+}
+os.makedirs(os.path.dirname(known_path), exist_ok=True)
+with open(known_path, "w") as f:
+    json.dump(known, f, indent=2)
+    f.write("\n")
+
+# 2. Synthesise missing per-plugin manifests from marketplace.json
+mkt_json = os.path.join(mkt_install, ".claude-plugin", "marketplace.json")
+if os.path.isfile(mkt_json):
+    with open(mkt_json) as f:
+        mkt = json.load(f)
+    # Keys that are marketplace-level metadata, not valid in plugin.json
+    strip_keys = {"source", "category", "strict", "homepage", "tags"}
+    for plugin in mkt.get("plugins", []):
+        source = plugin.get("source")
+        if not isinstance(source, str) or not source.startswith("./"):
+            continue
+        manifest_dir = os.path.join(mkt_install, source.removeprefix("./"), ".claude-plugin")
+        manifest_path = os.path.join(manifest_dir, "plugin.json")
+        if os.path.isfile(manifest_path):
+            continue
+        cleaned = {k: v for k, v in plugin.items() if k not in strip_keys}
+        os.makedirs(manifest_dir, exist_ok=True)
+        with open(manifest_path, "w") as f:
+            json.dump(cleaned, f, indent=2)
+            f.write("\n")
+PY
+    # Commit synthesised manifests so they're visible via git tree reads.
+    docker exec -u "$CONTAINER_USER" "$container_id" sh -c "
+        cd '$CONTAINER_HOME/.claude/plugins/marketplaces/claude-plugins-official' &&
+        git add -A &&
+        git -c user.email='sandbox@local' -c user.name='sandbox' \
+            commit -m 'Add missing plugin manifests' --allow-empty
+    " >/dev/null 2>&1 || true
+}
+
 copy_configs_to_container() {
     local container_id="$1"
     local skip_plugins="${2:-0}"
     local enable_ssh="${3:-${SANDBOX_SYNC_SSH:-0}}"
     local working_dir="${4:-}"
     local isolate_credentials="${5:-false}"
+    local from_branch="${6:-}"
+    local branch="${7:-}"
+    local repo_url="${8:-}"
 
     # Create container user if using host user matching
     ensure_container_user "$container_id"
@@ -1733,6 +1912,7 @@ copy_configs_to_container() {
     ensure_foundry_mcp_config "$container_id"
     if file_exists ~/.claude/settings.json; then
         copy_file_to_container "$container_id" ~/.claude/settings.json "$CONTAINER_HOME/.claude/settings.json"
+        merge_claude_settings "$container_id" ~/.claude/settings.json "$CONTAINER_HOME/.claude/settings.json"
     fi
     if file_exists ~/.claude/statusline.conf; then
         copy_file_to_container "$container_id" ~/.claude/statusline.conf "$CONTAINER_HOME/.claude/statusline.conf"
@@ -1740,6 +1920,17 @@ copy_configs_to_container() {
         copy_file_to_container "$container_id" "$SCRIPT_DIR/statusline.conf" "$CONTAINER_HOME/.claude/statusline.conf"
     fi
     ensure_claude_statusline "$container_id"
+    # Pre-install plugin marketplaces so Claude Code doesn't need to clone
+    # them at startup (the git proxy can't write to the dev container FS).
+    # Claude Code discovers marketplaces via known_marketplaces.json, so we
+    # must copy both the marketplace directory AND register it in that file
+    # with container-local paths.
+    if dir_exists ~/.claude/plugins/marketplaces/claude-plugins-official; then
+        copy_dir_to_container "$container_id" \
+            ~/.claude/plugins/marketplaces/claude-plugins-official \
+            "$CONTAINER_HOME/.claude/plugins/marketplaces/claude-plugins-official"
+        sync_marketplace_manifests "$container_id" "$CONTAINER_HOME/.claude/plugins"
+    fi
     dir_exists ~/.config/gh && copy_dir_to_container "$container_id" ~/.config/gh "$CONTAINER_HOME/.config/gh"
     # Skip auth file copies when credential isolation is enabled (they're mounted as stubs)
     if [ "$isolate_credentials" != "true" ]; then
@@ -1832,6 +2023,9 @@ copy_configs_to_container() {
     # Install foundry workspace documentation
     install_foundry_workspace_docs "$container_id"
 
+    # Inject sandbox branch context so Claude knows its branch and PR target
+    inject_sandbox_branch_context "$container_id" "$repo_url" "$from_branch" "$branch"
+
     # Debug: show what ended up in the container (only if SANDBOX_DEBUG is set)
     if [ "$SANDBOX_DEBUG" = "1" ]; then
         log_info "=== Claude Config Debug ==="
@@ -1862,6 +2056,7 @@ sync_runtime_credentials() {
     ensure_foundry_mcp_config "$container_id" "1"
     if file_exists ~/.claude/settings.json; then
         copy_file_to_container_quiet "$container_id" ~/.claude/settings.json "$CONTAINER_HOME/.claude/settings.json"
+        merge_claude_settings "$container_id" ~/.claude/settings.json "$CONTAINER_HOME/.claude/settings.json"
     fi
     if file_exists ~/.claude/statusline.conf; then
         copy_file_to_container_quiet "$container_id" ~/.claude/statusline.conf "$CONTAINER_HOME/.claude/statusline.conf"
@@ -1870,6 +2065,12 @@ sync_runtime_credentials() {
     fi
     ensure_claude_foundry_mcp "$container_id" "1"
     ensure_claude_statusline "$container_id" "1"
+    if dir_exists ~/.claude/plugins/marketplaces/claude-plugins-official; then
+        copy_dir_to_container_quiet "$container_id" \
+            ~/.claude/plugins/marketplaces/claude-plugins-official \
+            "$CONTAINER_HOME/.claude/plugins/marketplaces/claude-plugins-official"
+        sync_marketplace_manifests "$container_id" "$CONTAINER_HOME/.claude/plugins" "1"
+    fi
     dir_exists ~/.config/gh && copy_dir_to_container_quiet "$container_id" ~/.config/gh "$CONTAINER_HOME/.config/gh"
     dir_exists ~/.gemini && copy_dir_to_container_quiet "$container_id" ~/.gemini "$CONTAINER_HOME/.gemini" "antigravity"
     if opencode_enabled; then
@@ -2044,6 +2245,66 @@ copy_dir_to_container_quiet() {
 
 copy_file_to_container_quiet() {
     copy_file_to_container "$@" 2>/dev/null
+}
+
+fix_proxy_worktree_paths() {
+    local proxy_container="$1"
+    local host_user="$2"
+
+    if [ -z "$host_user" ] || [ -z "$proxy_container" ]; then
+        return 0
+    fi
+
+    # Validate host_user contains only safe characters
+    if ! printf '%s' "$host_user" | grep -qE '^[a-zA-Z0-9._-]+$'; then
+        log_warn "Skipping proxy worktree path fix: username contains unsafe characters"
+        return 0
+    fi
+
+    # The proxy mounts bare repos at /home/ubuntu/.sandboxes/repos, but the
+    # worktree's .git file points to /home/<host_user>/.sandboxes/repos/...
+    # Create a symlink so git can follow the gitdir pointer.
+    # Also handle macOS paths (/Users/<host_user>).
+    docker exec "$proxy_container" sh -c "
+        if [ ! -e '/home/$host_user' ] && [ -d '/home/ubuntu' ]; then
+            ln -s /home/ubuntu '/home/$host_user' 2>/dev/null || true
+        fi
+        if [ ! -e '/Users/$host_user' ] && [ -d '/home/ubuntu' ]; then
+            mkdir -p /Users 2>/dev/null || true
+            ln -s /home/ubuntu '/Users/$host_user' 2>/dev/null || true
+        fi
+
+        # Set core.worktree so git knows the working tree location
+        # Also set core.bare=false to override the shared bare repo config,
+        # and refresh the VirtioFS directory cache so git sees the latest
+        # bare repo config (git config does atomic rename which can leave
+        # stale inodes in VirtioFS).
+        if [ -f /git-workspace/.git ]; then
+            GITDIR_PATH=\$(grep 'gitdir:' /git-workspace/.git | sed 's/gitdir: //')
+            if [ -d \"\$GITDIR_PATH\" ]; then
+                # Force VirtioFS to refresh directory cache for bare repo config
+                BARE_DIR=\$(cat \"\$GITDIR_PATH/commondir\" 2>/dev/null || echo '..')
+                case \"\$BARE_DIR\" in
+                    /*) ;;
+                    *)  BARE_DIR=\"\$GITDIR_PATH/\$BARE_DIR\" ;;
+                esac
+                ls \"\$BARE_DIR\" >/dev/null 2>&1 || true
+                cat \"\$BARE_DIR/config\" >/dev/null 2>&1 || true
+
+                # Defensively re-set extensions.worktreeConfig (VirtioFS may lose host writes)
+                git config --file \"\$BARE_DIR/config\" extensions.worktreeConfig true
+                # Bump repositoryformatversion to 1 if needed (extensions require version >= 1)
+                REPO_VER=\$(git config --file \"\$BARE_DIR/config\" --get core.repositoryformatversion 2>/dev/null || echo 0)
+                if [ \"\$REPO_VER\" -lt 1 ] 2>/dev/null; then
+                    git config --file \"\$BARE_DIR/config\" core.repositoryformatversion 1
+                fi
+
+                touch \"\$GITDIR_PATH/config.worktree\" 2>/dev/null || true
+                git config --file \"\$GITDIR_PATH/config.worktree\" core.worktree /git-workspace
+                git config --file \"\$GITDIR_PATH/config.worktree\" core.bare false
+            fi
+        fi
+    " 2>/dev/null || true
 }
 
 fix_worktree_paths() {

@@ -731,6 +731,10 @@ guided_new() {
     cmd_new "${args[@]}"
 }
 
+# Tech debt: cmd_new() (~595 lines) handles argument parsing, repo resolution,
+# validation, container provisioning, registration, and IDE launch in a single
+# function. Consider decomposing into validate_inputs / provision_sandbox /
+# configure_container phases.
 cmd_new() {
     # Detect no-args mode and launch guided wizard
     if [[ $# -eq 0 ]]; then
@@ -839,6 +843,10 @@ cmd_new() {
                 branch="sandbox-${timestamp}"
             fi
         fi
+        # from_branch precedence:
+        # 1. --from <branch> (explicit user flag)
+        # 2. Current branch of local repo path (set above, line 802-804)
+        # 3. "main" (default when branch is auto-generated)
         from_branch="${from_branch:-main}"
     fi
 
@@ -1149,6 +1157,17 @@ OVERRIDES
             export ALLOW_PR_OPERATIONS=
             log_step "PR operations: blocked (default)"
         fi
+        # Git shadow mode: generate sandbox identity and write gitdir pointer
+        # SANDBOX_ID is a unique identifier used for HMAC authentication with the git API
+        export SANDBOX_ID
+        SANDBOX_ID=$(generate_sandbox_id "${container}:${name}:$(date +%s%N)") || \
+            die "Failed to generate sandbox identity (missing SHA-256 toolchain)"
+        log_step "Sandbox ID: ${SANDBOX_ID}"
+
+        # Write gitdir pointer so the proxy can locate the bare repo from the workspace
+        # The gitdir file in the worktree points to the bare repo's worktree directory
+        # This is already created by create_worktree, but we export bare_path for docker-compose
+        export REPOS_DIR="${REPOS_DIR}"
     fi
     compose_up "$worktree_dir" "$claude_config_path" "$container" "$override_file" "$isolate_credentials"
 
@@ -1156,6 +1175,10 @@ OVERRIDES
     if [ "$isolate_credentials" = "true" ]; then
         # Export gateway enabled flag for container_config.sh (credential isolation mode)
         export SANDBOX_GATEWAY_ENABLED=true
+
+        # Fix worktree gitdir paths in proxy container so git can resolve the
+        # .git file's gitdir pointer (host path → container mount path)
+        fix_proxy_worktree_paths "${container}-unified-proxy-1" "$(whoami)"
 
         # Extract repo owner/name from repo_url for metadata
         local repo_spec
@@ -1166,7 +1189,9 @@ OVERRIDES
             metadata_json=$(jq -n \
                 --arg repo "$repo_spec" \
                 --arg allow_pr "$allow_pr" \
-                '{repo: $repo, allow_pr: ($allow_pr == "true")}')
+                --arg sandbox_branch "$branch" \
+                --arg from_branch "${from_branch:-}" \
+                '{repo: $repo, allow_pr: ($allow_pr == "true"), sandbox_branch: $sandbox_branch, from_branch: $from_branch}')
         fi
 
         if ! setup_proxy_registration "$container_id" "$metadata_json"; then
@@ -1179,7 +1204,7 @@ OVERRIDES
         fi
     fi
 
-    copy_configs_to_container "$container_id" "0" "$runtime_enable_ssh" "$working_dir" "$isolate_credentials"
+    copy_configs_to_container "$container_id" "0" "$runtime_enable_ssh" "$working_dir" "$isolate_credentials" "$from_branch" "$branch" "$repo_url"
 
     if [ ${#copies[@]} -gt 0 ]; then
         echo "Copying files into container..."

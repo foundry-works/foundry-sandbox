@@ -45,6 +45,8 @@ cmd_destroy() {
 
     # Remove stubs volume (external volume not removed by compose down -v)
     remove_stubs_volume "$container"
+    # Remove HMAC secrets volume (git shadow mode)
+    remove_hmac_volume "$container"
 
     # Remove credential isolation networks (not always removed by compose down)
     for network_suffix in credential-isolation proxy-egress; do
@@ -53,6 +55,12 @@ cmd_destroy() {
             docker network rm "$network_name" 2>/dev/null || true
         fi
     done
+
+    # Load metadata BEFORE deleting config dir (metadata.json lives there)
+    SANDBOX_BRANCH="" SANDBOX_REPO_URL=""
+    load_sandbox_metadata "$name" 2>/dev/null || true
+    local _destroy_branch="${SANDBOX_BRANCH:-}"
+    local _destroy_repo="${SANDBOX_REPO_URL:-}"
 
     if [ "$keep_worktree" = false ] && [ -d "$claude_config_path" ]; then
         echo "Removing Claude config..."
@@ -65,6 +73,10 @@ cmd_destroy() {
             remove_worktree "$worktree_path"
         fi
     fi
+
+    # Clean up sandbox branch from bare repo (after worktree removal so
+    # the worktree-in-use check doesn't find our own worktree)
+    cleanup_sandbox_branch "$_destroy_branch" "$_destroy_repo"
 
     echo "Sandbox '$name' destroyed."
 }

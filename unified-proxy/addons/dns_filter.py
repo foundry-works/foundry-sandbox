@@ -307,11 +307,19 @@ def load(loader):
         _allowlist_domains = allowlist_config.domains
         ctx.log.info(f"DNS filter loaded {len(_allowlist_domains)} domains from config")
     except ConfigError as e:
-        ctx.log.warn(f"Failed to load allowlist config: {e}")
-        ctx.log.warn("DNS filter using default allowlist")
+        ctx.log.error(
+            f"DNS FILTER CONFIG ERROR: Failed to load allowlist config: {e}. "
+            f"Falling back to DEFAULT_ALLOWLIST ({len(DEFAULT_ALLOWLIST)} domains). "
+            f"This may mask a misconfiguration — verify allowlist.yaml exists and is valid. "
+            f"Set PROXY_ALLOWLIST_PATH to override the config file location."
+        )
         _allowlist_domains = DEFAULT_ALLOWLIST
     except Exception as e:
-        ctx.log.error(f"Unexpected error loading allowlist: {e}")
+        ctx.log.error(
+            f"DNS FILTER CONFIG ERROR: Unexpected error loading allowlist: {e}. "
+            f"Falling back to DEFAULT_ALLOWLIST ({len(DEFAULT_ALLOWLIST)} domains). "
+            f"This is likely a bug — check file permissions and YAML syntax."
+        )
         _allowlist_domains = DEFAULT_ALLOWLIST
 
 
