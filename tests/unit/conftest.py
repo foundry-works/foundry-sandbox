@@ -20,6 +20,33 @@ if unified_proxy_dir not in sys.path:
     sys.path.insert(0, unified_proxy_dir)
 
 
+class MockHeaders(dict):
+    """Mock mitmproxy Headers that supports case-insensitive get/set/del."""
+
+    def get(self, key, default=""):
+        for k, v in self.items():
+            if k.lower() == key.lower():
+                return v
+        return default
+
+    def __contains__(self, key):
+        return any(k.lower() == key.lower() for k in self.keys())
+
+    def __delitem__(self, key):
+        for k in list(self.keys()):
+            if k.lower() == key.lower():
+                super().__delitem__(k)
+                return
+        raise KeyError(key)
+
+    def __setitem__(self, key, value):
+        # Remove existing key with same name (case-insensitive) first
+        for k in list(self.keys()):
+            if k.lower() == key.lower():
+                super().__delitem__(k)
+        super().__setitem__(key, value)
+
+
 class MockHTTPResponse:
     """Mock mitmproxy HTTP Response that tracks status_code correctly."""
 

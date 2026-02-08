@@ -16,6 +16,7 @@ Provider Credential Map:
 - api.z.ai: x-api-key from ZHIPU_API_KEY
 - api.github.com: Authorization Bearer from GITHUB_TOKEN (or GH_TOKEN)
 - uploads.github.com: Authorization Bearer from GITHUB_TOKEN (or GH_TOKEN)
+- github.com: Authorization Bearer from GITHUB_TOKEN (or GH_TOKEN)
 
 OAuth Support (Codex CLI):
 - Detects CREDENTIAL_PROXY_PLACEHOLDER in Authorization header
@@ -122,7 +123,7 @@ PROVIDER_MAP = {
         "env_var": "ZHIPU_API_KEY",
         "format": "value",
     },
-    # GitHub API hosts (for gh CLI and API access)
+    # GitHub hosts (for gh CLI, API access, and git HTTPS operations)
     "api.github.com": {
         "header": "Authorization",
         "env_var": "GITHUB_TOKEN",
@@ -130,6 +131,12 @@ PROVIDER_MAP = {
         "format": "bearer",
     },
     "uploads.github.com": {
+        "header": "Authorization",
+        "env_var": "GITHUB_TOKEN",
+        "fallback_env_var": "GH_TOKEN",
+        "format": "bearer",
+    },
+    "github.com": {
         "header": "Authorization",
         "env_var": "GITHUB_TOKEN",
         "fallback_env_var": "GH_TOKEN",
@@ -551,7 +558,7 @@ class CredentialInjector:
             return
 
         if host not in self.credentials_cache:
-            if host in ("api.github.com", "uploads.github.com"):
+            if host in ("api.github.com", "uploads.github.com", "github.com"):
                 # Allow unauthenticated GitHub API requests when no token is available
                 self._strip_github_placeholder(flow)
                 ctx.log.info(

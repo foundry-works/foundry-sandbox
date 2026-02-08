@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **GitHub HTTPS credential injection** - Added `github.com` to the credential injector provider map so git push/pull/clone over HTTPS through the proxy are authenticated with `GITHUB_TOKEN` (or `GH_TOKEN` fallback)
+- **Credential injector unit tests** - New test suite (`tests/unit/test_credential_injector.py`) covering github.com injection, GH_TOKEN fallback, unauthenticated passthrough, placeholder stripping, and non-GitHub host handling
+- **MockHeaders helper** - Case-insensitive mock headers class in `conftest.py` for realistic mitmproxy header behavior in tests
+
 ## [0.11.0] - 2026-02-07
 
 ### Added
