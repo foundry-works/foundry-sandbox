@@ -102,10 +102,9 @@ cast repeat                                                         # repeat las
 
 ## Limitations
 
-- **Not a security boundary against malicious actors** - Protects against accidental damage from well-intentioned AI, not adversarial attacks
+- **Not a targeted-attack boundary** - Protects against automated threats (supply chain attacks, credential-stealing packages) and AI mistakes, but not a targeted human attacker with Docker access on the host
 - **Requires Docker** - No native process isolation; container overhead applies
 - **Linux/macOS focus** - Windows requires WSL2
-- **Shared git history** - All sandboxes share the same bare repo; force-push from one affects others
 - **No GPU passthrough** - GPU workloads need additional Docker configuration
 
 ## Documentation

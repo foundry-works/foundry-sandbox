@@ -7,26 +7,33 @@ This document provides a high-level overview of Foundry Sandbox security archite
 Foundry Sandbox implements **defense in depth** with multiple security layers:
 
 ```
-+-------------------+     +-------------------+     +-------------------+
-|   AI Assistant    |     |    Orchestrator   |     |   External APIs   |
-|   (untrusted)     |     |    (trusted)      |     |   (GitHub, etc)   |
-+--------+----------+     +--------+----------+     +--------+----------+
-         |                         |                         ^
-         v                         v                         |
-+--------+-------------------------+-------------------------+----------+
-|                           SANDBOX CONTAINER                           |
-|  +----------------+  +------------------+                              |
-|  | Read-only Root |  | Network Isolation|                              |
-|  +----------------+  +------------------+                              |
-|                              |                                        |
-|                              v                                        |
-|                    +-------------------+                               |
-|                    |  Unified Proxy    |                               |
-|                    |  [ALL CREDS:      |                               |
-|                    |   GITHUB_TOKEN,   |                               |
-|                    |   API_KEYS]       |                               |
-|                    +-------------------+                               |
-+---------------------------------------------------------------------------+
++-------------------+     +-------------------+
+|   AI Assistant    |     |    Orchestrator   |
+|   (untrusted)     |     |    (trusted)      |
++--------+----------+     +--------+----------+
+         |                         |
+         v                         v
++---------------------------+    +------------------------------+
+|    SANDBOX CONTAINER      |    |    UNIFIED PROXY CONTAINER   |
+|                           |    |    (separate container)      |
+|  +--------------------+   |    |                              |
+|  | Network Isolation  |   |    |  [ALL CREDENTIALS:          |
+|  +--------------------+   |    |   GITHUB_TOKEN, API_KEYS]   |
+|  +--------------------+   |    |                              |
+|  | .git hidden        |   |    |  • Credential injection     |
+|  +--------------------+   |    |  • Git API server (:8083)   |
+|  +--------------------+   |    |  • DNS filter (dnsmasq)     |
+|  | No real creds      |   |    |  • Policy engine            |
+|  +--------------------+   |    |                              |
+|                           |    +-------------+----------------+
+| credential-isolation net ◄├────┤             |
++---------------------------+    |             v
+                                 |    +-------------------+
+                                 |    |  External APIs    |
+                                 |    |  (GitHub, etc)    |
+                                 |    +-------------------+
+                                 |    proxy-egress network
+                                 +-----------------------------+
 ```
 
 ## Key Security Properties

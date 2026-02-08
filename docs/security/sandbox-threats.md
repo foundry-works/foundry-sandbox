@@ -103,6 +103,7 @@ Git commands can destroy work that may be unrecoverable. We distinguish between 
 | `git clean -f` | Local | Deletes untracked files |
 | `git checkout -- <file>` | Local | Discards file changes |
 | `git push --force` | Remote | Overwrites remote history (affects collaborators) |
+| `git push :refs/heads/main` | Remote | Deletes remote branch |
 
 **Defense Layers:**
 
@@ -116,9 +117,37 @@ Git commands can destroy work that may be unrecoverable. We distinguish between 
 
 | Layer | Control | Effect |
 |-------|---------|--------|
-| Primary | Unified proxy | Can reject force pushes based on policy |
+| Primary | Git proxy (unified-proxy) | Blocks force pushes to protected branches, blocks all branch/tag deletions |
+| Secondary | Bot mode restrictions | In bot mode, pushes restricted to `sandbox/*` branches only |
 
-**Why This Works:** For local destruction, the read-only filesystem is the actual security control—writes fail regardless of how commands are invoked. For remote destruction, the unified proxy can enforce force-push blocking. See [Read-only Filesystem](security-architecture.md#read-only-filesystem) for implementation details.
+**Why This Works:** For local destruction, the read-only filesystem is the actual security control—writes fail regardless of how commands are invoked. For remote destruction, the unified proxy's `git_proxy` addon parses git pkt-line protocol data to detect and block force pushes, branch deletions, and unauthorized repository access. See [Read-only Filesystem](security-architecture.md#read-only-filesystem) for local protection details.
+
+#### Git Shadow Mode
+
+In credential isolation mode, sandboxes cannot directly access the `.git` directory or run git commands against the local repository. Instead, all git operations are proxied through the unified-proxy's git API server.
+
+**How it works:**
+
+1. **`.git` is hidden** — The worktree's `.git` file (a gitdir pointer) is bind-mounted to `/dev/null`, preventing the sandbox from reading repository metadata or objects directly
+2. **Git wrapper intercepts commands** — `stubs/git-wrapper.sh` is mounted at `/usr/local/bin/git`, taking precedence over `/usr/bin/git`. For any git command under `/workspace`, the wrapper proxies the request to the git API server
+3. **Git API server** — The unified-proxy runs a git API endpoint on port 8083 that receives JSON-encoded git commands, validates them, and executes them against the bare repository
+4. **HMAC-SHA256 authentication** — Each request is signed with a per-sandbox HMAC secret. The signature covers the HTTP method, path, request body hash, timestamp, and a random nonce to prevent replay attacks
+5. **Policy enforcement** — Before executing any command, the git API applies the same policy checks as the HTTPS proxy: repo authorization, force-push blocking, branch deletion blocking, and bot mode branch restrictions
+
+**What the proxy enforces:**
+
+| Policy | Effect |
+|--------|--------|
+| Repo authorization | Container can only access repos listed in its registration metadata |
+| Branch deletion blocking | `git push` that would delete any branch or tag is rejected |
+| Force-push blocking | Non-fast-forward pushes to protected branches are rejected |
+| Bot mode | When `auth_mode=bot`, pushes restricted to `sandbox/*` branches |
+| Push size limits | Pushes exceeding 100MB are rejected (413 response) |
+| Malformed payload rejection | Pushes with unparseable pkt-line headers are rejected (fail closed) |
+
+#### Git HTTPS Credential Injection
+
+For remote git operations (`git push`, `git pull`), the unified-proxy injects `GIT_CREDENTIAL_TOKEN` into HTTPS requests to GitHub. The sandbox never receives the real GitHub token — it is held exclusively by the proxy container and injected at the network level during credential interception.
 
 ---
 

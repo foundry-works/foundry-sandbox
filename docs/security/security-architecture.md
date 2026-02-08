@@ -41,17 +41,26 @@ These controls are enforced by the kernel, Docker, or external architecture. The
 
 ### Read-only Filesystem
 
-**Enforced by:** Docker (`read_only: true`)
+**Enforced by:** Docker (`read_only: true` in base mode)
 
-**Implementation:** `docker-compose.yml`
+**Implementation:** `docker-compose.yml` (base), `docker-compose.credential-isolation.yml` (override)
 
+**Base mode** (`docker-compose.yml`):
 ```yaml
 services:
   dev:
     read_only: true
 ```
 
-**What it blocks:**
+**Credential isolation mode** overrides this to `read_only: false` because the root entrypoint needs to configure DNS via iptables and write `/etc/resolv.conf`. This is an accepted risk with mitigations:
+- Non-root user (uid 1000 via gosu) limits write scope
+- Network isolation (`internal: true`) prevents data exfiltration
+- Tmpfs `/home` means writes don't persist across restarts
+- The worktree `/workspace/.git` is hidden via bind mount to `/dev/null`
+
+See [Container Filesystem Write Capability](sandbox-threats.md#container-filesystem-write-capability) in the threat model for the full analysis.
+
+**What it blocks (in base mode):**
 - `rm -rf /` via any method (including `/bin/rm`)
 - Writing to system directories
 - Modifying installed packages
@@ -64,7 +73,7 @@ services:
 - `/var/cache/apt` - Package cache
 - `/home/ubuntu` - User home (ephemeral, resets on restart)
 
-**Bypass:** Cannot be bypassed from inside the container. Would require modifying `docker-compose.yml` on the host.
+**Bypass:** Cannot be bypassed from inside the container in base mode. In credential isolation mode, writes to non-tmpfs paths are possible but mitigated by non-root user and network isolation.
 
 ### Network Isolation
 

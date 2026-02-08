@@ -339,12 +339,13 @@ The unified-proxy handles all credential isolation and API proxying for sandboxe
 Each request flows through the addon chain in order:
 
 1. **container_identity** - Identifies container by source IP, attaches config to request
-2. **credential_injector** - Injects API credentials (Anthropic, GitHub, etc.)
-3. **git_proxy** - Rewrites Git URLs, handles smart HTTP protocol
-4. **rate_limiter** - Per-container, per-upstream rate limiting
-5. **circuit_breaker** - Protects against upstream failures
-6. **policy_engine** - Enforces access policies
-7. **metrics** - Records request/response metrics
+2. **policy_engine** - Enforces access policies (evaluated before credentials are injected)
+3. **dns_filter** - Filters DNS queries against allowlist (conditional; only when DNS mode enabled)
+4. **credential_injector** - Injects API credentials (Anthropic, GitHub, etc.)
+5. **git_proxy** - Validates git operations, enforces repo authorization and push policies
+6. **rate_limiter** - Per-container, per-upstream rate limiting
+7. **circuit_breaker** - Protects against upstream failures
+8. **metrics** - Records request/response metrics
 
 ### Container Registration
 
@@ -361,6 +362,38 @@ POST /internal/containers
 ```
 
 Registrations persist in SQLite with TTL-based expiration.
+
+### Git API Server (Shadow Mode)
+
+In credential isolation mode, the `.git` directory is hidden from sandboxes (bind-mounted to `/dev/null`). All git operations are proxied through a git API server on the unified-proxy container:
+
+```
+┌─────────────────────┐          ┌──────────────────────────────┐
+│   SANDBOX CONTAINER │          │       UNIFIED PROXY          │
+│                     │          │                              │
+│  git push origin    │          │   ┌───────────────────────┐  │
+│       │             │  HTTP    │   │   Git API Server      │  │
+│       ▼             │  POST    │   │   (port 8083)         │  │
+│  /usr/local/bin/git ├─────────►│   │                       │  │
+│  (git-wrapper.sh)   │          │   │  • HMAC-SHA256 auth   │  │
+│                     │          │   │  • Policy enforcement  │  │
+│  • Intercepts git   │          │   │  • Executes real git   │  │
+│  • Builds JSON body │          │   │  • Returns JSON result │  │
+│  • Signs with HMAC  │          │   └───────────────────────┘  │
+│                     │          │                              │
+│  .git → /dev/null   │          │  /git-workspace (bind mount) │
+│  (hidden)           │          │  /home/ubuntu/.sandboxes/    │
+│                     │          │    repos/ (bare repos)       │
+└─────────────────────┘          └──────────────────────────────┘
+```
+
+**How it works:**
+
+1. `stubs/git-wrapper.sh` is bind-mounted at `/usr/local/bin/git`, taking precedence over `/usr/bin/git`
+2. For commands under `/workspace`, the wrapper serializes arguments as JSON and sends an HMAC-signed HTTP request to the git API (port 8083)
+3. For commands outside `/workspace`, the wrapper falls through to the real `/usr/bin/git`
+4. Each sandbox has a unique HMAC secret (provisioned at creation time) stored in a shared Docker volume
+5. The git API authenticates requests, applies policy checks (force-push blocking, branch deletion blocking, repo authorization), then executes the real git command against the bare repository
 
 ## Next Steps
 
