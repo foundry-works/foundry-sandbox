@@ -354,6 +354,21 @@ esac
 EXIT_CODE=$(echo "$RESPONSE" | jq -r '.exit_code // 0' 2>/dev/null || echo 1)
 STDOUT=$(echo "$RESPONSE" | jq -r '.stdout // ""' 2>/dev/null || true)
 STDERR=$(echo "$RESPONSE" | jq -r '.stderr // ""' 2>/dev/null || true)
+STDOUT_B64=$(echo "$RESPONSE" | jq -r '.stdout_b64 // ""' 2>/dev/null || true)
+
+# Fall back to stdout_b64 when stdout is empty
+if [[ -z "$STDOUT" && -n "$STDOUT_B64" ]]; then
+    STDOUT=$(printf '%s' "$STDOUT_B64" | python3 - <<'PY' 2>/dev/null || true
+import base64, sys
+data = sys.stdin.read().strip()
+try:
+    decoded = base64.b64decode(data)
+    sys.stdout.write(decoded.decode("utf-8", errors="replace"))
+except Exception:
+    pass
+PY
+    )
+fi
 
 # Output results
 if [[ -n "$STDOUT" ]]; then

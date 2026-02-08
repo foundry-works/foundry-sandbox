@@ -46,6 +46,10 @@ def merge_claude_settings(container_path: str, host_path: str) -> None:
         if not merged["enabledPlugins"]:
             del merged["enabledPlugins"]
 
+    # Remove extra marketplaces - the sandbox pre-installs what it needs and
+    # can't clone new ones (git proxy blocks writes to the dev container FS)
+    merged.pop("extraKnownMarketplaces", None)
+
     write_json(container_path, merged)
 
 

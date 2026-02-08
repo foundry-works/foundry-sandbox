@@ -57,6 +57,7 @@ COPY github_config.py /opt/proxy/github_config.py
 COPY git_api.py /opt/proxy/git_api.py
 COPY git_operations.py /opt/proxy/git_operations.py
 COPY git_policies.py /opt/proxy/git_policies.py
+COPY branch_isolation.py /opt/proxy/branch_isolation.py
 
 # Copy addon modules (mitmproxy addons)
 COPY addons/ /opt/proxy/addons/

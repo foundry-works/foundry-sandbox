@@ -134,6 +134,10 @@ def resolve_bare_repo_path(repo_root: str) -> Optional[str]:
     in turn has a ``commondir`` file pointing (absolute or relative) to the
     shared bare repo.
 
+    Security: all resolved paths are validated with ``os.path.realpath()``
+    to prevent symlink/traversal attacks via crafted ``.git`` or
+    ``commondir`` files.
+
     Args:
         repo_root: The worktree's working directory root.
 
@@ -142,7 +146,8 @@ def resolve_bare_repo_path(repo_root: str) -> Optional[str]:
         the chain cannot be resolved.
     """
     try:
-        dot_git = os.path.join(repo_root, ".git")
+        real_root = os.path.realpath(repo_root)
+        dot_git = os.path.join(real_root, ".git")
 
         # If .git is a directory, this IS the git dir (not a worktree)
         if os.path.isdir(dot_git):
@@ -152,10 +157,14 @@ def resolve_bare_repo_path(repo_root: str) -> Optional[str]:
                 with open(commondir_file, "r") as f:
                     commondir = f.read().strip()
                 if os.path.isabs(commondir):
-                    return os.path.normpath(commondir)
-                return os.path.normpath(os.path.join(dot_git, commondir))
+                    resolved = os.path.realpath(commondir)
+                else:
+                    resolved = os.path.realpath(
+                        os.path.join(dot_git, commondir)
+                    )
+                return resolved
             # No commondir — .git itself is the git dir
-            return os.path.normpath(dot_git)
+            return os.path.realpath(dot_git)
 
         # .git is a file — read gitdir pointer
         if not os.path.isfile(dot_git):
@@ -169,8 +178,8 @@ def resolve_bare_repo_path(repo_root: str) -> Optional[str]:
 
         gitdir = content[len("gitdir:"):].strip()
         if not os.path.isabs(gitdir):
-            gitdir = os.path.join(repo_root, gitdir)
-        gitdir = os.path.normpath(gitdir)
+            gitdir = os.path.join(real_root, gitdir)
+        gitdir = os.path.realpath(gitdir)
 
         if not os.path.isdir(gitdir):
             return None
@@ -185,9 +194,9 @@ def resolve_bare_repo_path(repo_root: str) -> Optional[str]:
             commondir = f.read().strip()
 
         if os.path.isabs(commondir):
-            bare_path = os.path.normpath(commondir)
+            bare_path = os.path.realpath(commondir)
         else:
-            bare_path = os.path.normpath(os.path.join(gitdir, commondir))
+            bare_path = os.path.realpath(os.path.join(gitdir, commondir))
 
         if not os.path.isdir(bare_path):
             return None
@@ -196,6 +205,7 @@ def resolve_bare_repo_path(repo_root: str) -> Optional[str]:
 
     except (OSError, IOError):
         return None
+
 
 # ---------------------------------------------------------------------------
 # Branch Isolation Constants
@@ -387,13 +397,41 @@ def _strip_rev_suffixes(ref: str) -> str:
     return _REV_SUFFIX_RE.sub("", ref)
 
 
-def _is_allowed_branch_name(name: str, sandbox_branch: str) -> bool:
+def _normalize_base_branch(base_branch: Optional[str]) -> Optional[str]:
+    """Normalize a base branch name from metadata to a bare branch name."""
+    if not base_branch:
+        return None
+    if base_branch.startswith("refs/heads/"):
+        base_branch = base_branch[len("refs/heads/"):]
+    elif base_branch.startswith("refs/remotes/"):
+        parts = base_branch.split("/", 3)
+        if len(parts) >= 4:
+            base_branch = parts[3]
+        else:
+            return None
+    else:
+        for remote in ("origin", "upstream"):
+            prefix = f"{remote}/"
+            if base_branch.startswith(prefix):
+                base_branch = base_branch[len(prefix):]
+                break
+    return base_branch or None
+
+
+def _is_allowed_branch_name(
+    name: str,
+    sandbox_branch: str,
+    base_branch: Optional[str] = None,
+) -> bool:
     """Check if a bare branch name is allowed for this sandbox.
 
     Allowed: the sandbox's own branch, well-known branches,
-    and branches matching well-known prefixes.
+    the sandbox's base branch (if any), and branches matching
+    well-known prefixes.
     """
     if name == sandbox_branch:
+        return True
+    if base_branch and name == base_branch:
         return True
     if name in WELL_KNOWN_BRANCHES:
         return True
@@ -403,7 +441,11 @@ def _is_allowed_branch_name(name: str, sandbox_branch: str) -> bool:
     return False
 
 
-def _is_allowed_ref(ref: str, sandbox_branch: str) -> bool:
+def _is_allowed_ref(
+    ref: str,
+    sandbox_branch: str,
+    base_branch: Optional[str] = None,
+) -> bool:
     """Check if a ref argument is allowed under branch isolation.
 
     Allows: HEAD, @{...} forms, own sandbox branch, well-known branches,
@@ -414,7 +456,9 @@ def _is_allowed_ref(ref: str, sandbox_branch: str) -> bool:
     for sep in ("...", ".."):
         if sep in ref:
             parts = ref.split(sep, 1)
-            return all(_is_allowed_ref(p, sandbox_branch) for p in parts if p)
+            return all(
+                _is_allowed_ref(p, sandbox_branch, base_branch) for p in parts if p
+            )
 
     # Strip revision suffixes
     base = _strip_rev_suffixes(ref)
@@ -443,7 +487,7 @@ def _is_allowed_ref(ref: str, sandbox_branch: str) -> bool:
         # refs/remotes/<remote>/<branch...>
         parts = base.split("/", 3)
         if len(parts) >= 4:
-            return _is_allowed_branch_name(parts[3], sandbox_branch)
+            return _is_allowed_branch_name(parts[3], sandbox_branch, base_branch)
         # Incomplete path like "refs/remotes/origin" — deny
         return False
 
@@ -456,10 +500,12 @@ def _is_allowed_ref(ref: str, sandbox_branch: str) -> bool:
     # misclassifying legitimate branch names that contain "/" as remote refs.
     if "/" in base and not base.startswith("refs/"):
         prefix, _, branch_part = base.partition("/")
-        if not _is_allowed_branch_name(base, sandbox_branch):
+        if not _is_allowed_branch_name(base, sandbox_branch, base_branch):
             # Not an allowed branch name as-is, try as remote/branch
             if branch_part:
-                return _is_allowed_branch_name(branch_part, sandbox_branch)
+                return _is_allowed_branch_name(
+                    branch_part, sandbox_branch, base_branch
+                )
             return False
         # Allowed as a slashed branch name (e.g. "release/1.0")
         return True
@@ -467,14 +513,14 @@ def _is_allowed_ref(ref: str, sandbox_branch: str) -> bool:
     # Full ref paths
     if base.startswith("refs/heads/"):
         branch_name = base[len("refs/heads/"):]
-        return _is_allowed_branch_name(branch_name, sandbox_branch)
+        return _is_allowed_branch_name(branch_name, sandbox_branch, base_branch)
 
     # SHA hashes (hex strings of sufficient length) are always allowed
     if _is_sha_like(base):
         return True
 
     # Bare branch names
-    return _is_allowed_branch_name(base, sandbox_branch)
+    return _is_allowed_branch_name(base, sandbox_branch, base_branch)
 
 
 # ---------------------------------------------------------------------------
@@ -507,6 +553,7 @@ def validate_branch_isolation(
         return ValidationError(
             "Branch isolation: metadata present but missing sandbox_branch"
         )
+    base_branch = _normalize_base_branch(metadata.get("from_branch"))
 
     subcommand, sub_args, _ = get_subcommand_args(args)
     if subcommand is None:
@@ -521,7 +568,7 @@ def validate_branch_isolation(
             if a in ("-d", "-D", "--delete"):
                 delete_mode = True
             elif delete_mode and not a.startswith("-"):
-                if not _is_allowed_branch_name(a, sandbox_branch):
+                if not _is_allowed_branch_name(a, sandbox_branch, base_branch):
                     return ValidationError(
                         f"Branch isolation: cannot delete branch '{a}'"
                     )
@@ -534,26 +581,30 @@ def validate_branch_isolation(
 
     # --- checkout / switch ---
     if subcommand in ("checkout", "switch"):
-        return _validate_checkout_isolation(sub_args, sandbox_branch)
+        return _validate_checkout_isolation(sub_args, sandbox_branch, base_branch)
 
     # --- fetch / pull ---
     if subcommand in ("fetch", "pull"):
-        return _validate_fetch_isolation(sub_args, sandbox_branch)
+        return _validate_fetch_isolation(sub_args, sandbox_branch, base_branch)
 
     # --- push ---
     if subcommand == "push":
-        return _validate_push_isolation(sub_args, sandbox_branch)
+        return _validate_push_isolation(sub_args, sandbox_branch, base_branch)
 
     # --- worktree add ---
     if subcommand == "worktree" and sub_args and sub_args[0] == "add":
-        return _validate_worktree_add_isolation(sub_args[1:], sandbox_branch)
+        return _validate_worktree_add_isolation(
+            sub_args[1:], sandbox_branch, base_branch
+        )
 
     # --- bisect start ---
     if subcommand == "bisect" and sub_args and sub_args[0] == "start":
         for a in sub_args[1:]:
             if a == "--":
                 break
-            if not a.startswith("-") and not _is_allowed_ref(a, sandbox_branch):
+            if not a.startswith("-") and not _is_allowed_ref(
+                a, sandbox_branch, base_branch
+            ):
                 return ValidationError(
                     f"Branch isolation: ref '{a}' not allowed in bisect"
                 )
@@ -568,7 +619,9 @@ def validate_branch_isolation(
         for a in reflog_args:
             if a == "--":
                 break
-            if not a.startswith("-") and not _is_allowed_ref(a, sandbox_branch):
+            if not a.startswith("-") and not _is_allowed_ref(
+                a, sandbox_branch, base_branch
+            ):
                 return ValidationError(
                     f"Branch isolation: ref '{a}' not allowed in reflog"
                 )
@@ -584,14 +637,14 @@ def validate_branch_isolation(
                 skip_next = False
                 if pending_ref_check:
                     pending_ref_check = False
-                    if not _is_allowed_ref(a, sandbox_branch):
+                    if not _is_allowed_ref(a, sandbox_branch, base_branch):
                         return ValidationError(
                             f"Branch isolation: ref '{a}' not allowed in notes"
                         )
                 continue
             if a.startswith("--ref="):
                 ref_val = a[len("--ref="):]
-                if not _is_allowed_ref(ref_val, sandbox_branch):
+                if not _is_allowed_ref(ref_val, sandbox_branch, base_branch):
                     return ValidationError(
                         f"Branch isolation: ref '{ref_val}' not allowed in notes"
                     )
@@ -613,7 +666,7 @@ def validate_branch_isolation(
             positionals.append(a)
 
         for a in positionals:
-            if not _is_allowed_ref(a, sandbox_branch):
+            if not _is_allowed_ref(a, sandbox_branch, base_branch):
                 return ValidationError(
                     f"Branch isolation: ref '{a}' not allowed in notes"
                 )
@@ -621,11 +674,13 @@ def validate_branch_isolation(
 
     # --- ref-reading commands (log, show, diff, blame, etc.) ---
     if subcommand in _REF_READING_CMDS:
-        return _validate_ref_reading_isolation(sub_args, sandbox_branch)
+        return _validate_ref_reading_isolation(
+            sub_args, sandbox_branch, base_branch
+        )
 
     # --- tag with commit-ish argument ---
     if subcommand == "tag":
-        return _validate_tag_isolation(sub_args, sandbox_branch)
+        return _validate_tag_isolation(sub_args, sandbox_branch, base_branch)
 
     return None
 
@@ -636,7 +691,9 @@ def validate_branch_isolation(
 
 
 def _validate_checkout_isolation(
-    sub_args: List[str], sandbox_branch: str,
+    sub_args: List[str],
+    sandbox_branch: str,
+    base_branch: Optional[str] = None,
 ) -> Optional[ValidationError]:
     """Validate checkout/switch args for branch isolation."""
     creating_branch = False
@@ -683,7 +740,7 @@ def _validate_checkout_isolation(
         # When creating a branch, the start-point (if any) is the last positional
         if positionals:
             start_point = positionals[-1]
-            if not _is_allowed_ref(start_point, sandbox_branch):
+            if not _is_allowed_ref(start_point, sandbox_branch, base_branch):
                 return ValidationError(
                     f"Branch isolation: start-point '{start_point}' not allowed"
                 )
@@ -691,7 +748,7 @@ def _validate_checkout_isolation(
         # Switching to a branch: first positional is the target
         if positionals:
             target = positionals[0]
-            if not _is_allowed_ref(target, sandbox_branch):
+            if not _is_allowed_ref(target, sandbox_branch, base_branch):
                 return ValidationError(
                     f"Branch isolation: cannot switch to '{target}'. "
                     f"If this is a file path, use -- to separate paths from refs."
@@ -701,7 +758,9 @@ def _validate_checkout_isolation(
 
 
 def _validate_fetch_isolation(
-    sub_args: List[str], sandbox_branch: str,
+    sub_args: List[str],
+    sandbox_branch: str,
+    base_branch: Optional[str] = None,
 ) -> Optional[ValidationError]:
     """Validate fetch/pull args for branch isolation."""
     skip_next = False
@@ -736,11 +795,11 @@ def _validate_fetch_isolation(
         # Handle +src:dst refspec format
         spec = refspec.lstrip("+")
         src, _, dst = spec.partition(":")
-        if src and not _is_allowed_ref(src, sandbox_branch):
+        if src and not _is_allowed_ref(src, sandbox_branch, base_branch):
             return ValidationError(
                 f"Branch isolation: refspec source '{src}' not allowed"
             )
-        if dst and not _is_allowed_ref(dst, sandbox_branch):
+        if dst and not _is_allowed_ref(dst, sandbox_branch, base_branch):
             return ValidationError(
                 f"Branch isolation: refspec destination '{dst}' not allowed"
             )
@@ -749,7 +808,9 @@ def _validate_fetch_isolation(
 
 
 def _validate_push_isolation(
-    sub_args: List[str], sandbox_branch: str,
+    sub_args: List[str],
+    sandbox_branch: str,
+    base_branch: Optional[str] = None,
 ) -> Optional[ValidationError]:
     """Validate push args for branch isolation.
 
@@ -797,23 +858,23 @@ def _validate_push_isolation(
             src, dst = spec.split(":", 1)
             if not src and dst:
                 # Delete refspec (:dst) — check dst as branch name
-                if not _is_allowed_branch_name(dst, sandbox_branch):
+                if not _is_allowed_branch_name(dst, sandbox_branch, base_branch):
                     return ValidationError(
                         f"Branch isolation: cannot delete remote branch '{dst}'"
                     )
             else:
                 # src:dst — check both sides
-                if src and not _is_allowed_ref(src, sandbox_branch):
+                if src and not _is_allowed_ref(src, sandbox_branch, base_branch):
                     return ValidationError(
                         f"Branch isolation: push source '{src}' not allowed"
                     )
-                if dst and not _is_allowed_ref(dst, sandbox_branch):
+                if dst and not _is_allowed_ref(dst, sandbox_branch, base_branch):
                     return ValidationError(
                         f"Branch isolation: push destination '{dst}' not allowed"
                     )
         else:
             # Bare refspec — check as ref
-            if spec and not _is_allowed_ref(spec, sandbox_branch):
+            if spec and not _is_allowed_ref(spec, sandbox_branch, base_branch):
                 return ValidationError(
                     f"Branch isolation: push ref '{spec}' not allowed"
                 )
@@ -822,7 +883,9 @@ def _validate_push_isolation(
 
 
 def _validate_worktree_add_isolation(
-    sub_args: List[str], sandbox_branch: str,
+    sub_args: List[str],
+    sandbox_branch: str,
+    base_branch: Optional[str] = None,
 ) -> Optional[ValidationError]:
     """Validate worktree add args for branch isolation."""
     skip_next = False
@@ -844,7 +907,7 @@ def _validate_worktree_add_isolation(
     # First positional is path, second is commit-ish
     if len(positionals) >= 2:
         commit_ish = positionals[1]
-        if not _is_allowed_ref(commit_ish, sandbox_branch):
+        if not _is_allowed_ref(commit_ish, sandbox_branch, base_branch):
             return ValidationError(
                 f"Branch isolation: commit-ish '{commit_ish}' not allowed "
                 f"in worktree add"
@@ -854,7 +917,9 @@ def _validate_worktree_add_isolation(
 
 
 def _validate_tag_isolation(
-    sub_args: List[str], sandbox_branch: str,
+    sub_args: List[str],
+    sandbox_branch: str,
+    base_branch: Optional[str] = None,
 ) -> Optional[ValidationError]:
     """Validate tag args for branch isolation.
 
@@ -885,7 +950,7 @@ def _validate_tag_isolation(
     # First positional is the tag name (always allowed), second is commit-ish
     if len(positionals) >= 2:
         commit_ish = positionals[1]
-        if not _is_allowed_ref(commit_ish, sandbox_branch):
+        if not _is_allowed_ref(commit_ish, sandbox_branch, base_branch):
             return ValidationError(
                 f"Branch isolation: commit-ish '{commit_ish}' not allowed "
                 f"in tag creation"
@@ -895,7 +960,9 @@ def _validate_tag_isolation(
 
 
 def _validate_ref_reading_isolation(
-    sub_args: List[str], sandbox_branch: str,
+    sub_args: List[str],
+    sandbox_branch: str,
+    base_branch: Optional[str] = None,
 ) -> Optional[ValidationError]:
     """Validate ref-reading command args for branch isolation.
 
@@ -931,7 +998,7 @@ def _validate_ref_reading_isolation(
             continue
         if a.startswith("-"):
             continue
-        if not _is_allowed_ref(a, sandbox_branch):
+        if not _is_allowed_ref(a, sandbox_branch, base_branch):
             return ValidationError(
                 f"Branch isolation: ref '{a}' not allowed. "
                 f"If this is a file path, use -- to separate paths from refs."
@@ -1000,11 +1067,15 @@ def _extract_sha_args(sub_args: List[str]) -> List[str]:
     return shas
 
 
-def _get_allowed_refs(bare_repo: str, sandbox_branch: str) -> List[str]:
+def _get_allowed_refs(
+    bare_repo: str,
+    sandbox_branch: str,
+    base_branch: Optional[str] = None,
+) -> List[str]:
     """Build the list of fully-qualified refs this sandbox may access.
 
-    Includes the sandbox's own branch, well-known branches (matched via
-    ``for-each-ref``), and all tags.
+    Includes the sandbox's own branch, base branch (if any), well-known
+    branches (matched via ``for-each-ref``), and all tags.
 
     Args:
         bare_repo: Path to the bare git repository.
@@ -1014,6 +1085,8 @@ def _get_allowed_refs(bare_repo: str, sandbox_branch: str) -> List[str]:
         List of fully-qualified ref patterns for ``--stdin`` input.
     """
     refs: List[str] = [f"refs/heads/{sandbox_branch}"]
+    if base_branch:
+        refs.append(f"refs/heads/{base_branch}")
 
     # Well-known branches
     for name in WELL_KNOWN_BRANCHES:
@@ -1087,7 +1160,12 @@ def _check_sha_reachability(
                 if result.returncode == 0 and result.stdout.strip():
                     cache[sha] = True
                     return True
-            except (subprocess.TimeoutExpired, OSError):
+            except subprocess.TimeoutExpired:
+                logger.warning(
+                    "SHA reachability: timeout checking %s against %s",
+                    sha, ref,
+                )
+            except OSError:
                 pass
             continue
 
@@ -1101,7 +1179,13 @@ def _check_sha_reachability(
             if result.returncode == 0:
                 cache[sha] = True
                 return True
-        except (subprocess.TimeoutExpired, OSError):
+        except subprocess.TimeoutExpired:
+            logger.warning(
+                "SHA reachability: timeout checking %s against %s",
+                sha, ref,
+            )
+            continue
+        except OSError:
             continue
 
     cache[sha] = False
@@ -1131,6 +1215,7 @@ def validate_sha_reachability(
     sandbox_branch = metadata.get("sandbox_branch")
     if not sandbox_branch:
         return None
+    base_branch = _normalize_base_branch(metadata.get("from_branch"))
 
     subcommand, sub_args, _ = get_subcommand_args(args)
     if subcommand is None:
@@ -1162,7 +1247,7 @@ def validate_sha_reachability(
         return None
 
     # Build allowed refs and check each SHA
-    allowed_refs = _get_allowed_refs(bare_repo, sandbox_branch)
+    allowed_refs = _get_allowed_refs(bare_repo, sandbox_branch, base_branch)
     cache: dict = {}
 
     for sha in shas:
@@ -1180,7 +1265,11 @@ def validate_sha_reachability(
 # ---------------------------------------------------------------------------
 
 
-def _filter_branch_output(output: str, sandbox_branch: str) -> str:
+def _filter_branch_output(
+    output: str,
+    sandbox_branch: str,
+    base_branch: Optional[str] = None,
+) -> str:
     """Filter git branch output to hide other sandbox branches.
 
     Handles plain, verbose (-v/-vv), and remote (-a) branch listing formats.
@@ -1217,7 +1306,7 @@ def _filter_branch_output(output: str, sandbox_branch: str) -> str:
                 # Always keep HEAD symref lines
                 filtered_lines.append(line)
                 continue
-            if _is_allowed_branch_name(branch_name, sandbox_branch):
+            if _is_allowed_branch_name(branch_name, sandbox_branch, base_branch):
                 filtered_lines.append(line)
             continue
 
@@ -1225,7 +1314,7 @@ def _filter_branch_output(output: str, sandbox_branch: str) -> str:
         m = _BRANCH_LINE_RE.match(stripped)
         if m:
             branch_name = m.group("branch")
-            if _is_allowed_branch_name(branch_name, sandbox_branch):
+            if _is_allowed_branch_name(branch_name, sandbox_branch, base_branch):
                 filtered_lines.append(line)
             continue
 
@@ -1241,7 +1330,11 @@ def _filter_branch_output(output: str, sandbox_branch: str) -> str:
 # ---------------------------------------------------------------------------
 
 
-def _is_allowed_short_ref_token(token: str, sandbox_branch: str) -> bool:
+def _is_allowed_short_ref_token(
+    token: str,
+    sandbox_branch: str,
+    base_branch: Optional[str] = None,
+) -> bool:
     """Check whether a short/custom ref token from ref-enum output is allowed."""
     if not token:
         return True
@@ -1250,22 +1343,24 @@ def _is_allowed_short_ref_token(token: str, sandbox_branch: str) -> bool:
     if token.startswith("refs/tags/") or token.startswith("tags/"):
         return True
     if token.startswith("refs/heads/"):
-        return _is_allowed_branch_name(token[len("refs/heads/"):], sandbox_branch)
+        return _is_allowed_branch_name(
+            token[len("refs/heads/"):], sandbox_branch, base_branch
+        )
     if token.startswith("refs/remotes/"):
         parts = token.split("/", 3)
         if len(parts) >= 4:
-            return _is_allowed_branch_name(parts[3], sandbox_branch)
+            return _is_allowed_branch_name(parts[3], sandbox_branch, base_branch)
         # Incomplete path (e.g. "refs/remotes/origin") — deny
         return False
     # First treat token as a branch name (supports slashed branch names like
     # "sandbox/alice" and "release/1.0").
-    if _is_allowed_branch_name(token, sandbox_branch):
+    if _is_allowed_branch_name(token, sandbox_branch, base_branch):
         return True
     # Then try remote-short form ("origin/main", "upstream/feature").
     if "/" in token:
         remote, _, branch = token.partition("/")
         if remote and branch:
-            return _is_allowed_branch_name(branch, sandbox_branch)
+            return _is_allowed_branch_name(branch, sandbox_branch, base_branch)
     return False
 
 
@@ -1288,7 +1383,11 @@ def _looks_like_ref_token(token: str) -> bool:
     return True
 
 
-def _filter_ref_enum_output(output: str, sandbox_branch: str) -> str:
+def _filter_ref_enum_output(
+    output: str,
+    sandbox_branch: str,
+    base_branch: Optional[str] = None,
+) -> str:
     """Filter ref enumeration output (for-each-ref, ls-remote, show-ref).
 
     Two-pass filtering:
@@ -1301,6 +1400,7 @@ def _filter_ref_enum_output(output: str, sandbox_branch: str) -> str:
     Args:
         output: Raw stdout from a ref enumeration command.
         sandbox_branch: This sandbox's branch name.
+        base_branch: Optional base branch to allow.
 
     Returns:
         Filtered output with disallowed branch refs removed.
@@ -1319,7 +1419,7 @@ def _filter_ref_enum_output(output: str, sandbox_branch: str) -> str:
         ref_match = _REF_IN_LINE_RE.search(stripped)
         if ref_match:
             branch_name = ref_match.group(1)
-            if _is_allowed_branch_name(branch_name, sandbox_branch):
+            if _is_allowed_branch_name(branch_name, sandbox_branch, base_branch):
                 filtered_lines.append(line)
             continue
 
@@ -1332,7 +1432,7 @@ def _filter_ref_enum_output(output: str, sandbox_branch: str) -> str:
         remote_match = re.search(r"refs/remotes/[^/]+/([^\s]+)", stripped)
         if remote_match:
             branch_name = remote_match.group(1)
-            if _is_allowed_branch_name(branch_name, sandbox_branch):
+            if _is_allowed_branch_name(branch_name, sandbox_branch, base_branch):
                 filtered_lines.append(line)
             continue
 
@@ -1348,7 +1448,9 @@ def _filter_ref_enum_output(output: str, sandbox_branch: str) -> str:
                     second = tokens[1]
                     if _looks_like_ref_token(second):
                         # Looks like a ref — apply isolation filter
-                        if _is_allowed_short_ref_token(second, sandbox_branch):
+                        if _is_allowed_short_ref_token(
+                            second, sandbox_branch, base_branch
+                        ):
                             filtered_lines.append(line)
                     else:
                         # Non-ref data (date, commit message, etc.) — keep
@@ -1358,7 +1460,9 @@ def _filter_ref_enum_output(output: str, sandbox_branch: str) -> str:
                 continue
 
             # First token might be a short/custom ref token.
-            if _is_allowed_short_ref_token(first_token, sandbox_branch):
+            if _is_allowed_short_ref_token(
+                first_token, sandbox_branch, base_branch
+            ):
                 filtered_lines.append(line)
             continue
 
@@ -1374,7 +1478,11 @@ def _filter_ref_enum_output(output: str, sandbox_branch: str) -> str:
 # ---------------------------------------------------------------------------
 
 
-def _is_decoration_ref_allowed(ref: str, sandbox_branch: str) -> bool:
+def _is_decoration_ref_allowed(
+    ref: str,
+    sandbox_branch: str,
+    base_branch: Optional[str] = None,
+) -> bool:
     """Check if a single decoration ref should be kept.
 
     Always keeps: HEAD, HEAD -> branch (if branch allowed), tags,
@@ -1391,7 +1499,7 @@ def _is_decoration_ref_allowed(ref: str, sandbox_branch: str) -> bool:
     # "HEAD -> branch" form
     if ref.startswith("HEAD -> "):
         branch = ref[len("HEAD -> "):]
-        return _is_allowed_branch_name(branch, sandbox_branch)
+        return _is_allowed_branch_name(branch, sandbox_branch, base_branch)
 
     # Tags are always kept
     if ref.startswith("tag: "):
@@ -1403,13 +1511,17 @@ def _is_decoration_ref_allowed(ref: str, sandbox_branch: str) -> bool:
         if len(parts) == 2:
             # Could be origin/branch
             branch_name = parts[1]
-            return _is_allowed_branch_name(branch_name, sandbox_branch)
+            return _is_allowed_branch_name(branch_name, sandbox_branch, base_branch)
 
     # Bare branch name
-    return _is_allowed_branch_name(ref, sandbox_branch)
+    return _is_allowed_branch_name(ref, sandbox_branch, base_branch)
 
 
-def _filter_decoration_refs(decorations: str, sandbox_branch: str) -> Optional[str]:
+def _filter_decoration_refs(
+    decorations: str,
+    sandbox_branch: str,
+    base_branch: Optional[str] = None,
+) -> Optional[str]:
     """Filter individual refs within a decoration string.
 
     Args:
@@ -1420,13 +1532,19 @@ def _filter_decoration_refs(decorations: str, sandbox_branch: str) -> Optional[s
         Filtered decoration string, or None if all refs were removed.
     """
     refs = [r.strip() for r in decorations.split(",")]
-    allowed = [r for r in refs if _is_decoration_ref_allowed(r, sandbox_branch)]
+    allowed = [
+        r for r in refs if _is_decoration_ref_allowed(r, sandbox_branch, base_branch)
+    ]
     if not allowed:
         return None
     return ", ".join(allowed)
 
 
-def _filter_log_decorations(output: str, sandbox_branch: str) -> str:
+def _filter_log_decorations(
+    output: str,
+    sandbox_branch: str,
+    base_branch: Optional[str] = None,
+) -> str:
     """Filter SHA-anchored decoration lines in git log output.
 
     Handles standard ``git log --decorate`` format where decorations
@@ -1451,7 +1569,9 @@ def _filter_log_decorations(output: str, sandbox_branch: str) -> str:
             prefix = m.group("prefix")
             decorations = m.group("decorations")
             suffix = m.group("suffix")
-            filtered = _filter_decoration_refs(decorations, sandbox_branch)
+            filtered = _filter_decoration_refs(
+                decorations, sandbox_branch, base_branch
+            )
             if filtered:
                 filtered_lines.append(
                     prefix + "(" + filtered + ")" + suffix
@@ -1474,6 +1594,7 @@ def _filter_log_decorations(output: str, sandbox_branch: str) -> str:
 def _filter_custom_format_decorations(
     output: str,
     sandbox_branch: str,
+    base_branch: Optional[str] = None,
     has_bare_D: bool = True,
 ) -> str:
     """Filter custom --format=%d/%D decoration output.
@@ -1502,7 +1623,9 @@ def _filter_custom_format_decorations(
         m = _CUSTOM_D_RE.search(stripped)
         if m:
             decorations = m.group("decorations")
-            filtered = _filter_decoration_refs(decorations, sandbox_branch)
+            filtered = _filter_decoration_refs(
+                decorations, sandbox_branch, base_branch
+            )
             if filtered:
                 new_line = (
                     stripped[:m.start()]
@@ -1531,13 +1654,17 @@ def _filter_custom_format_decorations(
                 1 for t in non_empty
                 if len(t) <= 256 and (
                     t.startswith("HEAD") or t.startswith("tag: ")
-                    or "/" in t or _is_allowed_branch_name(t, sandbox_branch)
+                    or "/" in t or _is_allowed_branch_name(
+                        t, sandbox_branch, base_branch
+                    )
                 )
             )
             total_count = len(non_empty)
             looks_like_refs = total_count > 0 and ref_like_count > total_count // 2
             if looks_like_refs:
-                filtered = _filter_decoration_refs(stripped, sandbox_branch)
+                filtered = _filter_decoration_refs(
+                    stripped, sandbox_branch, base_branch
+                )
                 if filtered:
                     filtered_lines.append(filtered + trailing)
                 else:
@@ -1585,7 +1712,11 @@ def _log_has_source_flag(args: List[str]) -> bool:
     return "--source" in args
 
 
-def _filter_log_source_refs(output: str, sandbox_branch: str) -> str:
+def _filter_log_source_refs(
+    output: str,
+    sandbox_branch: str,
+    base_branch: Optional[str] = None,
+) -> str:
     """Redact disallowed branch refs from --source output.
 
     --source adds a ref name column to log output. Disallowed refs/heads/
@@ -1613,7 +1744,9 @@ def _filter_log_source_refs(output: str, sandbox_branch: str) -> str:
             r"refs/heads/([^\s]+)",
             lambda m: (
                 m.group(0)
-                if _is_allowed_branch_name(m.group(1), sandbox_branch)
+                if _is_allowed_branch_name(
+                    m.group(1), sandbox_branch, base_branch
+                )
                 else "refs/heads/[redacted]"
             ),
             stripped,
@@ -1628,7 +1761,11 @@ def _filter_log_source_refs(output: str, sandbox_branch: str) -> str:
 # ---------------------------------------------------------------------------
 
 
-def filter_stderr_branch_refs(stderr: str, sandbox_branch: str) -> str:
+def filter_stderr_branch_refs(
+    stderr: str,
+    sandbox_branch: str,
+    base_branch: Optional[str] = None,
+) -> str:
     """Redact disallowed branch names from stderr output.
 
     Git error messages, hints, and verbose output may contain branch names
@@ -1637,10 +1774,11 @@ def filter_stderr_branch_refs(stderr: str, sandbox_branch: str) -> str:
     """
     if not stderr or not sandbox_branch:
         return stderr
+    base_branch = _normalize_base_branch(base_branch)
 
     def _redact_match(m: re.Match) -> str:
         branch = m.group("branch") or m.group("remote_branch")
-        if branch and not _is_allowed_branch_name(branch, sandbox_branch):
+        if branch and not _is_allowed_branch_name(branch, sandbox_branch, base_branch):
             # Replace entire match with redacted version
             full = m.group(0)
             return full[:full.rfind(branch)] + "<redacted>"
@@ -1651,7 +1789,7 @@ def filter_stderr_branch_refs(stderr: str, sandbox_branch: str) -> str:
     # Second pass: redact bare branch names in single-quoted contexts
     def _redact_bare_match(m: re.Match) -> str:
         branch = m.group("bare_branch")
-        if branch and not _is_allowed_branch_name(branch, sandbox_branch):
+        if branch and not _is_allowed_branch_name(branch, sandbox_branch, base_branch):
             return "'<redacted>'"
         return m.group(0)
 
@@ -1667,6 +1805,7 @@ def filter_ref_listing_output(
     output: str,
     args: List[str],
     sandbox_branch: str,
+    base_branch: Optional[str] = None,
 ) -> str:
     """Dispatch to the appropriate output filter based on git subcommand.
 
@@ -1683,6 +1822,7 @@ def filter_ref_listing_output(
     """
     if not output or not sandbox_branch:
         return output
+    base_branch = _normalize_base_branch(base_branch)
 
     subcommand, sub_args, _ = get_subcommand_args(args)
     if subcommand is None:
@@ -1690,21 +1830,21 @@ def filter_ref_listing_output(
 
     # Branch listing
     if subcommand == "branch":
-        return _filter_branch_output(output, sandbox_branch)
+        return _filter_branch_output(output, sandbox_branch, base_branch)
 
     # Ref enumeration commands
     if subcommand in _REF_ENUM_CMDS:
-        return _filter_ref_enum_output(output, sandbox_branch)
+        return _filter_ref_enum_output(output, sandbox_branch, base_branch)
 
     # Log with decorations
     if subcommand == "log":
         if _log_has_source_flag(sub_args):
-            output = _filter_log_source_refs(output, sandbox_branch)
+            output = _filter_log_source_refs(output, sandbox_branch, base_branch)
         if _log_has_custom_decoration_format(sub_args):
             return _filter_custom_format_decorations(
-                output, sandbox_branch,
+                output, sandbox_branch, base_branch,
                 has_bare_D=_log_has_bare_D_format(sub_args),
             )
-        return _filter_log_decorations(output, sandbox_branch)
+        return _filter_log_decorations(output, sandbox_branch, base_branch)
 
     return output

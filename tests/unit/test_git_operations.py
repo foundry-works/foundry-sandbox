@@ -43,7 +43,9 @@ from git_operations import (
     check_push_protected_branches,
     execute_git,
     validate_command,
+    validate_clone_args,
     validate_path,
+    validate_path_args,
     validate_request,
 )
 
@@ -69,7 +71,7 @@ class TestCommandAllowlist:
 
     def test_allowed_commands_pass_through(self):
         """Test that all allowlisted commands pass validation."""
-        allowed_cmds = ["status", "add", "commit", "push", "pull", "fetch", "diff", "log"]
+        allowed_cmds = ["status", "add", "commit", "push", "pull", "fetch", "diff", "log", "clone"]
 
         for cmd in allowed_cmds:
             result = validate_command([cmd])
@@ -148,6 +150,40 @@ class TestConfigKeyValidation:
         assert result is None
 
 
+class TestCloneValidation:
+    """Tests for clone validation and allowlist enforcement."""
+
+    def test_clone_allows_marketplace_https(self):
+        """Marketplace clone should be allowed via HTTPS."""
+        metadata = {"repo": "foundry-works/foundry-sandbox"}
+        extra, error = validate_clone_args(
+            ["clone", "https://github.com/anthropics/claude-plugins-official.git"],
+            metadata,
+        )
+        assert error is None
+        assert extra is not None
+
+    def test_clone_blocks_unknown_repo(self):
+        """Clone of non-allowlisted repo should be blocked."""
+        metadata = {"repo": "foundry-works/foundry-sandbox"}
+        extra, error = validate_clone_args(
+            ["clone", "https://github.com/example/unknown.git"],
+            metadata,
+        )
+        assert error is not None
+        assert "not authorized" in error.reason.lower()
+
+    def test_clone_blocks_non_https(self):
+        """Only HTTPS GitHub URLs are allowed for clone."""
+        metadata = {"repo": "foundry-works/foundry-sandbox"}
+        extra, error = validate_clone_args(
+            ["clone", "git@github.com:anthropics/claude-plugins-official.git"],
+            metadata,
+        )
+        assert error is not None
+        assert "https://github.com" in error.reason
+
+
 class TestPathValidation:
     """Tests for path validation and traversal prevention."""
 
@@ -174,7 +210,20 @@ class TestPathValidation:
 
             # Should be blocked because realpath resolves to /etc
             assert error is not None
-            assert "outside repo root" in error.reason.lower()
+            assert "outside" in error.reason.lower()
+
+    def test_path_args_allows_extra_root(self):
+        """Test that extra allowed roots permit absolute paths."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            extra_root = os.path.join(tmpdir, "extra")
+            os.makedirs(extra_root, exist_ok=True)
+            dest = os.path.join(extra_root, "plugin")
+            error = validate_path_args(
+                ["clone", "https://github.com/anthropics/claude-plugins-official.git", dest],
+                tmpdir,
+                extra_allowed_roots=[extra_root],
+            )
+            assert error is None
 
 
 class TestRequestValidation:
@@ -448,8 +497,8 @@ class TestResponseHandling:
 
                 # Should call subprocess with resolved cwd (not client's cwd)
                 called_cwd = mock_run.call_args[1]["cwd"]
-                # Should be within repo root
-                assert called_cwd.startswith(tmpdir)
+                # Should be within repo root (use realpath for macOS /var → /private/var)
+                assert called_cwd.startswith(os.path.realpath(tmpdir))
 
 
 class TestGitApiMetadataLookup:
@@ -690,7 +739,7 @@ class TestEdgeCases:
             # Try to use absolute path outside repo
             result_path, error = validate_path("/etc/passwd", tmpdir)
             assert error is not None
-            assert "outside repo root" in error.reason.lower()
+            assert "outside" in error.reason.lower()
 
     def test_path_validation_maps_workspace_absolute_path(self):
         """Absolute /workspace paths are translated to repo_root for compatibility."""
@@ -1362,7 +1411,7 @@ class TestResolveBareRepoPath:
             dot_git = os.path.join(tmpdir, ".git")
             os.makedirs(dot_git)
             result = resolve_bare_repo_path(tmpdir)
-            assert result == os.path.normpath(dot_git)
+            assert result == os.path.realpath(dot_git)
 
     def test_dot_git_directory_with_commondir(self):
         """When .git dir has a commondir file, follow it."""
@@ -1375,7 +1424,7 @@ class TestResolveBareRepoPath:
             with open(os.path.join(dot_git, "commondir"), "w") as f:
                 f.write(bare)
             result = resolve_bare_repo_path(os.path.join(tmpdir, "work"))
-            assert result == os.path.normpath(bare)
+            assert result == os.path.realpath(bare)
 
     def test_dot_git_file_worktree(self):
         """When .git is a file with gitdir pointer, follow the chain."""
@@ -1398,7 +1447,7 @@ class TestResolveBareRepoPath:
                 f.write(f"gitdir: {wt_gitdir}")
 
             result = resolve_bare_repo_path(wt)
-            assert result == os.path.normpath(bare)
+            assert result == os.path.realpath(bare)
 
     def test_no_dot_git(self):
         """Returns None when .git does not exist."""
@@ -1429,7 +1478,7 @@ class TestResolveBareRepoPath:
             with open(os.path.join(dot_git, "commondir"), "w") as f:
                 f.write(rel)
             result = resolve_bare_repo_path(tmpdir)
-            assert result == os.path.normpath(bare)
+            assert result == os.path.realpath(bare)
 
 
 class TestFetchLock:

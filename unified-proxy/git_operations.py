@@ -169,6 +169,11 @@ _REMOTE_CMDS = frozenset({
     "fetch", "pull", "push", "remote",
 })
 
+# Clone commands
+_CLONE_CMDS = frozenset({
+    "clone",
+})
+
 # Patch commands
 _PATCH_CMDS = frozenset({
     "apply", "am", "format-patch",
@@ -202,6 +207,7 @@ ALLOWED_COMMANDS: FrozenSet[str] = (
     | _BRANCH_CMDS
     | _HISTORY_CMDS
     | _REMOTE_CMDS
+    | _CLONE_CMDS
     | _PATCH_CMDS
     | _NOTES_CMDS
     | _CONFIG_CMDS
@@ -273,6 +279,51 @@ REMOTE_ALLOWED_SUBCOMMANDS: FrozenSet[str] = frozenset({
 REMOTE_BLOCKED_SUBCOMMANDS: FrozenSet[str] = frozenset({
     "add", "set-url", "remove", "rename",
 })
+
+# ---------------------------------------------------------------------------
+# Clone Validation
+# ---------------------------------------------------------------------------
+
+# Always-allowed repos for Claude plugin marketplaces (read-only)
+# Must match unified-proxy/addons/git_proxy.py
+ALLOWED_MARKETPLACES: FrozenSet[str] = frozenset({
+    "anthropics/claude-plugins-official",
+    "foundry-works/claude-foundry",
+})
+
+# Only allow HTTPS GitHub URLs (ensures proxy enforcement)
+_GITHUB_HTTPS_RE = re.compile(
+    r"^https://github\.com/(?P<owner>[A-Za-z0-9_.-]+)/"
+    r"(?P<repo>[A-Za-z0-9_.-]+?)(?:\.git)?/?$"
+)
+
+# Clone options that consume a value argument.
+_CLONE_OPTIONS_WITH_VALUE: FrozenSet[str] = frozenset({
+    "-b", "--branch",
+    "-o", "--origin",
+    "-c", "--config",
+    "--depth",
+    "--filter",
+    "--shallow-since",
+    "--shallow-exclude",
+    "--reference",
+    "--reference-if-able",
+    "--separate-git-dir",
+    "--template",
+    "--upload-pack",
+    "-j", "--jobs",
+})
+
+# Short options that may embed their value (e.g. -bmain)
+_CLONE_SHORT_EMBED_OPTS: Tuple[str, ...] = (
+    "-b",
+    "-o",
+    "-c",
+    "-j",
+)
+
+# Base64-safe credential pattern (user:pass@) — reject for clone URLs
+_CLONE_CRED_RE = re.compile(r"://[^/:@]+:[^/:@]+@")
 
 # ---------------------------------------------------------------------------
 # Config Key Validation (-c key=value)
@@ -667,6 +718,163 @@ def _validate_remote_subcommand(args: List[str]) -> Optional[ValidationError]:
     return ValidationError(f"Remote subcommand not allowed: {subcmd}")
 
 
+def _extract_clone_positionals(args: List[str]) -> List[str]:
+    """Extract positional args from clone subcommand args.
+
+    Returns [repo, dest] (dest optional) after stripping flags and
+    options that consume values.
+    """
+    positionals: List[str] = []
+    idx = 0
+    while idx < len(args):
+        arg = args[idx]
+
+        # -- terminates options; everything after is positional
+        if arg == "--":
+            idx += 1
+            positionals.extend(args[idx:])
+            break
+
+        # Options that consume values (separate arg)
+        if arg in _CLONE_OPTIONS_WITH_VALUE:
+            idx += 2
+            continue
+
+        # --opt=value form
+        if any(
+            arg.startswith(opt + "=")
+            for opt in _CLONE_OPTIONS_WITH_VALUE
+            if opt.startswith("--")
+        ):
+            idx += 1
+            continue
+
+        # Short options with embedded value (e.g. -bmain)
+        for opt in _CLONE_SHORT_EMBED_OPTS:
+            if arg.startswith(opt) and len(arg) > len(opt):
+                idx += 1
+                break
+        else:
+            if arg.startswith("-"):
+                idx += 1
+                continue
+
+            positionals.append(arg)
+            idx += 1
+            continue
+
+        # Embedded short opt consumed
+        continue
+
+    return positionals
+
+
+def _parse_github_https_repo(url: str) -> Optional[str]:
+    """Parse https://github.com/<owner>/<repo>[.git] URLs into owner/repo."""
+    if not url:
+        return None
+    if _CLONE_CRED_RE.search(url):
+        return None
+    match = _GITHUB_HTTPS_RE.match(url)
+    if not match:
+        return None
+    owner = match.group("owner")
+    repo = match.group("repo")
+    return f"{owner}/{repo}"
+
+
+def _get_allowed_repos(metadata: Optional[dict]) -> List[str]:
+    """Get allowed repos from container metadata in owner/repo form."""
+    if not metadata:
+        return []
+    allowed_repos = metadata.get("repos", [])
+    if not allowed_repos:
+        repo = metadata.get("repo")
+        if repo:
+            allowed_repos = [repo]
+    return allowed_repos if isinstance(allowed_repos, list) else []
+
+
+def validate_clone_args(
+    args: List[str],
+    metadata: Optional[dict] = None,
+) -> Tuple[Optional[List[str]], Optional[ValidationError]]:
+    """Validate clone arguments and return extra allowed roots.
+
+    Enforces:
+    - HTTPS GitHub URLs only
+    - Repo must be in allowed_repos or ALLOWED_MARKETPLACES
+    - Disallow embedded credentials in URL
+
+    Returns:
+        (extra_allowed_roots, None) if valid, (None, ValidationError) if blocked.
+        For non-clone commands, returns (None, None).
+    """
+    subcommand, sub_args, _ = get_subcommand_args(args)
+    if subcommand != "clone":
+        return None, None
+
+    positionals = _extract_clone_positionals(sub_args)
+    if not positionals:
+        return None, ValidationError("Clone requires a repository URL")
+
+    repo_url = positionals[0]
+    repo_spec = _parse_github_https_repo(repo_url)
+    if not repo_spec:
+        return None, ValidationError(
+            "Clone URL not allowed: must be https://github.com/<owner>/<repo>[.git]"
+        )
+
+    allowed_repos = _get_allowed_repos(metadata)
+    if repo_spec not in allowed_repos and repo_spec not in ALLOWED_MARKETPLACES:
+        return None, ValidationError(
+            f"Clone repository not authorized: {repo_spec}"
+        )
+
+    # Allow clone destinations under the Claude plugin dirs.
+    # The git API runs as root (HOME=/root) but the dev container user
+    # is always ubuntu (HOME=/home/ubuntu).
+    client_home = os.environ.get("CONTAINER_HOME", "/home/ubuntu")
+    plugin_base = os.path.join(client_home, ".claude", "plugins")
+    plugin_cache_root = os.path.join(plugin_base, "cache")
+    plugin_marketplaces_root = os.path.join(plugin_base, "marketplaces")
+    return [plugin_cache_root, plugin_marketplaces_root], None
+
+
+def _strip_clone_config_overrides(args: List[str]) -> List[str]:
+    """Strip config overrides that are safe to ignore for HTTPS clones.
+
+    Currently drops core.sshCommand when present as a global -c option.
+    This avoids blocking marketplace clones that inject sshCommand even
+    though HTTPS URLs do not use SSH.
+    """
+    stripped: List[str] = []
+    idx = 0
+    while idx < len(args):
+        arg = args[idx]
+        if arg == "-c" and idx + 1 < len(args):
+            pair = args[idx + 1]
+            key = pair.split("=", 1)[0]
+            if key == "core.sshCommand":
+                idx += 2
+                continue
+            stripped.extend([arg, pair])
+            idx += 2
+            continue
+        if arg.startswith("-c") and len(arg) > 2:
+            pair = arg[2:]
+            key = pair.split("=", 1)[0]
+            if key == "core.sshCommand":
+                idx += 1
+                continue
+            stripped.append(arg)
+            idx += 1
+            continue
+        stripped.append(arg)
+        idx += 1
+    return stripped
+
+
 def _validate_config_subcommand(args: List[str]) -> Optional[ValidationError]:
     """Validate git config — only read-only operations allowed."""
     if not args:
@@ -712,7 +920,12 @@ def _validate_sparse_checkout_subcommand(args: List[str]) -> Optional[Validation
 
 
 def _validate_clean_flags(args: List[str]) -> Optional[ValidationError]:
-    """Validate git clean — only --dry-run is allowed."""
+    """Validate git clean — only --dry-run is allowed.
+
+    Note: combined short options (e.g. ``-nfd``) are intentionally blocked
+    because they don't exactly match ``-n``.  This is conservative by design
+    — users must pass ``-n`` as a separate flag.
+    """
     for arg in args:
         if arg.startswith("-") and arg not in _CLEAN_ALLOWED_FLAGS:
             return ValidationError(
@@ -774,9 +987,25 @@ def validate_path(
     return resolved, None
 
 
-def validate_path_args(args: List[str], repo_root: str) -> Optional[ValidationError]:
-    """Check that path-like arguments don't contain traversal."""
+def validate_path_args(
+    args: List[str],
+    repo_root: str,
+    extra_allowed_roots: Optional[List[str]] = None,
+) -> Optional[ValidationError]:
+    """Check that path-like arguments don't contain traversal.
+
+    Allows optional extra roots (absolute paths) for sanctioned operations
+    like plugin marketplace clones.
+    """
     real_root = os.path.realpath(repo_root)
+    allowed_roots = [real_root]
+    if extra_allowed_roots:
+        for root in extra_allowed_roots:
+            try:
+                allowed_roots.append(os.path.realpath(root))
+            except OSError:
+                continue
+
     # Translate /workspace paths to repo_root (proxy mounts at /git-workspace)
     client_root = os.path.realpath(
         os.environ.get("GIT_CLIENT_WORKSPACE_ROOT", "/workspace")
@@ -799,8 +1028,11 @@ def validate_path_args(args: List[str], repo_root: str) -> Optional[ValidationEr
             ):
                 rel = os.path.relpath(resolved, client_root)
                 resolved = os.path.realpath(os.path.join(real_root, rel))
-            if not resolved.startswith(real_root + os.sep) and resolved != real_root:
-                return ValidationError(f"Path outside repo root: {arg}")
+            if not any(
+                resolved == root or resolved.startswith(root + os.sep)
+                for root in allowed_roots
+            ):
+                return ValidationError(f"Path outside allowed roots: {arg}")
 
     return None
 
@@ -811,6 +1043,11 @@ def validate_path_args(args: List[str], repo_root: str) -> Optional[ValidationEr
 
 # SHA used by git_policies to detect creation/deletion operations.
 _ZERO_SHA = "0" * 40
+
+# Synthetic SHAs for policy checks where real SHAs are unavailable.
+# Any non-zero SHA signals "existing ref" to check_protected_branches.
+_SYNTHETIC_OLD_SHA = "1" * 40
+_SYNTHETIC_NEW_SHA = "2" * 40
 
 # Push options that consume the following argument.
 _PUSH_OPTIONS_WITH_VALUE: FrozenSet[str] = frozenset({
@@ -1101,7 +1338,7 @@ def check_push_protected_branches(
             qualified = _qualify_ref(target)
             block_reason = check_protected_branches(
                 refname=qualified,
-                old_sha="1" * 40,
+                old_sha=_SYNTHETIC_OLD_SHA,
                 new_sha=_ZERO_SHA,  # Deletion
                 bare_repo_path=bare_repo_path,
                 metadata=metadata,
@@ -1115,8 +1352,8 @@ def check_push_protected_branches(
     for refname in refnames:
         block_reason = check_protected_branches(
             refname=refname,
-            old_sha="1" * 40,   # Non-zero: treat as update
-            new_sha="2" * 40,   # Non-zero: treat as update
+            old_sha=_SYNTHETIC_OLD_SHA,   # Non-zero: treat as update
+            new_sha=_SYNTHETIC_NEW_SHA,   # Non-zero: treat as update
             bare_repo_path=bare_repo_path,
             metadata=metadata,
         )
@@ -1135,7 +1372,7 @@ def check_push_protected_branches(
                 qualified = _qualify_ref(dst)
                 block_reason = check_protected_branches(
                     refname=qualified,
-                    old_sha="1" * 40,
+                    old_sha=_SYNTHETIC_OLD_SHA,
                     new_sha=_ZERO_SHA,  # Deletion
                     bare_repo_path=bare_repo_path,
                     metadata=metadata,
@@ -1174,6 +1411,171 @@ def build_clean_env() -> Dict[str, str]:
         clean["PATH"] = "/usr/local/bin:/usr/bin:/bin"
 
     return clean
+
+
+def _git_config_get(
+    cwd: str,
+    env: Dict[str, str],
+    key: str,
+    git_dir: Optional[str] = None,
+) -> Optional[str]:
+    """Read a single git config value (best-effort)."""
+    try:
+        cmd = [GIT_BINARY]
+        if git_dir:
+            cmd += ["--git-dir", git_dir]
+        cmd += ["config", "--get", key]
+        result = subprocess.run(
+            cmd,
+            cwd=cwd,
+            capture_output=True,
+            timeout=SUBPROCESS_TIMEOUT,
+            env=env,
+        )
+    except (subprocess.TimeoutExpired, OSError):
+        return None
+    if result.returncode != 0:
+        return None
+    return result.stdout.decode("utf-8", errors="replace").strip() or None
+
+
+def _read_remote_urls_from_bare_config(
+    bare_repo: Optional[str],
+) -> Dict[str, Dict[str, List[str]]]:
+    """Parse remote URLs directly from a bare repo config file.
+
+    Returns mapping: remote -> {"url": str|None, "pushurls": [str]}.
+    """
+    if not bare_repo:
+        return {}
+    config_path = os.path.join(bare_repo, "config")
+    if not os.path.isfile(config_path):
+        return {}
+    remotes: Dict[str, Dict[str, List[str]]] = {}
+    current: Optional[str] = None
+    try:
+        with open(config_path, "r", encoding="utf-8", errors="replace") as f:
+            for line in f:
+                stripped = line.strip()
+                if not stripped or stripped.startswith("#") or stripped.startswith(";"):
+                    continue
+                if stripped.startswith("[") and stripped.endswith("]"):
+                    m = re.match(r'\[remote "(.+)"\]', stripped)
+                    if m:
+                        current = m.group(1)
+                        remotes.setdefault(current, {"url": None, "pushurls": []})
+                    else:
+                        current = None
+                    continue
+                if current and "=" in stripped:
+                    key, val = stripped.split("=", 1)
+                    key = key.strip()
+                    val = val.strip()
+                    if key == "url":
+                        remotes[current]["url"] = val
+                    elif key == "pushurl":
+                        remotes[current]["pushurls"].append(val)
+    except OSError:
+        return {}
+    return remotes
+
+
+def _git_config_get_all(
+    cwd: str,
+    env: Dict[str, str],
+    key: str,
+    git_dir: Optional[str] = None,
+) -> List[str]:
+    """Read all values for a git config key (best-effort)."""
+    try:
+        cmd = [GIT_BINARY]
+        if git_dir:
+            cmd += ["--git-dir", git_dir]
+        cmd += ["config", "--get-all", key]
+        result = subprocess.run(
+            cmd,
+            cwd=cwd,
+            capture_output=True,
+            timeout=SUBPROCESS_TIMEOUT,
+            env=env,
+        )
+    except (subprocess.TimeoutExpired, OSError):
+        return []
+    if result.returncode != 0:
+        return []
+    lines = result.stdout.decode("utf-8", errors="replace").splitlines()
+    return [line.strip() for line in lines if line.strip()]
+
+
+def _get_remote_names_from_config(
+    cwd: str,
+    env: Dict[str, str],
+    git_dir: Optional[str] = None,
+) -> List[str]:
+    """Extract remote names from git config (best-effort)."""
+    try:
+        cmd = [GIT_BINARY]
+        if git_dir:
+            cmd += ["--git-dir", git_dir]
+        cmd += ["config", "--get-regexp", r"^remote\\..*\\.url$"]
+        result = subprocess.run(
+            cmd,
+            cwd=cwd,
+            capture_output=True,
+            timeout=SUBPROCESS_TIMEOUT,
+            env=env,
+        )
+    except (subprocess.TimeoutExpired, OSError):
+        return []
+    if result.returncode != 0:
+        # Fall back to parsing the bare config directly
+        remotes = _read_remote_urls_from_bare_config(git_dir)
+        return sorted(remotes.keys())
+    names: List[str] = []
+    for line in result.stdout.decode("utf-8", errors="replace").splitlines():
+        if not line:
+            continue
+        key = line.split(None, 1)[0]
+        if key.startswith("remote.") and key.endswith(".url"):
+            name = key[len("remote."):-len(".url")]
+            if name:
+                names.append(name)
+    return sorted(set(names))
+
+
+def _synthesize_remote_verbose_output(
+    cwd: str,
+    env: Dict[str, str],
+    git_dir: Optional[str] = None,
+) -> str:
+    """Build a fallback `git remote -v` output from config (best-effort)."""
+    remotes = _get_remote_names_from_config(cwd, env, git_dir)
+    remotes_from_file = _read_remote_urls_from_bare_config(git_dir)
+    if not remotes:
+        remotes = sorted(remotes_from_file.keys())
+    if not remotes:
+        return ""
+
+    lines: List[str] = []
+    for name in remotes:
+        url = _git_config_get(cwd, env, f"remote.{name}.url", git_dir=git_dir)
+        if not url and name in remotes_from_file:
+            url = remotes_from_file[name].get("url")
+        if not url:
+            continue
+        pushurls = _git_config_get_all(
+            cwd, env, f"remote.{name}.pushurl", git_dir=git_dir
+        )
+        if not pushurls and name in remotes_from_file:
+            pushurls = remotes_from_file[name].get("pushurls", [])
+        if not pushurls:
+            pushurls = [url]
+        lines.append(f"{name}\t{url} (fetch)")
+        for pushurl in pushurls:
+            lines.append(f"{name}\t{pushurl} (push)")
+    if not lines:
+        return ""
+    return "\n".join(lines) + "\n"
 
 
 # ---------------------------------------------------------------------------
@@ -1273,19 +1675,43 @@ def execute_git(
         if isinstance(git_meta, dict):
             extra = git_meta.get("allowed_commands")
             if isinstance(extra, list):
-                extra_allowed = set(extra)
+                extra_allowed = {
+                    cmd for cmd in extra
+                    if isinstance(cmd, str)
+                    and re.fullmatch(r"[a-z][a-z0-9-]*", cmd)
+                }
 
     # Generate request ID for audit correlation
     req_id = str(uuid.uuid4())
 
+    args = request.args
+
+    # Clone-specific validation (repo allowlist + destination allowlist)
+    clone_allowed_roots = None
+    clone_extra, clone_err = validate_clone_args(args, metadata)
+    if clone_err:
+        audit_log(
+            event="clone_blocked",
+            action="clone",
+            decision="deny",
+            command_args=args,
+            reason=clone_err.reason,
+            matched_rule="clone_validation",
+            request_id=req_id,
+        )
+        return None, clone_err
+    if clone_extra:
+        clone_allowed_roots = clone_extra
+        args = _strip_clone_config_overrides(args)
+
     # Validate command
-    err = validate_command(request.args, extra_allowed)
+    err = validate_command(args, extra_allowed)
     if err:
         audit_log(
             event="command_blocked",
-            action=" ".join(request.args[:3]),
+            action=" ".join(args[:3]),
             decision="deny",
-            command_args=request.args,
+            command_args=args,
             reason=err.reason,
             matched_rule="command_validation",
             request_id=req_id,
@@ -1293,13 +1719,13 @@ def execute_git(
         return None, err
 
     # Validate branch isolation
-    err = validate_branch_isolation(request.args, metadata)
+    err = validate_branch_isolation(args, metadata)
     if err:
         audit_log(
             event="branch_isolation_blocked",
-            action=" ".join(request.args[:3]),
+            action=" ".join(args[:3]),
             decision="deny",
-            command_args=request.args,
+            command_args=args,
             reason=err.reason,
             matched_rule="branch_isolation",
             request_id=req_id,
@@ -1307,13 +1733,13 @@ def execute_git(
         return None, err
 
     # Validate SHA reachability (must follow branch isolation check)
-    err = validate_sha_reachability(request.args, repo_root, metadata)
+    err = validate_sha_reachability(args, repo_root, metadata)
     if err:
         audit_log(
             event="sha_reachability_blocked",
-            action=" ".join(request.args[:3]),
+            action=" ".join(args[:3]),
             decision="deny",
-            command_args=request.args,
+            command_args=args,
             reason=err.reason,
             matched_rule="sha_reachability",
             request_id=req_id,
@@ -1323,26 +1749,28 @@ def execute_git(
     # Validate working directory
     resolved_cwd, err = validate_path(request.cwd, repo_root)
     if err:
-        audit_log(event="path_blocked", action=" ".join(request.args[:3]),
-                  decision="deny", command_args=request.args, reason=err.reason,
+        audit_log(event="path_blocked", action=" ".join(args[:3]),
+                  decision="deny", command_args=args, reason=err.reason,
                   matched_rule="path_validation", request_id=req_id)
         return None, err
 
     # Validate path args
-    err = validate_path_args(request.args, repo_root)
+    err = validate_path_args(
+        args, repo_root, extra_allowed_roots=clone_allowed_roots
+    )
     if err:
-        audit_log(event="path_blocked", action=" ".join(request.args[:3]),
-                  decision="deny", command_args=request.args, reason=err.reason,
+        audit_log(event="path_blocked", action=" ".join(args[:3]),
+                  decision="deny", command_args=args, reason=err.reason,
                   matched_rule="path_arg_validation", request_id=req_id)
         return None, err
 
     # Check protected branches for push operations
-    push_args = _extract_push_args(request.args)
+    push_args = _extract_push_args(args)
     if push_args is not None:
         err = check_push_protected_branches(push_args, repo_root, metadata)
         if err:
             audit_log(event="push_blocked", action="push",
-                      decision="deny", command_args=request.args, reason=err.reason,
+                      decision="deny", command_args=args, reason=err.reason,
                       matched_rule="protected_branch", request_id=req_id)
             return None, err
 
@@ -1358,7 +1786,7 @@ def execute_git(
     client_root = os.environ.get("GIT_CLIENT_WORKSPACE_ROOT", "/workspace")
     real_repo = os.path.realpath(repo_root)
     translated_args = []
-    for arg in request.args:
+    for arg in args:
         if not arg.startswith("-") and os.path.isabs(arg):
             if arg == client_root or arg.startswith(client_root + "/"):
                 arg = real_repo + arg[len(client_root):]
@@ -1371,7 +1799,7 @@ def execute_git(
     env = build_clean_env()
 
     # Fetch locking: serialize concurrent fetch/pull per bare repo
-    subcommand = get_subcommand(request.args)
+    subcommand = get_subcommand(args)
     fetch_lock_ctx: Optional[contextlib.AbstractContextManager] = None
     if subcommand in ("fetch", "pull"):
         # Check break-glass override
@@ -1382,7 +1810,7 @@ def execute_git(
                 event="fetch_lock_unavailable",
                 action=subcommand,
                 decision="deny",
-                command_args=request.args,
+                command_args=args,
                 reason="Cannot resolve bare repo path for fetch locking",
                 matched_rule="fetch_lock",
                 request_id=req_id,
@@ -1398,7 +1826,7 @@ def execute_git(
                 event="fetch_lock_bypassed",
                 action=subcommand,
                 decision="allow",
-                command_args=request.args,
+                command_args=args,
                 reason="FOUNDRY_ALLOW_UNLOCKED_FETCH=1 override",
                 matched_rule="fetch_lock_bypass",
                 request_id=req_id,
@@ -1419,9 +1847,9 @@ def execute_git(
     except TimeoutError as exc:
         audit_log(
             event="fetch_lock_timeout",
-            action=subcommand or " ".join(request.args[:3]),
+            action=subcommand or " ".join(args[:3]),
             decision="deny",
-            command_args=request.args,
+            command_args=args,
             reason=str(exc),
             matched_rule="fetch_lock",
             request_id=req_id,
@@ -1430,16 +1858,18 @@ def execute_git(
             "Fetch lock timed out; another fetch may be in progress"
         )
     except subprocess.TimeoutExpired:
-        audit_log(event="command_timeout", action=" ".join(request.args[:3]),
-                  decision="deny", command_args=request.args, reason="Command timed out",
+        audit_log(event="command_timeout", action=" ".join(args[:3]),
+                  decision="deny", command_args=args, reason="Command timed out",
                   matched_rule="timeout", request_id=req_id)
         return None, ValidationError("Command timed out")
     except OSError as exc:
         logger.error("Git execution failed: %s", exc)
-        audit_log(event="command_error", action=" ".join(request.args[:3]),
-                  decision="deny", command_args=request.args, reason=str(exc),
+        audit_log(event="command_error", action=" ".join(args[:3]),
+                  decision="deny", command_args=args, reason=str(exc),
                   matched_rule="os_error", request_id=req_id)
         return None, ValidationError(f"Execution error: {exc}")
+
+    exit_code = result.returncode
 
     # Process stdout
     stdout_raw = result.stdout
@@ -1470,15 +1900,66 @@ def execute_git(
         if stderr_str:
             stderr_str = stderr_str.replace(real_repo, client_root)
 
+    # Fallback: synthesize remote output when empty or command failed
+    if subcommand == "remote" and stdout_str.strip() == "":
+        subcmd, sub_args, _ = get_subcommand_args(args)
+        bare_repo = resolve_bare_repo_path(resolved_cwd)
+        remotes_from_file = _read_remote_urls_from_bare_config(bare_repo)
+        if sub_args and "get-url" in sub_args:
+            idx = sub_args.index("get-url")
+            remote_name = "origin"
+            if idx + 1 < len(sub_args) and not sub_args[idx + 1].startswith("-"):
+                remote_name = sub_args[idx + 1]
+            url = _git_config_get(
+                resolved_cwd, env, f"remote.{remote_name}.url", git_dir=bare_repo
+            )
+            if not url and remote_name in remotes_from_file:
+                url = remotes_from_file[remote_name].get("url")
+            if url:
+                audit_log(
+                    event="remote_output_synthesized",
+                    action="remote get-url",
+                    decision="allow",
+                    command_args=args,
+                    request_id=req_id,
+                    reason="Synthesized get-url output from bare repo config",
+                )
+                stdout_str = url + "\n"
+                stdout_b64 = None
+                exit_code = 0
+                stderr_str = ""
+        if stdout_str.strip() == "" and (sub_args and "-v" in sub_args):
+            synthesized = _synthesize_remote_verbose_output(
+                resolved_cwd, env, git_dir=bare_repo
+            )
+            if synthesized:
+                audit_log(
+                    event="remote_output_synthesized",
+                    action="remote -v",
+                    decision="allow",
+                    command_args=args,
+                    request_id=req_id,
+                    reason="Synthesized verbose remote output from bare repo config",
+                )
+                stdout_str = synthesized
+                stdout_b64 = None
+                exit_code = 0
+                stderr_str = ""
+
     # Apply branch isolation output filtering
     sandbox_branch = metadata.get("sandbox_branch") if metadata else None
+    base_branch = metadata.get("from_branch") if metadata else None
     if sandbox_branch and stdout_str:
-        stdout_str = filter_ref_listing_output(stdout_str, request.args, sandbox_branch)
+        stdout_str = filter_ref_listing_output(
+            stdout_str, args, sandbox_branch, base_branch
+        )
     if sandbox_branch and stderr_str:
-        stderr_str = filter_stderr_branch_refs(stderr_str, sandbox_branch)
+        stderr_str = filter_stderr_branch_refs(
+            stderr_str, sandbox_branch, base_branch
+        )
 
     response = GitExecResponse(
-        exit_code=result.returncode,
+        exit_code=exit_code,
         stdout=stdout_str,
         stderr=stderr_str,
         stdout_b64=stdout_b64,
@@ -1487,10 +1968,10 @@ def execute_git(
 
     audit_log(
         event="command_executed",
-        action=" ".join(request.args[:3]),
+        action=" ".join(args[:3]),
         decision="allow",
-        command_args=request.args,
-        exit_code=result.returncode,
+        command_args=args,
+        exit_code=exit_code,
         stdout=stdout_str or "",
         stderr=stderr_str,
         request_id=req_id,
@@ -1512,6 +1993,8 @@ async def execute_git_async(
     """
     semaphore = _semaphore_pool.get(sandbox_id)
 
+    # Single-threaded event loop: no await between check and acquire,
+    # so no other coroutine can interleave.
     if semaphore.locked():
         return None, ValidationError(
             f"Too many concurrent operations for sandbox {sandbox_id}"

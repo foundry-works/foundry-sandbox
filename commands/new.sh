@@ -843,6 +843,10 @@ cmd_new() {
                 branch="sandbox-${timestamp}"
             fi
         fi
+        # from_branch precedence:
+        # 1. --from <branch> (explicit user flag)
+        # 2. Current branch of local repo path (set above, line 802-804)
+        # 3. "main" (default when branch is auto-generated)
         from_branch="${from_branch:-main}"
     fi
 
@@ -1186,7 +1190,8 @@ OVERRIDES
                 --arg repo "$repo_spec" \
                 --arg allow_pr "$allow_pr" \
                 --arg sandbox_branch "$branch" \
-                '{repo: $repo, allow_pr: ($allow_pr == "true"), sandbox_branch: $sandbox_branch}')
+                --arg from_branch "${from_branch:-}" \
+                '{repo: $repo, allow_pr: ($allow_pr == "true"), sandbox_branch: $sandbox_branch, from_branch: $from_branch}')
         fi
 
         if ! setup_proxy_registration "$container_id" "$metadata_json"; then
@@ -1199,7 +1204,7 @@ OVERRIDES
         fi
     fi
 
-    copy_configs_to_container "$container_id" "0" "$runtime_enable_ssh" "$working_dir" "$isolate_credentials"
+    copy_configs_to_container "$container_id" "0" "$runtime_enable_ssh" "$working_dir" "$isolate_credentials" "$from_branch" "$branch" "$repo_url"
 
     if [ ${#copies[@]} -gt 0 ]; then
         echo "Copying files into container..."

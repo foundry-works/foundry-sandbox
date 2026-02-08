@@ -171,14 +171,15 @@ cmd_start() {
                 --arg repo "$repo_spec" \
                 --arg allow_pr "${SANDBOX_ALLOW_PR:-0}" \
                 --arg sandbox_branch "${SANDBOX_BRANCH:-}" \
-                '{repo: $repo, allow_pr: ($allow_pr == "1"), sandbox_branch: $sandbox_branch}')
+                --arg from_branch "${SANDBOX_FROM_BRANCH:-}" \
+                '{repo: $repo, allow_pr: ($allow_pr == "1"), sandbox_branch: $sandbox_branch, from_branch: $from_branch}')
         fi
         if ! setup_proxy_registration "$container_id" "$metadata_json"; then
             die "Failed to register container with unified-proxy"
         fi
     fi
 
-    copy_configs_to_container "$container_id" "0" "$enable_ssh" "$SANDBOX_WORKING_DIR"
+    copy_configs_to_container "$container_id" "0" "$enable_ssh" "$SANDBOX_WORKING_DIR" "$isolate_credentials" "$SANDBOX_FROM_BRANCH" "$SANDBOX_BRANCH" "$SANDBOX_REPO_URL"
 
     # Log sparse checkout reminder if enabled
     if [ "${SANDBOX_SPARSE_CHECKOUT:-0}" = "1" ] && [ -n "$SANDBOX_WORKING_DIR" ]; then

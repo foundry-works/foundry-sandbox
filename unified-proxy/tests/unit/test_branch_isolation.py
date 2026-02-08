@@ -196,6 +196,11 @@ class TestIsAllowedBranchName:
     def test_other_sandbox_blocked(self):
         assert _is_allowed_branch_name("sandbox/other", SANDBOX) is False
 
+    def test_base_branch_allowed(self):
+        assert _is_allowed_branch_name(
+            "feature/xyz", SANDBOX, base_branch="feature/xyz"
+        ) is True
+
     def test_arbitrary_branch_blocked(self):
         assert _is_allowed_branch_name("feature/xyz", SANDBOX) is False
 
@@ -916,6 +921,19 @@ class TestRemoteBranchOutputFiltering:
         result = filter_ref_listing_output(output, ["branch", "-a"], SANDBOX)
         assert f"* {SANDBOX}" in result
         assert "main" in result
+        assert "sandbox/other" not in result
+
+    def test_branch_a_shows_base_branch(self):
+        base_branch = "feature/xyz"
+        output = (
+            f"* {SANDBOX}\n"
+            f"  remotes/origin/{base_branch}\n"
+            "  remotes/origin/sandbox/other\n"
+        )
+        result = filter_ref_listing_output(
+            output, ["branch", "-a"], SANDBOX, base_branch=base_branch
+        )
+        assert f"remotes/origin/{base_branch}" in result
         assert "sandbox/other" not in result
 
 
