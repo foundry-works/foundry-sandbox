@@ -10,6 +10,7 @@ we test the actual business logic without requiring the full mitmproxy runtime.
 """
 
 import os
+import shutil
 import sys
 from unittest.mock import MagicMock
 
@@ -904,6 +905,261 @@ class TestProtectedBranchEnforcement:
                 )
                 assert result is not None
             assert os.path.exists(lock_path)
+
+
+class TestRestrictedPathsCheck:
+    """Tests for restricted file path blocking on pushes.
+
+    These tests verify _check_restricted_paths() which inspects pack data
+    to block pushes modifying .github/workflows/ or .github/actions/.
+    Tests mock subprocess.run since the method shells out to git.
+    """
+
+    def _make_addon_and_flow(self, refs_data, bare_repo_path="/fake/bare"):
+        """Create addon + flow with container metadata including bare_repo_path."""
+        addon = git_proxy.GitProxyAddon()
+        container = create_container_config(
+            repos=["octocat/hello-world"],
+            bare_repo_path=bare_repo_path,
+        )
+        content = create_pktline_data(refs_data)
+        # Append fake pack data so pack_data is non-empty
+        content += b"PACK" + b"\x00" * 20
+        flow = create_git_flow(
+            "/octocat/hello-world.git/git-receive-pack",
+            method="POST",
+            content=content,
+            container_config=container,
+        )
+        return addon, flow
+
+    def _mock_subprocess_success(self, diff_output="src/main.py\n"):
+        """Return a side_effect function for subprocess.run that simulates success.
+
+        git init -> success, git unpack-objects -> success, git diff-tree -> diff_output.
+        """
+        call_count = [0]
+
+        def side_effect(cmd, **kwargs):
+            call_count[0] += 1
+            result = MagicMock()
+            result.returncode = 0
+            result.stdout = b""
+            result.stderr = b""
+            if "diff-tree" in cmd:
+                result.stdout = diff_output.encode()
+            return result
+
+        return side_effect
+
+    def _mock_subprocess_with_diff(self, diff_output):
+        """Return a side_effect that returns specific diff-tree output."""
+        return self._mock_subprocess_success(diff_output)
+
+    @pytest.fixture(autouse=True)
+    def _patch_fs(self, monkeypatch, tmp_path):
+        """Patch filesystem operations used by _check_restricted_paths."""
+        self._tmp_dir = str(tmp_path / "git-restricted-check-test")
+        os.makedirs(self._tmp_dir, exist_ok=True)
+        # Create objects/info dir so the code can write alternates
+        os.makedirs(os.path.join(self._tmp_dir, "objects", "info"), exist_ok=True)
+
+        monkeypatch.setattr(
+            "tempfile.mkdtemp",
+            lambda prefix="": self._tmp_dir,
+        )
+        # Patch shutil.rmtree to track cleanup calls
+        self._rmtree_calls = []
+        original_rmtree = shutil.rmtree
+
+        def tracking_rmtree(path, **kwargs):
+            self._rmtree_calls.append(path)
+            # Actually clean up
+            if os.path.isdir(path):
+                original_rmtree(path, **kwargs)
+
+        monkeypatch.setattr("shutil.rmtree", tracking_rmtree)
+
+    def test_blocked_push_workflow_file(self, monkeypatch):
+        """Push containing .github/workflows/ci.yml change is blocked."""
+        refs_data = [("a" * 40, "b" * 40, "refs/heads/feature-x")]
+        addon, flow = self._make_addon_and_flow(refs_data)
+
+        monkeypatch.setattr(
+            "subprocess.run",
+            self._mock_subprocess_with_diff(".github/workflows/ci.yml\n"),
+        )
+        monkeypatch.setattr("os.path.isdir", lambda p: True)
+
+        addon.request(flow)
+
+        assert flow.response is not None
+        assert flow.response.status_code == 403
+
+    def test_blocked_push_actions_file(self, monkeypatch):
+        """Push containing .github/actions/custom/action.yml change is blocked."""
+        refs_data = [("a" * 40, "b" * 40, "refs/heads/feature-x")]
+        addon, flow = self._make_addon_and_flow(refs_data)
+
+        monkeypatch.setattr(
+            "subprocess.run",
+            self._mock_subprocess_with_diff(".github/actions/custom/action.yml\n"),
+        )
+        monkeypatch.setattr("os.path.isdir", lambda p: True)
+
+        addon.request(flow)
+
+        assert flow.response is not None
+        assert flow.response.status_code == 403
+
+    def test_allowed_push_normal_file(self, monkeypatch):
+        """Push containing only src/main.py change is allowed."""
+        refs_data = [("a" * 40, "b" * 40, "refs/heads/feature-x")]
+        addon, flow = self._make_addon_and_flow(refs_data)
+
+        monkeypatch.setattr(
+            "subprocess.run",
+            self._mock_subprocess_with_diff("src/main.py\n"),
+        )
+        monkeypatch.setattr("os.path.isdir", lambda p: True)
+
+        addon.request(flow)
+
+        # No response means allowed
+        assert flow.response is None
+
+    def test_blocked_push_new_branch_with_workflow(self, monkeypatch):
+        """Branch creation containing a workflow file is blocked."""
+        refs_data = [(ZERO_SHA, "b" * 40, "refs/heads/new-feature")]
+        addon, flow = self._make_addon_and_flow(refs_data)
+
+        monkeypatch.setattr(
+            "subprocess.run",
+            self._mock_subprocess_with_diff(".github/workflows/deploy.yml\nsrc/app.py\n"),
+        )
+        monkeypatch.setattr("os.path.isdir", lambda p: True)
+
+        addon.request(flow)
+
+        assert flow.response is not None
+        assert flow.response.status_code == 403
+
+    def test_allowed_push_branch_deletion(self, monkeypatch):
+        """Branch deletion is not inspected for restricted paths (no files to check)."""
+        refs_data = [("a" * 40, ZERO_SHA, "refs/heads/old-branch")]
+        addon, flow = self._make_addon_and_flow(refs_data)
+
+        # subprocess should not be called for diff-tree on deletions,
+        # but the deletion will be blocked by the deletion check first
+        monkeypatch.setattr("subprocess.run", self._mock_subprocess_success())
+        monkeypatch.setattr("os.path.isdir", lambda p: True)
+
+        addon.request(flow)
+
+        # Blocked by deletion check, not restricted paths
+        assert flow.response is not None
+        assert flow.response.status_code == 403
+        assert b"deletion" in flow.response.content.lower()
+
+    def test_fail_closed_on_diff_error(self, monkeypatch):
+        """If git diff-tree fails, push is blocked."""
+        refs_data = [("a" * 40, "b" * 40, "refs/heads/feature-x")]
+        addon, flow = self._make_addon_and_flow(refs_data)
+
+        call_count = [0]
+
+        def diff_fails(cmd, **kwargs):
+            call_count[0] += 1
+            result = MagicMock()
+            result.returncode = 0
+            result.stdout = b""
+            result.stderr = b""
+            if "diff-tree" in cmd:
+                result.returncode = 128
+                result.stderr = b"fatal: bad object"
+            return result
+
+        monkeypatch.setattr("subprocess.run", diff_fails)
+        monkeypatch.setattr("os.path.isdir", lambda p: True)
+
+        addon.request(flow)
+
+        assert flow.response is not None
+        assert flow.response.status_code == 403
+
+    def test_fail_closed_on_unpack_error(self, monkeypatch):
+        """If git unpack-objects fails, push is blocked."""
+        refs_data = [("a" * 40, "b" * 40, "refs/heads/feature-x")]
+        addon, flow = self._make_addon_and_flow(refs_data)
+
+        call_count = [0]
+
+        def unpack_fails(cmd, **kwargs):
+            call_count[0] += 1
+            result = MagicMock()
+            result.returncode = 0
+            result.stdout = b""
+            result.stderr = b""
+            if "unpack-objects" in cmd:
+                result.returncode = 1
+                result.stderr = b"fatal: unpack failed"
+            return result
+
+        monkeypatch.setattr("subprocess.run", unpack_fails)
+        monkeypatch.setattr("os.path.isdir", lambda p: True)
+
+        addon.request(flow)
+
+        assert flow.response is not None
+        assert flow.response.status_code == 403
+
+    def test_temp_dir_cleanup(self, monkeypatch):
+        """Temporary object store is cleaned up even on failure."""
+        refs_data = [("a" * 40, "b" * 40, "refs/heads/feature-x")]
+        addon, flow = self._make_addon_and_flow(refs_data)
+
+        def exploding_subprocess(cmd, **kwargs):
+            result = MagicMock()
+            result.returncode = 0
+            result.stdout = b""
+            result.stderr = b""
+            if "diff-tree" in cmd:
+                raise RuntimeError("Simulated explosion")
+            return result
+
+        monkeypatch.setattr("subprocess.run", exploding_subprocess)
+        monkeypatch.setattr("os.path.isdir", lambda p: True)
+
+        addon.request(flow)
+
+        # Push should be blocked (fail closed)
+        assert flow.response is not None
+        assert flow.response.status_code == 403
+        # Temp dir should have been cleaned up
+        assert len(self._rmtree_calls) > 0
+        assert self._tmp_dir in self._rmtree_calls
+
+    def test_error_message_is_generic(self, monkeypatch):
+        """Returned error message does not contain file paths or restricted path names."""
+        refs_data = [("a" * 40, "b" * 40, "refs/heads/feature-x")]
+        addon, flow = self._make_addon_and_flow(refs_data)
+
+        monkeypatch.setattr(
+            "subprocess.run",
+            self._mock_subprocess_with_diff(".github/workflows/ci.yml\n"),
+        )
+        monkeypatch.setattr("os.path.isdir", lambda p: True)
+
+        addon.request(flow)
+
+        assert flow.response is not None
+        error_msg = flow.response.content.decode()
+        # Must not leak specific file paths or restricted path patterns
+        assert ".github/workflows" not in error_msg
+        assert ".github/actions" not in error_msg
+        assert "ci.yml" not in error_msg
+        # Should use the generic message
+        assert "security policy" in error_msg.lower()
 
 
 if __name__ == "__main__":
