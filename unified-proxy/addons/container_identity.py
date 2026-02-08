@@ -32,6 +32,11 @@ CONTAINER_ID_HEADER = "X-Container-Id"
 # Metadata key for attaching container config to flow
 FLOW_METADATA_KEY = "container_config"
 
+# Base directory where bare repos are stored (proxy-side mount point)
+REPOS_BASE_DIR = os.environ.get(
+    "REPOS_BASE_DIR", "/home/ubuntu/.sandboxes/repos"
+)
+
 # Global registry instance (initialized in load())
 _registry: Optional[ContainerRegistry] = None
 
@@ -118,6 +123,17 @@ class ContainerIdentityAddon:
                 f"Validated and stripped {CONTAINER_ID_HEADER} header "
                 f"for container {container_config.container_id}"
             )
+
+        # Enrich metadata with bare_repo_path if repo is known
+        metadata = container_config.metadata or {}
+        if "bare_repo_path" not in metadata:
+            repo = metadata.get("repo", "")
+            if repo and "/" in repo:
+                owner, repo_name = repo.split("/", 1)
+                metadata["bare_repo_path"] = os.path.join(
+                    REPOS_BASE_DIR, owner, repo_name + ".git"
+                )
+                container_config.metadata = metadata
 
         # Attach container config to flow metadata for downstream addons
         flow.metadata[FLOW_METADATA_KEY] = container_config

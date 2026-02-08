@@ -2,7 +2,7 @@
   "spec_id": "infrastructure-hardening-2026-02-08-001",
   "title": "infrastructure-hardening",
   "generated": "2026-02-08T21:54:35.734825Z",
-  "last_updated": "2026-02-08T22:40:02.843561Z",
+  "last_updated": "2026-02-08T22:45:43.299414Z",
   "metadata": {
     "description": "",
     "mission": "Close remaining infrastructure hardening gaps: harden git hook prevention on proxy side, block self-merge vectors at both API filter and policy engine layers, restore read-only filesystem in credential isolation mode, and block workflow file pushes via pack data inspection.",
@@ -21,7 +21,7 @@
     "category": "implementation",
     "template": "empty"
   },
-  "progress_percentage": 66,
+  "progress_percentage": 86,
   "status": "in_progress",
   "current_phase": "phase-4",
   "hierarchy": {
@@ -37,7 +37,7 @@
         "phase-4"
       ],
       "total_tasks": 36,
-      "completed_tasks": 24,
+      "completed_tasks": 31,
       "metadata": {
         "purpose": "",
         "category": "implementation"
@@ -766,7 +766,7 @@
     "phase-4": {
       "type": "phase",
       "title": "Workflow Push Blocking",
-      "status": "pending",
+      "status": "in_progress",
       "parent": "spec-root",
       "children": [
         "task-4-1",
@@ -783,7 +783,7 @@
         "task-4-11"
       ],
       "total_tasks": 12,
-      "completed_tasks": 0,
+      "completed_tasks": 7,
       "metadata": {
         "purpose": "",
         "description": "Block pushes that add or modify files under .github/workflows/ or .github/actions/, preventing indirect merge via GitHub Actions. The interception point is the git proxy addon (unified-proxy/addons/git_proxy.py), which intercepts HTTPS push traffic. Since the request() hook fires before the push is forwarded to GitHub, new objects exist only in the pack data, not yet in the bare repo. The approach: extract pack data from the request body (after pkt-line header), unpack into a temporary object store with the bare repo as an alternate, run git diff-tree to check changed files. Fail closed on any error. Highest complexity. Corresponds to PLAN1.md Item 2b."
@@ -799,11 +799,11 @@
     "task-4-1": {
       "type": "task",
       "title": "Add DEFAULT_RESTRICTED_PUSH_PATHS to git_policies.py",
-      "status": "pending",
+      "status": "completed",
       "parent": "phase-4",
       "children": [],
       "total_tasks": 1,
-      "completed_tasks": 0,
+      "completed_tasks": 1,
       "metadata": {
         "description": "Add restricted paths as a configurable policy alongside existing DEFAULT_PROTECTED_PATTERNS:\n\n```python\nDEFAULT_RESTRICTED_PUSH_PATHS: List[str] = [\n    \".github/workflows\",\n    \".github/actions\",\n]\n```\n\nPaths are stored without trailing slashes. The check uses `line == path or line.startswith(path + \"/\")` to match both the directory itself and any files underneath it. As a defensive measure, _check_restricted_paths() normalizes paths with rstrip(\"/\") at runtime, so a misconfigured trailing slash won't cause silent bypasses.\n\n.github/actions/ is included because custom composite actions can also execute arbitrary code, including merge operations.",
         "file_path": "unified-proxy/git_policies.py",
@@ -813,7 +813,12 @@
           "Contains .github/actions (no trailing slash)",
           "Type annotation List[str] included"
         ],
-        "task_category": "implementation"
+        "task_category": "implementation",
+        "started_at": "2026-02-08T22:40:30.682462Z",
+        "completed_at": "2026-02-08T22:40:39.287910Z",
+        "needs_journaling": false,
+        "actual_hours": 0.0,
+        "journaled_at": "2026-02-08T22:40:39.288008Z"
       },
       "dependencies": {
         "blocks": [],
@@ -824,11 +829,11 @@
     "task-4-2": {
       "type": "task",
       "title": "Set bare_repo_path in container metadata",
-      "status": "pending",
+      "status": "completed",
       "parent": "phase-4",
       "children": [],
       "total_tasks": 1,
-      "completed_tasks": 0,
+      "completed_tasks": 1,
       "metadata": {
         "description": "Set bare_repo_path in the container metadata during container registration. The bare repo path follows a predictable convention based on the repo owner/name:\n\n```python\nmetadata[\"bare_repo_path\"] = os.path.join(REPOS_BASE_DIR, owner, repo + \".git\")\n```\n\nWhere REPOS_BASE_DIR is the directory where the proxy stores bare repos (verify the actual path from the proxy's git clone/fetch logic).\n\nPer AI review feedback: if bare_repo_path is not available or invalid, write operations should fail-closed rather than silently skipping the restricted-paths check. The guard in the request() method should handle this (see integration task).",
         "file_path": "unified-proxy/addons/container_identity.py",
@@ -837,7 +842,12 @@
           "Path derived from REPOS_BASE_DIR + owner + repo.git convention",
           "REPOS_BASE_DIR matches the actual bare repo storage location"
         ],
-        "task_category": "implementation"
+        "task_category": "implementation",
+        "started_at": "2026-02-08T22:43:29.388850Z",
+        "completed_at": "2026-02-08T22:43:50.464500Z",
+        "needs_journaling": false,
+        "actual_hours": 0.01,
+        "journaled_at": "2026-02-08T22:43:50.464604Z"
       },
       "dependencies": {
         "blocks": [],
@@ -848,11 +858,11 @@
     "task-4-3": {
       "type": "task",
       "title": "Add pack_data field to GitOperation dataclass",
-      "status": "pending",
+      "status": "completed",
       "parent": "phase-4",
       "children": [],
       "total_tasks": 1,
-      "completed_tasks": 0,
+      "completed_tasks": 1,
       "metadata": {
         "description": "Add pack_data: bytes field to the GitOperation dataclass. In _parse_git_request(), after pkt-line parsing (line 284), extract the pack data. pktline_end is the byte offset returned by read_pktline_prefix() \u2014 it marks the end of the flush packet, so everything after it is pack data:\n\n```python\n# After line 284: refs = parse_pktline(buf[:pktline_end])\npack_data = body[pktline_end:] if pktline_end and pktline_end < len(body) else b\"\"\n```\n\nPass pack_data into the GitOperation constructor at line 288.\n\nThe read_pktline_prefix() function (pktline.py:138) already handles flush packet detection (0000), capabilities parsing, and max-bytes bounding. pktline_end is a reliable boundary marker.",
         "file_path": "unified-proxy/addons/git_proxy.py",
@@ -862,7 +872,12 @@
           "Empty bytes returned when no pack data present",
           "pack_data passed to GitOperation constructor"
         ],
-        "task_category": "implementation"
+        "task_category": "implementation",
+        "started_at": "2026-02-08T22:44:25.415932Z",
+        "completed_at": "2026-02-08T22:45:43.054115Z",
+        "needs_journaling": false,
+        "actual_hours": 0.02,
+        "journaled_at": "2026-02-08T22:45:43.054214Z"
       },
       "dependencies": {
         "blocks": [],
@@ -873,11 +888,11 @@
     "task-4-4": {
       "type": "task",
       "title": "Add _make_clean_git_env() helper method",
-      "status": "pending",
+      "status": "completed",
       "parent": "phase-4",
       "children": [],
       "total_tasks": 1,
-      "completed_tasks": 0,
+      "completed_tasks": 1,
       "metadata": {
         "description": "Add helper method to build a minimal environment for git subprocesses:\n\n```python\ndef _make_clean_git_env(self, **extra) -> dict:\n    \"\"\"Build a minimal environment for git subprocesses in restricted-path checks.\n\n    Uses only PATH (for finding the git binary) and HOME (required by git\n    for config resolution). All GIT_* and SSH_* vars from the proxy's own\n    environment are excluded to prevent interference (e.g., GIT_DIR,\n    GIT_WORK_TREE, GIT_CONFIG_PARAMETERS could confuse the subprocess).\n    \"\"\"\n    env = {\"PATH\": os.environ.get(\"PATH\", \"/usr/local/bin:/usr/bin:/bin\")}\n    home = os.environ.get(\"HOME\")\n    if home:\n        env[\"HOME\"] = home\n    env.update(extra)\n    return env\n```\n\nThis prevents: (a) environment variable confusion that could cause the subprocess to operate on the wrong repository, and (b) credential leakage via GIT_CREDENTIAL_TOKEN or similar vars.",
         "file_path": "unified-proxy/addons/git_proxy.py",
@@ -887,7 +902,10 @@
           "Accepts **extra kwargs for GIT_OBJECT_DIRECTORY etc.",
           "GIT_*, SSH_* vars from proxy environment excluded"
         ],
-        "task_category": "implementation"
+        "task_category": "implementation",
+        "completed_at": "2026-02-08T22:45:43.115005Z",
+        "needs_journaling": false,
+        "journaled_at": "2026-02-08T22:45:43.115076Z"
       },
       "dependencies": {
         "blocks": [],
@@ -898,11 +916,11 @@
     "task-4-5": {
       "type": "task",
       "title": "Implement _check_restricted_paths() method",
-      "status": "pending",
+      "status": "completed",
       "parent": "phase-4",
       "children": [],
       "total_tasks": 1,
-      "completed_tasks": 0,
+      "completed_tasks": 1,
       "metadata": {
         "description": "Implement the core restricted-paths check method. Full implementation in PLAN1.md Item 2b. Key aspects:\n\n1. Accept refs, bare_repo_path, pack_data, restricted_paths parameters\n2. Return None if allowed, generic error message if blocked\n3. Normalize restricted paths with rstrip(\"/\")\n4. Create temp dir with mkdtemp(prefix=\"git-restricted-check-\")\n5. Initialize temp bare repo with git init --bare\n6. Write alternates file pointing to real bare repo's objects dir\n7. Unpack pack data with git unpack-objects (10s timeout, clean env)\n8. For each non-deletion ref, run git diff-tree --name-only -r old new (10s timeout)\n9. For new branches (old_sha is all zeros), diff against GIT_EMPTY_TREE_SHA = \"4b825dc642cb6eb9a060e54bf899d69f82623700\"\n10. Check each changed file against restricted paths\n11. Log specific blocked path server-side at ctx.log.info level\n12. Return generic \"Push blocked by security policy\" (never reveal which path)\n13. Fail closed on any error (unpack failure, diff-tree failure, timeout)\n14. Always clean up temp dir in finally block\n\nSECURITY NOTES:\n- Pack data is untrusted (from sandbox). A memory-safety bug in git's pack parser could allow code execution on the proxy. Accepted risk with mitigations: size bounded by DEFAULT_MAX_PUSH_SIZE (100MB), 10s timeout, temp dir isolation, minimal env, fail-closed.\n- Thin packs handled via alternates (base objects in bare repo).\n- THREADING: This method is not thread-safe. It relies on mitmproxy's default synchronous addon execution (no @concurrent decorator). If concurrent execution is enabled, add a threading.Lock around the entire method.",
         "file_path": "unified-proxy/addons/git_proxy.py",
@@ -922,7 +940,10 @@
           "Concurrency assumption documented in code comment",
           "Restricted paths normalized with rstrip(/)"
         ],
-        "task_category": "implementation"
+        "task_category": "implementation",
+        "completed_at": "2026-02-08T22:45:43.171390Z",
+        "needs_journaling": false,
+        "journaled_at": "2026-02-08T22:45:43.171498Z"
       },
       "dependencies": {
         "blocks": [],
@@ -933,11 +954,11 @@
     "task-4-6": {
       "type": "task",
       "title": "Integrate restricted-paths check in request() method",
-      "status": "pending",
+      "status": "completed",
       "parent": "phase-4",
       "children": [],
       "total_tasks": 1,
-      "completed_tasks": 0,
+      "completed_tasks": 1,
       "metadata": {
         "description": "Call _check_restricted_paths() in the request() method alongside existing write-operation checks (after protected-branch checks at line 204-220):\n\n```python\nif git_op.is_write:\n    # ... existing size checks, deletion checks, protected branch checks ...\n\n    # Check for restricted file paths (e.g., .github/workflows/)\n    bare_repo_path = metadata.get(\"bare_repo_path\")\n    if bare_repo_path and os.path.isdir(bare_repo_path) and git_op.pack_data:\n        restricted_msg = self._check_restricted_paths(\n            git_op.refs, bare_repo_path, git_op.pack_data,\n            git_policies.DEFAULT_RESTRICTED_PUSH_PATHS,\n        )\n        if restricted_msg:\n            self._deny_request(flow, restricted_msg)\n            return\n    elif git_op.pack_data and not bare_repo_path:\n        # bare_repo_path not configured \u2014 log warning but don't block\n        # This should not happen in production; indicates misconfiguration\n        ctx.log.warn(\"[restricted-path] check skipped: bare_repo_path not in metadata\")\n```\n\nPer AI review: consider making missing bare_repo_path fail-closed for write operations in production. The current implementation logs a warning. Document this as a configuration issue.",
         "file_path": "unified-proxy/addons/git_proxy.py",
@@ -949,7 +970,10 @@
           "Missing bare_repo_path logs warning with [restricted-path] prefix",
           "Early return after denial"
         ],
-        "task_category": "implementation"
+        "task_category": "implementation",
+        "completed_at": "2026-02-08T22:45:43.231081Z",
+        "needs_journaling": false,
+        "journaled_at": "2026-02-08T22:45:43.231170Z"
       },
       "dependencies": {
         "blocks": [],
@@ -960,11 +984,11 @@
     "task-4-7": {
       "type": "task",
       "title": "Add concurrency assumption comment",
-      "status": "pending",
+      "status": "completed",
       "parent": "phase-4",
       "children": [],
       "total_tasks": 1,
-      "completed_tasks": 0,
+      "completed_tasks": 1,
       "metadata": {
         "description": "Add code comment anchoring the concurrency assumption near _check_restricted_paths():\n\n```python\n# THREADING: This method is not thread-safe. It relies on mitmproxy's default\n# synchronous addon execution (no @concurrent decorator). If concurrent execution\n# is enabled, add a threading.Lock around the entire method.\n```\n\nThis assumption depends on mitmproxy's default execution model. A malicious agent cannot DoS the proxy by issuing parallel pushes; they would simply queue.",
         "file_path": "unified-proxy/addons/git_proxy.py",
@@ -972,7 +996,10 @@
           "Threading assumption documented in code comment near _check_restricted_paths()",
           "Comment mentions @concurrent decorator and threading.Lock"
         ],
-        "task_category": "implementation"
+        "task_category": "implementation",
+        "completed_at": "2026-02-08T22:45:43.299123Z",
+        "needs_journaling": false,
+        "journaled_at": "2026-02-08T22:45:43.299214Z"
       },
       "dependencies": {
         "blocks": [],
@@ -1383,6 +1410,69 @@
       "author": "foundry-mcp",
       "metadata": {},
       "task_id": "verify-3-1"
+    },
+    {
+      "timestamp": "2026-02-08T22:40:39.288008Z",
+      "entry_type": "status_change",
+      "title": "Task Completed: Add DEFAULT_RESTRICTED_PUSH_PATHS to git_policies.py",
+      "content": "Added DEFAULT_RESTRICTED_PUSH_PATHS: List[str] to git_policies.py containing '.github/workflows' and '.github/actions' (no trailing slashes). Placed after DEFAULT_PROTECTED_PATTERNS. Python syntax check passes. Basic verification only \u2014 full testing deferred to verify-4-1.\"",
+      "author": "foundry-mcp",
+      "metadata": {},
+      "task_id": "task-4-1"
+    },
+    {
+      "timestamp": "2026-02-08T22:43:50.464604Z",
+      "entry_type": "status_change",
+      "title": "Task Completed: Set bare_repo_path in container metadata",
+      "content": "Added bare_repo_path enrichment to container_identity.py. Added REPOS_BASE_DIR constant (defaults to /home/ubuntu/.sandboxes/repos, configurable via env var). In request() method, before attaching container config to flow, derives bare_repo_path from metadata['repo'] field using REPOS_BASE_DIR/owner/repo.git convention. Only sets if not already present and repo contains owner/name format. Python syntax check passes. Basic verification only \u2014 full testing deferred to verify-4-1.\"",
+      "author": "foundry-mcp",
+      "metadata": {},
+      "task_id": "task-4-2"
+    },
+    {
+      "timestamp": "2026-02-08T22:45:43.054214Z",
+      "entry_type": "status_change",
+      "title": "Task Completed: Add pack_data field to GitOperation dataclass",
+      "content": "Added pack_data: bytes field to GitOperation dataclass (with repr=False). Extracts pack data from request body after pktline_end offset in _parse_git_request(). Empty bytes when no pack data present. Passed to GitOperation constructor.\"",
+      "author": "foundry-mcp",
+      "metadata": {},
+      "task_id": "task-4-3"
+    },
+    {
+      "timestamp": "2026-02-08T22:45:43.115076Z",
+      "entry_type": "status_change",
+      "title": "Task Completed: Add _make_clean_git_env() helper method",
+      "content": "Added _make_clean_git_env() helper method to GitProxyAddon. Only includes PATH and HOME from host environment. Accepts **extra kwargs for GIT_OBJECT_DIRECTORY etc. Excludes all GIT_*, SSH_* vars.\"",
+      "author": "foundry-mcp",
+      "metadata": {},
+      "task_id": "task-4-4"
+    },
+    {
+      "timestamp": "2026-02-08T22:45:43.171498Z",
+      "entry_type": "status_change",
+      "title": "Task Completed: Implement _check_restricted_paths() method",
+      "content": "Implemented _check_restricted_paths() method. Creates temp bare repo with mkdtemp, writes alternates to real bare repo, unpacks pack data with git unpack-objects (10s timeout, clean env), runs git diff-tree per non-deletion ref (new branches diff against GIT_EMPTY_TREE_SHA), checks changed files against restricted paths (exact or prefix+/ match). Returns generic 'Push blocked by security policy' \u2014 specific path logged server-side only. Fails closed on any error/timeout. Temp dir cleaned in finally block.\"",
+      "author": "foundry-mcp",
+      "metadata": {},
+      "task_id": "task-4-5"
+    },
+    {
+      "timestamp": "2026-02-08T22:45:43.231170Z",
+      "entry_type": "status_change",
+      "title": "Task Completed: Integrate restricted-paths check in request() method",
+      "content": "Integrated _check_restricted_paths() call in request() method after protected-branch checks and before bot-mode checks. Guards on bare_repo_path exists + is directory + pack_data present. Uses git_policies.DEFAULT_RESTRICTED_PUSH_PATHS. Missing bare_repo_path logs warning with [restricted-path] prefix.\"",
+      "author": "foundry-mcp",
+      "metadata": {},
+      "task_id": "task-4-6"
+    },
+    {
+      "timestamp": "2026-02-08T22:45:43.299214Z",
+      "entry_type": "status_change",
+      "title": "Task Completed: Add concurrency assumption comment",
+      "content": "Added THREADING comment above _check_restricted_paths() documenting the synchronous execution assumption, mentioning @concurrent decorator and threading.Lock.\"",
+      "author": "foundry-mcp",
+      "metadata": {},
+      "task_id": "task-4-7"
     }
   ]
 }

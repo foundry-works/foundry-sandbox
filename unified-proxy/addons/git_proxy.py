@@ -19,8 +19,11 @@ BEFORE credential injection (git requests need auth before forwarding).
 
 import os
 import re
+import shutil
+import subprocess
 import sys
-from dataclasses import dataclass
+import tempfile
+from dataclasses import dataclass, field
 from io import BytesIO
 from typing import List, Optional
 
@@ -31,6 +34,7 @@ from mitmproxy.flow import Flow
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from addons.container_identity import get_container_config
+import git_policies
 from git_policies import check_protected_branches
 from pktline import PktLineRef, parse_pktline, read_pktline_prefix
 
@@ -68,6 +72,7 @@ class GitOperation:
     is_write: bool
     refs: List[PktLineRef]
     push_size: int = 0
+    pack_data: bytes = field(default=b"", repr=False)
     parse_error: Optional[str] = None
 
     def repo_path(self) -> str:
@@ -219,6 +224,24 @@ class GitProxyAddon:
                     )
                     return
 
+            # Check for restricted file paths (e.g., .github/workflows/)
+            if bare_repo_path and os.path.isdir(bare_repo_path) and git_op.pack_data:
+                restricted_msg = self._check_restricted_paths(
+                    git_op.refs, bare_repo_path, git_op.pack_data,
+                    git_policies.DEFAULT_RESTRICTED_PUSH_PATHS,
+                )
+                if restricted_msg:
+                    self._deny_request(
+                        flow,
+                        restricted_msg,
+                        container_id=container_id,
+                    )
+                    return
+            elif git_op.pack_data and not bare_repo_path:
+                # bare_repo_path not configured — log warning but don't block
+                # This should not happen in production; indicates misconfiguration
+                ctx.log.warn("[restricted-path] check skipped: bare_repo_path not in metadata")
+
             # Check bot mode restrictions
             auth_mode = metadata.get("auth_mode", "normal")
             if auth_mode == "bot":
@@ -264,6 +287,7 @@ class GitProxyAddon:
         # Parse pkt-line data for push operations
         refs: List[PktLineRef] = []
         push_size = 0
+        pack_data = b""
         parse_error: Optional[str] = None
 
         if is_write:
@@ -284,6 +308,8 @@ class GitProxyAddon:
                     refs = parse_pktline(buf[:pktline_end])
                     if not refs:
                         parse_error = "no ref updates in pkt-line header"
+                    # Extract pack data (everything after the pkt-line flush packet)
+                    pack_data = body[pktline_end:] if pktline_end < len(body) else b""
 
         return GitOperation(
             owner=owner,
@@ -292,6 +318,7 @@ class GitProxyAddon:
             is_write=is_write,
             refs=refs,
             push_size=push_size,
+            pack_data=pack_data,
             parse_error=parse_error,
         )
 
@@ -338,6 +365,135 @@ class GitProxyAddon:
                     f"Attempted to push to: {ref.refname}"
                 )
         return None
+
+    def _make_clean_git_env(self, **extra) -> dict:
+        """Build a minimal environment for git subprocesses in restricted-path checks.
+
+        Uses only PATH (for finding the git binary) and HOME (required by git
+        for config resolution). All GIT_* and SSH_* vars from the proxy's own
+        environment are excluded to prevent interference (e.g., GIT_DIR,
+        GIT_WORK_TREE, GIT_CONFIG_PARAMETERS could confuse the subprocess).
+        """
+        env = {"PATH": os.environ.get("PATH", "/usr/local/bin:/usr/bin:/bin")}
+        home = os.environ.get("HOME")
+        if home:
+            env["HOME"] = home
+        env.update(extra)
+        return env
+
+    # THREADING: _check_restricted_paths is not thread-safe. It relies on
+    # mitmproxy's default synchronous addon execution (no @concurrent decorator).
+    # If concurrent execution is enabled, add a threading.Lock around the
+    # entire method.
+    def _check_restricted_paths(
+        self,
+        refs: List[PktLineRef],
+        bare_repo_path: str,
+        pack_data: bytes,
+        restricted_paths: List[str],
+    ) -> Optional[str]:
+        """Check if a push modifies restricted file paths (e.g., .github/workflows/).
+
+        Unpacks the push's pack data into a temporary object store with the bare
+        repo as an alternate, then runs git diff-tree to identify changed files.
+        Fails closed on any error.
+
+        Args:
+            refs: List of ref updates from the push.
+            bare_repo_path: Path to the bare git repository.
+            pack_data: Raw pack data from the push request body.
+            restricted_paths: List of path prefixes to block (no trailing slashes).
+
+        Returns:
+            None if allowed, generic error message if blocked or on any error.
+        """
+        GIT_EMPTY_TREE_SHA = "4b825dc642cb6eb9a060e54bf899d69f82623700"
+        ZERO_SHA = "0" * 40
+        SUBPROCESS_TIMEOUT = 10
+
+        # Normalize restricted paths (defensive against trailing slash misconfiguration)
+        normalized_paths = [p.rstrip("/") for p in restricted_paths]
+
+        tmp_dir = None
+        try:
+            tmp_dir = tempfile.mkdtemp(prefix="git-restricted-check-")
+
+            # Initialize a temporary bare repo
+            subprocess.run(
+                ["git", "init", "--bare", tmp_dir],
+                env=self._make_clean_git_env(),
+                capture_output=True,
+                timeout=SUBPROCESS_TIMEOUT,
+                check=True,
+            )
+
+            # Write alternates file so temp repo can resolve base objects from the real bare repo
+            objects_info_dir = os.path.join(tmp_dir, "objects", "info")
+            os.makedirs(objects_info_dir, exist_ok=True)
+            alternates_path = os.path.join(objects_info_dir, "alternates")
+            with open(alternates_path, "w") as f:
+                f.write(os.path.join(bare_repo_path, "objects") + "\n")
+
+            # Unpack the pack data into the temp repo
+            result = subprocess.run(
+                ["git", "unpack-objects"],
+                input=pack_data,
+                env=self._make_clean_git_env(
+                    GIT_OBJECT_DIRECTORY=os.path.join(tmp_dir, "objects"),
+                ),
+                capture_output=True,
+                timeout=SUBPROCESS_TIMEOUT,
+                cwd=tmp_dir,
+            )
+            if result.returncode != 0:
+                ctx.log.warn(
+                    f"[restricted-path] git unpack-objects failed: "
+                    f"{result.stderr.decode(errors='replace')[:200]}"
+                )
+                return "Push blocked by security policy"
+
+            # Check each non-deletion ref for restricted path changes
+            for ref in refs:
+                if ref.new_sha == ZERO_SHA:
+                    continue  # Skip deletions
+
+                old_sha = ref.old_sha if ref.old_sha != ZERO_SHA else GIT_EMPTY_TREE_SHA
+
+                diff_result = subprocess.run(
+                    ["git", "--git-dir", tmp_dir, "diff-tree", "--name-only", "-r",
+                     old_sha, ref.new_sha],
+                    env=self._make_clean_git_env(),
+                    capture_output=True,
+                    timeout=SUBPROCESS_TIMEOUT,
+                )
+                if diff_result.returncode != 0:
+                    ctx.log.warn(
+                        f"[restricted-path] git diff-tree failed for {ref.refname}: "
+                        f"{diff_result.stderr.decode(errors='replace')[:200]}"
+                    )
+                    return "Push blocked by security policy"
+
+                changed_files = diff_result.stdout.decode(errors="replace").strip().splitlines()
+                for line in changed_files:
+                    for restricted in normalized_paths:
+                        if line == restricted or line.startswith(restricted + "/"):
+                            ctx.log.info(
+                                f"[restricted-path] Blocked push modifying "
+                                f"restricted path: {line} (matched {restricted})"
+                            )
+                            return "Push blocked by security policy"
+
+            return None
+
+        except subprocess.TimeoutExpired:
+            ctx.log.warn("[restricted-path] Subprocess timed out during restricted-path check")
+            return "Push blocked by security policy"
+        except Exception as exc:
+            ctx.log.warn(f"[restricted-path] Error during restricted-path check: {exc}")
+            return "Push blocked by security policy"
+        finally:
+            if tmp_dir and os.path.isdir(tmp_dir):
+                shutil.rmtree(tmp_dir, ignore_errors=True)
 
     def _log_git_operation(
         self, git_op: GitOperation, container_id: str, allowed: bool
