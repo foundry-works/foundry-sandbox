@@ -491,6 +491,70 @@ class TestEdgeCases:
             assert FLOW_METADATA_KEY in flow.metadata
 
 
+class TestPathTraversalValidation:
+    """Tests for path traversal protection in bare_repo_path enrichment."""
+
+    def test_repo_with_dotdot_in_owner_returns_403(self, addon, registry):
+        """Test that '..' in owner component is rejected."""
+        registry.register(
+            container_id="traversal-container",
+            ip_address="172.17.0.20",
+            metadata={"repo": "../../etc/passwd"},
+        )
+
+        flow = create_flow("172.17.0.20")
+        addon.request(flow)
+
+        assert flow.response is not None
+        assert flow.response.status_code == 403
+
+    def test_repo_with_dotdot_in_repo_name_returns_403(self, addon, registry):
+        """Test that '..' in repo name component is rejected."""
+        registry.register(
+            container_id="traversal-container-2",
+            ip_address="172.17.0.21",
+            metadata={"repo": "owner/../../../etc"},
+        )
+
+        flow = create_flow("172.17.0.21")
+        addon.request(flow)
+
+        assert flow.response is not None
+        assert flow.response.status_code == 403
+
+    def test_normal_repo_is_enriched(self, addon, registry):
+        """Test that normal repo metadata gets bare_repo_path enriched."""
+        registry.register(
+            container_id="normal-repo-container",
+            ip_address="172.17.0.22",
+            metadata={"repo": "owner/repo-name"},
+        )
+
+        flow = create_flow("172.17.0.22")
+        addon.request(flow)
+
+        assert flow.response is None
+        config = container_identity.get_container_config(flow)
+        assert config is not None
+        assert "bare_repo_path" in config.metadata
+        assert config.metadata["bare_repo_path"].endswith("owner/repo-name.git")
+
+    def test_traversal_rejection_logs_warning(self, addon, registry):
+        """Test that path traversal rejection is logged."""
+        registry.register(
+            container_id="traversal-log-container",
+            ip_address="172.17.0.23",
+            metadata={"repo": "../../evil/path"},
+        )
+
+        flow = create_flow("172.17.0.23")
+        addon.request(flow)
+
+        assert mock_ctx.log.was_called_with_level("warn")
+        messages = mock_ctx.log.get_messages("warn")
+        assert any("path traversal" in msg.lower() for msg in messages)
+
+
 class TestResponseContent:
     """Tests for response content on denial."""
 

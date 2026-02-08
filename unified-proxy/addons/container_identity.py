@@ -130,6 +130,18 @@ class ContainerIdentityAddon:
             repo = metadata.get("repo", "")
             if repo and "/" in repo:
                 owner, repo_name = repo.split("/", 1)
+                # Reject path traversal in repo metadata to prevent pointing
+                # bare_repo_path at arbitrary filesystem locations.
+                if ".." in owner or ".." in repo_name:
+                    ctx.log.warn(
+                        f"Rejecting repo with path traversal: {repo}"
+                    )
+                    self._deny_request(
+                        flow,
+                        f"Invalid repo metadata: path traversal detected",
+                        log_level="warn",
+                    )
+                    return
                 metadata["bare_repo_path"] = os.path.join(
                     REPOS_BASE_DIR, owner, repo_name + ".git"
                 )

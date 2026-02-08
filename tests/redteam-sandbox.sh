@@ -1470,14 +1470,9 @@ WFEOF
             fi
         else
             test_fail "Push with .github/workflows/ file SUCCEEDED (should be blocked!)"
-            # Clean up the pushed branch via GitHub API (git push --delete
-            # is blocked by the proxy's branch-deletion policy).
-            REPO_SLUG=$(echo "$REMOTE_URL" | sed -E 's|https?://github.com/||;s|\.git$||')
-            curl -s --max-time 10 \
-                -X DELETE \
-                -H "Authorization: token CREDENTIAL_PROXY_PLACEHOLDER" \
-                "https://api.github.com/repos/${REPO_SLUG}/git/refs/heads/${WORKFLOW_TEST_BRANCH}" \
-                >/dev/null 2>&1 || true
+            # Note: Branch cleanup via DELETE /git/refs/ is also blocked by the
+            # proxy's git ref mutation policy. Log the orphan for manual cleanup.
+            info "Orphan branch '${WORKFLOW_TEST_BRANCH}' may remain on remote (cleanup blocked by policy)"
         fi
 
         # Test 2: Normal code push should still work after workflow block
@@ -1492,15 +1487,9 @@ WFEOF
 
         if [[ $NORMAL_PUSH_EXIT -eq 0 ]]; then
             test_pass "Normal code push succeeded after workflow block"
-            # Clean up the test branch via GitHub API (git push --delete is
-            # blocked by the proxy's branch-deletion policy, so we use the
-            # REST API which is not subject to the same restriction).
-            REPO_SLUG=$(echo "$REMOTE_URL" | sed -E 's|https?://github.com/||;s|\.git$||')
-            curl -s --max-time 10 \
-                -X DELETE \
-                -H "Authorization: token CREDENTIAL_PROXY_PLACEHOLDER" \
-                "https://api.github.com/repos/${REPO_SLUG}/git/refs/heads/${WORKFLOW_TEST_BRANCH}" \
-                >/dev/null 2>&1 || true
+            # Note: Branch cleanup via DELETE /git/refs/ is blocked by the
+            # proxy's git ref mutation policy. Log the orphan for manual cleanup.
+            info "Orphan branch '${WORKFLOW_TEST_BRANCH}' may remain on remote (cleanup blocked by policy)"
         else
             test_fail "Normal code push failed after workflow block (exit: $NORMAL_PUSH_EXIT)"
             info "Output: $(echo "$NORMAL_PUSH_OUTPUT" | head -c 300)"

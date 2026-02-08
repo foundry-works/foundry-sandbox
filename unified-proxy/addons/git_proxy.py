@@ -416,7 +416,20 @@ class GitProxyAddon:
 
         Returns:
             None if allowed, generic error message if blocked or on any error.
+
+        Note:
+            The caller (request()) checks push size before calling this method.
+            This defensive check ensures safety even if the call order is refactored.
         """
+        # Defensive size check: reject oversized pack data even if the caller
+        # didn't enforce the limit (e.g., due to future refactoring of request()).
+        if len(pack_data) > self._max_push_size:
+            ctx.log.warn(
+                f"[restricted-path] pack_data exceeds max push size "
+                f"({len(pack_data)} > {self._max_push_size})"
+            )
+            return "Push blocked by security policy"
+
         GIT_EMPTY_TREE_SHA = "4b825dc642cb6eb9a060e54bf899d69f82623700"
         ZERO_SHA = "0" * 40
         SUBPROCESS_TIMEOUT = 10
@@ -437,7 +450,15 @@ class GitProxyAddon:
                 check=True,
             )
 
-            # Write alternates file so temp repo can resolve base objects from the real bare repo
+            # Write alternates file so temp repo can resolve base objects from the real bare repo.
+            #
+            # TRUST BOUNDARY: The alternates file grants the temp repo read access
+            # to all objects in the real bare repo's object store. If a pack parser
+            # exploit compromises the temp repo, it could read (but not write) the
+            # real repo's objects. This is an accepted tradeoff: the temp repo needs
+            # access to resolve base objects for diff-tree, and the real bare repo
+            # is already readable by the proxy process. The temp dir is cleaned up
+            # in the finally block regardless of success or failure.
             objects_info_dir = os.path.join(tmp_dir, "objects", "info")
             os.makedirs(objects_info_dir, exist_ok=True)
             alternates_path = os.path.join(objects_info_dir, "alternates")

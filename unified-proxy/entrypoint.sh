@@ -156,11 +156,10 @@ copy_ca_to_shared_volume() {
 generate_combined_ca_bundle() {
     local combined="${SHARED_CERTS_DIR}/ca-certificates.crt"
     local tmp="${combined}.tmp"
-    # Write atomically: build in temp file, then rename.
-    # Prevents sandbox from reading a partial bundle (system CAs only,
-    # missing mitmproxy CA) if it starts between the two writes.
-    cat /etc/ssl/certs/ca-certificates.crt > "$tmp"
-    cat "${MITMPROXY_CA_CERT}" >> "$tmp"
+    # Write atomically: build in temp file with a single command, then rename.
+    # A single cat invocation ensures we never leave a partial bundle (system
+    # CAs only, missing mitmproxy CA) if the process is interrupted.
+    cat /etc/ssl/certs/ca-certificates.crt "${MITMPROXY_CA_CERT}" > "$tmp"
     mv "$tmp" "$combined"
     log "Combined CA bundle generated at $combined"
 }

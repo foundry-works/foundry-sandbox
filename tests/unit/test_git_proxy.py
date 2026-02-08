@@ -149,9 +149,6 @@ from registry import ContainerConfig
 
 # Constants from the module
 GIT_METADATA_KEY = "git_operation"
-DEFAULT_TEST_BARE_REPO = "/tmp/foundry-test-bare.git"
-
-
 @pytest.fixture(autouse=True)
 def reset_mock_ctx():
     """Reset mock ctx before each test.
@@ -165,7 +162,7 @@ def reset_mock_ctx():
 
 
 @pytest.fixture(autouse=True)
-def bypass_restricted_path_check_for_non_restricted_tests(monkeypatch, request):
+def bypass_restricted_path_check_for_non_restricted_tests(monkeypatch, request, tmp_path):
     """Stub restricted-path enforcement outside TestRestrictedPathsCheck.
 
     Most unit tests in this module target auth/branch/size behavior and are not
@@ -181,21 +178,43 @@ def bypass_restricted_path_check_for_non_restricted_tests(monkeypatch, request):
     )
 
 
+DEFAULT_TEST_BARE_REPO = None  # Set per-test via _test_bare_repo fixture
+
+
+@pytest.fixture(autouse=True)
+def _test_bare_repo(tmp_path, request):
+    """Provide a per-test bare repo directory using pytest's tmp_path.
+
+    Avoids side effects from writing to /tmp/foundry-test-bare.git which
+    persists across test runs and could leak into other tests.
+    """
+    global DEFAULT_TEST_BARE_REPO
+    if "TestRestrictedPathsCheck" in request.node.nodeid:
+        yield  # TestRestrictedPathsCheck manages its own paths
+        return
+    bare = str(tmp_path / "foundry-test-bare.git")
+    os.makedirs(bare, exist_ok=True)
+    DEFAULT_TEST_BARE_REPO = bare
+    yield
+    DEFAULT_TEST_BARE_REPO = None
+
+
 def create_container_config(
     container_id="test-container",
     ip_address="172.17.0.2",
     repos=None,
     auth_mode="normal",
-    bare_repo_path=DEFAULT_TEST_BARE_REPO,
+    bare_repo_path="__default__",
     **kwargs,
 ):
     """Create a ContainerConfig with given repos and auth_mode in metadata."""
     import time
 
+    if bare_repo_path == "__default__":
+        bare_repo_path = DEFAULT_TEST_BARE_REPO
+
     metadata = {"repos": repos or [], "auth_mode": auth_mode}
     if bare_repo_path is not None:
-        if bare_repo_path == DEFAULT_TEST_BARE_REPO:
-            os.makedirs(bare_repo_path, exist_ok=True)
         metadata["bare_repo_path"] = bare_repo_path
     metadata.update(kwargs)
 
@@ -964,10 +983,7 @@ class TestRestrictedPathsCheck:
 
         git init -> success, git unpack-objects -> success, git diff-tree -> diff_output.
         """
-        call_count = [0]
-
         def side_effect(cmd, **kwargs):
-            call_count[0] += 1
             result = MagicMock()
             result.returncode = 0
             result.stdout = b""
@@ -990,8 +1006,10 @@ class TestRestrictedPathsCheck:
         # Create objects/info dir so the code can write alternates
         os.makedirs(os.path.join(self._tmp_dir, "objects", "info"), exist_ok=True)
 
+        # Patch at the module where it's imported, not the global tempfile.
+        # This is robust against import style changes in git_proxy.py.
         monkeypatch.setattr(
-            "tempfile.mkdtemp",
+            "git_proxy.tempfile.mkdtemp",
             lambda prefix="": self._tmp_dir,
         )
         # Patch shutil.rmtree to track cleanup calls
@@ -1229,6 +1247,27 @@ class TestRestrictedPathsCheck:
 
         assert flow.response is not None
         assert flow.response.status_code == 403
+
+    def test_defensive_size_check_blocks_oversized_pack(self, monkeypatch):
+        """Pack data exceeding max_push_size is blocked defensively.
+
+        _check_restricted_paths has its own size guard independent of the
+        caller's size check in request(), ensuring safety even if the call
+        order is refactored.
+        """
+        addon = git_proxy.GitProxyAddon(max_push_size=100)
+        refs = [git_proxy.PktLineRef("a" * 40, "b" * 40, "refs/heads/feature-x")]
+        oversized_pack = b"x" * 200
+
+        monkeypatch.setattr("os.path.isdir", lambda p: True)
+
+        result = addon._check_restricted_paths(
+            refs, "/fake/bare", oversized_pack,
+            [".github/workflows"],
+        )
+
+        assert result is not None
+        assert "security policy" in result.lower()
 
 
 if __name__ == "__main__":
