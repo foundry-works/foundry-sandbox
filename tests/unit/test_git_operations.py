@@ -1703,5 +1703,74 @@ class TestBlockedFlagAfterSubcommand:
         assert "blocked flag" in result.reason.lower()
 
 
+# ---------------------------------------------------------------------------
+# S9: Proxy-side hook hardening
+# ---------------------------------------------------------------------------
+
+
+class TestProxySideHookFlags:
+    """Tests that proxy-side hook/fsmonitor hardening works correctly.
+
+    The proxy injects ``-c core.hooksPath=/dev/null`` and
+    ``-c core.fsmonitor=false`` into every ``execute_git`` invocation so that
+    git hooks and fsmonitor cannot be used as an escape vector.  The
+    corresponding keys are in CONFIG_NEVER_ALLOW so clients cannot override
+    them via ``-c`` flags.
+    """
+
+    def test_proxy_side_hooks_disabled(self):
+        """execute_git() must inject -c core.hooksPath=/dev/null and -c core.fsmonitor=false."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            with patch("git_operations.subprocess.run") as mock_run:
+                mock_run.return_value = MagicMock(
+                    returncode=0,
+                    stdout=b"On branch main",
+                    stderr=b"",
+                )
+                request = GitExecRequest(args=["status"])
+                metadata = {"sandbox_branch": "test-branch"}
+                response, error = execute_git(request, tmpdir, metadata=metadata)
+
+                assert error is None
+                # Inspect the command list passed to subprocess.run
+                cmd = mock_run.call_args[0][0]
+
+                # Verify -c core.hooksPath=/dev/null is present
+                assert "-c" in cmd
+                hooks_idx = cmd.index("core.hooksPath=/dev/null")
+                assert cmd[hooks_idx - 1] == "-c", (
+                    "core.hooksPath=/dev/null must be preceded by -c"
+                )
+
+                # Verify -c core.fsmonitor=false is present
+                fsmon_idx = cmd.index("core.fsmonitor=false")
+                assert cmd[fsmon_idx - 1] == "-c", (
+                    "core.fsmonitor=false must be preceded by -c"
+                )
+
+    def test_client_cannot_override_hooks_path(self):
+        """Client-supplied -c core.hooksPath=... must be rejected by CONFIG_NEVER_ALLOW."""
+        # Test -c form
+        result = validate_command(["-c", "core.hooksPath=/tmp/evil", "status"])
+        assert result is not None
+        assert "blocked config key" in result.reason.lower()
+
+        # Test --config form (git alias for -c).
+        # The parser does not special-case --config, so it will not be
+        # recognised as a config flag; instead the value becomes the
+        # "subcommand" and is rejected via the allowlist.  Either way the
+        # command is denied.
+        result_cfg = validate_command(["--config", "core.hooksPath=/tmp/evil", "status"])
+        assert result_cfg is not None
+        # Rejected — the exact reason may differ from the -c path
+        assert "not allowed" in result_cfg.reason.lower() or "blocked" in result_cfg.reason.lower()
+
+    def test_client_cannot_override_fsmonitor(self):
+        """Client-supplied -c core.fsmonitor=... must be rejected by CONFIG_NEVER_ALLOW."""
+        result = validate_command(["-c", "core.fsmonitor=/tmp/evil", "status"])
+        assert result is not None
+        assert "blocked config key" in result.reason.lower()
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
