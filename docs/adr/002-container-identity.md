@@ -5,11 +5,6 @@
 Accepted
 
 Date: 2026-02-04
-Implemented: 2026-02-05
-
-### Update (2026-02-05)
-
-Gateway consolidated into **unified-proxy** (see [ADR-005](005-unified-proxy.md)). Identity registry uses SQLite (`unified-proxy/registry.py`). Registration via Unix socket (`/var/run/proxy/internal.sock`).
 
 ### Implementation Notes
 
@@ -31,12 +26,12 @@ The unified proxy needs to reliably identify which sandbox container is making r
 - **Resource quotas** - Rate limiting and resource allocation should be per-container
 - **Sandbox lifecycle management** - Container start/stop/restart events must be tracked to maintain accurate identity registrations
 
-Currently, the system needs a mechanism that:
-1. Uniquely identifies containers across their lifecycle
-2. Handles container restarts (same identity after restart vs. fresh identity)
-3. Supports optional verification for additional security
-4. Works within Docker's networking model
-5. Cleans up stale registrations when containers are removed
+The identity mechanism must:
+1. Uniquely identify containers across their lifecycle
+2. Handle container restarts (same identity after restart vs. fresh identity)
+3. Support optional verification for additional security
+4. Work within Docker's networking model
+5. Clean up stale registrations when containers are removed
 
 ## Decision
 
@@ -48,7 +43,7 @@ Containers are identified by their unique IP address on the Docker network creat
 
 - Each sandbox container receives a unique IP from the docker-compose service's network
 - The IP address is stable within the container's lifetime
-- The IP is registered in the proxy-managed identity registry when the container connects to the proxy
+- The IP is registered in the SQLite-backed identity registry when the container connects to the proxy
 - The IP can be discovered from the proxy's perspective via socket inspection or explicit registration
 
 **Advantages:**
@@ -206,7 +201,7 @@ For each registration:
 Log orphaned containers and removals for audit trail
 ```
 
-### Migration Path: Container Restart Detection
+### Restart Detection
 
 Using the `container-start-time` field, the proxy can detect when a container restarts:
 
@@ -233,6 +228,7 @@ This explicit signal is more reliable than inferring from IP changes alone.
 - **Graceful restart handling:** Containers can restart and obtain new identity without manual intervention
 - **Passive safety:** TTL ensures registrations eventually clean up even if proxy crashes or containers die unexpectedly
 - **Clear signals:** Container restart is explicitly detectable via `container-start-time` change
+- **Persistence:** SQLite-backed registry survives proxy restarts without losing container registrations
 
 ### Negative
 
@@ -308,5 +304,8 @@ This explicit signal is more reliable than inferring from IP changes alone.
 - [Security Architecture](../security/security-architecture.md) - Credential isolation and network controls
 - [Network Isolation](../security/network-isolation.md) - Docker network setup and firewall rules
 - [Architecture](../architecture.md) - System overview and component interactions
+- `unified-proxy/addons/container_identity.py` — Identity addon implementation
+- `unified-proxy/registry.py` — SQLite-backed container registry
+- `unified-proxy/internal_api.py` — Registration REST API
 - Docker Networking: https://docs.docker.com/engine/network/
 - Docker Compose Networking: https://docs.docker.com/compose/networking/

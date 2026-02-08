@@ -390,7 +390,7 @@ docker logs unified-proxy 2>&1 | grep -i "dns.*blocked\|NXDOMAIN" | tail -20
 
 **Check 3: Verify domain in allowlist**
 ```bash
-docker exec unified-proxy cat /etc/proxy/allowlist.conf | grep <domain>
+docker exec unified-proxy cat /etc/unified-proxy/allowlist.yaml | grep <domain>
 ```
 
 ## Emergency Procedures

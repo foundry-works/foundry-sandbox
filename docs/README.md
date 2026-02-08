@@ -18,7 +18,7 @@ The key insight: AI assistants can hallucinate dangerous commands or act without
 
 ```bash
 # Build the sandbox image
-./sandbox.sh build
+cast build
 
 # Create a sandbox from a GitHub repo
 cast new owner/repo
@@ -60,7 +60,7 @@ claude
 
 | Document | Description |
 |----------|-------------|
-| [ADR-001: Unified Proxy Consolidation](adr/001-consolidation.md) | Consolidation of gateway and api-proxy into unified proxy |
+| [ADR-001: Unified Proxy Architecture](adr/001-consolidation.md) | Single-service proxy for credential isolation and request interception |
 | [ADR-002: Container Identity](adr/002-container-identity.md) | Container identity design for proxy authentication |
 | [ADR-003: Policy Engine](adr/003-policy-engine.md) | Policy engine design for access control |
 | [ADR-004: DNS Integration](adr/004-dns-integration.md) | DNS filtering integration with unified proxy |

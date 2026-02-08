@@ -7,10 +7,6 @@ Accepted
 Date: 2026-02-04
 Implemented: 2026-02-05
 
-### Update (2026-02-05)
-
-Gateway consolidated into **unified-proxy** (see [ADR-005](005-unified-proxy.md)). Allowlist moved from `gateway/allowlist.conf` to `config/allowlist.yaml`. Policy paths moved from `/etc/gateway/policies/` to `/etc/proxy/policies/`.
-
 ### Implementation Notes
 
 Policy engine implemented in `unified-proxy/addons/policy_engine.py`:
@@ -46,7 +42,7 @@ The current system works well for its single purpose (domain allowlisting) but l
 
 ### Constraints
 
-1. **Backward compatibility**: Existing allowlist.conf format must be supported
+1. **Backward compatibility**: Existing allowlist.yaml format must be supported
 2. **Performance**: Policy evaluation must not add significant latency to request handling
 3. **Simplicity**: Operators should be able to understand and modify policies without deep system knowledge
 4. **Security**: Must maintain fail-closed (default-deny) posture
@@ -362,7 +358,7 @@ def find_matching_policy(policies, request, scope):
 The current `config/allowlist.yaml` format is automatically converted to policy format on startup:
 
 ```yaml
-# Old format in allowlist.conf
+# Simplified format in allowlist.yaml
 github.com github
 api.github.com github
 *.openai.com ai
@@ -387,7 +383,7 @@ api.github.com github
   action: allow
 ```
 
-The allowlist.conf remains the single source of truth for global allowlist policies. New policy types (rate limiting, content filtering) are defined in separate YAML files.
+The allowlist.yaml remains the single source of truth for global allowlist policies. New policy types (rate limiting, content filtering) are defined in separate YAML files.
 
 ## Consequences
 
@@ -398,7 +394,7 @@ The allowlist.conf remains the single source of truth for global allowlist polic
 3. **Clarity**: Explicit evaluation order eliminates ambiguity about which policy applies
 4. **Auditability**: Policy decisions are logged with matching policy ID for investigation
 5. **Fail-closed**: Default-deny model ensures only explicitly allowed operations succeed
-6. **Backward compatible**: Existing allowlist.conf continues to work without modification
+6. **Backward compatible**: Existing allowlist.yaml continues to work without modification
 7. **Operator-friendly**: Policy YAML syntax is human-readable and easy to modify
 
 ### Negative

@@ -6,30 +6,16 @@ Accepted
 
 Date: 2026-02-04
 
-### Update (2026-02-05)
-
-The `gateway/` directory has been deleted and all functionality migrated to `unified-proxy/`. Key path and variable changes:
-
-| Original | Current |
-|----------|---------|
-| `gateway/entrypoint.sh` | `unified-proxy/entrypoint.sh` |
-| `gateway/build-configs.sh` | Removed (config generation integrated into proxy startup) |
-| `gateway/allowlist.conf` | `config/allowlist.yaml` (YAML format) |
-| `lib/gateway.sh` | `lib/proxy.sh` (container registration via Unix socket) |
-| `GATEWAY_ENABLE_DNS` | `PROXY_ENABLE_DNS` |
-
-DNS filtering is now enabled by default (`PROXY_ENABLE_DNS=true`) and uses mitmproxy's built-in DNS mode (`--mode dns@53`) with a `dns_filter.py` addon, replacing the separate dnsmasq process. The dual-layer filtering approach (DNS + firewall) described below remains the same in principle.
-
 ## Context
 
-The Foundry Sandbox system needs to enforce network isolation through DNS filtering. Currently, the credential isolation gateway uses dnsmasq to control DNS resolution and restrict egress to allowlisted domains. The unified proxy architecture must decide how to integrate DNS control while maintaining flexibility for deployments that may not require DNS integration.
+The Foundry Sandbox system needs to enforce network isolation through DNS filtering. The unified proxy must control DNS resolution to restrict egress to allowlisted domains, while maintaining flexibility for deployments that may not require DNS integration.
 
 ### Current State
 
-The gateway implementation includes:
-- **dnsmasq-based DNS filtering** (activated when `GATEWAY_ENABLE_DNS=true`)
-- **Allowlist-driven configuration** (single source of truth in `gateway/allowlist.conf`)
-- **Two-layer filtering**: DNS (dnsmasq) + firewall (iptables/ipset)
+The unified-proxy implementation includes:
+- **mitmproxy DNS addon filtering** (activated when `PROXY_ENABLE_DNS=true`, enabled by default)
+- **Allowlist-driven configuration** (single source of truth in `config/allowlist.yaml`)
+- **Two-layer filtering**: DNS (mitmproxy `dns_filter.py` addon) + firewall (iptables/ipset)
 - **Domain allowlist** with support for:
   - Standard domains (resolved once at startup)
   - Wildcard domains (*.example.com pattern matching)
@@ -38,71 +24,71 @@ The gateway implementation includes:
 
 ### Constraints
 
-1. **Root privileges required**: dnsmasq must bind to port 53 (requires root)
-2. **Privilege dropping**: Security requires dnsmasq to drop to non-root after binding
+1. **Root privileges required**: DNS must bind to port 53 (requires root)
+2. **Privilege dropping**: Security requires dropping to non-root after binding
 3. **Container environment**: DNS configuration must work with Docker's internal DNS (127.0.0.11)
 4. **Read-only filesystem**: /etc/resolv.conf is read-only; must be written before privilege drop
-5. **Multi-network containers**: Internal services (gateway, api-proxy) live on credential-isolation network; dnsmasq may return wrong IPs without /etc/hosts override
-6. **Network modes**: Sandbox can run in "limited", "unlimited", or "isolated" mode (affects DNS/firewall interaction)
+5. **Single-service architecture**: The unified-proxy container handles both HTTP proxying and DNS filtering as mitmproxy addons
+6. **Network modes**: Sandbox can run in "limited", "host-only", or "none" mode (affects DNS/firewall interaction)
 
 ## Decision
 
-The unified proxy will implement **dual-mode DNS architecture**:
+The unified proxy implements **dual-mode DNS architecture**:
 
-### Mode A: DNS-Enabled (with dnsmasq)
+### Mode A: DNS-Enabled (with mitmproxy DNS addon)
 
-**When enabled** (`GATEWAY_ENABLE_DNS=true` and running as root):
-- Gateway's entrypoint starts dnsmasq in foreground
-- Entrypoint-root.sh (running first, as root) configures /etc/resolv.conf to point to gateway's dnsmasq
-- Entrypoint-root.sh sets up DNS firewall rules (port 53 allowed only to gateway IP)
+**When enabled** (`PROXY_ENABLE_DNS=true` and running as root):
+- Unified-proxy starts mitmproxy with `--mode dns@53` and the `dns_filter.py` addon
+- Entrypoint-root.sh (running first, as root) configures /etc/resolv.conf to point to unified-proxy's IP
+- Entrypoint-root.sh sets up DNS firewall rules (port 53 allowed only to unified-proxy IP)
 - Container resolves domains through allowlist-filtered DNS
 - Two-layer filtering:
-  1. DNS layer: dnsmasq returns NXDOMAIN for non-allowlisted domains
-  2. Firewall layer: iptables blocks port 53 to non-gateway destinations
+  1. DNS layer: `dns_filter.py` returns NXDOMAIN for non-allowlisted domains
+  2. Firewall layer: iptables blocks port 53 to non-proxy destinations
 
 **Go Criteria (enable DNS integration):**
-- Running as root with capability to start dnsmasq
-- GATEWAY_ENABLE_DNS environment variable set to "true"
-- /etc/dnsmasq.conf exists and is readable
+- Running as root with capability to bind port 53
+- `PROXY_ENABLE_DNS` environment variable set to "true" (default)
+- `config/allowlist.yaml` exists and is readable
 - Network mode is "limited" (requires egress filtering)
 
 ### Mode B: DNS-Disabled (fallback)
 
-**When disabled** (non-root execution or GATEWAY_ENABLE_DNS=false):
-- No dnsmasq startup
+**When disabled** (non-root execution or `PROXY_ENABLE_DNS=false`):
+- mitmproxy starts without `--mode dns@53`
 - Container uses Docker's default DNS (127.0.0.11 or host-provided)
 - Firewall rules still restrict egress (independent of DNS)
 - Warning logged: "DNS routing disabled"
 - Fallback to firewall-only isolation (less effective but still functional)
 
 **No-Go Criteria (disable DNS integration):**
-- Running as non-root user (dnsmasq cannot bind port 53)
-- GATEWAY_ENABLE_DNS environment variable not set or false
-- /etc/dnsmasq.conf missing
+- Running as non-root user (cannot bind port 53)
+- `PROXY_ENABLE_DNS` environment variable set to false
+- `config/allowlist.yaml` missing
 - Container lacks NET_ADMIN capability for firewall rules
 
 ### Allowlist Integration
 
 The domain allowlist serves both DNS and firewall:
 
-1. **Source of Truth**: `gateway/allowlist.conf` (human-edited)
-   - Single file listing all allowed domains
-   - Supports comments with CIDR blocks: `# 1.2.3.0/24`
-   - Supports domain types: `github.com generic`, `api.openai.com rotating_ip`
+1. **Source of Truth**: `config/allowlist.yaml` (human-edited)
+   - Single YAML file listing all allowed domains with category tags
+   - Supports wildcard domains (*.example.com)
+   - Supports CIDR blocks for known IPs
 
-2. **DNS Config Generation**: `gateway/build-configs.sh` generates `dnsmasq.conf`
-   - Converts domain list to dnsmasq `server=/domain/127.0.0.11` directives
-   - Sets `address=/#/` to block unlisted domains (returns NXDOMAIN)
-   - Sets `no-resolv` to prevent /etc/resolv.conf fallback
+2. **DNS Filter**: `unified-proxy/addons/dns_filter.py` loads the allowlist at startup
+   - Matches incoming DNS queries against the allowlist
+   - Returns NXDOMAIN for non-allowlisted domains
+   - Forwards allowlisted queries to Docker's internal DNS (127.0.0.11)
 
-3. **Firewall Config Generation**: `gateway/build-configs.sh` generates `firewall-allowlist.generated`
-   - Exports domain arrays for `safety/network-firewall.sh`
-   - Includes ALLOWLIST_DOMAINS, ROTATING_IP_DOMAINS, WILDCARD_DOMAINS, CIDR_BLOCKS
-   - Used by firewall setup to pre-resolve IPs and create iptables rules
+3. **Firewall Config**: `safety/network-firewall.sh` reads the allowlist
+   - Resolves allowlisted domains to IPs and creates iptables rules
+   - Includes ALLOWLIST_DOMAINS, WILDCARD_DOMAINS, CIDR_BLOCKS
+   - Uses ipset for efficient iptables rules with large domain lists
 
 4. **Runtime Override**: Environment variables allow temporary allowlist expansion
    - `SANDBOX_ALLOWED_DOMAINS="domain1.com,domain2.com"` adds to firewall allowlist
-   - Does NOT affect dnsmasq (would require configuration reload)
+   - Does NOT affect DNS filter (would require proxy restart)
 
 ### Startup Sequence
 
@@ -113,12 +99,12 @@ Container Start
     │
     ▼
 entrypoint-root.sh (as root)
-  ├─ Resolve internal service IPs (gateway, api-proxy) via Docker DNS
-  ├─ Add to /etc/hosts (takes precedence over dnsmasq)
+  ├─ Resolve unified-proxy IP via Docker DNS
+  ├─ Add to /etc/hosts (takes precedence over DNS filtering)
   │
   ├─ [DNS Enabled Branch]
-  │  ├─ Configure /etc/resolv.conf: nameserver <gateway-ip>
-  │  └─ Setup DNS firewall: allow UDP/TCP :53 to gateway, drop others
+  │  ├─ Configure /etc/resolv.conf: nameserver <unified-proxy-ip>
+  │  └─ Setup DNS firewall: allow UDP/TCP :53 to unified-proxy, drop others
   │
   └─ Drop privileges via gosu
       │
@@ -134,41 +120,39 @@ entrypoint-root.sh (as root)
 
 - **Defense in depth**: Dual-layer filtering (DNS + firewall) prevents both direct DNS bypass and DNS spoofing
 - **Flexible deployment**: Works in both restricted (DNS-enabled) and unrestricted (DNS-disabled) environments
-- **Centralized allowlist**: Single source of truth (`allowlist.conf`) reduces maintenance burden and sync issues
+- **Centralized allowlist**: Single source of truth (`config/allowlist.yaml`) reduces maintenance burden and sync issues
 - **Clear failure modes**: Graceful degradation if DNS cannot start (logs warning, continues with firewall-only mode)
-- **Privilege separation**: dnsmasq runs as root (needed for port 53), but application runs as non-root
+- **Integrated architecture**: DNS filtering runs as a mitmproxy addon within the same process, reducing operational complexity
 - **Scalable filtering**: ipset support for efficient iptables rules (handles thousands of IPs)
 - **Multi-domain support**: Handles standard, wildcard, and rotating IP domains in single config
 
 ### Negative
 
 - **Root requirement**: DNS filtering requires root privileges; non-root deployments lose DNS layer
-- **Configuration complexity**: Three configuration files to maintain (allowlist.conf, dnsmasq.conf, firewall-allowlist.generated)
 - **Network-dependent**: Relies on Docker's internal DNS (127.0.0.11); may not work with custom DNS setups
 - **Startup order sensitivity**: entrypoint-root.sh must run before entrypoint.sh for DNS to work (tight coupling)
-- **Manual regeneration**: After editing allowlist.conf, must run `gateway/build-configs.sh` to regenerate configs
-- **Limited customization**: Runtime domain additions (SANDBOX_ALLOWED_DOMAINS) don't affect dnsmasq
+- **Limited customization**: Runtime domain additions (`SANDBOX_ALLOWED_DOMAINS`) don't affect DNS filter without restart
 - **IP churn**: Non-wildcard domains resolved once at startup; IP changes require restart
 
 ### Neutral
 
-- **dnsmasq as dependency**: Adds another service to manage (but keeps existing architecture)
-- **Logging overhead**: dnsmasq DNS query logging may impact performance in high-volume scenarios
-- **IPv6 handling**: Firewall rules cover both IPv4 and IPv6, but dnsmasq focuses primarily on IPv4
-- **Wildcard mode trade-offs**: Wildcard domains (*.api.example.com) open ports 80/443 to all destinations, relying on DNS+gateway validation
+- **mitmproxy DNS addon**: DNS filtering is built into the proxy process rather than being a separate service
+- **Logging overhead**: DNS query logging may impact performance in high-volume scenarios
+- **IPv6 handling**: Firewall rules cover both IPv4 and IPv6, but DNS filtering focuses primarily on IPv4
+- **Wildcard mode trade-offs**: Wildcard domains (*.api.example.com) open ports 80/443 to all destinations, relying on DNS+proxy validation
 
 ## Alternatives Considered
 
 ### 1. Proxy-Only Filtering (No DNS Control)
 **Rejected**: Firewall-only isolation is insufficient. Attackers could:
 - Use hardcoded IPs to bypass firewall rules
-- Perform DNS rebinding attacks against gateway validation
-- Exploit DNS timeouts or race conditions in gateway hostname resolution
+- Perform DNS rebinding attacks against proxy validation
+- Exploit DNS timeouts or race conditions in proxy hostname resolution
 
 ### 2. dnsmasq Only (No Firewall)
 **Rejected**: DNS-only filtering has critical gaps:
 - No protection against direct IP-based requests (bypass DNS entirely)
-- Single point of failure (if dnsmasq crashes, all egress fails)
+- Single point of failure (if DNS crashes, all egress fails)
 - Cannot restrict to specific IPs within allowlisted domains (if domain uses shared hosting)
 
 ### 3. Strict Allowlist with Zero Customization
@@ -180,29 +164,27 @@ entrypoint-root.sh (as root)
 ### 4. Full Network Namespace Isolation
 **Rejected**: Adds complexity without corresponding security benefit:
 - Requires additional network configuration per container
-- Complicates gateway communication (separate network for credential exchange)
+- Complicates proxy communication (separate network for credential exchange)
 - Still needs allowlist enforcement (no free security)
 
 ### 5. DNS over HTTPS (DoH) Only
 **Rejected**: DoH bypasses DNS filtering and prevents allowlist enforcement:
 - DNS queries go directly to DoH provider, not through local DNS
 - Requires blocking DoH endpoints (fragile, easy to circumvent)
-- Incompatible with dnsmasq-based filtering
+- Incompatible with local DNS-based filtering
 
 ## References
 
 - [Network Isolation Architecture](../security/network-isolation.md) - How DNS fits into broader network security
-- Domain Allowlist - now at `config/allowlist.yaml` (was `gateway/allowlist.conf`)
-- [Credential Isolation](../security/credential-isolation.md) - Gateway architecture and session management
+- Domain Allowlist - `config/allowlist.yaml`
+- [Credential Isolation](../security/credential-isolation.md) - Proxy architecture and session management
 - [Sandbox Threats](../security/sandbox-threats.md) - Threat model and what we protect against
 - [Security Architecture](../security/security-architecture.md) - Defense in depth overview
 
 ### Implementation Files
 
-- `gateway/entrypoint.sh` - (deleted; migrated to `unified-proxy/entrypoint.sh`)
-- `gateway/build-configs.sh` - (deleted; config generation integrated into proxy startup)
 - `unified-proxy/entrypoint.sh` - Proxy startup with integrated DNS filter
 - `unified-proxy/addons/dns_filter.py` - DNS filtering addon for mitmproxy
 - `entrypoint-root.sh` - Root entrypoint that configures DNS before privilege drop
 - `safety/network-firewall.sh` - Firewall rule setup using allowlist
-- `lib/proxy.sh` - Container registration (calls proxy via Unix socket; replaces `lib/gateway.sh`)
+- `lib/proxy.sh` - Container registration (calls proxy via Unix socket)

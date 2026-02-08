@@ -6,21 +6,9 @@ Accepted
 
 Date: 2026-02-04
 
-### Update (2026-02-05)
-
-The gateway and api-proxy have been consolidated into a single **unified-proxy** service. Key differences from the original two-service model described below:
-
-- **Single service**: One unified-proxy container replaces both gateway and api-proxy. The sandbox depends on one `service_healthy` condition, not two.
-- **Single healthcheck**: The unified-proxy exposes an internal API via Unix socket (`/var/run/proxy/internal.sock`). The healthcheck uses `curl -sf --unix-socket /var/run/proxy/internal.sock http://localhost/internal/health`.
-- **SQLite registry**: Session tokens stored in a Python dictionary have been replaced by a SQLite-backed container registry (`unified-proxy/registry.py`) with WAL mode and TTL-based expiration. Registrations survive proxy restarts.
-- **Integrated DNS filter**: DNS filtering is now built into mitmproxy as an addon (`dns_filter.py`) running on port 53, replacing the separate dnsmasq process.
-- **Startup sequence**: The proxy starts internal API, validates addons, then starts mitmproxy with HTTP (port 8080) and optional DNS (port 53) modes.
-
-The fail-closed principles and error scenarios described below remain valid. References to "gateway" and "api-proxy" as separate services are historical.
-
 ## Context
 
-The unified proxy system (gateway + api-proxy) is a critical security component that enforces credential isolation and network restrictions. If the proxy fails silently or becomes partially available, the sandbox could:
+The unified proxy is a critical security component that enforces credential isolation and network restrictions. If the proxy fails silently or becomes partially available, the sandbox could:
 
 1. Bypass security controls and access external systems directly
 2. Expose real credentials to untrusted code
@@ -30,15 +18,16 @@ Without careful failure mode design, the system creates a false sense of securit
 
 ### Current System
 
-The credential isolation architecture uses two proxy containers:
+The credential isolation architecture uses one proxy container:
 
-- **Gateway**: Holds GitHub credentials, enforces DNS routing, injects credentials for git operations
-- **API Proxy**: Holds API keys (Anthropic, OpenAI, Google, etc.), performs HTTPS MITM to inject credentials
+- **Unified Proxy**: Holds all credentials (GitHub token, API keys for Anthropic, OpenAI, Google, etc.), enforces DNS filtering, performs HTTPS MITM to inject credentials, and proxies git operations through an authenticated API
 
-Both proxies must be healthy and reachable for the sandbox to operate securely. The sandbox depends on:
-- Gateway for DNS resolution and git credential injection
-- API Proxy for outbound HTTP/HTTPS requests
+The unified proxy must be healthy and reachable for the sandbox to operate securely. The sandbox depends on:
+- Unified proxy for DNS resolution and domain filtering
+- Unified proxy for outbound HTTP/HTTPS requests with credential injection
+- Unified proxy for git operations via the git API
 - Correct certificate trust setup for HTTPS interception
+- SQLite-backed container registry for session management
 
 ## Decision
 
@@ -50,15 +39,13 @@ We implement **fail-closed behavior** with strict readiness requirements and ord
 
 **Implementation:**
 
-- **Gateway failure** → DNS cannot be routed through gateway
+- **Proxy failure** → DNS cannot be routed through proxy, credentials cannot be injected
   - DNS firewall rules (iptables) block all DNS to external resolvers
+  - HTTP_PROXY and HTTPS_PROXY environment variables point to unified-proxy:8080
+  - If unified-proxy is unreachable, all HTTP/HTTPS and DNS requests fail
   - Sandbox cannot resolve external domains → cannot connect anywhere
   - Legitimate operations fail (curl, git clone) → user sees clear error
   - No silent fallback to direct network access
-
-- **API Proxy failure** → credentials cannot be injected
-  - HTTP_PROXY and HTTPS_PROXY environment variables point to api-proxy:8080
-  - If api-proxy is unreachable, HTTP/HTTPS requests fail with connection refused
   - No fallback to using placeholder credentials
   - No fallback to direct API access
 
@@ -76,38 +63,29 @@ We implement **fail-closed behavior** with strict readiness requirements and ord
 
 **Implemented checks (in order):**
 
-1. **API Proxy Readiness** (`api-proxy`)
-   - Docker healthcheck: TCP connect to port 8080
+1. **Unified Proxy Readiness** (`unified-proxy`)
+   - Docker healthcheck: `curl -sf --unix-socket /var/run/proxy/internal.sock http://localhost/internal/health`
    - Timeout: 5 seconds per attempt
    - Retries: 5 attempts before marking unhealthy
    - Start period: 10 seconds (grace time for initialization)
-   - What it validates: Port is listening, basic connectivity works
-   - What it does NOT validate: Credentials loaded, MITM setup complete
+   - What it validates: Internal API is running, mitmproxy is listening, addons loaded
+   - What it does NOT validate: All credentials loaded correctly
 
-2. **Gateway Readiness** (`gateway`)
-   - Docker healthcheck: HTTP GET to `/health` endpoint
-   - Timeout: 5 seconds per attempt
-   - Retries: 3 attempts before marking unhealthy
-   - Start period: 10 seconds (grace time for initialization)
-   - What it validates: Flask app is running, can handle requests
-   - What it does NOT validate: Credentials loaded, domain allowlist loaded
-
-3. **Sandbox Dependency on Proxies** (`dev` service)
+2. **Sandbox Dependency on Proxy** (`dev` service)
    - Docker compose `depends_on` with `condition: service_healthy`
-   - Blocks container startup until both proxies are healthy
-   - If either proxy fails healthcheck, sandbox container fails to start
+   - Blocks container startup until unified-proxy is healthy
+   - If proxy fails healthcheck, sandbox container fails to start
    - Error message clearly shows which dependency failed
 
-4. **Runtime Readiness Checks** (in entrypoint)
-   - After proxies are marked healthy, entrypoint validates additional conditions:
-     - Gateway DNS configuration (in `entrypoint-root.sh`)
+3. **Runtime Readiness Checks** (in entrypoint)
+   - After proxy is marked healthy, entrypoint validates additional conditions:
+     - DNS configuration (in `entrypoint-root.sh`)
      - mitmproxy CA certificate mounted and readable
-     - Domain allowlist loaded (gateway logs confirm)
-     - Gateway IP resolved and added to /etc/hosts
+     - Unified-proxy IP resolved and added to /etc/hosts
 
 **Design Rationale:**
 
-The healthchecks validate *availability*, not *correctness*. Full validation happens during entrypoint initialization, after Docker marks services healthy. This two-stage approach:
+The healthcheck validates *availability*, not *correctness*. Full validation happens during entrypoint initialization, after Docker marks the service healthy. This two-stage approach:
 - Prevents premature startup if port is not listening
 - Allows full configuration validation before shell prompt
 - Gives operators visibility into each stage of failure
@@ -119,51 +97,34 @@ The healthchecks validate *availability*, not *correctness*. Full validation hap
 #### Stage 0: Docker Service Startup (Orchestrator Level)
 
 1. **docker-compose up** is called
-2. Docker starts both proxy services (concurrently):
-   - api-proxy (healthcheck: port 8080 TCP)
-   - gateway (healthcheck: /health HTTP endpoint)
+2. Docker starts the unified-proxy service
 
-#### Stage 1: Proxy Initialization (Parallel)
+#### Stage 1: Proxy Initialization
 
-**API Proxy** (`api-proxy:8080`):
+**Unified Proxy** (`unified-proxy`):
 ```
 1. Load Python environment
-2. Parse configuration from environment variables
-3. Load mitmproxy certificates (stored in named volume: mitm-certs)
-4. Start mitmproxy server
-5. Listen on 0.0.0.0:8080 (TCP port available)
-6. Docker healthcheck succeeds when port 8080 accepts connections
+2. Start internal API via Unix socket (/var/run/proxy/internal.sock)
+3. Validate addons (credential injector, DNS filter, policy engine, etc.)
+4. Load mitmproxy certificates (stored in named volume: mitm-certs)
+5. Load domain allowlist from config/allowlist.yaml
+6. Initialize SQLite container registry (/var/lib/unified-proxy/registry.db)
+7. Start mitmproxy with HTTP mode (port 8080) and optional DNS mode (port 53)
+8. Write readiness marker (/var/run/proxy/ready)
+9. Docker healthcheck succeeds when internal API returns healthy
 ```
 
-**Gateway** (`gateway:8080`):
-```
-1. Load Python environment
-2. Load domain allowlist from firewall-allowlist.generated
-3. Initialize Flask application
-4. Load session storage (in-memory dictionary)
-5. Listen on 0.0.0.0:8080 (TCP port available)
-6. Docker healthcheck: HTTP GET /health
-7. Response: {"status": "healthy"}, 200 OK
-8. If allowlist fails to load: log warning but continue
-   (operations will fail at runtime, not silently succeed)
-```
+#### Stage 2: Sandbox Initialization (After Proxy Healthy)
 
-**Dependency:** API Proxy and Gateway are independent (can start concurrently). No ordering required between them.
-
-#### Stage 2: Sandbox Initialization (After Proxies Healthy)
-
-Once both proxies pass healthcheck, sandbox (`dev`) container starts:
+Once the proxy passes healthcheck, sandbox (`dev`) container starts:
 
 1. **entrypoint-root.sh** (runs as root):
    ```
-   1. Resolve internal service IPs:
-      - Gateway IP via getent hosts gateway
-      - API Proxy IP via getent hosts api-proxy
+   1. Resolve unified-proxy IP via getent hosts unified-proxy
    2. Add to /etc/hosts for reliable resolution:
-      - "${GATEWAY_IP} gateway"
-      - "${API_PROXY_IP} api-proxy"
+      - "${PROXY_IP} unified-proxy"
    3. Configure DNS firewall (iptables rules):
-      - ACCEPT DNS to gateway IP only
+      - ACCEPT DNS to unified-proxy IP only
       - DROP DNS to all other destinations
       - Prevents: dig @8.8.8.8, direct external DNS resolution
    4. Install mitmproxy CA certificate:
@@ -174,7 +135,7 @@ Once both proxies pass healthcheck, sandbox (`dev`) container starts:
    ```
 
    **Failure modes:**
-   - Cannot resolve gateway → **FAIL**: Warning logged, but gateway IP remains unset. DNS iptables rules still block external DNS. Sandbox cannot reach anything.
+   - Cannot resolve unified-proxy → **FAIL**: Warning logged, proxy IP remains unset. DNS iptables rules still block external DNS. Sandbox cannot reach anything.
    - mitmproxy CA missing → **FAIL**: git clone fails with "certificate verify failed"
    - iptables rules fail → **LOG WARNING**: DNS might leak. Operator should see warning in logs.
 
@@ -184,8 +145,8 @@ Once both proxies pass healthcheck, sandbox (`dev`) container starts:
    2. Fix permissions on mounted volumes
    3. Set npm, pip configuration
    4. Configure Claude onboarding
-   5. Copy proxy stubs (gateway mode) if enabled
-   6. Apply gateway gitconfig rewriting (gateway mode) if enabled
+   5. Copy proxy stubs if enabled
+   6. Apply gitconfig rewriting if enabled
    7. Return prompt or execute passed command
    ```
 
@@ -193,8 +154,8 @@ Once both proxies pass healthcheck, sandbox (`dev`) container starts:
 - Healthcheck start_period: 10s grace time
 - Healthcheck interval: 5s checks
 - With 5 retries at 5s each: ~35s total time to mark unhealthy
-- Typical healthy startup: 2-5 seconds per proxy
-- Sandbox startup (once proxies healthy): 1-2 seconds
+- Typical healthy startup: 2-5 seconds
+- Sandbox startup (once proxy healthy): 1-2 seconds
 
 ### 4. Graceful Shutdown
 
@@ -207,26 +168,20 @@ Once both proxies pass healthcheck, sandbox (`dev`) container starts:
    - Grace period: 10 seconds (Docker default)
    - After grace period: SIGKILL
    - On SIGTERM: Bash saves command history, closes files
-   - No active connections to gate/proxy (would still fail-closed if killed)
+   - No active connections to proxy survive (would still fail-closed if killed)
 
-2. **Gateway container** (gateway):
-   - Docker sends SIGTERM to Flask process
-   - Grace period: 10 seconds
-   - Flask stops accepting new connections (no new sessions)
-   - In-flight git operations continue until completion or timeout
-   - Session storage discarded (in-memory only, not persistent)
-   - After SIGKILL: container stops
-
-3. **API Proxy container** (api-proxy):
+2. **Unified Proxy container** (unified-proxy):
    - Docker sends SIGTERM to mitmproxy process
    - Grace period: 10 seconds
    - mitmproxy stops accepting new connections
-   - In-flight HTTP/HTTPS requests continue until completion or timeout
+   - In-flight HTTP/HTTPS and git requests continue until completion or timeout
+   - SQLite registry persists to disk (WAL mode ensures consistency)
    - After SIGKILL: container stops
 
-4. **Named volumes** (mitm-certs, proxy-stubs):
+3. **Named volumes** (mitm-certs, proxy-data):
    - Preserved for next startup (unless explicitly deleted)
    - Certificates remain valid
+   - Container registry database preserved
    - Allowlist remains available
 
 **Cleanup on container stop:**
@@ -244,27 +199,27 @@ Once both proxies pass healthcheck, sandbox (`dev`) container starts:
 - Volumes retained for next sandbox (certificates don't expire)
 - Network released by Docker
 - Memory reclaimed
-- Port released (api-proxy:8080, gateway:8080)
+- Port released (unified-proxy:8080, optionally :53)
 
 ### 5. Error Scenarios and Recovery
 
-**Scenario A: API Proxy Crashes During Operation**
+**Scenario A: Unified Proxy Crashes During Operation**
 
 1. Proxy process dies
-2. Docker healthcheck detects no port listening (fails after 5 retries)
-3. Sandbox's HTTP/HTTPS requests fail: "Connection refused to api-proxy:8080"
-4. User sees explicit error, must restart docker-compose
-5. Credentials never exposed (proxy held all credentials)
+2. Docker healthcheck detects failure (internal API unreachable)
+3. Sandbox's HTTP/HTTPS requests fail: "Connection refused to unified-proxy:8080"
+4. DNS queries fail (port 53 unreachable, iptables blocks external DNS)
+5. User sees explicit error, must restart docker-compose
+6. Credentials never exposed (proxy held all credentials)
 
-**Scenario B: Gateway Becomes Unresponsive**
+**Scenario B: Unified Proxy Becomes Unresponsive**
 
-1. Gateway process hangs (Python deadlock, etc.)
-2. Healthcheck fails: /health endpoint times out
-3. Docker marks gateway unhealthy
-4. Active sandbox continues running but cannot make new git requests
-5. Existing git credentials in filesystem still valid (short-lived tokens)
-6. User must restart docker-compose
-7. Next startup: gateway healthcheck fails → sandbox fails to start
+1. Proxy process hangs (Python deadlock, etc.)
+2. Healthcheck fails: internal API endpoint times out
+3. Docker marks unified-proxy unhealthy
+4. Active sandbox continues running but cannot make new requests
+5. User must restart docker-compose
+6. Next startup: proxy healthcheck fails → sandbox fails to start
 
 **Scenario C: DNS Firewall Rules Not Applied**
 
@@ -273,7 +228,7 @@ Once both proxies pass healthcheck, sandbox (`dev`) container starts:
 3. Script logs warning but continues (not fatal)
 4. Sandbox starts but DNS is not blocked
 5. **Problem:** Sandbox can make direct DNS queries
-6. **Mitigation:** gateway configured for allowlist, but direct DNS bypass possible
+6. **Mitigation:** Proxy configured for allowlist, but direct DNS bypass possible
 7. **Recommendation:** Operator should see "Failed to apply DNS firewall" in logs
 
 **Scenario D: mitmproxy CA Certificate Not Mounted**
@@ -281,7 +236,7 @@ Once both proxies pass healthcheck, sandbox (`dev`) container starts:
 1. /certs/mitmproxy-ca.pem does not exist
 2. entrypoint-root.sh skips installation (silent skip)
 3. Sandbox starts and user runs `git clone`
-4. git connects to gateway, receives MITM'd connection
+4. git connects to proxy, receives MITM'd connection
 5. Certificate validation fails: "unable to get local issuer certificate"
 6. User sees explicit TLS error
 7. Clear failure: not a silent bypass
@@ -290,33 +245,32 @@ Once both proxies pass healthcheck, sandbox (`dev`) container starts:
 
 ### Positive
 
-- **Security by Default:** Proxy failures result in lockdown, not graceful degradation
+- **Security by Default:** Proxy failure results in lockdown, not graceful degradation
 - **Operator Visibility:** Failed healthchecks and logs make problems obvious
 - **Explicit Errors:** Users see "Connection refused" or "Certificate verify failed," not mysterious timeouts
 - **Reliable Isolation:** No partial bypass scenarios where sandbox appears isolated but isn't
 - **Clear Dependency Chain:** docker-compose ordering makes startup requirements explicit
-- **Defense-in-Depth on DNS:** Combination of gateway routing + iptables firewall rules + /etc/hosts prevents multiple bypass paths
+- **Defense-in-Depth on DNS:** Combination of proxy DNS filtering + iptables firewall rules + /etc/hosts prevents multiple bypass paths
+- **Persistent Sessions:** SQLite-backed container registry survives proxy restarts, avoiding re-authentication
 
 ### Negative
 
-- **Operational Overhead:** Operators must monitor two proxy services plus healthchecks
 - **Startup Time:** Waiting for healthchecks adds 2-5 seconds to sandbox creation
-- **Logging Noise:** If proxies frequently fail/recover, logs accumulate quickly
-- **No Graceful Degradation:** Cannot operate with reduced functionality (e.g., if API proxy down but git still needed)
-- **Cached Credentials Risk:** Session tokens are in-memory; gateway restart loses sessions and requires re-auth
+- **Logging Noise:** If proxy frequently fails/recovers, logs accumulate quickly
+- **No Graceful Degradation:** Cannot operate with reduced functionality (e.g., if DNS fails but HTTP still needed)
 - **Manual Restart Required:** No automatic recovery if proxy becomes unhealthy mid-operation
 
 ### Neutral
 
-- **Two Proxy Containers:** Requires Docker Compose to manage two services (not a security difference, just complexity)
-- **Healthcheck Overhead:** ~0.5% CPU to perform /health checks every 5-10 seconds (negligible)
+- **Single Proxy Container:** One service to monitor (simpler than multi-service, but single point of failure)
+- **Healthcheck Overhead:** ~0.5% CPU to perform health checks every 5-10 seconds (negligible)
 - **TLS MITM:** Explicit design choice to intercept HTTPS; documented in credential-isolation.md threat model
 
 ## Alternatives Considered
 
 ### Alternative 1: Graceful Degradation
 
-If API proxy fails, allow direct API calls with placeholder credentials (fail-open).
+If proxy fails, allow direct API calls with placeholder credentials (fail-open).
 
 **Rationale for rejection:**
 - Placeholder credentials would fail at API endpoint anyway
@@ -326,33 +280,32 @@ If API proxy fails, allow direct API calls with placeholder credentials (fail-op
 
 ### Alternative 2: Proxy Auto-Restart
 
-If gateway/api-proxy becomes unhealthy, automatically restart them.
+If unified-proxy becomes unhealthy, automatically restart it.
 
 **Rationale for rejection:**
 - Docker's `restart: unless-stopped` already does this
 - Automatic restart can mask underlying problems
-- If proxies fail repeatedly, need operator intervention to investigate
-- Sessions would be lost (in-memory store) anyway
-- Scenario: proxy crashes, auto-restarts, sandbox unaware, makes git request with old token → fails
+- If proxy fails repeatedly, need operator intervention to investigate
+- Scenario: proxy crashes, auto-restarts, sandbox unaware, makes request with old session → fails
 
 ### Alternative 3: Multiple Proxy Instances
 
-Run 2-3 replicas of each proxy with load balancing.
+Run 2-3 replicas of the proxy with load balancing.
 
 **Rationale for rejection:**
-- Session affinity becomes complex (tokens only valid on creating instance)
+- SQLite registry would need to be shared or replaced with distributed store
 - Adds Docker networking complexity
 - Sandboxes still cannot operate if all replicas fail
 - Cost/complexity not justified for single-tenant use case
 
-### Alternative 4: Persistent Session Store
+### Alternative 4: External Session Store
 
-Store sessions in Redis/database so they survive proxy restarts.
+Store sessions in Redis/database external to the proxy.
 
 **Rationale for rejection:**
 - Adds persistent storage dependency
 - Increases attack surface (compromise of session store = all sessions)
-- Sessions are short-lived (24h inactivity, 7d absolute TTL)
+- SQLite with WAL mode provides sufficient durability within a single container
 - Sandboxes are ephemeral—expected to be recreated
 - Not worth the complexity and security cost
 
@@ -363,7 +316,6 @@ Store sessions in Redis/database so they survive proxy restarts.
 - [Credential Isolation](/workspace/docs/security/credential-isolation.md) - Credential isolation threat model
 - [entrypoint-root.sh](/workspace/entrypoint-root.sh) - DNS firewall and startup initialization
 - [entrypoint.sh](/workspace/entrypoint.sh) - Sandbox user-level startup
-- `gateway/gateway.py` - (deleted; migrated to `unified-proxy/`)
 - [unified-proxy/entrypoint.sh](/workspace/unified-proxy/entrypoint.sh) - Proxy startup with internal API, addon validation, and mitmproxy
-- [unified-proxy/registry.py](/workspace/unified-proxy/registry.py) - SQLite-backed container registry (replaces in-memory session store)
+- [unified-proxy/registry.py](/workspace/unified-proxy/registry.py) - SQLite-backed container registry
 - Docker Compose Documentation: [depends_on with service_healthy condition](https://docs.docker.com/compose/compose-file/compose-file-v3/#depends_on)
