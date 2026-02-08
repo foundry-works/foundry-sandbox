@@ -150,6 +150,21 @@ copy_ca_to_shared_volume() {
     log "CA certificate copied to ${SHARED_CERTS_DIR}/mitmproxy-ca.pem"
 }
 
+# Generate combined CA bundle for sandbox containers.
+# Includes system CAs + mitmproxy CA so sandboxes don't need to run
+# update-ca-certificates (which requires a writable root filesystem).
+generate_combined_ca_bundle() {
+    local combined="${SHARED_CERTS_DIR}/ca-certificates.crt"
+    local tmp="${combined}.tmp"
+    # Write atomically: build in temp file, then rename.
+    # Prevents sandbox from reading a partial bundle (system CAs only,
+    # missing mitmproxy CA) if it starts between the two writes.
+    cat /etc/ssl/certs/ca-certificates.crt > "$tmp"
+    cat "${MITMPROXY_CA_CERT}" >> "$tmp"
+    mv "$tmp" "$combined"
+    log "Combined CA bundle generated at $combined"
+}
+
 validate_config() {
     log "Validating configuration..."
 
@@ -507,6 +522,7 @@ main() {
     fi
 
     copy_ca_to_shared_volume
+    generate_combined_ca_bundle
 
     # Validate configuration
     validate_config

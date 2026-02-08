@@ -257,21 +257,43 @@ fi
 # Trust mitmproxy CA when mounted (explicit proxy mode)
 if [ -f "/certs/mitmproxy-ca.pem" ]; then
     echo "Configuring CA trust for proxy..."
-    export NODE_EXTRA_CA_CERTS="/certs/mitmproxy-ca.pem"
-    export REQUESTS_CA_BUNDLE="/certs/mitmproxy-ca.pem"
-    export SSL_CERT_FILE="/certs/mitmproxy-ca.pem"
-    export CURL_CA_BUNDLE="/certs/mitmproxy-ca.pem"
-    if command -v update-ca-certificates >/dev/null 2>&1; then
-        if [ "$(id -u)" = "0" ]; then
-            # Running as root, no sudo needed
-            cp "/certs/mitmproxy-ca.pem" "/usr/local/share/ca-certificates/mitmproxy-ca.crt" 2>/dev/null || true
-            update-ca-certificates >/dev/null 2>&1 || true
-        elif command -v sudo >/dev/null 2>&1 && sudo -n true 2>/dev/null; then
-            sudo cp "/certs/mitmproxy-ca.pem" "/usr/local/share/ca-certificates/mitmproxy-ca.crt" 2>/dev/null || true
-            sudo update-ca-certificates >/dev/null 2>&1 || true
-        elif [ -w "/usr/local/share/ca-certificates" ]; then
-            cp "/certs/mitmproxy-ca.pem" "/usr/local/share/ca-certificates/mitmproxy-ca.crt" 2>/dev/null || true
-            update-ca-certificates >/dev/null 2>&1 || true
+
+    if [ "${SANDBOX_CA_MODE}" = "combined" ]; then
+        # Combined bundle mode (credential-isolation with read-only FS).
+        # Env vars (NODE_EXTRA_CA_CERTS, REQUESTS_CA_BUNDLE, etc.) are set
+        # via docker-compose.credential-isolation.yml.
+        if [ ! -f "/certs/ca-certificates.crt" ]; then
+            echo "FATAL: SANDBOX_CA_MODE=combined but /certs/ca-certificates.crt not found"
+            echo "The proxy container may not be running or failed to generate the combined bundle."
+            exit 1
+        fi
+        echo "Combined CA bundle available at /certs/ca-certificates.crt"
+
+        # Defensive: set CA env vars here as a safety net in case compose-level
+        # env vars are missing. These are no-ops if already set by compose.
+        export NODE_EXTRA_CA_CERTS="${NODE_EXTRA_CA_CERTS:-/certs/ca-certificates.crt}"
+        export REQUESTS_CA_BUNDLE="${REQUESTS_CA_BUNDLE:-/certs/ca-certificates.crt}"
+        export SSL_CERT_FILE="${SSL_CERT_FILE:-/certs/ca-certificates.crt}"
+        export CURL_CA_BUNDLE="${CURL_CA_BUNDLE:-/certs/ca-certificates.crt}"
+        export GIT_SSL_CAINFO="${GIT_SSL_CAINFO:-/certs/ca-certificates.crt}"
+    else
+        # Legacy path: no combined bundle (standalone proxy or non-isolation mode).
+        export NODE_EXTRA_CA_CERTS="/certs/mitmproxy-ca.pem"
+        export REQUESTS_CA_BUNDLE="/certs/mitmproxy-ca.pem"
+        export SSL_CERT_FILE="/certs/mitmproxy-ca.pem"
+        export CURL_CA_BUNDLE="/certs/mitmproxy-ca.pem"
+        export GIT_SSL_CAINFO="/certs/mitmproxy-ca.pem"
+        if command -v update-ca-certificates >/dev/null 2>&1; then
+            if [ "$(id -u)" = "0" ]; then
+                cp "/certs/mitmproxy-ca.pem" "/usr/local/share/ca-certificates/mitmproxy-ca.crt" 2>/dev/null || true
+                update-ca-certificates >/dev/null 2>&1 || true
+            elif command -v sudo >/dev/null 2>&1 && sudo -n true 2>/dev/null; then
+                sudo cp "/certs/mitmproxy-ca.pem" "/usr/local/share/ca-certificates/mitmproxy-ca.crt" 2>/dev/null || true
+                sudo update-ca-certificates >/dev/null 2>&1 || true
+            elif [ -w "/usr/local/share/ca-certificates" ]; then
+                cp "/certs/mitmproxy-ca.pem" "/usr/local/share/ca-certificates/mitmproxy-ca.crt" 2>/dev/null || true
+                update-ca-certificates >/dev/null 2>&1 || true
+            fi
         fi
     fi
 fi
