@@ -147,13 +147,23 @@ CONDITIONAL_PR_OPERATIONS = [
 ALWAYS_BLOCKED_GRAPHQL_MUTATIONS = [
     "mergePullRequest",
     "reopenPullRequest",
+    "enablePullRequestAutoMerge",
+    "disablePullRequestAutoMerge",
+    "dismissPullRequestReview",
+    "updatePullRequestBranch",  # Performs server-side merge; block conservatively
+    # addPullRequestReview: blocked entirely because the regex-based mutation parser
+    # cannot inspect GraphQL arguments (inline vs variables). APPROVE-only filtering
+    # would require a GraphQL AST parser. REST reviews are NOT blocked — body
+    # inspection in policy_engine.py selectively blocks only APPROVE events.
+    # Collateral: GraphQL comment/request-changes reviews are blocked. All major
+    # tools (gh, hub, Claude) use REST for reviews, so no functional impact.
+    "addPullRequestReview",
 ]
 
 # GraphQL mutations that are conditionally blocked (when ALLOW_PR_OPERATIONS is not set)
 CONDITIONAL_BLOCKED_GRAPHQL_MUTATIONS = [
     "createPullRequest",
     "updatePullRequest",
-    "addPullRequestReview",
     "submitPullRequestReview",
     "closePullRequest",
     "addPullRequestReviewComment",
@@ -181,6 +191,11 @@ BLOCKED_PATTERNS = [
 
     # PR merge via API (creates merge commits, modifies branch)
     ("PUT", r"^/repos/[^/]+/[^/]+/pulls/\d+/merge$", "gh pr merge: merges pull request (requires human approval)"),
+
+    # Defense-in-depth: also blocked in addons/policy_engine.py
+    ("PUT", r"^/repos/[^/]+/[^/]+/pulls/\d+/auto-merge$", "auto-merge: enables automatic merge (requires human approval)"),
+    ("DELETE", r"^/repos/[^/]+/[^/]+/pulls/\d+/auto-merge$", "auto-merge: disables automatic merge (requires human approval)"),
+    ("DELETE", r"^/repos/[^/]+/[^/]+/pulls/\d+/reviews/\d+$", "review deletion: removes review (requires human approval)"),
 
     # Note: PR reopen is detected by checking PATCH request body for state: open
     # This is handled in the request() method, not here in static patterns
