@@ -23,7 +23,7 @@ This document defines what Foundry Sandbox protects against, why these protectio
 | Host filesystem | Critical | Read-only root, container isolation |
 | Git history | High | Read-only filesystem, unified-proxy force-push blocking |
 | Production credentials | High | Sandboxes don't have access by default |
-| Other projects | Medium | Sandboxes are isolated from each other |
+| Other projects | Medium | Branch isolation (deny-by-default ref validation, output filtering), separate Docker networks |
 | System stability | Medium | Resource limits, no root access |
 
 ### Threat Actors
@@ -65,6 +65,7 @@ Each pillar blocks specific threat categories. For implementation details, see [
 | Credential theft | Credential Isolation | Network Isolation | [Credential Threats](#3-credential-theft) |
 | Supply chain attacks | Credential Isolation | Network + CAP_NET_RAW | [Supply Chain](#4-supply-chain-attacks) |
 | Lateral movement | Network (ICC=false) | CAP_NET_RAW dropped | [Lateral Movement](#5-lateral-movement) |
+| Cross-sandbox branch access | Branch Isolation | Output filtering | [Branch Isolation](#branch-isolation) |
 | Session hijacking | IP binding | CAP_NET_RAW dropped | [Session Attacks](#6-session-token-attacks) |
 | DNS exfiltration | Network (dnsmasq) | Domain allowlist | [DNS Exfiltration](#7-dns-exfiltration) |
 | Sudo escalation | Sudoers Allowlist | Read-only Filesystem | [Sudo Escalation](#8-sudo-escalation) |
@@ -118,7 +119,8 @@ Git commands can destroy work that may be unrecoverable. We distinguish between 
 | Layer | Control | Effect |
 |-------|---------|--------|
 | Primary | Git proxy (unified-proxy) | Blocks force pushes to protected branches, blocks all branch/tag deletions |
-| Secondary | Bot mode restrictions | In bot mode, pushes restricted to `sandbox/*` branches only |
+| Secondary | Protected branch enforcement | Blocks ALL direct pushes to main/master/release/production (not just force pushes) |
+| Tertiary | Bot mode restrictions | In bot mode, pushes restricted to `sandbox/*` branches only |
 
 **Why This Works:** For local destruction, the read-only filesystem is the actual security control—writes fail regardless of how commands are invoked. For remote destruction, the unified proxy's `git_proxy` addon parses git pkt-line protocol data to detect and block force pushes, branch deletions, and unauthorized repository access. See [Read-only Filesystem](security-architecture.md#read-only-filesystem) for local protection details.
 
@@ -148,6 +150,26 @@ In credential isolation mode, sandboxes cannot directly access the `.git` direct
 #### Git HTTPS Credential Injection
 
 For remote git operations (`git push`, `git pull`), the unified-proxy injects `GIT_CREDENTIAL_TOKEN` into HTTPS requests to GitHub. The sandbox never receives the real GitHub token — it is held exclusively by the proxy container and injected at the network level during credential interception.
+
+#### Branch Isolation
+
+In credential isolation mode, each sandbox is restricted to its own branch via the `branch_isolation.py` module. This prevents one sandbox from accessing, modifying, or even seeing another sandbox's branches.
+
+**How it works:**
+
+1. **Deny-by-default ref validation** — For commands that reference branches (checkout, switch, fetch, pull, merge, rebase, cherry-pick), the validator checks that all ref arguments are allowed: the sandbox's own branch, well-known branches (main, master, develop, production, release/*, hotfix/*), and tags
+2. **SHA reachability enforcement** — SHA arguments are validated to ensure they are ancestors of allowed branches, preventing access to commits on other sandboxes' branches
+3. **Output filtering** — Commands that list refs (`git branch`, `for-each-ref`, `ls-remote`, `show-ref`, `log --decorate`) have their output filtered to hide disallowed branches
+4. **Fail-closed** — Sandboxes without branch identity metadata in their container registration cannot execute git operations
+
+**Defense layers:**
+
+| Layer | Control | Effect |
+|-------|---------|--------|
+| Primary | Deny-by-default ref validation | Git commands can only reference allowed branches |
+| Secondary | SHA reachability | SHA args verified as ancestors of allowed branches |
+| Tertiary | Output filtering | Branch listings hide other sandboxes' branches |
+| Fail-safe | Missing metadata check | No branch identity = no git operations |
 
 ---
 

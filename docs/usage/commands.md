@@ -110,7 +110,8 @@ Note: SSH forwarding is disabled by default and agent-only (no key copy); use `-
 2. Creates git worktree with specified branch
 3. Sets up Claude Code configuration
 4. Starts Docker container
-5. Attaches to tmux session inside container
+5. Registers container with unified proxy (including branch identity for isolation)
+6. Attaches to tmux session inside container
 
 If `repo` is `.` and no branch is provided, the sandbox branch is created from your current branch.
 
@@ -391,6 +392,7 @@ cast destroy <name> [options]
 3. Removes Docker container and volumes
 4. Removes Claude config directory
 5. Removes git worktree
+6. Cleans up sandbox branch from bare repo (if not used by other worktrees)
 
 ### Examples
 

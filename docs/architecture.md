@@ -20,7 +20,9 @@ This document explains the technical design of Foundry Sandbox: how components f
 │  │  │                                               │   │   │
 │  │  │  • Read-only filesystem    (Docker)           │   │   │
 │  │  │  • Network isolation       (Docker/dns/ipt)   │   │   │
-│  │  │  • Credential isolation    (unified-proxy)          │   │   │
+│  │  │  • Credential isolation    (unified-proxy)    │   │   │
+│  │  │  • Branch isolation        (git_operations)   │   │   │
+│  │  │  • Git safety              (git_policies)     │   │   │
 │  │  └──────────────────────────────────────────────┘   │   │
 │  │                                                      │   │
 │  │  /workspace ◄─── volume mount (git worktree)        │   │
@@ -58,7 +60,7 @@ cast new repo        cast attach       cast stop         cast destroy
 - **Clone/Setup** - Repository cloned, worktree created, container started
 - **Running** - Container active, tmux session available
 - **Stopped** - Container stopped, worktree preserved on disk
-- **Removed** - All resources cleaned up
+- **Removed** - All resources cleaned up (including sandbox branch cleanup from bare repo)
 
 ## Git Worktree Strategy
 
@@ -158,6 +160,7 @@ Created by `cast new`, records sandbox configuration:
   "network_mode": "limited",
   "sync_ssh": 0,
   "ssh_mode": "disabled",
+  "allow_pr": false,
   "mounts": ["/data:/data"],
   "copies": []
 }
@@ -238,6 +241,11 @@ foundry-sandbox/
 │   │   ├── policy_engine.py        # Access policies
 │   │   ├── dns_filter.py           # DNS filtering
 │   │   └── metrics.py              # Observability
+│   ├── branch_isolation.py     # Cross-sandbox branch isolation validator
+│   ├── git_operations.py       # Sandboxed git command execution (deny-by-default allowlist)
+│   ├── git_policies.py         # Protected branch enforcement
+│   ├── git_api.py              # Git API TCP server (port 8083)
+│   ├── github-api-filter.py    # GitHub API endpoint security filter
 │   ├── registry.py             # Container registry (SQLite)
 │   ├── internal_api.py         # Flask API for registration
 │   └── entrypoint.sh           # Proxy startup script
@@ -347,6 +355,8 @@ Each request flows through the addon chain in order:
 7. **circuit_breaker** - Protects against upstream failures
 8. **metrics** - Records request/response metrics
 
+Additionally, `github-api-filter.py` runs as a legacy addon loaded after the main chain, filtering dangerous GitHub API operations (repo deletion, secret access, branch protection changes) at the network layer.
+
 ### Container Registration
 
 Containers register with the proxy via the internal API:
@@ -357,7 +367,13 @@ POST /internal/containers
   "container_id": "sandbox-abc123",
   "ip_address": "172.17.0.2",
   "ttl_seconds": 86400,
-  "metadata": {"sandbox_name": "my-project"}
+  "metadata": {
+    "sandbox_name": "my-project",
+    "repo": "owner/repo",
+    "sandbox_branch": "feature-branch",
+    "from_branch": "main",
+    "allow_pr": false
+  }
 }
 ```
 
@@ -393,7 +409,8 @@ In credential isolation mode, the `.git` directory is hidden from sandboxes (bin
 2. For commands under `/workspace`, the wrapper serializes arguments as JSON and sends an HMAC-signed HTTP request to the git API (port 8083)
 3. For commands outside `/workspace`, the wrapper falls through to the real `/usr/bin/git`
 4. Each sandbox has a unique HMAC secret (provisioned at creation time) stored in a shared Docker volume
-5. The git API authenticates requests, applies policy checks (force-push blocking, branch deletion blocking, repo authorization), then executes the real git command against the bare repository
+5. The git API authenticates requests, applies policy checks (force-push blocking, branch deletion blocking, repo authorization), validates branch isolation via `branch_isolation.py`, then executes the real git command against the bare repository
+6. `git_operations.py` uses `fcntl.flock` to serialize concurrent fetch operations per bare repo, preventing corruption from parallel fetches
 
 ## Next Steps
 

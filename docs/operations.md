@@ -325,6 +325,55 @@ docker exec unified-proxy printenv GITHUB_TOKEN | head -c 10
 # Should show first 10 chars of token (ghp_... or gho_...)
 ```
 
+### Branch Isolation Errors
+
+**Symptom:** Git commands fail with "branch isolation: access denied" or "missing branch identity"
+
+**Check 1: Verify sandbox has branch identity**
+```bash
+PROXY_CONTAINER="sandbox-<sandbox-name>-unified-proxy-1"
+docker exec "$PROXY_CONTAINER" curl -s --unix-socket /var/run/proxy/internal.sock \
+  http://localhost/internal/containers | jq '.[].metadata'
+```
+
+Look for `sandbox_branch` and `from_branch` fields in the metadata. If missing, the sandbox was created before branch isolation support (v0.10).
+
+**Check 2: Review audit logs for denied operations**
+```bash
+docker logs unified-proxy 2>&1 | grep -E "git_audit.*denied" | tail -20
+```
+
+**Resolution:**
+- **Legacy sandbox (no branch identity):** Recreate the sandbox with `cast destroy && cast new` to get branch isolation metadata
+- **Branch not in allowed set:** The sandbox can only access its own branch, well-known branches (main, master, develop, production, release/*, hotfix/*), and tags
+- **SHA not reachable:** SHA arguments must be ancestors of allowed branches
+
+### Git Fetch Hangs
+
+**Symptom:** `git fetch` or `git pull` appears to hang indefinitely
+
+`git_operations.py` uses `fcntl.flock` to serialize concurrent fetch operations per bare repo, preventing corruption from parallel fetches. A hang may indicate a stale lock.
+
+**Check 1: Identify the lock file**
+```bash
+docker exec unified-proxy ls -la /home/ubuntu/.sandboxes/repos/github.com/owner/repo.git/.fetch-lock
+```
+
+**Check 2: Check for stale processes**
+```bash
+docker exec unified-proxy ps aux | grep git
+```
+
+**Resolution:**
+- If no git process is holding the lock, remove the stale lock file:
+  ```bash
+  docker exec unified-proxy rm -f /home/ubuntu/.sandboxes/repos/github.com/owner/repo.git/.fetch-lock
+  ```
+- If a git process is hung, kill it and retry:
+  ```bash
+  docker exec unified-proxy kill <pid>
+  ```
+
 ### Request Blocked Unexpectedly
 
 **Symptom:** Request returns 403 or connection refused

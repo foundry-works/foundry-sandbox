@@ -27,6 +27,8 @@ Finally, in addition to providing tight security guardrails, this sandbox is des
 - **Fast Creation** - Worktrees share git objects; new sandboxes spin up in seconds
 - **Network Control** - Limited (allowlist), host-only, or no network access
 - **Credential Isolation** - API keys stay outside sandboxes via proxy (enabled by default)
+- **Branch Isolation** - Each sandbox restricted to its own git branch; other sandboxes' branches hidden
+- **Git Safety** - Protected branch enforcement, force-push blocking, GitHub API operation controls
 - **Presets & History** - Save configurations as presets; repeat last command with `cast repeat`
 - **Volume Mounts** - Mount host directories read-write or read-only
 - **JSON Output** - All commands support `--json` for scripting and automation

@@ -252,6 +252,42 @@ curl http://unified-proxy:9090/internal/metrics
 proxy_requests_total{container_id="sandbox-abc",upstream_host="api.anthropic.com",method="POST",status="200"} 42
 ```
 
+## Git Operation Audit Logs
+
+The git API server (`git_operations.py`) emits structured audit log entries for all git operations. These logs use the `git_audit` logger and include detailed context for security investigation.
+
+### Audit Log Fields
+
+| Field | Description |
+|-------|-------------|
+| `event` | Event type (e.g., `git_operation`) |
+| `action` | Git subcommand executed (e.g., `push`, `fetch`, `checkout`) |
+| `decision` | Outcome: `allowed`, `denied`, or `error` |
+| `sandbox_id` | Sandbox identity from HMAC authentication |
+| `container_id` | Source container identifier |
+| `reason` | Explanation for denied operations (e.g., branch isolation violation) |
+| `matched_rule` | Which policy rule matched (e.g., `protected_branch`, `branch_isolation`) |
+| `command_args` | Git command arguments (sanitized) |
+| `exit_code` | Process exit code for executed commands |
+| `policy_version` | Policy schema version for audit compatibility |
+| `request_id` | Unique request identifier for tracing |
+
+### Example Queries
+
+```bash
+# Find all denied git operations
+docker logs unified-proxy 2>&1 | grep '"decision": "denied"'
+
+# Find branch isolation violations
+docker logs unified-proxy 2>&1 | grep 'branch_isolation'
+
+# Find operations by a specific sandbox
+docker logs unified-proxy 2>&1 | grep '"sandbox_id": "abc123"'
+
+# Find protected branch enforcement events
+docker logs unified-proxy 2>&1 | grep 'protected_branch'
+```
+
 ## See Also
 
 - [Architecture](architecture.md) - System components

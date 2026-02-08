@@ -40,7 +40,7 @@ All outbound traffic from the sandbox is routed through the unified proxy:
 - Sandbox uses placeholder API keys (`CREDENTIAL_PROXY_PLACEHOLDER`)
 - Unified proxy intercepts requests and injects real credentials
 - mitmproxy CA certificate trusted by sandbox for HTTPS interception
-- Git operations also flow through the proxy, which injects `GITHUB_TOKEN`
+- Git operations in shadow mode go through the git API server (port 8083), not the HTTPS proxy. HTTPS git push/fetch credentials are injected via `GIT_CREDENTIAL_TOKEN` in the proxy's subprocess environment
 
 ```yaml
 environment:
@@ -99,6 +99,7 @@ This prevents IP spoofing, ARP poisoning, and raw packet sniffing on the Docker 
 | OPENAI_API_KEY | Yes | Placeholder |
 | GOOGLE_API_KEY | Yes | Placeholder |
 | Other API Keys | Yes | Placeholder |
+| GIT_CREDENTIAL_TOKEN | Yes (subprocess env only) | No (never exposed) |
 
 The unified proxy holds all real credentials. Sandboxes never see real values.
 

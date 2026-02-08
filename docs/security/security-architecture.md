@@ -30,6 +30,16 @@ AI Command ────────►│  ┌───────────�
                     │  │   (unified-proxy)           │   │
                     │  └─────────────────────────────┘   │
                     │                                     │
+                    │  ┌─────────────────────────────┐   │
+                    │  │   Branch Isolation          │   │
+                    │  │   (git_operations)          │   │
+                    │  └─────────────────────────────┘   │
+                    │                                     │
+                    │  ┌─────────────────────────────┐   │
+                    │  │   Git Safety                │   │
+                    │  │   (git_policies)            │   │
+                    │  └─────────────────────────────┘   │
+                    │                                     │
                     └─────────────────────────────────────┘
 ```
 
@@ -148,6 +158,7 @@ The sandbox contains **zero real credentials**:
 | ANTHROPIC_API_KEY | Unified Proxy container | `CREDENTIAL_PROXY_PLACEHOLDER` |
 | OPENAI_API_KEY | Unified Proxy container | `CREDENTIAL_PROXY_PLACEHOLDER` |
 | Other API keys | Unified Proxy container | `CREDENTIAL_PROXY_PLACEHOLDER` |
+| GIT_CREDENTIAL_TOKEN | Unified Proxy subprocess env only | Nothing (never exposed) |
 
 - Real credentials never enter sandbox containers
 - Sandboxes are registered with the proxy via container registration
@@ -219,6 +230,8 @@ python -c "import os; print(os.environ)"  # Different interpreter
 | Sudoers allowlist | Linux kernel | No (from userspace) | Restrict sudo commands |
 | Credential isolation | Unified-proxy architecture | No (without proxy compromise) | Protect credentials |
 | Operator approval | TTY check | No (from non-interactive) | Human-in-the-loop |
+| Branch isolation | git_operations + branch_isolation.py | No (from container) | Prevent cross-sandbox git access |
+| Git safety | git_policies.py + github-api-filter.py | No (from container) | Protected branches, force-push blocking, API controls |
 | Credential redaction | Shell functions | **Yes** | Defense in depth |
 
 ---

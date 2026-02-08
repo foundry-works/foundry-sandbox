@@ -63,6 +63,24 @@ Container filesystem is **read-only** by default:
 - Writable tmpfs mounts for `/tmp`, `/home`
 - Changes do not persist across container restarts
 
+### Branch Isolation
+
+Each sandbox is **restricted to its own git branch**:
+
+- Deny-by-default ref validation on all git commands (checkout, switch, fetch, pull, merge, rebase, cherry-pick)
+- Output filtering hides other sandboxes' branches from `git branch`, `for-each-ref`, `ls-remote`, `show-ref`, and `log --decorate`
+- SHA reachability enforcement validates SHAs are ancestors of allowed branches
+- Protected branch enforcement blocks pushes to main/master/release/production
+
+### Git Safety
+
+Remote git operations are **controlled by the unified proxy**:
+
+- Protected branches — blocks ALL direct pushes to main, master, release/*, and production (not just force pushes)
+- Force-push blocking — non-fast-forward pushes to protected branches are rejected
+- PR operation controls — PR create/comment/review blocked by default; enable with `--allow-pr`
+- GitHub API filtering — dangerous API operations (repo delete, secret access, branch protection changes) are blocked at the network layer
+
 ### Operator Approval
 
 Sensitive operations require **human approval**:
@@ -90,6 +108,8 @@ Sensitive operations require **human approval**:
 | Repository allowlist | Container registration | Restricts accessible repositories |
 | Domain allowlist | `config/allowlist.yaml` | Controls allowed outbound domains |
 | Credential injection | `docker-compose.credential-isolation.yml` | Enables credential isolation mode |
+| `--allow-pr` flag | `cast new` option | Controls PR create/comment/review (default: blocked) |
+| Branch identity | Container registration metadata | Restricts git access to sandbox's own branch |
 
 ### Network Modes
 
@@ -107,6 +127,7 @@ Sensitive operations require **human approval**:
 | ANTHROPIC_API_KEY | Yes | Placeholder |
 | OPENAI_API_KEY | Yes | Placeholder |
 | Other API Keys | Yes | Placeholder |
+| GIT_CREDENTIAL_TOKEN | Yes (subprocess env only) | No (never exposed) |
 
 The unified proxy holds all real credentials and injects them into outbound requests. Sandboxes never receive real tokens.
 

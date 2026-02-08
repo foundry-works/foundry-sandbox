@@ -81,6 +81,26 @@ When `auto` is specified, the sandbox scans the repository root for common requi
 
 Packages are re-installed on `cast start` and `cast attach` (if the sandbox was stopped), ensuring dependencies stay in sync after container restart.
 
+### ZAI
+
+ZAI provides a Claude alias backed by the Zhipu API. Enable with `--with-zai` when creating a sandbox:
+
+```bash
+cast new owner/repo feature --with-zai
+```
+
+Requires `ZHIPU_API_KEY` set in your environment.
+
+### Search Providers
+
+The `foundry-mcp` research tools support multiple search providers. Set these optional API keys for enhanced research capabilities:
+
+| Variable | Provider | Purpose |
+|----------|----------|---------|
+| `TAVILY_API_KEY` | Tavily | Web search for deep research |
+| `PERPLEXITY_API_KEY` | Perplexity | AI-powered search |
+| `SEMANTIC_SCHOLAR_API_KEY` | Semantic Scholar | Academic paper search |
+
 ### Tmux
 
 Sandbox tmux sessions can be tuned via environment variables:
