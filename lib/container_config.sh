@@ -352,7 +352,7 @@ inject_sandbox_branch_context() {
         repo_spec=$(echo "$repo_url" | sed -E 's#^(https?://)?github\.com/##; s#^git@github\.com:##; s#\.git$##')
     fi
 
-    log_info "Injecting sandbox branch context into CLAUDE.md..."
+    log_debug "Injecting sandbox branch context into CLAUDE.md..."
 
     # Build repo line conditionally
     local repo_line=""
