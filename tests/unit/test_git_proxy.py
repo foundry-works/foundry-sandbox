@@ -149,6 +149,7 @@ from registry import ContainerConfig
 
 # Constants from the module
 GIT_METADATA_KEY = "git_operation"
+DEFAULT_TEST_BARE_REPO = "/tmp/foundry-test-bare.git"
 
 
 @pytest.fixture(autouse=True)
@@ -163,17 +164,39 @@ def reset_mock_ctx():
     yield
 
 
+@pytest.fixture(autouse=True)
+def bypass_restricted_path_check_for_non_restricted_tests(monkeypatch, request):
+    """Stub restricted-path enforcement outside TestRestrictedPathsCheck.
+
+    Most unit tests in this module target auth/branch/size behavior and are not
+    exercising pack/diff subprocess logic. Keep those tests focused while the
+    dedicated restricted-path test class validates _check_restricted_paths().
+    """
+    if "TestRestrictedPathsCheck" in request.node.nodeid:
+        return
+    monkeypatch.setattr(
+        git_proxy.GitProxyAddon,
+        "_check_restricted_paths",
+        lambda self, refs, bare_repo_path, pack_data, restricted_paths: None,
+    )
+
+
 def create_container_config(
     container_id="test-container",
     ip_address="172.17.0.2",
     repos=None,
     auth_mode="normal",
+    bare_repo_path=DEFAULT_TEST_BARE_REPO,
     **kwargs,
 ):
     """Create a ContainerConfig with given repos and auth_mode in metadata."""
     import time
 
     metadata = {"repos": repos or [], "auth_mode": auth_mode}
+    if bare_repo_path is not None:
+        if bare_repo_path == DEFAULT_TEST_BARE_REPO:
+            os.makedirs(bare_repo_path, exist_ok=True)
+        metadata["bare_repo_path"] = bare_repo_path
     metadata.update(kwargs)
 
     return ContainerConfig(
@@ -915,7 +938,9 @@ class TestRestrictedPathsCheck:
     Tests mock subprocess.run since the method shells out to git.
     """
 
-    def _make_addon_and_flow(self, refs_data, bare_repo_path="/fake/bare"):
+    def _make_addon_and_flow(
+        self, refs_data, bare_repo_path="/fake/bare", include_pack_data=True
+    ):
         """Create addon + flow with container metadata including bare_repo_path."""
         addon = git_proxy.GitProxyAddon()
         container = create_container_config(
@@ -923,8 +948,9 @@ class TestRestrictedPathsCheck:
             bare_repo_path=bare_repo_path,
         )
         content = create_pktline_data(refs_data)
-        # Append fake pack data so pack_data is non-empty
-        content += b"PACK" + b"\x00" * 20
+        if include_pack_data:
+            # Append fake pack data so pack_data is non-empty
+            content += b"PACK" + b"\x00" * 20
         flow = create_git_flow(
             "/octocat/hello-world.git/git-receive-pack",
             method="POST",
@@ -1160,6 +1186,49 @@ class TestRestrictedPathsCheck:
         assert "ci.yml" not in error_msg
         # Should use the generic message
         assert "security policy" in error_msg.lower()
+
+    def test_missing_bare_repo_path_blocks(self, monkeypatch):
+        """Missing bare_repo_path should fail closed."""
+        refs_data = [("a" * 40, "b" * 40, "refs/heads/feature-x")]
+        addon, flow = self._make_addon_and_flow(refs_data, bare_repo_path=None)
+
+        addon.request(flow)
+
+        assert flow.response is not None
+        assert flow.response.status_code == 403
+        error_msg = flow.response.content.decode()
+        assert "security policy" in error_msg.lower()
+
+    def test_invalid_bare_repo_path_blocks(self, monkeypatch):
+        """Non-directory bare_repo_path should fail closed."""
+        refs_data = [("a" * 40, "b" * 40, "refs/heads/feature-x")]
+        addon, flow = self._make_addon_and_flow(
+            refs_data, bare_repo_path="/not/a/real/bare-repo.git"
+        )
+
+        monkeypatch.setattr("os.path.isdir", lambda p: False)
+        addon.request(flow)
+
+        assert flow.response is not None
+        assert flow.response.status_code == 403
+        error_msg = flow.response.content.decode()
+        assert "security policy" in error_msg.lower()
+
+    def test_empty_pack_data_still_checked(self, monkeypatch):
+        """Empty pack_data should still run restricted-path check."""
+        refs_data = [("a" * 40, "b" * 40, "refs/heads/feature-x")]
+        addon, flow = self._make_addon_and_flow(refs_data, include_pack_data=False)
+
+        monkeypatch.setattr(
+            "subprocess.run",
+            self._mock_subprocess_with_diff(".github/workflows/ci.yml\n"),
+        )
+        monkeypatch.setattr("os.path.isdir", lambda p: True)
+
+        addon.request(flow)
+
+        assert flow.response is not None
+        assert flow.response.status_code == 403
 
 
 if __name__ == "__main__":

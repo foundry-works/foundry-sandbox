@@ -128,6 +128,8 @@ git_proxy.http = mock_http
 from pktline import ZERO_SHA
 from registry import ContainerConfig
 
+DEFAULT_TEST_BARE_REPO = "/tmp/foundry-test-bare.git"
+
 
 @pytest.fixture(autouse=True)
 def reset_mock_ctx():
@@ -141,11 +143,30 @@ def reset_mock_ctx():
     yield
 
 
-def create_container_config(repos=None, auth_mode="normal", **extra_metadata):
+@pytest.fixture(autouse=True)
+def bypass_restricted_path_check(monkeypatch):
+    """Security tests here don't target restricted-path pack parsing logic."""
+    monkeypatch.setattr(
+        git_proxy.GitProxyAddon,
+        "_check_restricted_paths",
+        lambda self, refs, bare_repo_path, pack_data, restricted_paths: None,
+    )
+
+
+def create_container_config(
+    repos=None,
+    auth_mode="normal",
+    bare_repo_path=DEFAULT_TEST_BARE_REPO,
+    **extra_metadata,
+):
     """Create a ContainerConfig with given configuration."""
     import time
 
     metadata = {"repos": repos or [], "auth_mode": auth_mode}
+    if bare_repo_path is not None:
+        if bare_repo_path == DEFAULT_TEST_BARE_REPO:
+            os.makedirs(bare_repo_path, exist_ok=True)
+        metadata["bare_repo_path"] = bare_repo_path
     metadata.update(extra_metadata)
 
     return ContainerConfig(

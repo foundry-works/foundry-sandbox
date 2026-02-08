@@ -225,7 +225,7 @@ class GitProxyAddon:
                     return
 
             # Check for restricted file paths (e.g., .github/workflows/)
-            if bare_repo_path and os.path.isdir(bare_repo_path) and git_op.pack_data:
+            if bare_repo_path and os.path.isdir(bare_repo_path):
                 restricted_msg = self._check_restricted_paths(
                     git_op.refs, bare_repo_path, git_op.pack_data,
                     git_policies.DEFAULT_RESTRICTED_PUSH_PATHS,
@@ -237,10 +237,17 @@ class GitProxyAddon:
                         container_id=container_id,
                     )
                     return
-            elif git_op.pack_data and not bare_repo_path:
-                # bare_repo_path not configured — log warning but don't block
-                # This should not happen in production; indicates misconfiguration
-                ctx.log.warn("[restricted-path] check skipped: bare_repo_path not in metadata")
+            else:
+                # Fail closed if bare_repo_path is missing or invalid
+                ctx.log.warn(
+                    "[restricted-path] check failed: bare_repo_path missing or invalid"
+                )
+                self._deny_request(
+                    flow,
+                    "Push blocked by security policy",
+                    container_id=container_id,
+                )
+                return
 
             # Check bot mode restrictions
             auth_mode = metadata.get("auth_mode", "normal")
@@ -394,9 +401,12 @@ class GitProxyAddon:
     ) -> Optional[str]:
         """Check if a push modifies restricted file paths (e.g., .github/workflows/).
 
-        Unpacks the push's pack data into a temporary object store with the bare
-        repo as an alternate, then runs git diff-tree to identify changed files.
-        Fails closed on any error.
+        Runs git diff-tree for each non-deletion ref in an isolated temporary bare
+        repo whose alternate object store points at the real bare repo. When push
+        pack data is present, it is unpacked into the temporary object store first.
+        This also supports ref-only pushes with no pack payload (objects already on
+        remote): diff-tree still runs and policy still applies. Fails closed on
+        any error.
 
         Args:
             refs: List of ref updates from the push.
@@ -434,23 +444,24 @@ class GitProxyAddon:
             with open(alternates_path, "w") as f:
                 f.write(os.path.join(bare_repo_path, "objects") + "\n")
 
-            # Unpack the pack data into the temp repo
-            result = subprocess.run(
-                ["git", "unpack-objects"],
-                input=pack_data,
-                env=self._make_clean_git_env(
-                    GIT_OBJECT_DIRECTORY=os.path.join(tmp_dir, "objects"),
-                ),
-                capture_output=True,
-                timeout=SUBPROCESS_TIMEOUT,
-                cwd=tmp_dir,
-            )
-            if result.returncode != 0:
-                ctx.log.warn(
-                    f"[restricted-path] git unpack-objects failed: "
-                    f"{result.stderr.decode(errors='replace')[:200]}"
+            # Unpack the pack data into the temp repo if present
+            if pack_data:
+                result = subprocess.run(
+                    ["git", "unpack-objects"],
+                    input=pack_data,
+                    env=self._make_clean_git_env(
+                        GIT_OBJECT_DIRECTORY=os.path.join(tmp_dir, "objects"),
+                    ),
+                    capture_output=True,
+                    timeout=SUBPROCESS_TIMEOUT,
+                    cwd=tmp_dir,
                 )
-                return "Push blocked by security policy"
+                if result.returncode != 0:
+                    ctx.log.warn(
+                        f"[restricted-path] git unpack-objects failed: "
+                        f"{result.stderr.decode(errors='replace')[:200]}"
+                    )
+                    return "Push blocked by security policy"
 
             # Check each non-deletion ref for restricted path changes
             for ref in refs:
