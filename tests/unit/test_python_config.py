@@ -215,6 +215,7 @@ class TestSyncOpencodeFunctions:
         assert command_looks_like_foundry(["foundry-mcp"]) is True
         assert command_looks_like_foundry(["uvx", "foundry-mcp"]) is True
         assert command_looks_like_foundry(["python3", "-m", "foundry_mcp.server"]) is True
+        assert command_looks_like_foundry(["python", "-s", "-m", "foundry_mcp.server"]) is True
         assert command_looks_like_foundry(["node", "server.js"]) is False
 
 

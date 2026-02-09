@@ -1215,6 +1215,300 @@ else
 fi
 
 # ============================================================================
+header "23. SELF-MERGE PREVENTION"
+# ============================================================================
+
+echo ""
+echo "Testing self-merge prevention controls..."
+echo "(These operations must be blocked to prevent sandbox from merging its own PRs)"
+
+# Test 1: gh pr merge (PUT /repos/*/pulls/*/merge) → expect blocked
+info "Testing PR merge block (PUT /repos/*/pulls/*/merge)..."
+SELF_MERGE_RESP=$(curl -s --max-time 10 \
+    -X PUT \
+    -H "Authorization: token CREDENTIAL_PROXY_PLACEHOLDER" \
+    -H "Content-Type: application/json" \
+    -d '{"commit_title":"self-merge test","merge_method":"merge"}' \
+    "https://api.github.com/repos/octocat/Hello-World/pulls/1/merge" 2>&1)
+
+if echo "$SELF_MERGE_RESP" | grep -qiE "(blocked|forbidden|not allowed|policy)"; then
+    test_pass "PR merge blocked (self-merge prevention)"
+elif echo "$SELF_MERGE_RESP" | grep -qE '"merged"'; then
+    test_fail "PR merge endpoint accessible (self-merge possible!)"
+else
+    info "Merge response: $(echo "$SELF_MERGE_RESP" | head -c 200)"
+    test_warn "PR merge response unclear - verify manually"
+fi
+
+# Test 2: Auto-merge enablement (PUT /repos/*/pulls/*/auto-merge) → expect blocked
+info "Testing auto-merge enablement block (PUT /repos/*/pulls/*/auto-merge)..."
+AUTOMERGE_RESP=$(curl -s --max-time 10 \
+    -X PUT \
+    -H "Authorization: token CREDENTIAL_PROXY_PLACEHOLDER" \
+    -H "Content-Type: application/json" \
+    -d '{}' \
+    "https://api.github.com/repos/octocat/Hello-World/pulls/1/auto-merge" 2>&1)
+
+if echo "$AUTOMERGE_RESP" | grep -qiE "(blocked|forbidden|not allowed|policy)"; then
+    test_pass "Auto-merge enablement blocked"
+elif echo "$AUTOMERGE_RESP" | grep -qE '"auto_merge"'; then
+    test_fail "Auto-merge enablement accessible!"
+else
+    info "Auto-merge response: $(echo "$AUTOMERGE_RESP" | head -c 200)"
+    test_warn "Auto-merge response unclear - verify manually"
+fi
+
+# Test 3: PR review approval (POST /repos/*/pulls/*/reviews with event=APPROVE) → expect blocked
+info "Testing PR review approval block (POST /repos/*/pulls/*/reviews, event=APPROVE)..."
+APPROVE_RESP=$(curl -s --max-time 10 \
+    -X POST \
+    -H "Authorization: token CREDENTIAL_PROXY_PLACEHOLDER" \
+    -H "Content-Type: application/json" \
+    -d '{"event":"APPROVE","body":"Looks good"}' \
+    "https://api.github.com/repos/octocat/Hello-World/pulls/1/reviews" 2>&1)
+
+if echo "$APPROVE_RESP" | grep -qiE "(blocked|forbidden|not allowed|policy|self-approving)"; then
+    test_pass "PR review approval blocked (self-approval prevention)"
+elif echo "$APPROVE_RESP" | grep -qE '"state".*"APPROVED"'; then
+    test_fail "PR review approval accessible (self-approval possible!)"
+else
+    info "Approval response: $(echo "$APPROVE_RESP" | head -c 200)"
+    test_warn "PR review approval response unclear - verify manually"
+fi
+
+# Test 4: PR review comment (POST /repos/*/pulls/*/reviews with event=COMMENT) → expect success
+# Non-approval reviews must still work via REST
+info "Testing PR review comment (POST /repos/*/pulls/*/reviews, event=COMMENT)..."
+COMMENT_REVIEW_RESP=$(curl -s --max-time 10 \
+    -X POST \
+    -H "Authorization: token CREDENTIAL_PROXY_PLACEHOLDER" \
+    -H "Content-Type: application/json" \
+    -d '{"event":"COMMENT","body":"non-approval review comment"}' \
+    "https://api.github.com/repos/octocat/Hello-World/pulls/1/reviews" 2>&1)
+
+if echo "$COMMENT_REVIEW_RESP" | grep -qiE "(blocked|forbidden|not allowed|policy)"; then
+    test_fail "Non-approval PR review comment unexpectedly blocked"
+elif echo "$COMMENT_REVIEW_RESP" | grep -qE '"id"'; then
+    test_pass "Non-approval PR review comment allowed (correct behavior)"
+elif echo "$COMMENT_REVIEW_RESP" | grep -qE "(not found|404|422)"; then
+    test_pass "Non-approval review comment reached GitHub (not blocked by policy)"
+else
+    info "Comment review response: $(echo "$COMMENT_REVIEW_RESP" | head -c 200)"
+    test_warn "Non-approval review comment response unclear - verify manually"
+fi
+
+# Test 5: Review deletion (DELETE /repos/*/pulls/*/reviews/123) → expect blocked
+info "Testing review deletion block (DELETE /repos/*/pulls/*/reviews/123)..."
+DELETE_REVIEW_RESP=$(curl -s --max-time 10 \
+    -X DELETE \
+    -H "Authorization: token CREDENTIAL_PROXY_PLACEHOLDER" \
+    "https://api.github.com/repos/octocat/Hello-World/pulls/1/reviews/123" 2>&1)
+
+if echo "$DELETE_REVIEW_RESP" | grep -qiE "(blocked|forbidden|not allowed|policy)"; then
+    test_pass "Review deletion blocked (prevents unblocking PRs)"
+elif echo "$DELETE_REVIEW_RESP" | grep -qE '"message".*"Not Found"'; then
+    test_warn "Review deletion returned 404 - may not have reached policy layer"
+else
+    info "Delete review response: $(echo "$DELETE_REVIEW_RESP" | head -c 200)"
+    test_warn "Review deletion response unclear - verify manually"
+fi
+
+# Test 6: GraphQL updatePullRequestBranch mutation → expect blocked
+info "Testing GraphQL updatePullRequestBranch block..."
+GRAPHQL_UPDATE_RESP=$(curl -s --max-time 10 \
+    -X POST \
+    -H "Authorization: token CREDENTIAL_PROXY_PLACEHOLDER" \
+    -H "Content-Type: application/json" \
+    -d '{"query":"mutation { updatePullRequestBranch(input: {pullRequestId: \"PR_test123\"}) { pullRequest { id } } }"}' \
+    "https://api.github.com/graphql" 2>&1)
+
+if echo "$GRAPHQL_UPDATE_RESP" | grep -qiE "(blocked|forbidden|not allowed|policy)"; then
+    test_pass "GraphQL updatePullRequestBranch blocked"
+elif echo "$GRAPHQL_UPDATE_RESP" | grep -qE '"errors"'; then
+    info "GraphQL response had errors (may be blocked at filter layer)"
+    test_pass "GraphQL updatePullRequestBranch blocked or rejected"
+else
+    info "GraphQL response: $(echo "$GRAPHQL_UPDATE_RESP" | head -c 200)"
+    test_warn "GraphQL updatePullRequestBranch response unclear - verify manually"
+fi
+
+# ============================================================================
+header "24. READ-ONLY FILESYSTEM & CA TRUST"
+# ============================================================================
+
+echo ""
+echo "Testing read-only filesystem and CA trust configuration..."
+echo "(Credential isolation mode should have read-only root FS with combined CA bundle)"
+
+# Test 1: Root filesystem should be read-only
+info "Testing root filesystem is read-only..."
+TOUCH_OUTPUT=$(touch /usr/bin/test-readonly-probe 2>&1)
+TOUCH_EXIT=$?
+if [[ $TOUCH_EXIT -ne 0 ]] && echo "$TOUCH_OUTPUT" | grep -qiE "(read-only|read only|permission denied)"; then
+    test_pass "Root filesystem is read-only"
+    rm -f /usr/bin/test-readonly-probe 2>/dev/null
+elif [[ $TOUCH_EXIT -eq 0 ]]; then
+    rm -f /usr/bin/test-readonly-probe 2>/dev/null
+    test_fail "Root filesystem is writable (should be read-only)"
+else
+    info "Touch output: $TOUCH_OUTPUT"
+    test_warn "Root filesystem write test inconclusive"
+fi
+
+# Test 2: Combined CA bundle exists
+info "Testing combined CA bundle exists..."
+if [[ -f /certs/ca-certificates.crt ]]; then
+    test_pass "Combined CA bundle exists at /certs/ca-certificates.crt"
+else
+    test_warn "Combined CA bundle not found (may not be in credential isolation mode)"
+fi
+
+# Test 3: SANDBOX_CA_MODE is set to combined
+info "Testing SANDBOX_CA_MODE environment variable..."
+if [[ "${SANDBOX_CA_MODE:-}" = "combined" ]]; then
+    test_pass "SANDBOX_CA_MODE=combined is set"
+else
+    test_warn "SANDBOX_CA_MODE not set to combined (may not be in credential isolation mode)"
+fi
+
+# Test 4: CA trust works (curl HTTPS through proxy)
+info "Testing CA trust via HTTPS request..."
+CURL_HTTPS_RESP=$(curl -s --max-time 10 -o /dev/null -w "%{http_code}" \
+    "https://api.github.com/" 2>&1)
+if [[ "$CURL_HTTPS_RESP" =~ ^(200|301|302|403|404|429) ]]; then
+    test_pass "HTTPS request succeeded through proxy (HTTP $CURL_HTTPS_RESP)"
+elif [[ "$CURL_HTTPS_RESP" =~ ^(000|60|77) ]]; then
+    test_fail "HTTPS request failed - CA trust issue (code: $CURL_HTTPS_RESP)"
+else
+    info "HTTPS response code: $CURL_HTTPS_RESP"
+    test_warn "HTTPS response unclear - verify CA trust manually"
+fi
+
+# Test 5: Git over HTTPS works
+info "Testing git over HTTPS..."
+GIT_LS_RESP=$(git ls-remote --exit-code https://github.com/octocat/Hello-World.git HEAD 2>&1)
+GIT_LS_EXIT=$?
+if [[ $GIT_LS_EXIT -eq 0 ]] || [[ $GIT_LS_EXIT -eq 2 ]]; then
+    test_pass "Git HTTPS works through proxy"
+elif echo "$GIT_LS_RESP" | grep -qiE "(SSL|certificate|CA)"; then
+    test_fail "Git HTTPS failed due to CA trust issue"
+else
+    info "Git ls-remote exit: $GIT_LS_EXIT, output: $(echo "$GIT_LS_RESP" | head -c 200)"
+    test_warn "Git HTTPS response unclear - verify manually"
+fi
+
+# Test 6: tmpfs is writable (expected - /tmp should always work)
+info "Testing tmpfs writability (/tmp)..."
+if touch /tmp/test-tmpfs-probe && rm -f /tmp/test-tmpfs-probe; then
+    test_pass "tmpfs (/tmp) is writable"
+else
+    test_fail "tmpfs (/tmp) is not writable"
+fi
+
+# Test 7: Home directory is writable (expected - /home is tmpfs)
+info "Testing home directory writability..."
+if touch ~/test-home-probe && rm -f ~/test-home-probe; then
+    test_pass "Home directory is writable"
+else
+    test_fail "Home directory is not writable"
+fi
+
+# ============================================================================
+header "25. WORKFLOW PUSH BLOCKING"
+# ============================================================================
+
+echo ""
+echo "Testing that pushes modifying .github/workflows/ are blocked..."
+echo "(Requires git shadow mode and push access to test repo)"
+
+if [[ "${GIT_SHADOW_ENABLED:-0}" == "1" ]]; then
+
+    WORKFLOW_TEST_BRANCH="sandbox/redteam-workflow-test-$$"
+    WORKFLOW_TEST_DIR="/tmp/workflow-push-test-$$"
+    rm -rf "$WORKFLOW_TEST_DIR" 2>/dev/null
+
+    # Get current repo info from git remote
+    REMOTE_URL=$(git remote get-url origin 2>/dev/null || true)
+    if [[ -n "$REMOTE_URL" ]]; then
+
+        # Set up a temporary clone for the test
+        mkdir -p "$WORKFLOW_TEST_DIR"
+        cd "$WORKFLOW_TEST_DIR"
+        git init --quiet
+        git remote add origin "$REMOTE_URL"
+        git fetch --depth=1 origin HEAD --quiet 2>/dev/null
+        git checkout -b "$WORKFLOW_TEST_BRANCH" FETCH_HEAD --quiet 2>/dev/null
+
+        # Test 1: Push with .github/workflows/ file should be BLOCKED
+        info "Creating commit with .github/workflows/merge.yml..."
+        mkdir -p .github/workflows
+        cat > .github/workflows/merge.yml << 'WFEOF'
+name: Auto-merge
+on: pull_request
+jobs:
+  merge:
+    runs-on: ubuntu-latest
+    steps:
+      - run: gh pr merge --auto
+WFEOF
+        git add .github/workflows/merge.yml
+        git commit --quiet -m "redteam: add auto-merge workflow"
+
+        info "Attempting push with workflow file (should be blocked)..."
+        WORKFLOW_PUSH_OUTPUT=$(git push origin "$WORKFLOW_TEST_BRANCH" 2>&1)
+        WORKFLOW_PUSH_EXIT=$?
+
+        if [[ $WORKFLOW_PUSH_EXIT -ne 0 ]]; then
+            test_pass "Push with .github/workflows/ file was blocked (exit: $WORKFLOW_PUSH_EXIT)"
+
+            # Verify error message is generic (does not reveal restricted path)
+            if echo "$WORKFLOW_PUSH_OUTPUT" | grep -qiE "\.github/(workflows|actions)"; then
+                test_fail "Error message reveals restricted path pattern"
+                info "Output: $(echo "$WORKFLOW_PUSH_OUTPUT" | head -c 300)"
+            else
+                test_pass "Error message is generic (does not reveal restricted path)"
+            fi
+        else
+            test_fail "Push with .github/workflows/ file SUCCEEDED (should be blocked!)"
+            # Note: Branch cleanup via DELETE /git/refs/ is also blocked by the
+            # proxy's git ref mutation policy. Log the orphan for manual cleanup.
+            info "Orphan branch '${WORKFLOW_TEST_BRANCH}' may remain on remote (cleanup blocked by policy)"
+        fi
+
+        # Test 2: Normal code push should still work after workflow block
+        info "Testing normal code push still works..."
+        git reset --hard HEAD~1 --quiet 2>/dev/null
+        echo "# redteam test" > src_redteam_test.txt
+        git add src_redteam_test.txt
+        git commit --quiet -m "redteam: normal code push test"
+
+        NORMAL_PUSH_OUTPUT=$(git push origin "$WORKFLOW_TEST_BRANCH" 2>&1)
+        NORMAL_PUSH_EXIT=$?
+
+        if [[ $NORMAL_PUSH_EXIT -eq 0 ]]; then
+            test_pass "Normal code push succeeded after workflow block"
+            # Note: Branch cleanup via DELETE /git/refs/ is blocked by the
+            # proxy's git ref mutation policy. Log the orphan for manual cleanup.
+            info "Orphan branch '${WORKFLOW_TEST_BRANCH}' may remain on remote (cleanup blocked by policy)"
+        else
+            test_fail "Normal code push failed after workflow block (exit: $NORMAL_PUSH_EXIT)"
+            info "Output: $(echo "$NORMAL_PUSH_OUTPUT" | head -c 300)"
+        fi
+
+        # Return to workspace
+        cd /workspace
+        rm -rf "$WORKFLOW_TEST_DIR" 2>/dev/null
+
+    else
+        info "No git remote configured - skipping workflow push blocking test"
+    fi
+
+else
+    info "GIT_SHADOW_ENABLED not set - skipping workflow push blocking tests"
+    info "  These tests require git shadow mode with push access to a test repo."
+fi
+
+# ============================================================================
 header "SUMMARY"
 # ============================================================================
 

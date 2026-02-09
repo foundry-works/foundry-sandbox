@@ -11,11 +11,11 @@ from unittest.mock import MagicMock, Mock, patch
 
 import pytest
 
-# Mock mitmproxy modules before importing circuit_breaker
-sys.modules['mitmproxy'] = MagicMock()
-sys.modules['mitmproxy.http'] = MagicMock()
-sys.modules['mitmproxy.ctx'] = MagicMock()
-sys.modules['mitmproxy.flow'] = MagicMock()
+# NOTE: We do NOT overwrite sys.modules["mitmproxy"] here because conftest.py
+# already installs proper mitmproxy mocks. Overwriting the top-level module
+# entry would pollute the global module cache and break other test files
+# (test_github_api_filter, test_dual_layer_consistency) that import
+# mitmproxy-based addons later in the session.
 
 # Add unified-proxy to path
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../../unified-proxy"))

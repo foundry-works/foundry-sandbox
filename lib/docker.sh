@@ -35,6 +35,24 @@ setup_credential_placeholders() {
     fi
 }
 
+# Generate a unique /24 subnet for the credential-isolation network.
+# Uses a hash of the project name to derive subnet bytes in the 10.x.x.0/24 range.
+# Exports SANDBOX_SUBNET and SANDBOX_PROXY_IP for use in docker-compose.
+generate_sandbox_subnet() {
+    local project_name="$1"
+    local hash
+    hash=$(printf '%s' "$project_name" | md5sum | cut -c1-4)
+    local byte1=$(( 16#${hash:0:2} ))
+    local byte2=$(( 16#${hash:2:2} ))
+    # Avoid 0 (network) and ensure valid range 1-254
+    [ "$byte1" -eq 0 ] && byte1=1
+    [ "$byte2" -eq 0 ] && byte2=1
+    [ "$byte1" -gt 254 ] && byte1=254
+    [ "$byte2" -gt 254 ] && byte2=254
+    export SANDBOX_SUBNET="10.${byte1}.${byte2}.0/24"
+    export SANDBOX_PROXY_IP="10.${byte1}.${byte2}.2"
+}
+
 get_compose_command() {
     local override_file="$1"
     local isolate_credentials="${2:-false}"
@@ -79,6 +97,10 @@ compose_up() {
             provision_hmac_secret "$container" "$SANDBOX_ID"
             export HMAC_VOLUME_NAME="${container}_hmac"
         fi
+        # Generate unique subnet for credential-isolation network.
+        # Docker 29+ makes /etc/resolv.conf read-only with read_only:true,
+        # so we configure DNS at compose level using a static proxy IP.
+        generate_sandbox_subnet "$container"
     fi
 
     local compose_cmd

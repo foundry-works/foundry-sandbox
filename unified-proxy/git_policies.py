@@ -18,6 +18,11 @@ DEFAULT_PROTECTED_PATTERNS: List[str] = [
     "refs/heads/production",
 ]
 
+DEFAULT_RESTRICTED_PUSH_PATHS: List[str] = [
+    ".github/workflows",
+    ".github/actions",
+]
+
 ZERO_SHA = "0" * 40
 
 

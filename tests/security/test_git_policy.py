@@ -13,7 +13,8 @@ Security Properties Tested:
 
 import os
 import sys
-from unittest.mock import MagicMock
+import tempfile
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -127,6 +128,8 @@ git_proxy.http = mock_http
 from pktline import ZERO_SHA
 from registry import ContainerConfig
 
+DEFAULT_TEST_BARE_REPO = "/tmp/foundry-test-bare.git"
+
 
 @pytest.fixture(autouse=True)
 def reset_mock_ctx():
@@ -140,11 +143,30 @@ def reset_mock_ctx():
     yield
 
 
-def create_container_config(repos=None, auth_mode="normal", **extra_metadata):
+@pytest.fixture(autouse=True)
+def bypass_restricted_path_check(monkeypatch):
+    """Security tests here don't target restricted-path pack parsing logic."""
+    monkeypatch.setattr(
+        git_proxy.GitProxyAddon,
+        "_check_restricted_paths",
+        lambda self, refs, bare_repo_path, pack_data, restricted_paths: None,
+    )
+
+
+def create_container_config(
+    repos=None,
+    auth_mode="normal",
+    bare_repo_path=DEFAULT_TEST_BARE_REPO,
+    **extra_metadata,
+):
     """Create a ContainerConfig with given configuration."""
     import time
 
     metadata = {"repos": repos or [], "auth_mode": auth_mode}
+    if bare_repo_path is not None:
+        if bare_repo_path == DEFAULT_TEST_BARE_REPO:
+            os.makedirs(bare_repo_path, exist_ok=True)
+        metadata["bare_repo_path"] = bare_repo_path
     metadata.update(extra_metadata)
 
     return ContainerConfig(
@@ -728,6 +750,66 @@ class TestCombinedAttacks:
         # Should be 413 (size limit), not 403 (deletion)
         assert flow.response is not None
         assert flow.response.status_code == 413
+
+
+class TestGitHookHardening:
+    """Security tests for git hook hardening in proxy-side execution.
+
+    Attack scenario: A cloned repository contains malicious hooks in
+    .git/hooks/ that attempt to execute during proxy-side git operations.
+    The proxy must inject hook-disabling flags to prevent this.
+    """
+
+    def test_hooks_disabled_in_execution(self):
+        """Test that git hooks cannot execute during proxy-side git operations.
+
+        Verifies that execute_git() injects core.hooksPath=/dev/null and
+        core.fsmonitor=false into the command array passed to subprocess.run,
+        ensuring malicious hooks in cloned repos cannot trigger.
+        """
+        from git_operations import GitExecRequest, execute_git
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            request = GitExecRequest(args=["status"])
+            metadata = {"sandbox_branch": "test-branch"}
+
+            with patch("git_operations.subprocess.run") as mock_run:
+                mock_run.return_value = MagicMock(
+                    returncode=0,
+                    stdout=b"",
+                    stderr=b"",
+                )
+
+                execute_git(request, tmpdir, metadata=metadata)
+
+                mock_run.assert_called_once()
+                cmd = mock_run.call_args[0][0]
+
+                # Verify hook-disabling flags are present in the command array
+                assert "-c" in cmd, "Expected -c flag in command"
+
+                # Find all -c flag pairs in the command
+                config_pairs = {}
+                for i, arg in enumerate(cmd):
+                    if arg == "-c" and i + 1 < len(cmd):
+                        key_value = cmd[i + 1]
+                        if "=" in key_value:
+                            key, value = key_value.split("=", 1)
+                            config_pairs[key] = value
+
+                assert "core.hooksPath" in config_pairs, (
+                    "core.hooksPath not found in git command config flags"
+                )
+                assert config_pairs["core.hooksPath"] == "/dev/null", (
+                    f"core.hooksPath should be /dev/null, got {config_pairs['core.hooksPath']}"
+                )
+
+                assert "core.fsmonitor" in config_pairs, (
+                    "core.fsmonitor not found in git command config flags"
+                )
+                assert config_pairs["core.fsmonitor"] == "false", (
+                    f"core.fsmonitor should be false, got {config_pairs['core.fsmonitor']}"
+                )
 
 
 if __name__ == "__main__":

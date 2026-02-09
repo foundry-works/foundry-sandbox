@@ -70,6 +70,7 @@ Each pillar blocks specific threat categories. For implementation details, see [
 | Session hijacking | IP binding | CAP_NET_RAW dropped | [Session Attacks](#6-session-token-attacks) |
 | DNS exfiltration | Network (DNS filter) | Domain allowlist | [DNS Exfiltration](#7-dns-exfiltration) |
 | Sudo escalation | Sudoers Allowlist | Read-only Filesystem | [Sudo Escalation](#8-sudo-escalation) |
+| Proxy pack parsing exploit | Pack size limit + timeout | Fail-closed, isolated tempdir | [Proxy-Side Attack Surface](#proxy-side-attack-surface) |
 
 ---
 
@@ -400,6 +401,26 @@ The sandbox trusts the unified-proxy's mitmproxy CA certificate for HTTPS interc
 - Network isolation ensures only the unified-proxy can use this CA for interception
 
 **Rationale:** Architectural requirement for credential injection. The proxy must terminate TLS to inject real credentials into outbound API requests.
+
+### Proxy-Side Attack Surface
+
+The unified-proxy runs `git unpack-objects` on untrusted pack data received from the sandbox during push operations. The proxy is the most privileged component in the architecture — it holds real credentials and has network access to GitHub.
+
+**Risk:** A memory-safety bug in git's pack parser could allow code execution on the proxy host, potentially compromising all held credentials and bypassing network controls.
+
+**Mitigations:**
+
+| # | Control | Effect |
+|---|---------|--------|
+| 1 | Pack size bounded by `DEFAULT_MAX_PUSH_SIZE` (100MB) | Limits the attack surface to bounded input; rejects oversized payloads before parsing (`git_proxy.py:52`) |
+| 2 | 10-second subprocess timeout | Kills hung or exploited git processes before they can establish persistence |
+| 3 | Isolated temp directory | `unpack-objects` runs in a dedicated temporary object store, not the main bare repo |
+| 4 | Minimal subprocess environment | Git subprocesses run with a stripped environment, reducing available attack primitives |
+| 5 | Fail-closed on any error | Parse failures, timeouts, or unexpected exit codes all result in push rejection |
+
+**Accepted risk rationale:** A pure-Python pack parser would be equally complex and less battle-tested against adversarial input than git's C implementation. Git's pack format handling has extensive fuzzing coverage upstream, and the mitigations above bound the blast radius of any exploit. The alternative — not inspecting pack data — would leave the restricted-paths check (`DEFAULT_RESTRICTED_PUSH_PATHS` in `git_policies.py:21`) unenforceable, which is a worse security outcome.
+
+---
 
 ### In-Memory State Reset
 
