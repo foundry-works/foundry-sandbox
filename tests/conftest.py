@@ -31,13 +31,15 @@ def requires_docker(has_docker):
         pytest.skip("Docker is not available")
 
 
-@pytest.fixture
+@pytest.fixture(scope="session")
 def cli():
     """Return a callable that invokes the sandbox CLI.
 
     Reads SANDBOX_CLI env var (default ``./sandbox.sh``) and splits it with
     ``shlex.split`` so multi-token entrypoints like
     ``python3 -m foundry_sandbox.cli`` work correctly.
+
+    Session-scoped because the callable is stateless.
 
     Usage::
 
