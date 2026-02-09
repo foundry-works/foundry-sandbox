@@ -27,12 +27,3 @@ Docker-based sandbox environment for running Claude Code with isolated credentia
 **Important:** Read `docs/security/sandbox-threats.md` to understand the threat model and security boundaries before making changes to sandbox isolation.
 
 **Important:** Read docs in `docs/adr` for decision records on architecture.
-
-<sandbox-context>
-## Sandbox Context
-- **Repository**: foundry-works/foundry-sandbox
-- **Branch**: `tyler/foundry-sandbox-20260208-1643`
-- **Based on**: `tylerburleigh/hardening-and-rewrite`
-
-When creating PRs, target `tylerburleigh/hardening-and-rewrite` as the base branch.
-</sandbox-context>
