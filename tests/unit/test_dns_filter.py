@@ -122,32 +122,26 @@ class MockCtx:
         self.log = MockCtxLog()
 
 
-# Mock DNS module components
+# Create test-specific mock objects for dns_filter tests.
+# NOTE: We do NOT overwrite sys.modules["mitmproxy"] here because conftest.py
+# already installs proper mitmproxy mocks. Overwriting the top-level module
+# entry would pollute the global module cache and break other test files
+# that import mitmproxy-based addons later in the session.
 mock_dns = MagicMock()
 mock_dns.DNSFlow = MockDNSFlow
 mock_dns.response_codes = MagicMock()
 mock_dns.response_codes.NXDOMAIN = 3  # Standard DNS NXDOMAIN code
 
-# Create ctx mock
 mock_ctx = MockCtx()
 
-# Create mock mitmproxy
-mock_mitmproxy = MagicMock()
-mock_mitmproxy.dns = mock_dns
-mock_mitmproxy.ctx = mock_ctx
-
-# Install mocks into sys.modules BEFORE importing dns_filter
-sys.modules["mitmproxy"] = mock_mitmproxy
+# Register dns sub-module in sys.modules (does not overwrite mitmproxy top-level)
 sys.modules["mitmproxy.dns"] = mock_dns
-sys.modules["mitmproxy.ctx"] = mock_ctx
 
-# Now add addons path and import dns_filter
+# Add addons path and import dns_filter (uses conftest mitmproxy mocks)
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../../unified-proxy/addons"))
-
-# Import the module - it will use our mocked mitmproxy
 import dns_filter
 
-# Ensure the module uses our mock ctx
+# Replace the module-level mitmproxy references with our test-specific mocks
 dns_filter.ctx = mock_ctx
 dns_filter.dns = mock_dns
 

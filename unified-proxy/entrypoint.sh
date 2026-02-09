@@ -132,6 +132,11 @@ generate_ca_cert() {
             wait "${gen_pid}" 2>/dev/null || true
             return 0
         fi
+        # Fail fast if mitmdump died before producing the cert
+        if ! kill -0 "${gen_pid}" 2>/dev/null; then
+            log_error "mitmdump (PID ${gen_pid}) exited before generating CA certificate"
+            return 1
+        fi
         sleep 0.5
     done
 
@@ -148,6 +153,20 @@ copy_ca_to_shared_volume() {
 
     cp "${MITMPROXY_CA_CERT}" "${SHARED_CERTS_DIR}/mitmproxy-ca.pem"
     log "CA certificate copied to ${SHARED_CERTS_DIR}/mitmproxy-ca.pem"
+}
+
+# Generate combined CA bundle for sandbox containers.
+# Includes system CAs + mitmproxy CA so sandboxes don't need to run
+# update-ca-certificates (which requires a writable root filesystem).
+generate_combined_ca_bundle() {
+    local combined="${SHARED_CERTS_DIR}/ca-certificates.crt"
+    local tmp="${combined}.tmp"
+    # Write atomically: build in temp file with a single command, then rename.
+    # A single cat invocation ensures we never leave a partial bundle (system
+    # CAs only, missing mitmproxy CA) if the process is interrupted.
+    cat /etc/ssl/certs/ca-certificates.crt "${MITMPROXY_CA_CERT}" > "$tmp"
+    mv "$tmp" "$combined"
+    log "Combined CA bundle generated at $combined"
 }
 
 validate_config() {
@@ -507,6 +526,7 @@ main() {
     fi
 
     copy_ca_to_shared_volume
+    generate_combined_ca_bundle
 
     # Validate configuration
     validate_config

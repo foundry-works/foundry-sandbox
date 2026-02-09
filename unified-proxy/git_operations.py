@@ -1799,8 +1799,15 @@ def execute_git(
                 arg = real_repo + arg[len(client_root):]
         translated_args.append(arg)
 
-    # Build command
-    cmd = [GIT_BINARY] + translated_args
+    # Build command — inject hook-disabling flags before client args.
+    # core.hooksPath=/dev/null  → disables all git hooks
+    # core.fsmonitor=false      → disables fs-monitor (can execute arbitrary commands)
+    # Safe because CONFIG_NEVER_ALLOW blocks clients from sending either key.
+    cmd = [
+        GIT_BINARY,
+        "-c", "core.hooksPath=/dev/null",
+        "-c", "core.fsmonitor=false",
+    ] + translated_args
 
     # Build clean environment
     env = build_clean_env()

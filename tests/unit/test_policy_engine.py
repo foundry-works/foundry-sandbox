@@ -845,6 +845,70 @@ class TestCheckGithubBlocklist:
         )
         assert result is None
 
+    def test_check_github_blocklist_auto_merge_enable(self, policy_engine):
+        """Test auto-merge enablement is blocked."""
+        result = policy_engine._check_github_blocklist(
+            "PUT", "/repos/owner/repo/pulls/1/auto-merge"
+        )
+        assert result is not None
+        assert "auto-merge" in result
+
+    def test_check_github_blocklist_auto_merge_disable(self, policy_engine):
+        """Test auto-merge disablement is blocked."""
+        result = policy_engine._check_github_blocklist(
+            "DELETE", "/repos/owner/repo/pulls/1/auto-merge"
+        )
+        assert result is not None
+        assert "auto-merge" in result
+
+    def test_check_github_blocklist_review_deletion(self, policy_engine):
+        """Test review deletion is blocked."""
+        result = policy_engine._check_github_blocklist(
+            "DELETE", "/repos/owner/repo/pulls/1/reviews/123"
+        )
+        assert result is not None
+        assert "review" in result.lower()
+
+
+class TestPRReviewBodyPolicies:
+    """Tests for PR review body inspection policies."""
+
+    @pytest.fixture
+    def policy_engine(self):
+        """Create PolicyEngine instance."""
+        return PolicyEngine()
+
+    def test_blocked_pr_review_approve(self, policy_engine):
+        """Test POST /pulls/1/reviews with event:APPROVE is blocked."""
+        import json
+
+        body = json.dumps({"event": "APPROVE"}).encode()
+        result = policy_engine._check_github_body_policies(
+            "POST", "/repos/owner/repo/pulls/1/reviews", body, "application/json", ""
+        )
+        assert result is not None
+        assert "approv" in result.lower()
+
+    def test_allowed_pr_review_comment(self, policy_engine):
+        """Test POST /pulls/1/reviews with event:COMMENT is allowed."""
+        import json
+
+        body = json.dumps({"event": "COMMENT"}).encode()
+        result = policy_engine._check_github_body_policies(
+            "POST", "/repos/owner/repo/pulls/1/reviews", body, "application/json", ""
+        )
+        assert result is None
+
+    def test_allowed_pr_review_request_changes(self, policy_engine):
+        """Test POST /pulls/1/reviews with event:REQUEST_CHANGES is allowed."""
+        import json
+
+        body = json.dumps({"event": "REQUEST_CHANGES"}).encode()
+        result = policy_engine._check_github_body_policies(
+            "POST", "/repos/owner/repo/pulls/1/reviews", body, "application/json", ""
+        )
+        assert result is None
+
 
 class TestNormalizePath:
     """Tests for normalize_path function."""
@@ -1359,7 +1423,9 @@ class TestEndpointPathEnforcement:
         self, mock_ctx, mock_get_config, mock_response_make,
         policy_engine_with_config, mock_container_config
     ):
-        """Pull request review endpoints remain allowed."""
+        """Pull request review endpoints remain allowed for non-APPROVE events."""
+        import json
+
         mock_get_config.return_value = mock_container_config
         mock_ctx.log = Mock()
         flow = self._make_flow(
@@ -1367,6 +1433,9 @@ class TestEndpointPathEnforcement:
             "api.github.com",
             "/repos/owner/repo/pulls/1/reviews",
         )
+        # Body inspection requires proper headers and a non-APPROVE body
+        flow.request.headers = {"content-type": "application/json"}
+        flow.request.content = json.dumps({"event": "COMMENT", "body": "LGTM"}).encode()
 
         policy_engine_with_config.request(flow)
 

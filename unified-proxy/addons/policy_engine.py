@@ -59,10 +59,15 @@ GITHUB_MERGE_PR_PATTERN = re.compile(r"^/repos/[^/]+/[^/]+/pulls/\d+/merge$")
 GITHUB_CREATE_RELEASE_PATTERN = re.compile(r"^/repos/[^/]+/[^/]+/releases$")
 GITHUB_GIT_REFS_ROOT_PATTERN = re.compile(r"^/repos/[^/]+/[^/]+/git/refs$")
 GITHUB_GIT_REFS_SUBPATH_PATTERN = re.compile(r"^/repos/[^/]+/[^/]+/git/refs/.+$")
+# Defense-in-depth: also blocked in github-api-filter.py
+GITHUB_AUTO_MERGE_PATTERN = re.compile(r"^/repos/[^/]+/[^/]+/pulls/\d+/auto-merge$")
+GITHUB_DELETE_REVIEW_PATTERN = re.compile(r"^/repos/[^/]+/[^/]+/pulls/\d+/reviews/\d+$")
 
 # GitHub patterns for body-inspected PATCH operations
 GITHUB_PATCH_PR_PATTERN = re.compile(r"^/repos/[^/]+/[^/]+/pulls/\d+$")
 GITHUB_PATCH_ISSUE_PATTERN = re.compile(r"^/repos/[^/]+/[^/]+/issues/\d+$")
+# Defense-in-depth: also blocked at GraphQL level in github-api-filter.py
+GITHUB_PR_REVIEW_PATTERN = re.compile(r"^/repos/[^/]+/[^/]+/pulls/\d+/reviews$")
 
 # Global allowlist configuration (loaded in load())
 _allowlist_config: Optional[AllowlistConfig] = None
@@ -222,7 +227,11 @@ class PolicyEngine:
         Args:
             flow: The mitmproxy HTTP flow.
         """
-        method = flow.request.method
+        # Normalize method to uppercase for defense-in-depth.
+        # HTTP methods are defined as case-sensitive uppercase per spec,
+        # but a proxy-aware attacker could craft raw requests with
+        # lowercase methods to bypass string comparisons.
+        method = flow.request.method.upper()
         raw_host = flow.request.pretty_host
         host = normalize_host(raw_host)
         path = flow.request.path
@@ -460,6 +469,16 @@ class PolicyEngine:
         if method in {"PATCH", "DELETE"} and GITHUB_GIT_REFS_SUBPATH_PATTERN.match(path):
             return "GitHub git ref mutation is blocked by policy"
 
+        # Block auto-merge enablement/disablement
+        # Defense-in-depth: also blocked in github-api-filter.py
+        if method in ("PUT", "DELETE") and GITHUB_AUTO_MERGE_PATTERN.match(path):
+            return "GitHub auto-merge operations are blocked by policy"
+
+        # Block review deletion (prevents removing blocking reviews)
+        # Defense-in-depth: also blocked in github-api-filter.py
+        if method == "DELETE" and GITHUB_DELETE_REVIEW_PATTERN.match(path):
+            return "Deleting pull request reviews is blocked by policy"
+
         return None
 
     def _check_github_body_policies(
@@ -470,10 +489,11 @@ class PolicyEngine:
         content_type: str,
         content_encoding: str,
     ) -> Optional[str]:
-        """Check GitHub body-level policies for PATCH operations.
+        """Check GitHub body-level policies for PATCH and POST operations.
 
-        Inspects request bodies on security-relevant PATCH endpoints to block
-        PR close and issue close operations while allowing reopens and edits.
+        Inspects request bodies on security-relevant endpoints to block
+        PR close, issue close, and PR review approval operations while
+        allowing reopens, edits, and non-approval review events.
 
         Args:
             method: HTTP method.
@@ -485,8 +505,42 @@ class PolicyEngine:
         Returns:
             Block reason if request should be blocked, None otherwise.
         """
-        # Only inspect PATCH requests
-        if method != "PATCH":
+        # Only inspect PATCH and POST requests
+        if method not in ("PATCH", "POST"):
+            return None
+
+        # POST: PR review approval check
+        if method == "POST" and GITHUB_PR_REVIEW_PATTERN.match(path):
+            # Reject compressed bodies
+            if content_encoding:
+                return (
+                    "Compressed request bodies are not allowed for "
+                    "security-relevant GitHub POST endpoints"
+                )
+            if not content_type or not content_type.lower().startswith("application/json"):
+                return (
+                    "Content-Type must be application/json for "
+                    "security-relevant GitHub POST endpoints"
+                )
+            if body is None:
+                return (
+                    "Streaming request bodies are not allowed for "
+                    "security-relevant GitHub POST endpoints"
+                )
+            body_str = body.lstrip(b"\xef\xbb\xbf").decode("utf-8", errors="replace")
+            try:
+                parsed = json.loads(body_str)
+            except (json.JSONDecodeError, ValueError):
+                return "Malformed JSON body in security-relevant GitHub POST request"
+            if not isinstance(parsed, dict):
+                return (
+                    "Request body must be a JSON object for "
+                    "security-relevant GitHub POST endpoints"
+                )
+            # Defense-in-depth: also blocked at GraphQL level in github-api-filter.py
+            event = parsed.get("event")
+            if event is not None and str(event).upper() == "APPROVE":
+                return "Self-approving pull requests is blocked by policy"
             return None
 
         # Only inspect PR and issue endpoints
