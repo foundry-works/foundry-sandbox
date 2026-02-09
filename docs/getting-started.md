@@ -8,13 +8,15 @@ This guide walks you through installing Foundry Sandbox and creating your first 
 - **Git** - Version control
 - **Bash** - Shell (Linux/macOS default, WSL2 on Windows)
 - **tmux** - Terminal multiplexer (usually pre-installed)
+- **Python** - 3.10+ (for the Python CLI; the shell entrypoint works without Python)
 
 Verify your setup:
 
 ```bash
-docker --version   # Docker version 20.10+
-git --version      # git version 2.x+
-tmux -V            # tmux 3.x+
+docker --version    # Docker version 20.10+
+git --version       # git version 2.x+
+tmux -V             # tmux 3.x+
+python3 --version   # Python 3.10+
 ```
 
 ## Installation
@@ -35,6 +37,23 @@ After installation, reload your shell:
 ```bash
 source ~/.bashrc  # or ~/.zshrc
 ```
+
+### Python CLI (Optional)
+
+The Python CLI provides the same commands as the shell entrypoint with improved argument parsing via Click. To install it:
+
+```bash
+cd ~/.foundry-sandbox  # or wherever you cloned the repo
+pip install -e .
+```
+
+Once installed, you can invoke it via:
+
+```bash
+python3 -m foundry_sandbox.cli <command>
+```
+
+The `cast` alias uses the shell entrypoint (`sandbox.sh`) by default. Both entrypoints support identical commands and options.
 
 ## Creating Your First Sandbox
 
@@ -157,6 +176,14 @@ export CLAUDE_CODE_OAUTH_TOKEN="..."
 These are passed into containers automatically.
 
 Public repositories can be used without a GitHub token, but requests may be rate limited. Private repos and push operations require a token.
+
+### CI / Non-Interactive Mode
+
+Set `SANDBOX_NONINTERACTIVE=1` to suppress all interactive prompts. When enabled, confirmations default to "yes" and selection prompts use the first option. This is useful for CI pipelines and scripted workflows.
+
+```bash
+SANDBOX_NONINTERACTIVE=1 cast destroy sandbox-name
+```
 
 ## Next Steps
 

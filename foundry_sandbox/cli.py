@@ -144,8 +144,12 @@ class CastGroup(click.Group):
             return cmd_name, cmd_obj, remaining
 
         # Step 3: Shell fallback -------------------------------------------
-        # Build a thin wrapper command so Click invokes the fallback
-        # without ever parsing the remaining args itself.
+        # Only fall back to shell for commands we know sandbox.sh handles.
+        # Reject genuinely unknown commands with a clear error message.
+        if cmd_name not in KNOWN_SHELL_COMMANDS:
+            ctx.fail(
+                f"Unknown command '{cmd_name}'. Run 'cast help' for available commands."
+            )
         original_name = args[0]  # Use the original token (pre-alias)
         return cmd_name, _make_fallback_command(original_name), remaining
 
@@ -219,21 +223,37 @@ def cli(ctx: click.Context) -> None:
 # Migrated commands are imported and added here as they become available.
 
 from foundry_sandbox.commands.attach import attach  # noqa: E402
+from foundry_sandbox.commands.build import build  # noqa: E402
+from foundry_sandbox.commands.config import config  # noqa: E402
 from foundry_sandbox.commands.destroy import destroy  # noqa: E402
 from foundry_sandbox.commands.destroy_all import destroy_all  # noqa: E402
+from foundry_sandbox.commands.help_cmd import help_cmd  # noqa: E402
+from foundry_sandbox.commands.info import info  # noqa: E402
+from foundry_sandbox.commands.list_cmd import list_cmd  # noqa: E402
+from foundry_sandbox.commands.new import new  # noqa: E402
 from foundry_sandbox.commands.preset import preset  # noqa: E402
 from foundry_sandbox.commands.prune import prune  # noqa: E402
 from foundry_sandbox.commands.refresh_creds import refresh_creds  # noqa: E402
 from foundry_sandbox.commands.start import start  # noqa: E402
+from foundry_sandbox.commands.status import status  # noqa: E402
+from foundry_sandbox.commands.stop import stop  # noqa: E402
 from foundry_sandbox.commands.upgrade import upgrade  # noqa: E402
 
 cli.add_command(attach)
+cli.add_command(build)
+cli.add_command(config)
 cli.add_command(destroy)
 cli.add_command(destroy_all)
+cli.add_command(help_cmd)
+cli.add_command(info)
+cli.add_command(list_cmd)
+cli.add_command(new)
 cli.add_command(preset)
 cli.add_command(prune)
 cli.add_command(refresh_creds)
 cli.add_command(start)
+cli.add_command(status)
+cli.add_command(stop)
 cli.add_command(upgrade)
 
 
@@ -249,8 +269,21 @@ def main() -> None:
     ``sys.exit`` on its own — we manage exit codes explicitly in
     fallback commands and let migrated commands use Click's default
     return behaviour.
+
+    Usage errors (bad flags, missing required args) are normalised to
+    exit code 1 to match the shell entrypoint's behaviour.  Click's
+    default for ``UsageError`` is exit code 2.
     """
-    result = cli(standalone_mode=False)
+    try:
+        result = cli(standalone_mode=False)
+    except click.UsageError as exc:
+        # Normalise Click's exit code 2 → 1 for shell parity.
+        click.echo(f"Error: {exc.format_message()}", err=True)
+        sys.exit(1)
+    except SystemExit as exc:
+        # Catch Click's SystemExit(2) from nested usage errors.
+        code = exc.code if isinstance(exc.code, int) else 1
+        sys.exit(1 if code == 2 else code)
     # If a migrated command returned an integer exit code, honour it.
     if isinstance(result, int):
         sys.exit(result)
