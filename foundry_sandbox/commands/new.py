@@ -42,8 +42,10 @@ from foundry_sandbox.constants import get_repos_dir
 from foundry_sandbox.docker import compose_up, hmac_secret_file_count, populate_stubs_volume, repair_hmac_secret_permissions
 from foundry_sandbox.git import ensure_bare_repo
 from foundry_sandbox.git_worktree import create_worktree
+from foundry_sandbox.image import check_image_freshness
 from foundry_sandbox.network import add_claude_home_to_override, add_ssh_agent_to_override, add_timezone_to_override
 from foundry_sandbox.paths import derive_sandbox_paths, ensure_dir, path_claude_home
+from foundry_sandbox.permissions import install_workspace_permissions
 from foundry_sandbox.proxy import setup_proxy_registration
 from foundry_sandbox.state import load_sandbox_metadata, write_sandbox_metadata, save_last_cast_new, save_cast_preset, load_last_cast_new, load_cast_preset, save_last_attach
 from foundry_sandbox.tui import tui_choose, tui_confirm, tui_input
@@ -726,7 +728,9 @@ def new(
             sys.exit(1)
 
     # Check image freshness
-    _shell_call("_bridge_check_image_freshness")
+    if check_image_freshness():
+        if click.confirm("Rebuild image now?", default=True):
+            _shell_call("build")
 
     # Check network capacity
     isolate_credentials = not no_isolate_credentials
@@ -1018,7 +1022,7 @@ def new(
                 _shell_call("_bridge_copy_file_to_container", container_id, src, dst)
 
     # Install workspace permissions
-    _shell_call("_bridge_install_workspace_permissions", container_id)
+    install_workspace_permissions(container_id)
 
     # Install pip requirements
     if pip_requirements:

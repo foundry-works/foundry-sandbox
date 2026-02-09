@@ -34,7 +34,7 @@ BASE_MODULES = {"constants", "utils", "_bridge", "models", "__init__"}
 MID_MODULES = {"paths", "config"}
 
 # Bridge-callable modules are those that use bridge_main in __main__ blocks.
-BRIDGE_CALLABLE_MODULES = {"claude_settings", "opencode_sync", "config"}
+BRIDGE_CALLABLE_MODULES = {"claude_settings", "opencode_sync", "config", "state", "docker", "validate", "api_keys"}
 
 # Heavy imports forbidden at module level in bridge-callable modules.
 FORBIDDEN_BRIDGE_IMPORTS = {"click", "pydantic"}

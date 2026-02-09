@@ -70,22 +70,23 @@ KNOWN_SHELL_COMMANDS: set[str] = {
 
 
 def _shell_fallback(cmd: str, args: list[str]) -> int:
-    """Execute a command via sandbox.sh, passing through env/cwd/stdout/stderr.
+    """Fallback for commands not yet registered as Click subcommands.
+
+    Now that sandbox.sh is a thin wrapper around this CLI, shell fallback
+    would create infinite recursion. All commands should be registered as
+    Click subcommands. This function exists as a safety net and logs an
+    error instead of recursing.
 
     Args:
-        cmd: The command name to pass as the first argument to sandbox.sh.
-        args: Additional arguments forwarded verbatim.
+        cmd: The command name.
+        args: Additional arguments.
 
     Returns:
-        The process exit code from sandbox.sh.
+        Exit code 1 (always fails).
     """
-    log_debug(f"Falling back to shell: {SANDBOX_SH} {cmd} {' '.join(args)}")
-    result = subprocess.run(
-        [str(SANDBOX_SH), cmd, *args],
-        env=os.environ.copy(),
-        cwd=os.getcwd(),
-    )
-    return result.returncode
+    log_debug(f"Shell fallback requested for '{cmd}' but sandbox.sh now delegates to Python CLI")
+    click.echo(f"Error: command '{cmd}' not implemented in Python CLI", err=True)
+    return 1
 
 
 # ---------------------------------------------------------------------------
@@ -94,15 +95,13 @@ def _shell_fallback(cmd: str, args: list[str]) -> int:
 
 
 class CastGroup(click.Group):
-    """Custom Click group that supports alias resolution and shell fallback.
+    """Custom Click group that supports alias resolution.
 
     Behaviour:
-    * Registered (migrated) subcommands are dispatched normally by Click.
+    * Registered subcommands are dispatched normally by Click.
     * Aliases listed in ``ALIASES`` are rewritten to their canonical form
       before dispatch.
-    * Any other token that is *not* a registered subcommand is handed off
-      to ``sandbox.sh`` via :func:`_shell_fallback`.  This lets the Python
-      CLI coexist with shell commands that have not yet been migrated.
+    * Unknown commands produce an error message.
     """
 
     def format_usage(self, ctx: click.Context, formatter: click.HelpFormatter) -> None:

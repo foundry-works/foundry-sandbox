@@ -13,6 +13,17 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
 
+    strategy:
+      fail-fast: false
+      matrix:
+        entrypoint:
+          - name: shell
+            cli: "./sandbox.sh"
+          - name: python
+            cli: "python3 -m foundry_sandbox.cli"
+
+    name: smoke (${{ matrix.entrypoint.name }})
+
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -22,8 +33,10 @@ jobs:
         with:
           python-version: "3.12"
 
-      - name: Install pytest
-        run: pip install pytest
+      - name: Install dependencies
+        run: pip install -e ".[dev,test-orchestration]"
 
       - name: Run orchestration smoke tests
+        env:
+          SANDBOX_CLI: ${{ matrix.entrypoint.cli }}
         run: pytest tests/orchestration/test_lifecycle.py -x -v --tb=short -k "test_create_sandbox or test_stop_start_sandbox or test_destroy_sandbox"

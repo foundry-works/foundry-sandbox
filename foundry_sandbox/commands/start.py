@@ -36,6 +36,7 @@ from foundry_sandbox.docker import (
     populate_stubs_volume,
     repair_hmac_secret_permissions,
 )
+from foundry_sandbox.image import check_image_freshness
 from foundry_sandbox.network import (
     add_claude_home_to_override,
     add_ssh_agent_to_override,
@@ -195,9 +196,11 @@ def start(name: str) -> None:
         sys.exit(1)
 
     # ------------------------------------------------------------------
-    # 2. Check image freshness (shell fallback)
+    # 2. Check image freshness
     # ------------------------------------------------------------------
-    _shell_call("_bridge_check_image_freshness")
+    if check_image_freshness():
+        if click.confirm("Rebuild image now?", default=True):
+            _shell_call("build")
 
     # ------------------------------------------------------------------
     # 3. Load metadata and export enable flags

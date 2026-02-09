@@ -27,6 +27,7 @@ from foundry_sandbox.constants import get_worktrees_dir
 from foundry_sandbox.docker import container_is_running
 from foundry_sandbox.paths import derive_sandbox_paths
 from foundry_sandbox.state import load_last_attach, load_sandbox_metadata, save_last_attach
+from foundry_sandbox.tmux import attach as tmux_attach_session, session_exists as tmux_session_exists, create_and_attach as tmux_create_and_attach, attach_existing as tmux_attach_to_existing
 from foundry_sandbox.utils import log_debug, log_error, log_info
 
 # Path to sandbox.sh for shell fallback
@@ -164,115 +165,19 @@ def _sync_opencode_plugins(name: str, container_id: str) -> None:
     log_debug(f"OpenCode plugin sync for {name} (container {container_id})")
 
 
-def _tmux_session_exists(session: str) -> bool:
-    """Check if a tmux session exists.
-
-    Args:
-        session: Session name.
-
-    Returns:
-        True if session exists.
-    """
-    result = subprocess.run(
-        ["tmux", "has-session", "-t", session],
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
-        check=False,
-    )
-    return result.returncode == 0
-
-
-def _tmux_attach_existing(session: str) -> None:
-    """Attach to an existing tmux session.
-
-    Args:
-        session: Session name.
-    """
-    log_info(f"Attaching to existing tmux session: {session}")
-    os.execvp("tmux", ["tmux", "attach-session", "-t", session])
-
-
-def _tmux_create_and_attach(
-    session: str,
-    worktree_path: str,
-    container_id: str,
-    working_dir: str,
-) -> None:
-    """Create a new tmux session and attach to it.
-
-    Args:
-        session: Session name.
-        worktree_path: Path to worktree.
-        container_id: Container ID.
-        working_dir: Working directory inside container.
-    """
-    log_info(f"Creating tmux session: {session}")
-
-    # Build the docker exec command
-    container_user = os.environ.get("CONTAINER_USER", "ubuntu")
-
-    if working_dir:
-        exec_cmd = f"bash -c 'cd /workspace/{working_dir} 2>/dev/null; exec bash'"
-    else:
-        exec_cmd = "bash"
-
-    # Get tmux settings from environment
-    scrollback = os.environ.get("SANDBOX_TMUX_SCROLLBACK", "200000")
-    mouse = os.environ.get("SANDBOX_TMUX_MOUSE", "1")
-
-    # Create the tmux session with docker exec
-    docker_command = (
-        f"docker exec -u {container_user} -it {container_id} {exec_cmd}; "
-        "echo 'Container exited. Press enter to close.'; read"
-    )
-
-    # Create detached session first
-    subprocess.run(
-        [
-            "tmux", "new-session", "-d", "-s", session,
-            "-c", worktree_path,
-            docker_command,
-        ],
-        check=False,
-    )
-
-    # Set history limit
-    subprocess.run(
-        ["tmux", "set-option", "-t", session, "history-limit", scrollback],
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
-        check=False,
-    )
-
-    # Set mouse mode
-    mouse_setting = "on" if mouse == "1" else "off"
-    subprocess.run(
-        ["tmux", "set-option", "-t", session, "mouse", mouse_setting],
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
-        check=False,
-    )
-
-    # Now attach (replace this process)
-    os.execvp("tmux", ["tmux", "attach-session", "-t", session])
-
-
 def _tmux_attach(name: str, working_dir: str, paths) -> None:
     """Create or attach to tmux session for sandbox.
+
+    Delegates to foundry_sandbox.tmux module.
 
     Args:
         name: Sandbox name.
         working_dir: Working directory inside container.
         paths: SandboxPaths object.
     """
-    session = name  # tmux session name is just the sandbox name
     container_id = f"{paths.container_name}-dev-1"
     worktree_path = str(paths.worktree_path)
-
-    if _tmux_session_exists(session):
-        _tmux_attach_existing(session)
-    else:
-        _tmux_create_and_attach(session, worktree_path, container_id, working_dir)
+    tmux_attach_session(name, container_id, worktree_path, working_dir)
 
 
 def _launch_ide(ide_name: str, worktree_path: str) -> bool:

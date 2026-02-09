@@ -1,0 +1,705 @@
+"""Docker operations for foundry-sandbox.
+
+Replaces lib/docker.sh (237 lines). Wraps docker and docker-compose CLI calls
+via subprocess. Matches current timeout/error behavior and stderr messaging.
+
+No Click or Pydantic imports at module level (bridge-callable constraint).
+"""
+
+from __future__ import annotations
+
+import base64
+import hashlib
+import os
+import secrets
+import subprocess
+import sys
+from pathlib import Path
+from typing import Any
+
+from foundry_sandbox._bridge import bridge_main
+from foundry_sandbox.constants import get_sandbox_debug, get_sandbox_verbose
+from foundry_sandbox.utils import log_debug, log_error
+
+
+# ============================================================================
+# Internal Helpers
+# ============================================================================
+
+
+def _run_cmd(
+    args: list[str],
+    *,
+    quiet: bool = False,
+    check: bool = True,
+    timeout: float | None = None,
+) -> subprocess.CompletedProcess[str]:
+    """Run a command, optionally suppressing output.
+
+    Mirrors the shell run_cmd / run_cmd_quiet helpers from lib/runtime.sh:
+      - run_cmd: prints "+ <cmd>" when SANDBOX_VERBOSE=1, runs command
+      - run_cmd_quiet: same verbose trace, but redirects stdout+stderr to /dev/null
+
+    Args:
+        args: Command and arguments.
+        quiet: If True, suppress stdout and stderr (like run_cmd_quiet).
+        check: If True, raise CalledProcessError on non-zero exit.
+        timeout: Optional timeout in seconds.
+
+    Returns:
+        CompletedProcess result.
+
+    Raises:
+        subprocess.CalledProcessError: If check=True and command fails.
+        subprocess.TimeoutExpired: If timeout is exceeded.
+    """
+    if get_sandbox_verbose():
+        print(f"+ {' '.join(args)}", file=sys.stderr)
+
+    kwargs: dict[str, Any] = {"check": check}
+    if timeout is not None:
+        kwargs["timeout"] = timeout
+    if quiet:
+        kwargs["stdout"] = subprocess.DEVNULL
+        kwargs["stderr"] = subprocess.DEVNULL
+    else:
+        kwargs["stdout"] = subprocess.PIPE
+        kwargs["stderr"] = subprocess.PIPE
+
+    return subprocess.run(args, **kwargs)
+
+
+def _script_dir() -> Path:
+    """Return the repository root directory (equivalent to $SCRIPT_DIR in shell).
+
+    The shell code uses SCRIPT_DIR which points to the repo root where
+    docker-compose.yml lives.
+    """
+    # Walk up from foundry_sandbox/ to the repo root
+    return Path(__file__).resolve().parent.parent
+
+
+# ============================================================================
+# Credential Placeholders
+# ============================================================================
+
+
+def setup_credential_placeholders() -> dict[str, str]:
+    """Detect host auth configuration and return appropriate sandbox env vars.
+
+    Determines which placeholder credentials to use based on what's configured
+    on the host. Returns a dict of environment variable names to values.
+
+    Returns:
+        Dictionary of env var names to their values.
+    """
+    env: dict[str, str] = {}
+
+    # Claude: Use OAuth placeholder if CLAUDE_CODE_OAUTH_TOKEN is set on host
+    if os.environ.get("CLAUDE_CODE_OAUTH_TOKEN"):
+        env["SANDBOX_ANTHROPIC_API_KEY"] = ""
+        env["SANDBOX_CLAUDE_OAUTH"] = "CREDENTIAL_PROXY_PLACEHOLDER"
+    else:
+        env["SANDBOX_ANTHROPIC_API_KEY"] = "CREDENTIAL_PROXY_PLACEHOLDER"
+        env["SANDBOX_CLAUDE_OAUTH"] = ""
+
+    # Gemini: Check selectedType in settings file
+    gemini_settings = Path.home() / ".gemini" / "settings.json"
+    gemini_is_oauth = False
+    if gemini_settings.is_file():
+        try:
+            content = gemini_settings.read_text()
+            if '"selectedType"' in content and '"oauth-personal"' in content:
+                gemini_is_oauth = True
+        except OSError:
+            pass
+    if gemini_is_oauth:
+        env["SANDBOX_GEMINI_API_KEY"] = ""
+    else:
+        env["SANDBOX_GEMINI_API_KEY"] = "CREDENTIAL_PROXY_PLACEHOLDER"
+
+    # OpenCode/Zhipu: Only set placeholder if OpenCode is explicitly enabled
+    if os.environ.get("SANDBOX_ENABLE_OPENCODE", "0") == "1":
+        env["SANDBOX_ZHIPU_API_KEY"] = "PROXY_PLACEHOLDER_OPENCODE"
+    else:
+        env["SANDBOX_ZHIPU_API_KEY"] = ""
+
+    # Tavily: Set flag if API key is available on host
+    if os.environ.get("TAVILY_API_KEY"):
+        env["SANDBOX_ENABLE_TAVILY"] = "1"
+    else:
+        env["SANDBOX_ENABLE_TAVILY"] = "0"
+
+    return env
+
+
+# ============================================================================
+# Subnet Generation
+# ============================================================================
+
+
+def generate_sandbox_subnet(project_name: str) -> tuple[str, str]:
+    """Generate a unique /24 subnet for the credential-isolation network.
+
+    Uses a hash of the project name to derive subnet bytes in the 10.x.x.0/24
+    range.
+
+    Args:
+        project_name: Docker compose project name.
+
+    Returns:
+        Tuple of (subnet, proxy_ip) e.g. ("10.42.17.0/24", "10.42.17.2").
+    """
+    digest = hashlib.md5(project_name.encode()).hexdigest()[:4]
+    byte1 = int(digest[:2], 16)
+    byte2 = int(digest[2:4], 16)
+
+    # Avoid 0 (network) and ensure valid range 1-254
+    if byte1 == 0:
+        byte1 = 1
+    if byte2 == 0:
+        byte2 = 1
+    if byte1 > 254:
+        byte1 = 254
+    if byte2 > 254:
+        byte2 = 254
+
+    subnet = f"10.{byte1}.{byte2}.0/24"
+    proxy_ip = f"10.{byte1}.{byte2}.2"
+    return subnet, proxy_ip
+
+
+# ============================================================================
+# Compose Command Building
+# ============================================================================
+
+
+def get_compose_command(
+    override_file: str = "",
+    isolate_credentials: bool = False,
+) -> list[str]:
+    """Build docker compose command with optional credential isolation.
+
+    Args:
+        override_file: Path to docker-compose override file (optional).
+        isolate_credentials: Whether to include credential isolation compose file.
+
+    Returns:
+        List of command arguments for docker compose.
+    """
+    script_dir = str(_script_dir())
+    cmd = [
+        "docker", "compose",
+        "-f", f"{script_dir}/docker-compose.yml",
+    ]
+    if isolate_credentials:
+        cmd.extend(["-f", f"{script_dir}/docker-compose.credential-isolation.yml"])
+    if override_file and Path(override_file).is_file():
+        cmd.extend(["-f", override_file])
+    return cmd
+
+
+# ============================================================================
+# Compose Up / Down
+# ============================================================================
+
+
+def compose_up(
+    worktree_path: str,
+    claude_config_path: str,
+    container: str,
+    override_file: str = "",
+    isolate_credentials: bool = False,
+    repos_dir: str = "",
+    sandbox_id: str = "",
+) -> None:
+    """Start containers via docker compose up.
+
+    Sets up required environment variables and runs compose up -d.
+
+    Args:
+        worktree_path: Path to git worktree.
+        claude_config_path: Path to Claude config directory.
+        container: Container/project name.
+        override_file: Optional docker-compose override file.
+        isolate_credentials: Whether to enable credential isolation.
+        repos_dir: Repository directory (for compose volume substitution).
+        sandbox_id: Sandbox ID (for HMAC secret provisioning).
+    """
+    env = os.environ.copy()
+    env["WORKSPACE_PATH"] = worktree_path
+    env["CLAUDE_CONFIG_PATH"] = claude_config_path
+    env["CONTAINER_NAME"] = container
+
+    if isolate_credentials:
+        # Detect host auth config and set appropriate placeholder env vars
+        cred_env = setup_credential_placeholders()
+        env.update(cred_env)
+
+        # Generate a random session management key for this sandbox
+        env["GATEWAY_SESSION_MGMT_KEY"] = secrets.token_bytes(32).hex()
+
+        # Populate stubs volume (avoids Docker Desktop bind mount staleness)
+        populate_stubs_volume(container)
+        env["STUBS_VOLUME_NAME"] = f"{container}_stubs"
+
+        # Export REPOS_DIR for docker-compose volume substitution
+        env["REPOS_DIR"] = repos_dir or os.environ.get("REPOS_DIR", "")
+
+        # Export git identity for unified-proxy
+        env["GIT_USER_NAME"] = os.environ.get("GIT_USER_NAME", "")
+        if not env["GIT_USER_NAME"]:
+            try:
+                result = subprocess.run(
+                    ["git", "config", "--global", "user.name"],
+                    capture_output=True, text=True, check=False,
+                )
+                env["GIT_USER_NAME"] = result.stdout.strip()
+            except OSError:
+                pass
+
+        env["GIT_USER_EMAIL"] = os.environ.get("GIT_USER_EMAIL", "")
+        if not env["GIT_USER_EMAIL"]:
+            try:
+                result = subprocess.run(
+                    ["git", "config", "--global", "user.email"],
+                    capture_output=True, text=True, check=False,
+                )
+                env["GIT_USER_EMAIL"] = result.stdout.strip()
+            except OSError:
+                pass
+
+        # Git shadow mode: provision HMAC secret for git API authentication
+        if sandbox_id:
+            provision_hmac_secret(container, sandbox_id)
+            env["HMAC_VOLUME_NAME"] = f"{container}_hmac"
+
+        # Generate unique subnet for credential-isolation network
+        subnet, proxy_ip = generate_sandbox_subnet(container)
+        env["SANDBOX_SUBNET"] = subnet
+        env["SANDBOX_PROXY_IP"] = proxy_ip
+
+    compose_cmd = get_compose_command(override_file, isolate_credentials)
+    cmd = compose_cmd + ["-p", container, "up", "-d"]
+
+    if get_sandbox_verbose():
+        print(f"+ {' '.join(cmd)}", file=sys.stderr)
+
+    subprocess.run(
+        cmd, env=env, check=True,
+        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+    )
+
+
+def compose_down(
+    worktree_path: str,
+    claude_config_path: str,
+    container: str,
+    override_file: str = "",
+    remove_volumes: bool = False,
+    isolate_credentials: bool = False,
+) -> None:
+    """Stop containers via docker compose down.
+
+    Args:
+        worktree_path: Path to git worktree.
+        claude_config_path: Path to Claude config directory.
+        container: Container/project name.
+        override_file: Optional docker-compose override file.
+        remove_volumes: Whether to remove volumes (-v flag).
+        isolate_credentials: Whether credential isolation is enabled.
+    """
+    env = os.environ.copy()
+    env["WORKSPACE_PATH"] = worktree_path
+    env["CLAUDE_CONFIG_PATH"] = claude_config_path
+    env["CONTAINER_NAME"] = container
+
+    # Auto-detect credential isolation if not explicitly set
+    if not isolate_credentials:
+        try:
+            result = subprocess.run(
+                ["docker", "ps", "-a", "--format", "{{.Names}}"],
+                capture_output=True, text=True, check=False,
+            )
+            for line in result.stdout.splitlines():
+                if line.startswith(f"{container}-unified-proxy-"):
+                    isolate_credentials = True
+                    break
+        except OSError:
+            pass
+
+    compose_cmd = get_compose_command(override_file, isolate_credentials)
+    cmd = compose_cmd + ["-p", container, "down"]
+    if remove_volumes:
+        cmd.append("-v")
+
+    if get_sandbox_verbose():
+        print(f"+ {' '.join(cmd)}", file=sys.stderr)
+
+    subprocess.run(cmd, env=env, check=True)
+
+
+# ============================================================================
+# Container Status & Interaction
+# ============================================================================
+
+
+def container_is_running(container: str) -> bool:
+    """Check if a container is running.
+
+    Args:
+        container: Container project name.
+
+    Returns:
+        True if the dev container is running.
+    """
+    try:
+        result = subprocess.run(
+            ["docker", "ps", "--filter", f"name=^{container}-dev",
+             "--format", "{{.Names}}"],
+            capture_output=True, text=True, check=False,
+        )
+        return bool(result.stdout.strip())
+    except OSError:
+        return False
+
+
+def get_unified_proxy_host_port(container: str) -> str:
+    """Get the unified-proxy host port for a container.
+
+    Args:
+        container: Container project name.
+
+    Returns:
+        Host port string, or empty string if not found.
+    """
+    proxy_container = f"{container}-unified-proxy-1"
+    try:
+        result = subprocess.run(
+            ["docker", "port", proxy_container, "8080"],
+            capture_output=True, text=True, check=False,
+        )
+        if result.returncode != 0 or not result.stdout.strip():
+            return ""
+        # Output is like "0.0.0.0:12345" or ":::12345", take first line
+        first_line = result.stdout.strip().splitlines()[0]
+        # Extract port after last colon
+        return first_line.rsplit(":", 1)[-1]
+    except OSError:
+        return ""
+
+
+def setup_unified_proxy_url(container: str) -> str:
+    """Set up GATEWAY_URL after containers start.
+
+    Args:
+        container: Container project name.
+
+    Returns:
+        Gateway URL string (e.g. "http://127.0.0.1:12345"), or empty on failure.
+    """
+    port = get_unified_proxy_host_port(container)
+    if not port:
+        return ""
+    return f"http://127.0.0.1:{port}"
+
+
+def exec_in_container(container_id: str, *args: str) -> subprocess.CompletedProcess[str]:
+    """Execute a command inside a container.
+
+    Args:
+        container_id: Docker container ID or name.
+        *args: Command and arguments to run.
+
+    Returns:
+        CompletedProcess result.
+    """
+    return _run_cmd(["docker", "exec", container_id, *args])
+
+
+def copy_to_container(src: str, container_id: str, dst: str) -> None:
+    """Copy a file to a container.
+
+    Args:
+        src: Source path on host.
+        container_id: Docker container ID or name.
+        dst: Destination path inside container.
+    """
+    _run_cmd(["docker", "cp", src, f"{container_id}:{dst}"])
+
+
+# ============================================================================
+# Volume Management
+# ============================================================================
+
+
+def populate_stubs_volume(container: str) -> None:
+    """Populate the stubs volume for credential isolation.
+
+    Uses a temporary alpine container to copy stub files into the volume.
+    This avoids Docker Desktop's VirtioFS/gRPC-FUSE file sync staleness issues.
+
+    Args:
+        container: Container project name.
+    """
+    volume_name = f"{container}_stubs"
+    script_dir = str(_script_dir())
+
+    # Create volume (ignore if exists)
+    subprocess.run(
+        ["docker", "volume", "create", volume_name],
+        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+        check=False,
+    )
+
+    subprocess.run(
+        [
+            "docker", "run", "--rm",
+            "-v", f"{script_dir}/unified-proxy:/src:ro",
+            "-v", f"{volume_name}:/stubs",
+            "alpine:latest",
+            "sh", "-c",
+            "cp /src/stub-*.json /src/stub-*.yml /stubs/ 2>/dev/null "
+            "|| cp /src/stub-*.json /stubs/",
+        ],
+        check=True,
+    )
+
+
+def remove_stubs_volume(container: str) -> None:
+    """Remove the stubs volume for a sandbox.
+
+    Args:
+        container: Container project name.
+    """
+    subprocess.run(
+        ["docker", "volume", "rm", f"{container}_stubs"],
+        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+        check=False,
+    )
+
+
+def provision_hmac_secret(container: str, sandbox_id: str) -> None:
+    """Provision per-sandbox HMAC secret for git API authentication.
+
+    Creates a Docker volume containing the shared secret file.
+    File mode 0444 is intentional: both runtime users (sandbox user and
+    mitmproxy user) must read this file, and UID/GID differ across images.
+
+    Args:
+        container: Container project name.
+        sandbox_id: Sandbox identifier for the secret filename.
+    """
+    volume_name = f"{container}_hmac"
+
+    # Generate 32-byte (256-bit) random secret (base64 encoded)
+    hmac_secret_b64 = base64.b64encode(secrets.token_bytes(32)).decode()
+
+    # Create volume (ignore if exists)
+    subprocess.run(
+        ["docker", "volume", "create", volume_name],
+        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+        check=False,
+    )
+
+    # Write secret to volume using temporary container
+    subprocess.run(
+        [
+            "docker", "run", "--rm",
+            "-v", f"{volume_name}:/secrets",
+            "alpine:latest",
+            "sh", "-c",
+            f"echo -n '{hmac_secret_b64}' > /secrets/{sandbox_id} "
+            f"&& chmod 0444 /secrets/{sandbox_id}",
+        ],
+        check=True,
+    )
+
+
+def hmac_secret_file_count(container: str) -> int:
+    """Return the number of HMAC secret files in a sandbox volume.
+
+    Args:
+        container: Container project name.
+
+    Returns:
+        Number of secret files, or 0 on error.
+    """
+    volume_name = f"{container}_hmac"
+    try:
+        result = subprocess.run(
+            [
+                "docker", "run", "--rm",
+                "-v", f"{volume_name}:/secrets",
+                "alpine:latest",
+                "sh", "-c",
+                "find /secrets -mindepth 1 -maxdepth 1 -type f | wc -l",
+            ],
+            capture_output=True, text=True, check=False,
+        )
+        return int(result.stdout.strip())
+    except (OSError, ValueError):
+        return 0
+
+
+def repair_hmac_secret_permissions(container: str) -> None:
+    """Ensure HMAC secret files are readable by both sandbox and proxy users.
+
+    Args:
+        container: Container project name.
+    """
+    volume_name = f"{container}_hmac"
+    subprocess.run(
+        [
+            "docker", "run", "--rm",
+            "-v", f"{volume_name}:/secrets",
+            "alpine:latest",
+            "sh", "-c",
+            "find /secrets -mindepth 1 -maxdepth 1 -type f -exec chmod 0444 {} +",
+        ],
+        stdout=subprocess.DEVNULL, check=True,
+    )
+
+
+def remove_hmac_volume(container: str) -> None:
+    """Remove the HMAC secrets volume for a sandbox.
+
+    Args:
+        container: Container project name.
+    """
+    subprocess.run(
+        ["docker", "volume", "rm", f"{container}_hmac"],
+        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+        check=False,
+    )
+
+
+# ============================================================================
+# Bridge Commands
+# ============================================================================
+
+
+def _cmd_container_is_running(container: str) -> bool:
+    """Bridge command: Check if container is running."""
+    return container_is_running(container)
+
+
+def _cmd_compose_up(
+    worktree_path: str,
+    claude_config_path: str,
+    container: str,
+    override_file: str = "",
+    isolate_credentials: str = "false",
+    repos_dir: str = "",
+    sandbox_id: str = "",
+) -> None:
+    """Bridge command: Start containers."""
+    compose_up(
+        worktree_path, claude_config_path, container,
+        override_file=override_file,
+        isolate_credentials=isolate_credentials == "true",
+        repos_dir=repos_dir,
+        sandbox_id=sandbox_id,
+    )
+
+
+def _cmd_compose_down(
+    worktree_path: str,
+    claude_config_path: str,
+    container: str,
+    override_file: str = "",
+    remove_volumes: str = "false",
+    isolate_credentials: str = "false",
+) -> None:
+    """Bridge command: Stop containers."""
+    compose_down(
+        worktree_path, claude_config_path, container,
+        override_file=override_file,
+        remove_volumes=remove_volumes == "true",
+        isolate_credentials=isolate_credentials == "true",
+    )
+
+
+def _cmd_exec_in_container(container_id: str, *args: str) -> str:
+    """Bridge command: Execute command in container."""
+    result = exec_in_container(container_id, *args)
+    return result.stdout if result.stdout else ""
+
+
+def _cmd_copy_to_container(src: str, container_id: str, dst: str) -> None:
+    """Bridge command: Copy file to container."""
+    copy_to_container(src, container_id, dst)
+
+
+def _cmd_get_proxy_port(container: str) -> str:
+    """Bridge command: Get unified proxy host port."""
+    return get_unified_proxy_host_port(container)
+
+
+def _cmd_setup_proxy_url(container: str) -> str:
+    """Bridge command: Set up gateway URL."""
+    url = setup_unified_proxy_url(container)
+    if not url:
+        raise ValueError(f"Could not determine proxy port for {container}")
+    return url
+
+
+def _cmd_populate_stubs(container: str) -> None:
+    """Bridge command: Populate stubs volume."""
+    populate_stubs_volume(container)
+
+
+def _cmd_remove_stubs(container: str) -> None:
+    """Bridge command: Remove stubs volume."""
+    remove_stubs_volume(container)
+
+
+def _cmd_provision_hmac(container: str, sandbox_id: str) -> None:
+    """Bridge command: Provision HMAC secret."""
+    provision_hmac_secret(container, sandbox_id)
+
+
+def _cmd_hmac_file_count(container: str) -> int:
+    """Bridge command: Count HMAC secret files."""
+    return hmac_secret_file_count(container)
+
+
+def _cmd_repair_hmac_permissions(container: str) -> None:
+    """Bridge command: Repair HMAC secret permissions."""
+    repair_hmac_secret_permissions(container)
+
+
+def _cmd_remove_hmac(container: str) -> None:
+    """Bridge command: Remove HMAC volume."""
+    remove_hmac_volume(container)
+
+
+def _cmd_generate_subnet(project_name: str) -> dict[str, str]:
+    """Bridge command: Generate sandbox subnet."""
+    subnet, proxy_ip = generate_sandbox_subnet(project_name)
+    return {"subnet": subnet, "proxy_ip": proxy_ip}
+
+
+def _cmd_setup_credential_placeholders() -> dict[str, str]:
+    """Bridge command: Detect host auth and return placeholder env vars."""
+    return setup_credential_placeholders()
+
+
+if __name__ == "__main__":
+    bridge_main({
+        "container-is-running": _cmd_container_is_running,
+        "compose-up": _cmd_compose_up,
+        "compose-down": _cmd_compose_down,
+        "exec": _cmd_exec_in_container,
+        "copy-to": _cmd_copy_to_container,
+        "get-proxy-port": _cmd_get_proxy_port,
+        "setup-proxy-url": _cmd_setup_proxy_url,
+        "populate-stubs": _cmd_populate_stubs,
+        "remove-stubs": _cmd_remove_stubs,
+        "provision-hmac": _cmd_provision_hmac,
+        "hmac-file-count": _cmd_hmac_file_count,
+        "repair-hmac-permissions": _cmd_repair_hmac_permissions,
+        "remove-hmac": _cmd_remove_hmac,
+        "generate-subnet": _cmd_generate_subnet,
+        "setup-credential-placeholders": _cmd_setup_credential_placeholders,
+    })

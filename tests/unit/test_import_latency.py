@@ -3,12 +3,13 @@
 Ensures that each bridge-callable module can be imported within 300ms,
 preventing accidental dependency bloat that would slow shell-to-Python calls.
 
-The CLI --help latency gate is deferred to Phase 4 (CLI entrypoint).
+Also includes a CLI --help latency gate to ensure the CLI entrypoint is fast.
 """
 
 import os
 import subprocess
 import sys
+import time
 
 import pytest
 
@@ -86,13 +87,32 @@ class TestInternalModuleImportLatency:
         )
 
 
-class TestCLILatency:
-    """CLI entrypoint latency gate — deferred to Phase 4."""
+CLI_BUDGET_MS = 500
 
-    @pytest.mark.skip(reason="CLI entrypoint not yet implemented (Phase 4)")
+
+class TestCLILatency:
+    """CLI entrypoint latency gate."""
+
     def test_cli_help_under_budget(self):
-        """CLI --help must complete in <500ms (placeholder for Phase 4)."""
-        pass
+        """CLI --help must complete in <500ms."""
+        env = os.environ.copy()
+        env["PYTHONPATH"] = os.path.join(os.path.dirname(__file__), "../..")
+        start = time.perf_counter()
+        result = subprocess.run(
+            [sys.executable, "-m", "foundry_sandbox.cli", "--help"],
+            capture_output=True,
+            text=True,
+            env=env,
+            timeout=10,
+        )
+        elapsed_ms = (time.perf_counter() - start) * 1000
+        assert result.returncode == 0, (
+            f"CLI --help failed. stderr: {result.stderr}"
+        )
+        assert elapsed_ms < CLI_BUDGET_MS, (
+            f"CLI --help took {elapsed_ms:.1f}ms, "
+            f"exceeds {CLI_BUDGET_MS}ms budget"
+        )
 
 
 if __name__ == "__main__":
