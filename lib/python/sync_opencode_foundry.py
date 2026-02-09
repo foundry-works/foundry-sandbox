@@ -99,9 +99,12 @@ def command_looks_like_foundry(cmd: List[str]) -> bool:
     head = cmd[0]
     if head in ("uvx", "foundry-mcp"):
         return True
-    if head in ("python", "python3") and len(cmd) >= 3 and cmd[1] == "-m":
-        module = cmd[2]
-        return module in ("foundry-mcp", "foundry_mcp", "foundry_mcp.server")
+    if head in ("python", "python3"):
+        # Handle optional flags like -s before -m
+        rest = [a for a in cmd[1:] if not a.startswith("-") or a == "-m"]
+        if len(rest) >= 2 and rest[0] == "-m":
+            module = rest[1]
+            return module in ("foundry-mcp", "foundry_mcp", "foundry_mcp.server")
     return False
 
 
@@ -127,7 +130,7 @@ def pick_foundry_command(cmd: List[str]) -> Optional[List[str]]:
 
     python_cmd = sys.executable or find_executable("python3") or find_executable("python")
     if python_cmd:
-        return [python_cmd, "-m", "foundry_mcp.server"]
+        return [python_cmd, "-s", "-m", "foundry_mcp.server"]
     return None
 
 

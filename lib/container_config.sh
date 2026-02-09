@@ -688,9 +688,12 @@ def command_looks_like_foundry(cmd):
     head = cmd[0]
     if head in ("uvx", "foundry-mcp"):
         return True
-    if head in ("python", "python3") and len(cmd) >= 3 and cmd[1] == "-m":
-        module = cmd[2]
-        return module in ("foundry-mcp", "foundry_mcp", "foundry_mcp.server")
+    if head in ("python", "python3"):
+        # Handle optional flags like -s before -m
+        rest = [a for a in cmd[1:] if not a.startswith("-") or a == "-m"]
+        if len(rest) >= 2 and rest[0] == "-m":
+            module = rest[1]
+            return module in ("foundry-mcp", "foundry_mcp", "foundry_mcp.server")
     return False
 
 def pick_foundry_command(cmd):
@@ -702,7 +705,7 @@ def pick_foundry_command(cmd):
         return [uvx_cmd, "foundry-mcp"]
     python_cmd = sys.executable or find_executable("python3") or find_executable("python")
     if python_cmd:
-        return [python_cmd, "-m", "foundry_mcp.server"]
+        return [python_cmd, "-s", "-m", "foundry_mcp.server"]
     return None
 
 if command_looks_like_foundry(command_list):
@@ -1518,13 +1521,27 @@ for path in paths:
             data[key] = val
             changed = True
 
-    # Only add if not already configured
+    # Ensure foundry-mcp uses -s (skip user site-packages) to prevent
+    # user-installed packages from shadowing system dependencies.
+    # Workspace pip requirements install to ~/.local which is tmpfs;
+    # loading .so files from there can fail with mmap errors.
     if "foundry-mcp" not in data["mcpServers"]:
         data["mcpServers"]["foundry-mcp"] = {
             "command": "python",
-            "args": ["-m", "foundry_mcp.server"]
+            "args": ["-s", "-m", "foundry_mcp.server"]
         }
         changed = True
+    else:
+        fmcp = data["mcpServers"]["foundry-mcp"]
+        args = fmcp.get("args", [])
+        cmd = fmcp.get("command", "")
+        is_python = cmd in ("python", "python3") or (
+            isinstance(args, list) and args and args[0] == "-m"
+        )
+        if is_python and isinstance(args, list) and "-s" not in args:
+            args.insert(0, "-s")
+            fmcp["args"] = args
+            changed = True
 
     # Only add tavily-mcp if Tavily is enabled (API key available on host)
     enable_tavily = os.environ.get("SANDBOX_ENABLE_TAVILY", "0") == "1"
