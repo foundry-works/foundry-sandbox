@@ -361,12 +361,11 @@ class TestEdgeCases:
         assert flow.response is not None
         assert flow.response.status_code == 403
 
-    @patch.object(github_api_filter, "ctx")
-    def test_graphql_malformed_json_allowed(self, mock_ctx, api_filter):
-        """Test that malformed GraphQL requests (bad JSON) are allowed to pass.
+    def test_graphql_malformed_json_blocked(self, api_filter):
+        """Test that malformed GraphQL requests (bad JSON) are blocked (fail closed).
 
-        The filter tries to parse JSON but returns None if parsing fails,
-        allowing the request to proceed (the API will reject it).
+        The filter blocks unparseable JSON bodies to prevent parser-differential
+        attacks where a crafted body might parse differently in Python vs. GitHub.
         """
         flow = Mock()
         flow.request = Mock()
@@ -378,11 +377,9 @@ class TestEdgeCases:
 
         api_filter.request(flow)
 
-        # Should not be blocked by the filter
-        # (malformed JSON won't match any mutation pattern)
-        # The flow should either pass through or be rejected by another layer
-        # Since _check_graphql_mutations returns None on JSON error,
-        # request will continue through other checks
+        # Should be blocked (fail closed on unparseable body)
+        assert flow.response is not None
+        assert flow.response.status_code == 403
 
     @patch.object(github_api_filter, "ctx")
     def test_uploads_github_com_host(self, mock_ctx, api_filter):
@@ -402,6 +399,162 @@ class TestEdgeCases:
         # Should be allowed (GET on release assets is permitted)
         assert flow.response is None
         assert mock_ctx.log.info.called
+
+
+class TestGraphQLCommentBypass:
+    """Tests for GraphQL comment stripping before mutation detection."""
+
+    @pytest.fixture
+    def api_filter(self):
+        """Create GitHubAPIFilter instance."""
+        return GitHubAPIFilter()
+
+    def test_comment_between_mutation_and_paren(self, api_filter):
+        """Test that a GraphQL comment between mutation name and ( is blocked.
+
+        A payload like `mergePullRequest # comment\n(` previously bypassed
+        the `\\s*\\(` regex because the comment text intervened.
+        """
+        flow = Mock()
+        flow.request = Mock()
+        flow.request.host = "api.github.com"
+        flow.request.method = "POST"
+        flow.request.path = "/graphql"
+        flow.request.get_text = Mock(return_value=json.dumps({
+            "query": "mutation { mergePullRequest # comment\n(input: {pullRequestId: \"PR_123\"}) { pullRequest { id } } }"
+        }))
+        flow.response = None
+
+        api_filter.request(flow)
+
+        assert flow.response is not None
+        assert flow.response.status_code == 403
+
+    def test_multiple_comments_in_query(self, api_filter):
+        """Test that multiple comments don't prevent mutation detection."""
+        flow = Mock()
+        flow.request = Mock()
+        flow.request.host = "api.github.com"
+        flow.request.method = "POST"
+        flow.request.path = "/graphql"
+        flow.request.get_text = Mock(return_value=json.dumps({
+            "query": "# start comment\nmutation { # another comment\nenablePullRequestAutoMerge # bypass\n(input: {pullRequestId: \"PR_123\"}) { pullRequest { id } } }"
+        }))
+        flow.response = None
+
+        api_filter.request(flow)
+
+        assert flow.response is not None
+        assert flow.response.status_code == 403
+
+    @patch.object(github_api_filter, "ctx")
+    def test_comment_in_safe_query_still_allowed(self, mock_ctx, api_filter):
+        """Test that comments in safe queries don't cause false positives."""
+        flow = Mock()
+        flow.request = Mock()
+        flow.request.host = "api.github.com"
+        flow.request.method = "POST"
+        flow.request.path = "/graphql"
+        flow.request.get_text = Mock(return_value=json.dumps({
+            "query": "# just a query\nquery { repository(owner: \"owner\", name: \"repo\") { name } }"
+        }))
+        flow.response = None
+
+        api_filter.request(flow)
+
+        assert flow.response is None
+
+
+class TestPRReopenCaseInsensitive:
+    """Tests for case-insensitive PR reopen detection."""
+
+    @pytest.fixture
+    def api_filter(self):
+        """Create GitHubAPIFilter instance."""
+        return GitHubAPIFilter()
+
+    def _make_pr_patch_flow(self, state_value):
+        """Create a mock flow for PATCH to a PR endpoint with given state."""
+        flow = Mock()
+        flow.request = Mock()
+        flow.request.host = "api.github.com"
+        flow.request.method = "PATCH"
+        flow.request.path = "/repos/owner/repo/pulls/123"
+        flow.request.get_text = Mock(return_value=json.dumps({"state": state_value}))
+        flow.response = None
+        return flow
+
+    def test_reopen_lowercase(self, api_filter):
+        """Test that state: 'open' (lowercase) is detected as reopen."""
+        flow = self._make_pr_patch_flow("open")
+        api_filter.request(flow)
+        assert flow.response is not None
+        assert flow.response.status_code == 403
+
+    def test_reopen_uppercase(self, api_filter):
+        """Test that state: 'OPEN' (uppercase) is detected as reopen."""
+        flow = self._make_pr_patch_flow("OPEN")
+        api_filter.request(flow)
+        assert flow.response is not None
+        assert flow.response.status_code == 403
+
+    def test_reopen_mixed_case(self, api_filter):
+        """Test that state: 'Open' (mixed case) is detected as reopen."""
+        flow = self._make_pr_patch_flow("Open")
+        api_filter.request(flow)
+        assert flow.response is not None
+        assert flow.response.status_code == 403
+
+
+class TestHTTPMethodNormalization:
+    """Tests for HTTP method normalization to uppercase."""
+
+    @pytest.fixture
+    def api_filter(self):
+        """Create GitHubAPIFilter instance."""
+        return GitHubAPIFilter()
+
+    def test_lowercase_put_merge_blocked(self, api_filter):
+        """Test that lowercase 'put' method for merge is still blocked."""
+        flow = Mock()
+        flow.request = Mock()
+        flow.request.host = "api.github.com"
+        flow.request.method = "put"  # lowercase
+        flow.request.path = "/repos/owner/repo/pulls/123/merge"
+        flow.response = None
+
+        api_filter.request(flow)
+
+        assert flow.response is not None
+        assert flow.response.status_code == 403
+
+    def test_lowercase_delete_ref_blocked(self, api_filter):
+        """Test that lowercase 'delete' method for ref deletion is still blocked."""
+        flow = Mock()
+        flow.request = Mock()
+        flow.request.host = "api.github.com"
+        flow.request.method = "delete"  # lowercase
+        flow.request.path = "/repos/owner/repo/git/refs/heads/main"
+        flow.response = None
+
+        api_filter.request(flow)
+
+        assert flow.response is not None
+        assert flow.response.status_code == 403
+
+    @patch.object(github_api_filter, "ctx")
+    def test_lowercase_get_allowed(self, mock_ctx, api_filter):
+        """Test that lowercase 'get' method for safe endpoint is allowed."""
+        flow = Mock()
+        flow.request = Mock()
+        flow.request.host = "api.github.com"
+        flow.request.method = "get"  # lowercase
+        flow.request.path = "/repos/owner/repo/pulls/123"
+        flow.response = None
+
+        api_filter.request(flow)
+
+        assert flow.response is None
 
 
 if __name__ == "__main__":

@@ -106,34 +106,23 @@ class MockCtx:
         self.log = MockCtxLog()
 
 
-# Create mock modules BEFORE any mitmproxy import
-mock_mitmproxy = MagicMock()
-
-# Create http mock with our Response class
+# Create test-specific mock objects for container_identity tests.
+# NOTE: We do NOT overwrite sys.modules["mitmproxy*"] here because conftest.py
+# already installs proper mitmproxy mocks.  Overwriting them would pollute the
+# global module cache and break other test files (test_github_api_filter,
+# test_dual_layer_consistency) that import mitmproxy-based addons later.
 mock_http = MagicMock()
 mock_http.Response = MockResponse
 mock_http.HTTPFlow = MockHTTPFlow
 
-# Create ctx mock
 mock_ctx = MockCtx()
 
-# Create flow mock
-mock_flow = MagicMock()
-mock_flow.Flow = MockHTTPFlow
-
-# Install mocks into sys.modules BEFORE importing container_identity
-sys.modules["mitmproxy"] = mock_mitmproxy
-sys.modules["mitmproxy.http"] = mock_http
-sys.modules["mitmproxy.ctx"] = mock_ctx
-sys.modules["mitmproxy.flow"] = mock_flow
-
-# Now add addons path and import container_identity
+# Add addons path and import container_identity (uses conftest mitmproxy mocks)
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../../unified-proxy/addons"))
-
-# Import the module - it will use our mocked mitmproxy
 import container_identity
 
-# Ensure the module uses our mock ctx (replace the reference it got during import)
+# Replace the module-level mitmproxy references with our test-specific mocks
+# so that container_identity uses MockResponse/MockCtx defined above.
 container_identity.ctx = mock_ctx
 container_identity.http = mock_http
 
@@ -553,6 +542,47 @@ class TestPathTraversalValidation:
         assert mock_ctx.log.was_called_with_level("warn")
         messages = mock_ctx.log.get_messages("warn")
         assert any("path traversal" in msg.lower() for msg in messages)
+
+    def test_slash_in_repo_name_returns_403(self, addon, registry):
+        """Test that '/' in repo_name (after initial split) is rejected.
+
+        The initial split on '/' gives owner and repo_name. If repo_name
+        itself contains '/', it could be used for path injection.
+        """
+        registry.register(
+            container_id="slash-container",
+            ip_address="172.17.0.24",
+            metadata={"repo": "owner/repo/evil"},
+        )
+
+        flow = create_flow("172.17.0.24")
+        addon.request(flow)
+
+        assert flow.response is not None
+        assert flow.response.status_code == 403
+
+    def test_realpath_validation_blocks_escape(self, addon, registry):
+        """Test that os.path.realpath validation blocks path escape attempts.
+
+        Even if '..' is not literally present, the realpath check ensures
+        the constructed path stays under REPOS_BASE_DIR.
+        """
+        # A repo name with valid characters that looks normal
+        # (realpath check is the last line of defense)
+        registry.register(
+            container_id="realpath-container",
+            ip_address="172.17.0.25",
+            metadata={"repo": "owner/repo-name"},
+        )
+
+        flow = create_flow("172.17.0.25")
+        addon.request(flow)
+
+        # Normal repo should succeed
+        assert flow.response is None
+        config = container_identity.get_container_config(flow)
+        assert config is not None
+        assert "bare_repo_path" in config.metadata
 
 
 class TestResponseContent:

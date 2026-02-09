@@ -23,9 +23,10 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import time
 from dataclasses import dataclass, field
 from io import BytesIO
-from typing import List, Optional
+from typing import Dict, List, Optional
 
 from mitmproxy import ctx, http
 from mitmproxy.flow import Flow
@@ -50,6 +51,13 @@ GIT_METADATA_KEY = "git_operation"
 
 # Push size limit (default: 100MB)
 DEFAULT_MAX_PUSH_SIZE = 100 * 1024 * 1024
+
+# Push rate limiting: per-container token bucket.
+# Each push (git-receive-pack POST) consumes one token.
+# This limits the rate at which restricted-path checks run,
+# since each check creates a temp bare repo and spawns subprocesses.
+PUSH_RATE_CAPACITY = int(os.environ.get("PUSH_RATE_CAPACITY", "10"))
+PUSH_RATE_REFILL_PER_SEC = float(os.environ.get("PUSH_RATE_REFILL_PER_SEC", "1.0"))
 
 # Sandbox branch pattern for bot mode
 SANDBOX_BRANCH_PATTERN = re.compile(r"^refs/heads/sandbox/")
@@ -116,6 +124,8 @@ class GitProxyAddon:
             max_push_size: Maximum allowed push size in bytes (default 100MB).
         """
         self._max_push_size = max_push_size
+        # Per-container push rate limiter: container_id -> (tokens, last_refill)
+        self._push_buckets: Dict[str, list] = {}
 
     def load(self, loader):
         """Called when addon is loaded."""
@@ -176,6 +186,18 @@ class GitProxyAddon:
 
         # For write operations, apply additional checks
         if git_op.is_write:
+            # Rate limit pushes to prevent resource exhaustion.
+            # Each push triggers temp dir creation + subprocess spawning
+            # for restricted-path checks, so rapid pushes are expensive.
+            if self._check_push_rate_limit(container_id):
+                self._deny_request(
+                    flow,
+                    "Push rate limit exceeded. Try again shortly.",
+                    container_id=container_id,
+                    status_code=429,
+                )
+                return
+
             # Fail closed on malformed push payloads.
             if git_op.parse_error:
                 self._deny_request(
@@ -373,6 +395,42 @@ class GitProxyAddon:
                 )
         return None
 
+    def _check_push_rate_limit(self, container_id: str) -> bool:
+        """Check if the container has exceeded its push rate limit.
+
+        Uses a simple token bucket: each push consumes one token, tokens
+        refill at PUSH_RATE_REFILL_PER_SEC, with max PUSH_RATE_CAPACITY.
+
+        Args:
+            container_id: The container making the push.
+
+        Returns:
+            True if the push should be rate-limited (blocked), False if allowed.
+        """
+        now = time.monotonic()
+        bucket = self._push_buckets.get(container_id)
+
+        if bucket is None:
+            # First push from this container: full bucket minus one token
+            self._push_buckets[container_id] = [PUSH_RATE_CAPACITY - 1, now]
+            return False
+
+        tokens, last_refill = bucket
+        # Refill tokens based on elapsed time
+        elapsed = now - last_refill
+        tokens = min(PUSH_RATE_CAPACITY, tokens + elapsed * PUSH_RATE_REFILL_PER_SEC)
+
+        if tokens < 1.0:
+            # Not enough tokens — rate limited
+            bucket[0] = tokens
+            bucket[1] = now
+            return True
+
+        # Consume one token
+        bucket[0] = tokens - 1
+        bucket[1] = now
+        return False
+
     def _make_clean_git_env(self, **extra) -> dict:
         """Build a minimal environment for git subprocesses in restricted-path checks.
 
@@ -525,7 +583,13 @@ class GitProxyAddon:
             return "Push blocked by security policy"
         finally:
             if tmp_dir and os.path.isdir(tmp_dir):
-                shutil.rmtree(tmp_dir, ignore_errors=True)
+                try:
+                    shutil.rmtree(tmp_dir)
+                except OSError as cleanup_err:
+                    ctx.log.warn(
+                        f"[restricted-path] Failed to clean up temp dir "
+                        f"{tmp_dir}: {cleanup_err}"
+                    )
 
     def _log_git_operation(
         self, git_op: GitOperation, container_id: str, allowed: bool
@@ -561,7 +625,7 @@ class GitProxyAddon:
             flow: The mitmproxy HTTP flow.
             reason: Human-readable reason for denial.
             container_id: Container ID for logging.
-            status_code: HTTP status code (403 for forbidden, 413 for too large).
+            status_code: HTTP status code (403, 413, 429).
         """
         # Log the denial with git operation info
         git_op_info = flow.metadata.get(GIT_METADATA_KEY, {})
@@ -573,16 +637,21 @@ class GitProxyAddon:
         )
 
         # Determine status message
-        if status_code == 413:
-            status_message = "Request Entity Too Large"
-        else:
-            status_message = "Forbidden"
+        status_messages = {
+            413: "Request Entity Too Large",
+            429: "Too Many Requests",
+        }
+        status_message = status_messages.get(status_code, "Forbidden")
 
         # Create error response
+        headers = {"Content-Type": "text/plain"}
+        if status_code == 429:
+            headers["Retry-After"] = "5"
+
         flow.response = http.Response.make(
             status_code,
             f"{status_message}: {reason}".encode(),
-            {"Content-Type": "text/plain"},
+            headers,
         )
 
 

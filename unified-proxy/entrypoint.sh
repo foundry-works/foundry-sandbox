@@ -132,6 +132,11 @@ generate_ca_cert() {
             wait "${gen_pid}" 2>/dev/null || true
             return 0
         fi
+        # Fail fast if mitmdump died before producing the cert
+        if ! kill -0 "${gen_pid}" 2>/dev/null; then
+            log_error "mitmdump (PID ${gen_pid}) exited before generating CA certificate"
+            return 1
+        fi
         sleep 0.5
     done
 

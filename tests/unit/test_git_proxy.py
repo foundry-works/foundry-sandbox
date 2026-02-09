@@ -109,34 +109,22 @@ class MockCtx:
         self.log = MockCtxLog()
 
 
-# Create mock modules BEFORE any mitmproxy import
-mock_mitmproxy = MagicMock()
-
-# Create http mock with our Response class
+# Create test-specific mock objects for git_proxy tests.
+# NOTE: We do NOT overwrite sys.modules["mitmproxy"] here because conftest.py
+# already installs proper mitmproxy mocks. Overwriting the top-level module
+# entry would pollute the global module cache and break other test files
+# that import mitmproxy-based addons later in the session.
 mock_http = MagicMock()
 mock_http.Response = MockResponse
 mock_http.HTTPFlow = MockHTTPFlow
 
-# Create ctx mock
 mock_ctx = MockCtx()
 
-# Create flow mock
-mock_flow = MagicMock()
-mock_flow.Flow = MockHTTPFlow
-
-# Install mocks into sys.modules BEFORE importing git_proxy
-sys.modules["mitmproxy"] = mock_mitmproxy
-sys.modules["mitmproxy.http"] = mock_http
-sys.modules["mitmproxy.ctx"] = mock_ctx
-sys.modules["mitmproxy.flow"] = mock_flow
-
-# Add addons path
+# Add addons path and import git_proxy (uses conftest mitmproxy mocks)
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../../unified-proxy/addons"))
-
-# Import git_proxy - it will use our mocked mitmproxy
 import git_proxy
 
-# Ensure the module uses our mock ctx
+# Replace the module-level mitmproxy references with our test-specific mocks
 git_proxy.ctx = mock_ctx
 git_proxy.http = mock_http
 

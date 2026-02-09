@@ -85,25 +85,16 @@ class MockCtx:
         self.log = MockCtxLog()
 
 
-# Create mock modules BEFORE any mitmproxy import
+# Create test-specific mock objects for rate_limiter tests.
+# NOTE: We do NOT overwrite sys.modules["mitmproxy"] here because conftest.py
+# already installs proper mitmproxy mocks. Overwriting the top-level module
+# entry would pollute the global module cache and break other test files
+# that import mitmproxy-based addons later in the session.
 mock_http = MagicMock()
 mock_http.Response = MockResponse
 mock_http.HTTPFlow = MockHTTPFlow
 
 mock_ctx_instance = MockCtx()
-
-mock_mitmproxy = MagicMock()
-mock_mitmproxy.http = mock_http
-mock_mitmproxy.ctx = mock_ctx_instance
-
-mock_flow = MagicMock()
-mock_flow.Flow = MockHTTPFlow
-
-# Install mocks into sys.modules BEFORE importing rate_limiter
-sys.modules["mitmproxy"] = mock_mitmproxy
-sys.modules["mitmproxy.http"] = mock_http
-sys.modules["mitmproxy.ctx"] = mock_ctx_instance
-sys.modules["mitmproxy.flow"] = mock_flow
 
 from addons.rate_limiter import TokenBucket, RateLimiterAddon, BUCKET_EXPIRY_SECONDS
 from registry import ContainerConfig

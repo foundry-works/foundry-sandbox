@@ -227,7 +227,11 @@ class PolicyEngine:
         Args:
             flow: The mitmproxy HTTP flow.
         """
-        method = flow.request.method
+        # Normalize method to uppercase for defense-in-depth.
+        # HTTP methods are defined as case-sensitive uppercase per spec,
+        # but a proxy-aware attacker could craft raw requests with
+        # lowercase methods to bypass string comparisons.
+        method = flow.request.method.upper()
         raw_host = flow.request.pretty_host
         host = normalize_host(raw_host)
         path = flow.request.path

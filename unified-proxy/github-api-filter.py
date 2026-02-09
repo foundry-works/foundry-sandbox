@@ -271,7 +271,11 @@ class GitHubAPIFilter:
         if host not in GITHUB_API_HOSTS:
             return
 
-        method = flow.request.method
+        # Normalize method to uppercase for defense-in-depth.
+        # HTTP methods are defined as case-sensitive uppercase per spec,
+        # but a proxy-aware attacker could craft raw requests with
+        # lowercase methods to bypass string comparisons.
+        method = flow.request.method.upper()
         path = flow.request.path
 
         # Strip query string for pattern matching
@@ -338,8 +342,10 @@ class GitHubAPIFilter:
             if not content:
                 return False
             data = json.loads(content)
-            # Check if state is being set to "open"
-            return data.get("state") == "open"
+            # Check if state is being set to "open" (case-insensitive
+            # for defense-in-depth, consistent with policy_engine.py's
+            # APPROVE check which uses str(...).upper())
+            return str(data.get("state", "")).lower() == "open"
         except (json.JSONDecodeError, UnicodeDecodeError):
             return False
 
@@ -354,6 +360,12 @@ class GitHubAPIFilter:
                 return None
             data = json.loads(content)
             query = data.get("query", "")
+
+            # Strip GraphQL comments before regex matching.
+            # GraphQL supports `# comment` line comments, which could be
+            # inserted between a mutation name and its opening `(` to
+            # bypass the `\bmutation\s*\(` regex pattern.
+            query = re.sub(r'#[^\n]*', '', query)
 
             # Check always-blocked mutations first
             for mutation in ALWAYS_BLOCKED_GRAPHQL_MUTATIONS:
@@ -370,7 +382,10 @@ class GitHubAPIFilter:
 
             return None
         except (json.JSONDecodeError, UnicodeDecodeError):
-            return None
+            # Fail closed: if we can't parse the body, block the request.
+            # A crafted body that parses differently in Python vs. GitHub's
+            # parser could exploit a fail-open here.
+            return "unparseable GraphQL request body (fail closed)"
 
     def _block_request(self, flow: http.HTTPFlow, reason: str) -> None:
         """Return 403 Forbidden with explanation."""
