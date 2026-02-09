@@ -1,0 +1,42 @@
+name: Orchestration Tests (Full)
+
+on:
+  schedule:
+    - cron: '0 6 * * *'
+  workflow_dispatch:
+
+concurrency:
+  group: orchestration-tests-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  orchestration-tests:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install pytest
+        run: pip install pytest
+
+      - name: Run orchestration tests
+        run: pytest tests/orchestration/ -v --tb=short
+
+      - name: Run security integration tests
+        if: always()
+        run: pytest tests/security/ -v --tb=short
+
+      - name: Cleanup orphaned test sandboxes
+        if: always()
+        run: |
+          for name in $(./sandbox.sh list --json 2>/dev/null | python3 -c "import json,sys; [print(s['name']) for s in json.load(sys.stdin) if s['name'].startswith('test-')]" 2>/dev/null); do
+            ./sandbox.sh destroy "$name" --force 2>/dev/null || true
+          done
+          docker system prune -f --volumes 2>/dev/null || true

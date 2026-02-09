@@ -1,0 +1,29 @@
+name: Orchestration Smoke Tests
+
+on:
+  push:
+  pull_request:
+
+concurrency:
+  group: orchestration-smoke-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  smoke-tests:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install pytest
+        run: pip install pytest
+
+      - name: Run orchestration smoke tests
+        run: pytest tests/orchestration/test_lifecycle.py -x -v --tb=short -k "test_create_sandbox or test_stop_start_sandbox or test_destroy_sandbox"
