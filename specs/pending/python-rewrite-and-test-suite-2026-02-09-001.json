@@ -1,0 +1,2536 @@
+{
+  "spec_id": "python-rewrite-and-test-suite-2026-02-09-001",
+  "title": "python-rewrite-and-test-suite",
+  "generated": "2026-02-09T12:33:24.136363Z",
+  "last_updated": "2026-02-09T12:59:52.748683Z",
+  "metadata": {
+    "description": "",
+    "mission": "Rewrite the foundry-sandbox shell orchestration layer (~8,900 lines) in Python using an incremental strangler fig pattern, with a comprehensive integration test suite as a prerequisite safety net, delivering testability, type safety, and focused modules while maintaining strict behavioral parity.",
+    "objectives": [],
+    "complexity": "low",
+    "estimated_hours": 0,
+    "assumptions": [
+      "Target users are developers on Linux or macOS with Python 3.10+ available (macOS via Homebrew/pyenv, Ubuntu 22.04+ ships 3.10)",
+      "jq is available on host (already used in tests/run.sh and command handlers)",
+      "Container entrypoints (entrypoint.sh, entrypoint-root.sh) are out of scope \u2014 they remain shell and are not migration targets",
+      "Strangler fig pattern allows any phase to pause without breaking the project \u2014 shell and Python coexist safely at every phase boundary",
+      "Strict behavioral parity only \u2014 no new features, commands, flags, or capabilities introduced during the rewrite",
+      "Unified proxy (mitmproxy), Docker image, security model, and TUI design are out of scope \u2014 unchanged by this rewrite"
+    ],
+    "owner": "",
+    "category": "implementation",
+    "template": "empty"
+  },
+  "progress_percentage": 0,
+  "status": "pending",
+  "current_phase": null,
+  "hierarchy": {
+    "spec-root": {
+      "type": "spec",
+      "title": "python-rewrite-and-test-suite",
+      "status": "pending",
+      "parent": null,
+      "children": [
+        "phase-1",
+        "phase-2",
+        "phase-3",
+        "phase-4",
+        "phase-5",
+        "phase-6",
+        "phase-7"
+      ],
+      "total_tasks": 93,
+      "completed_tasks": 0,
+      "metadata": {
+        "purpose": "",
+        "category": "implementation"
+      },
+      "dependencies": {
+        "blocks": [],
+        "blocked_by": [],
+        "depends": []
+      }
+    },
+    "phase-1": {
+      "type": "phase",
+      "title": "Phase 0a: Orchestration Test Suite (Minimum Viable Safety Net)",
+      "status": "pending",
+      "parent": "spec-root",
+      "children": [
+        "task-1-1",
+        "task-1-2",
+        "task-1-3",
+        "task-1-4",
+        "task-1-5",
+        "task-1-6",
+        "task-1-7",
+        "task-1-8",
+        "task-1-9",
+        "task-1-10",
+        "verify-1-1"
+      ],
+      "total_tasks": 11,
+      "completed_tasks": 0,
+      "metadata": {
+        "purpose": "",
+        "description": "Build orchestration lifecycle tests and CI workflows against the existing shell implementation. Establishes the baseline behavior the Python rewrite must match. Gates Phase 2+. Can start immediately with no Python infrastructure."
+      },
+      "dependencies": {
+        "blocks": [
+          "phase-2"
+        ],
+        "blocked_by": [],
+        "depends": []
+      }
+    },
+    "task-1-1": {
+      "type": "task",
+      "title": "Create shared test fixtures in tests/conftest.py",
+      "status": "pending",
+      "parent": "phase-1",
+      "children": [],
+      "total_tasks": 1,
+      "completed_tasks": 0,
+      "metadata": {
+        "description": "CLI runner abstraction supporting SANDBOX_CLI env var for shell vs Python entrypoint (uses shlex.split for multi-token entrypoints) and local_repo fixture (deterministic git repo for lifecycle tests)",
+        "file_path": "tests/conftest.py",
+        "acceptance_criteria": [
+          "cli fixture reads SANDBOX_CLI env var with ./sandbox.sh default",
+          "shlex.split handles multi-token entrypoints like 'python3 -m foundry_sandbox.cli'",
+          "local_repo fixture creates deterministic git repo with main branch and README.md",
+          "No fixture name collisions with existing tests/unit/conftest.py or tests/integration/conftest.py"
+        ],
+        "task_category": "implementation"
+      },
+      "dependencies": {
+        "blocks": [],
+        "blocked_by": [],
+        "depends": []
+      }
+    },
+    "task-1-2": {
+      "type": "task",
+      "title": "Create tests/orchestration/conftest.py with sandbox fixtures",
+      "status": "pending",
+      "parent": "phase-1",
+      "children": [],
+      "total_tasks": 1,
+      "completed_tasks": 0,
+      "metadata": {
+        "description": "sandbox_name fixture generating unique test-{uuid} names and teardown cleanup that destroys sandbox on test completion",
+        "file_path": "tests/orchestration/conftest.py",
+        "acceptance_criteria": [
+          "sandbox_name generates unique test-{uuid8} names",
+          "Teardown calls cli('destroy', name, '--force')",
+          "Fixtures inherit cli and local_repo from root conftest"
+        ],
+        "task_category": "implementation"
+      },
+      "dependencies": {
+        "blocks": [],
+        "blocked_by": [],
+        "depends": []
+      }
+    },
+    "task-1-3": {
+      "type": "task",
+      "title": "Implement tests/orchestration/test_lifecycle.py",
+      "status": "pending",
+      "parent": "phase-1",
+      "children": [],
+      "total_tasks": 1,
+      "completed_tasks": 0,
+      "metadata": {
+        "description": "Core lifecycle tests: test_create_sandbox, test_stop_start_sandbox, test_destroy_sandbox, test_list_sandboxes, test_status_sandbox. Uses --skip-key-check for CI determinism.",
+        "file_path": "tests/orchestration/test_lifecycle.py",
+        "acceptance_criteria": [
+          "test_create_sandbox verifies sandbox.sh new succeeds, metadata written, container running",
+          "test_stop_start_sandbox verifies stop preserves state, start resumes",
+          "test_destroy_sandbox verifies all resources cleaned up (worktree, metadata, container)",
+          "test_list_sandboxes verifies JSON output includes created sandbox",
+          "test_status_sandbox verifies correct running/stopped state reporting"
+        ],
+        "task_category": "implementation"
+      },
+      "dependencies": {
+        "blocks": [],
+        "blocked_by": [],
+        "depends": []
+      }
+    },
+    "task-1-4": {
+      "type": "task",
+      "title": "Implement tests/orchestration/test_state.py",
+      "status": "pending",
+      "parent": "phase-1",
+      "children": [],
+      "total_tasks": 1,
+      "completed_tasks": 0,
+      "metadata": {
+        "description": "Metadata persistence tests: test_metadata_written_on_create, test_metadata_persists_across_stop_start, test_metadata_cleaned_on_destroy",
+        "file_path": "tests/orchestration/test_state.py",
+        "acceptance_criteria": [
+          "test_metadata_written_on_create verifies metadata.json contains repo, branch, mounts",
+          "test_metadata_persists_across_stop_start verifies metadata survives container lifecycle",
+          "test_metadata_cleaned_on_destroy verifies no orphaned metadata after destroy"
+        ],
+        "task_category": "implementation"
+      },
+      "dependencies": {
+        "blocks": [],
+        "blocked_by": [],
+        "depends": []
+      }
+    },
+    "task-1-5": {
+      "type": "task",
+      "title": "Implement tests/orchestration/test_git_worktree.py",
+      "status": "pending",
+      "parent": "phase-1",
+      "children": [],
+      "total_tasks": 1,
+      "completed_tasks": 0,
+      "metadata": {
+        "description": "Git worktree lifecycle tests: test_worktree_created, test_worktree_on_correct_branch, test_worktree_removed_on_destroy, test_bare_repo_shared",
+        "file_path": "tests/orchestration/test_git_worktree.py",
+        "acceptance_criteria": [
+          "test_worktree_created verifies worktree exists at expected path after create",
+          "test_worktree_on_correct_branch verifies checked out to specified branch",
+          "test_worktree_removed_on_destroy verifies no orphaned worktrees",
+          "test_bare_repo_shared verifies two sandboxes of same repo share bare repo"
+        ],
+        "task_category": "implementation"
+      },
+      "dependencies": {
+        "blocks": [],
+        "blocked_by": [],
+        "depends": []
+      }
+    },
+    "task-1-6": {
+      "type": "task",
+      "title": "Implement tests/orchestration/test_network_modes.py",
+      "status": "pending",
+      "parent": "phase-1",
+      "children": [],
+      "total_tasks": 1,
+      "completed_tasks": 0,
+      "metadata": {
+        "description": "Network isolation tests: test_default_network_mode, test_no_isolate_credentials_flag, test_network_isolation_active",
+        "file_path": "tests/orchestration/test_network_modes.py",
+        "acceptance_criteria": [
+          "test_default_network_mode verifies credential isolation enabled by default",
+          "test_no_isolate_credentials_flag verifies flag disables credential isolation",
+          "test_network_isolation_active verifies container cannot reach blocked domains"
+        ],
+        "task_category": "implementation"
+      },
+      "dependencies": {
+        "blocks": [],
+        "blocked_by": [],
+        "depends": []
+      }
+    },
+    "task-1-7": {
+      "type": "task",
+      "title": "Create .github/workflows/test.yml",
+      "status": "pending",
+      "parent": "phase-1",
+      "children": [],
+      "total_tasks": 1,
+      "completed_tasks": 0,
+      "metadata": {
+        "description": "Unit tests CI workflow with Python 3.10 + 3.12 matrix, type checking job (mypy --strict + ruff check)",
+        "file_path": ".github/workflows/test.yml",
+        "acceptance_criteria": [
+          "Matrix tests Python 3.10 and 3.12",
+          "Installs dev and test-orchestration extras",
+          "Runs pytest tests/unit/ -v --tb=short",
+          "Type check job runs mypy and ruff check"
+        ],
+        "task_category": "implementation"
+      },
+      "dependencies": {
+        "blocks": [],
+        "blocked_by": [],
+        "depends": []
+      }
+    },
+    "task-1-8": {
+      "type": "task",
+      "title": "Create .github/workflows/orchestration-smoke.yml",
+      "status": "pending",
+      "parent": "phase-1",
+      "children": [],
+      "total_tasks": 1,
+      "completed_tasks": 0,
+      "metadata": {
+        "description": "PR/push gate with 3 core lifecycle smoke tests. Timeout 15min, concurrency group per branch, cancel-in-progress.",
+        "file_path": ".github/workflows/orchestration-smoke.yml",
+        "acceptance_criteria": [
+          "Triggers on push and pull_request",
+          "Runs create, stop/start, destroy lifecycle tests with -x flag",
+          "15 minute timeout",
+          "Concurrency group: orchestration-smoke-${{ github.ref }} with cancel-in-progress"
+        ],
+        "task_category": "implementation"
+      },
+      "dependencies": {
+        "blocks": [],
+        "blocked_by": [],
+        "depends": []
+      }
+    },
+    "task-1-9": {
+      "type": "task",
+      "title": "Create .github/workflows/orchestration-tests.yml",
+      "status": "pending",
+      "parent": "phase-1",
+      "children": [],
+      "total_tasks": 1,
+      "completed_tasks": 0,
+      "metadata": {
+        "description": "Nightly/manual full orchestration + security integration suite. Timeout 30min, orphan cleanup in always() step, Docker system prune.",
+        "file_path": ".github/workflows/orchestration-tests.yml",
+        "acceptance_criteria": [
+          "Triggers on schedule (daily 06:00 UTC) and workflow_dispatch",
+          "Runs all tests/orchestration/ tests",
+          "Runs security integration tests",
+          "Orphan cleanup step destroys test-* sandboxes in always() block",
+          "30 minute timeout",
+          "Concurrency group per branch"
+        ],
+        "task_category": "implementation"
+      },
+      "dependencies": {
+        "blocks": [],
+        "blocked_by": [],
+        "depends": []
+      }
+    },
+    "task-1-10": {
+      "type": "task",
+      "title": "Document baseline exit codes per command",
+      "status": "pending",
+      "parent": "phase-1",
+      "children": [],
+      "total_tasks": 1,
+      "completed_tasks": 0,
+      "metadata": {
+        "description": "Capture actual exit codes for each sandbox.sh command in success and common failure scenarios. This becomes the parity target for the Python rewrite. Store as assertions in lifecycle tests.",
+        "acceptance_criteria": [
+          "Exit codes documented for all 16 commands in success path",
+          "Exit codes documented for common failure paths (missing args, invalid sandbox name, Docker down)",
+          "Results stored as test assertions in orchestration tests"
+        ],
+        "task_category": "investigation"
+      },
+      "dependencies": {
+        "blocks": [],
+        "blocked_by": [],
+        "depends": []
+      }
+    },
+    "verify-1-1": {
+      "type": "verify",
+      "title": "Verify Phase 0a: orchestration tests pass against shell",
+      "status": "pending",
+      "parent": "phase-1",
+      "children": [],
+      "total_tasks": 1,
+      "completed_tasks": 0,
+      "metadata": {
+        "description": "All orchestration tests pass against ./sandbox.sh. CI workflows trigger correctly. Test isolation validated (unique naming, serial execution, timeouts). Fixture collision check passes.",
+        "verification_type": "run-tests"
+      },
+      "dependencies": {
+        "blocks": [],
+        "blocked_by": [],
+        "depends": []
+      }
+    },
+    "phase-2": {
+      "type": "phase",
+      "title": "Phase 0b: Security Tests & Fuzzing (Extended Safety Net)",
+      "status": "pending",
+      "parent": "spec-root",
+      "children": [
+        "task-2-1",
+        "task-2-2",
+        "task-2-3",
+        "task-2-4",
+        "task-2-5",
+        "verify-2-1"
+      ],
+      "total_tasks": 6,
+      "completed_tasks": 0,
+      "metadata": {
+        "purpose": "",
+        "description": "Security regression tests and Hypothesis fuzzing against existing shell. Gates Phase 3+ (security-critical migrations). Converts redteam-sandbox.sh test cases into pytest and adds fuzz targets for git validation and policy evaluation."
+      },
+      "dependencies": {
+        "blocks": [
+          "phase-3"
+        ],
+        "blocked_by": [
+          "phase-1"
+        ],
+        "depends": []
+      }
+    },
+    "task-2-1": {
+      "type": "task",
+      "title": "Create tests/security/conftest.py with running sandbox fixtures",
+      "status": "pending",
+      "parent": "phase-2",
+      "children": [],
+      "total_tasks": 1,
+      "completed_tasks": 0,
+      "metadata": {
+        "description": "Module-scoped running_sandbox fixture and docker_exec helper. Inherits cli/local_repo from root conftest \u2014 do NOT redefine. sandbox_name is module-scoped for shared sandbox across security tests.",
+        "file_path": "tests/security/conftest.py",
+        "acceptance_criteria": [
+          "running_sandbox fixture creates sandbox with --skip-key-check",
+          "docker_exec helper runs commands inside sandbox container via docker exec",
+          "Fixtures inherit cli and local_repo from tests/conftest.py",
+          "Module-scoped for efficiency (one sandbox per test module)"
+        ],
+        "task_category": "implementation"
+      },
+      "dependencies": {
+        "blocks": [],
+        "blocked_by": [],
+        "depends": []
+      }
+    },
+    "task-2-2": {
+      "type": "task",
+      "title": "Implement tests/security/test_credential_isolation.py",
+      "status": "pending",
+      "parent": "phase-2",
+      "children": [],
+      "total_tasks": 1,
+      "completed_tasks": 0,
+      "metadata": {
+        "description": "Credential isolation tests run inside sandbox via docker exec: test_no_real_credentials_in_env, test_api_requests_work_via_proxy, test_credential_not_in_response_headers",
+        "file_path": "tests/security/test_credential_isolation.py",
+        "acceptance_criteria": [
+          "test_no_real_credentials_in_env verifies docker exec env shows only placeholders",
+          "test_api_requests_work_via_proxy verifies credential injection is transparent",
+          "test_credential_not_in_response_headers verifies proxy strips credentials from responses"
+        ],
+        "task_category": "implementation"
+      },
+      "dependencies": {
+        "blocks": [],
+        "blocked_by": [],
+        "depends": []
+      }
+    },
+    "task-2-3": {
+      "type": "task",
+      "title": "Implement tests/security/test_self_merge_blocked.py",
+      "status": "pending",
+      "parent": "phase-2",
+      "children": [],
+      "total_tasks": 1,
+      "completed_tasks": 0,
+      "metadata": {
+        "description": "Self-merge prevention tests: test_gh_pr_merge_blocked (403), test_auto_merge_enable_blocked (403), test_pr_review_create_blocked (403), test_graphql_merge_mutation_blocked (403)",
+        "file_path": "tests/security/test_self_merge_blocked.py",
+        "acceptance_criteria": [
+          "test_gh_pr_merge_blocked verifies 403 response",
+          "test_auto_merge_enable_blocked verifies 403 response",
+          "test_pr_review_create_blocked verifies 403 response",
+          "test_graphql_merge_mutation_blocked verifies 403 response"
+        ],
+        "task_category": "implementation"
+      },
+      "dependencies": {
+        "blocks": [],
+        "blocked_by": [],
+        "depends": []
+      }
+    },
+    "task-2-4": {
+      "type": "task",
+      "title": "Implement tests/security/test_filesystem_readonly.py",
+      "status": "pending",
+      "parent": "phase-2",
+      "children": [],
+      "total_tasks": 1,
+      "completed_tasks": 0,
+      "metadata": {
+        "description": "Filesystem boundary tests: test_root_filesystem_readonly, test_tmpfs_writable, test_workspace_writable, test_git_directory_hidden",
+        "file_path": "tests/security/test_filesystem_readonly.py",
+        "acceptance_criteria": [
+          "test_root_filesystem_readonly verifies docker exec touch /usr/bin/xxx fails",
+          "test_tmpfs_writable verifies /tmp and /home/ubuntu are writable",
+          "test_workspace_writable verifies /workspace files can be modified",
+          "test_git_directory_hidden verifies /workspace/.git is empty/inaccessible"
+        ],
+        "task_category": "implementation"
+      },
+      "dependencies": {
+        "blocks": [],
+        "blocked_by": [],
+        "depends": []
+      }
+    },
+    "task-2-5": {
+      "type": "task",
+      "title": "Implement tests/security/test_fuzzing.py",
+      "status": "pending",
+      "parent": "phase-2",
+      "children": [],
+      "total_tasks": 1,
+      "completed_tasks": 0,
+      "metadata": {
+        "description": "Hypothesis-based fuzzing: git_operations.validate_command (no crash on arbitrary argv), git_policies policy evaluation, branch_isolation validation, dangerous operations fail-closed. Uses @settings(derandomize=True) in CI, 50 examples PR / 500 nightly.",
+        "file_path": "tests/security/test_fuzzing.py",
+        "acceptance_criteria": [
+          "test_git_validation_no_crash uses Hypothesis with argv_tokens strategy",
+          "test_git_validation_fail_closed verifies known dangerous operations rejected",
+          "All fuzz tests use @settings(derandomize=True) for CI reproducibility",
+          "PR budget: 50 examples/target; nightly: 500 examples/target via conftest profile",
+          "sys.path includes unified-proxy for import"
+        ],
+        "task_category": "implementation"
+      },
+      "dependencies": {
+        "blocks": [],
+        "blocked_by": [],
+        "depends": []
+      }
+    },
+    "verify-2-1": {
+      "type": "verify",
+      "title": "Verify Phase 0b: security tests pass against shell",
+      "status": "pending",
+      "parent": "phase-2",
+      "children": [],
+      "total_tasks": 1,
+      "completed_tasks": 0,
+      "metadata": {
+        "description": "All security regression tests pass inside running sandboxes. Fuzz tests pass within budget. No false positives.",
+        "verification_type": "run-tests"
+      },
+      "dependencies": {
+        "blocks": [],
+        "blocked_by": [],
+        "depends": []
+      }
+    },
+    "phase-3": {
+      "type": "phase",
+      "title": "Phase 1: Foundation (Package Scaffold + Primitives)",
+      "status": "pending",
+      "parent": "spec-root",
+      "children": [
+        "task-3-1",
+        "task-3-2",
+        "task-3-3",
+        "task-3-4",
+        "task-3-5",
+        "task-3-6",
+        "task-3-7",
+        "task-3-8",
+        "task-3-9",
+        "task-3-10",
+        "task-3-11",
+        "task-3-12",
+        "task-3-13",
+        "task-3-14",
+        "task-3-15",
+        "verify-3-1",
+        "task-3-16"
+      ],
+      "total_tasks": 17,
+      "completed_tasks": 0,
+      "metadata": {
+        "purpose": "",
+        "description": "Create the Python package skeleton and migrate only the simplest, lowest-risk modules. Establishes package structure, build tooling, type checking, bridge protocol, and import latency gates. Does NOT introduce CLI entrypoint (Phase 4) or migrate complex state.sh (Phase 2). May proceed in parallel with Phase 0."
+      },
+      "dependencies": {
+        "blocks": [
+          "phase-4"
+        ],
+        "blocked_by": [
+          "phase-2"
+        ],
+        "depends": []
+      }
+    },
+    "task-3-1": {
+      "type": "task",
+      "title": "Create pyproject.toml with build system and dependencies",
+      "status": "pending",
+      "parent": "phase-3",
+      "children": [],
+      "total_tasks": 1,
+      "completed_tasks": 0,
+      "metadata": {
+        "description": "Hatchling build system, foundry-sandbox v0.1.0, requires-python>=3.10, dependencies (click>=8.1, pydantic>=2.0), optional extras (dev: pytest/mypy/ruff/hypothesis, test-orchestration: pyyaml, test-proxy: flask/mitmproxy/etc), tool configs for pytest/mypy/ruff.",
+        "file_path": "pyproject.toml",
+        "acceptance_criteria": [
+          "Build system is hatchling",
+          "requires-python >= 3.10",
+          "click>=8.1 and pydantic>=2.0 in dependencies",
+          "dev extras include pytest>=8.0, pytest-cov>=5.0, pytest-timeout>=2.3, hypothesis>=6.100, mypy>=1.10, ruff>=0.5",
+          "mypy strict=true python_version=3.10; ruff target-version=py310 line-length=100",
+          "pip install -e '.[dev,test-orchestration]' succeeds"
+        ],
+        "task_category": "implementation"
+      },
+      "dependencies": {
+        "blocks": [],
+        "blocked_by": [],
+        "depends": []
+      }
+    },
+    "task-3-2": {
+      "type": "task",
+      "title": "Create foundry_sandbox/__init__.py package init",
+      "status": "pending",
+      "parent": "phase-3",
+      "children": [],
+      "total_tasks": 1,
+      "completed_tasks": 0,
+      "metadata": {
+        "description": "Package init file. Minimal \u2014 just version string.",
+        "file_path": "foundry_sandbox/__init__.py",
+        "acceptance_criteria": [
+          "Package is importable as foundry_sandbox",
+          "__version__ defined"
+        ],
+        "task_category": "implementation"
+      },
+      "dependencies": {
+        "blocks": [],
+        "blocked_by": [],
+        "depends": []
+      }
+    },
+    "task-3-3": {
+      "type": "task",
+      "title": "Create foundry_sandbox/_bridge.py shared bridge dispatcher",
+      "status": "pending",
+      "parent": "phase-3",
+      "children": [],
+      "total_tasks": 1,
+      "completed_tasks": 0,
+      "metadata": {
+        "description": "Shared bridge dispatcher for __main__ blocks. JSON envelope: {ok, result, error}. Exit codes: 0=success, 1=handled, >=2=crash. SANDBOX_DEBUG=1 controls traceback. Provides bridge_main(dispatch_table) helper.",
+        "file_path": "foundry_sandbox/_bridge.py",
+        "acceptance_criteria": [
+          "bridge_main accepts dispatch dict",
+          "Success: {ok:true, result:<value>, error:null} on stdout, exit 0",
+          "Failure: {ok:false, result:null, error:{code,message}} on stdout, exit 1",
+          "Crash: exit >=2, no JSON on stdout",
+          "SANDBOX_DEBUG=1 emits traceback to stderr"
+        ],
+        "task_category": "implementation"
+      },
+      "dependencies": {
+        "blocks": [],
+        "blocked_by": [],
+        "depends": []
+      }
+    },
+    "task-3-4": {
+      "type": "task",
+      "title": "Create foundry_sandbox/constants.py configuration defaults",
+      "status": "pending",
+      "parent": "phase-3",
+      "children": [],
+      "total_tasks": 1,
+      "completed_tasks": 0,
+      "metadata": {
+        "description": "Configuration defaults replacing lib/constants.sh. Sandbox home, image names, container naming, timeouts.",
+        "file_path": "foundry_sandbox/constants.py",
+        "acceptance_criteria": [
+          "All constants from lib/constants.sh have Python equivalents",
+          "SANDBOX_HOME respects env var override",
+          "Type-annotated module-level constants"
+        ],
+        "task_category": "implementation"
+      },
+      "dependencies": {
+        "blocks": [],
+        "blocked_by": [],
+        "depends": []
+      }
+    },
+    "task-3-5": {
+      "type": "task",
+      "title": "Create foundry_sandbox/models.py Pydantic metadata models",
+      "status": "pending",
+      "parent": "phase-3",
+      "children": [],
+      "total_tasks": 1,
+      "completed_tasks": 0,
+      "metadata": {
+        "description": "Pydantic models for sandbox metadata. NOT imported at module level by bridge-callable modules (import latency).",
+        "file_path": "foundry_sandbox/models.py",
+        "acceptance_criteria": [
+          "SandboxMetadata model matches existing metadata.json structure",
+          "Models validate on construction (Pydantic V2)",
+          "Not imported at module level by bridge-callable modules"
+        ],
+        "task_category": "implementation"
+      },
+      "dependencies": {
+        "blocks": [],
+        "blocked_by": [],
+        "depends": []
+      }
+    },
+    "task-3-6": {
+      "type": "task",
+      "title": "Create foundry_sandbox/utils.py logging and formatting",
+      "status": "pending",
+      "parent": "phase-3",
+      "children": [],
+      "total_tasks": 1,
+      "completed_tasks": 0,
+      "metadata": {
+        "description": "Logging with Formatter matching shell format (arrows, indentation, color codes). Replaces lib/utils.sh, lib/format.sh, lib/runtime.sh. Uses stdlib logging.",
+        "file_path": "foundry_sandbox/utils.py",
+        "acceptance_criteria": [
+          "SandboxFormatter matches shell output format",
+          "Color codes respect TERM",
+          "log_info/warn/error/debug/section/step functions available",
+          "Does not import Click or Pydantic at module level"
+        ],
+        "task_category": "implementation"
+      },
+      "dependencies": {
+        "blocks": [],
+        "blocked_by": [],
+        "depends": []
+      }
+    },
+    "task-3-7": {
+      "type": "task",
+      "title": "Create foundry_sandbox/paths.py path resolution",
+      "status": "pending",
+      "parent": "phase-3",
+      "children": [],
+      "total_tasks": 1,
+      "completed_tasks": 0,
+      "metadata": {
+        "description": "Path resolution replacing lib/paths.sh and absorbing lib/fs.sh helpers via pathlib/shutil.",
+        "file_path": "foundry_sandbox/paths.py",
+        "acceptance_criteria": [
+          "path_worktree, path_metadata_file, derive_sandbox_paths work correctly",
+          "ensure_dir and safe_remove available via pathlib/shutil",
+          "Does not import Click or Pydantic at module level"
+        ],
+        "task_category": "implementation"
+      },
+      "dependencies": {
+        "blocks": [],
+        "blocked_by": [],
+        "depends": []
+      }
+    },
+    "task-3-8": {
+      "type": "task",
+      "title": "Migrate lib/python/json_config.py to foundry_sandbox/config.py",
+      "status": "pending",
+      "parent": "phase-3",
+      "children": [],
+      "total_tasks": 1,
+      "completed_tasks": 0,
+      "metadata": {
+        "description": "Absorb json_config.py. Also absorbs lib/json.sh helpers via json stdlib.",
+        "file_path": "foundry_sandbox/config.py",
+        "acceptance_criteria": [
+          "All json_config.py functionality preserved",
+          "Type annotations on all functions",
+          "Bridge-callable via __main__ dispatcher"
+        ],
+        "task_category": "implementation"
+      },
+      "dependencies": {
+        "blocks": [],
+        "blocked_by": [],
+        "depends": []
+      }
+    },
+    "task-3-9": {
+      "type": "task",
+      "title": "Migrate lib/python/merge_claude_settings.py to foundry_sandbox/claude_settings.py",
+      "status": "pending",
+      "parent": "phase-3",
+      "children": [],
+      "total_tasks": 1,
+      "completed_tasks": 0,
+      "metadata": {
+        "description": "Absorb merge_claude_settings.py. Merges host/container Claude settings preserving hooks.",
+        "file_path": "foundry_sandbox/claude_settings.py",
+        "acceptance_criteria": [
+          "All merge_claude_settings.py functionality preserved",
+          "Settings merge preserves hooks correctly",
+          "Bridge-callable via __main__ dispatcher"
+        ],
+        "task_category": "implementation"
+      },
+      "dependencies": {
+        "blocks": [],
+        "blocked_by": [],
+        "depends": []
+      }
+    },
+    "task-3-10": {
+      "type": "task",
+      "title": "Migrate lib/python/sync_opencode_foundry.py to foundry_sandbox/opencode_sync.py",
+      "status": "pending",
+      "parent": "phase-3",
+      "children": [],
+      "total_tasks": 1,
+      "completed_tasks": 0,
+      "metadata": {
+        "description": "Absorb sync_opencode_foundry.py for syncing OpenCode foundry configuration.",
+        "file_path": "foundry_sandbox/opencode_sync.py",
+        "acceptance_criteria": [
+          "All sync_opencode_foundry.py functionality preserved",
+          "Type annotations on all functions",
+          "Bridge-callable via __main__ dispatcher"
+        ],
+        "task_category": "implementation"
+      },
+      "dependencies": {
+        "blocks": [],
+        "blocked_by": [],
+        "depends": []
+      }
+    },
+    "task-3-11": {
+      "type": "task",
+      "title": "Update shell callsites for migrated lib/python/ modules",
+      "status": "pending",
+      "parent": "phase-3",
+      "children": [],
+      "total_tasks": 1,
+      "completed_tasks": 0,
+      "metadata": {
+        "description": "Update all shell callsites that use python3 lib/python/... to use python3 -m foundry_sandbox.<module>. Affects json_config, merge_claude_settings, sync_opencode_foundry callsites across shell files.",
+        "file_path": "lib/container_config.sh",
+        "acceptance_criteria": [
+          "All python3 lib/python/ calls updated to python3 -m foundry_sandbox.<module>",
+          "Old lib/python/ files removed or kept as aliases during transition"
+        ],
+        "task_category": "refactoring"
+      },
+      "dependencies": {
+        "blocks": [],
+        "blocked_by": [],
+        "depends": []
+      }
+    },
+    "task-3-12": {
+      "type": "task",
+      "title": "Add shell dependency guards and bridge helper",
+      "status": "pending",
+      "parent": "phase-3",
+      "children": [],
+      "total_tasks": 1,
+      "completed_tasks": 0,
+      "metadata": {
+        "description": "Add require_python_module, require_jq, Python version check (>=3.10), and _bridge_call helper to shell. Callsite-scoped (no global preamble). _bridge_call handles crashes, empty output, envelope parsing.",
+        "file_path": "lib/utils.sh",
+        "acceptance_criteria": [
+          "require_python_module fails with install instructions",
+          "require_jq fails with install message",
+          "Python version check shows found version in error",
+          "_bridge_call sets BRIDGE_RESULT on success",
+          "Guards are callsite-scoped"
+        ],
+        "task_category": "implementation"
+      },
+      "dependencies": {
+        "blocks": [],
+        "blocked_by": [],
+        "depends": []
+      }
+    },
+    "task-3-13": {
+      "type": "task",
+      "title": "Create tests/unit/test_bridge_contract.py",
+      "status": "pending",
+      "parent": "phase-3",
+      "children": [],
+      "total_tasks": 1,
+      "completed_tasks": 0,
+      "metadata": {
+        "description": "Parametrized test validating JSON envelope for all bridge-exposed functions on success and failure paths.",
+        "file_path": "tests/unit/test_bridge_contract.py",
+        "acceptance_criteria": [
+          "Parametrized over all bridge-exposed functions",
+          "Validates {ok, result, error} structure and exit codes",
+          "Tests SANDBOX_DEBUG traceback behavior"
+        ],
+        "task_category": "implementation"
+      },
+      "dependencies": {
+        "blocks": [],
+        "blocked_by": [],
+        "depends": []
+      }
+    },
+    "task-3-14": {
+      "type": "task",
+      "title": "Create tests/unit/test_import_latency.py",
+      "status": "pending",
+      "parent": "phase-3",
+      "children": [],
+      "total_tasks": 1,
+      "completed_tasks": 0,
+      "metadata": {
+        "description": "Import latency gate: bridge modules <300ms. CLI --help gate deferred to Phase 4.",
+        "file_path": "tests/unit/test_import_latency.py",
+        "acceptance_criteria": [
+          "Each bridge-callable module imports in <300ms",
+          "Measures wall-clock time via subprocess",
+          "CLI latency test is skip/placeholder until Phase 4"
+        ],
+        "task_category": "implementation"
+      },
+      "dependencies": {
+        "blocks": [],
+        "blocked_by": [],
+        "depends": []
+      }
+    },
+    "task-3-15": {
+      "type": "task",
+      "title": "Create unit tests for paths, constants, models, and config",
+      "status": "pending",
+      "parent": "phase-3",
+      "children": [],
+      "total_tasks": 1,
+      "completed_tasks": 0,
+      "metadata": {
+        "description": "Unit tests for Phase 1 modules: path derivation, constants, Pydantic model round-trips, config read/write.",
+        "file_path": "tests/unit/test_foundation.py",
+        "acceptance_criteria": [
+          "Path derivation tests cover all functions with known inputs/outputs",
+          "Model serialization round-trip tests",
+          "Config module tests cover json_config operations"
+        ],
+        "task_category": "implementation"
+      },
+      "dependencies": {
+        "blocks": [],
+        "blocked_by": [],
+        "depends": []
+      }
+    },
+    "verify-3-1": {
+      "type": "verify",
+      "title": "Verify Phase 1: package scaffold and primitives",
+      "status": "pending",
+      "parent": "phase-3",
+      "children": [],
+      "total_tasks": 1,
+      "completed_tasks": 0,
+      "metadata": {
+        "description": "pip install succeeds, mypy/ruff pass, all unit tests pass, existing shell smoke tests unbroken.",
+        "verification_type": "fidelity"
+      },
+      "dependencies": {
+        "blocks": [],
+        "blocked_by": [],
+        "depends": []
+      }
+    },
+    "phase-4": {
+      "type": "phase",
+      "title": "Phase 2: State + Docker + Validation",
+      "status": "pending",
+      "parent": "spec-root",
+      "children": [
+        "task-4-1",
+        "task-4-2",
+        "task-4-3",
+        "task-4-4",
+        "task-4-5",
+        "task-4-6",
+        "task-4-7",
+        "task-4-8",
+        "verify-4-1"
+      ],
+      "total_tasks": 9,
+      "completed_tasks": 0,
+      "metadata": {
+        "purpose": "",
+        "description": "Migrate state management (891 lines, moved here from Phase 1 per review), Docker operations, input validation, and API key checking. First phase with shell bridge wrappers delegating to Python. Gated by Phase 0a completion."
+      },
+      "dependencies": {
+        "blocks": [
+          "phase-5"
+        ],
+        "blocked_by": [
+          "phase-3"
+        ],
+        "depends": []
+      }
+    },
+    "task-4-1": {
+      "type": "task",
+      "title": "Create foundry_sandbox/state.py sandbox metadata persistence",
+      "status": "pending",
+      "parent": "phase-4",
+      "children": [],
+      "total_tasks": 1,
+      "completed_tasks": 0,
+      "metadata": {
+        "description": "Replaces lib/state.sh (27KB, 891 lines). Reads/writes JSON metadata, sandbox listing, inspection. Pure data management with no Docker calls.",
+        "file_path": "foundry_sandbox/state.py",
+        "acceptance_criteria": [
+          "All state.sh functions have Python equivalents",
+          "Metadata JSON structure matches existing format exactly",
+          "Sandbox listing returns same data as shell version",
+          "Bridge-callable via __main__ dispatcher",
+          "Does not import Click or Pydantic at module level"
+        ],
+        "task_category": "implementation"
+      },
+      "dependencies": {
+        "blocks": [],
+        "blocked_by": [],
+        "depends": []
+      }
+    },
+    "task-4-2": {
+      "type": "task",
+      "title": "Create foundry_sandbox/docker.py Docker operations",
+      "status": "pending",
+      "parent": "phase-4",
+      "children": [],
+      "total_tasks": 1,
+      "completed_tasks": 0,
+      "metadata": {
+        "description": "Replaces lib/docker.sh (237 lines, 8KB). Wraps docker and docker-compose CLI calls via subprocess. Matches current timeout/error behavior and stderr messaging.",
+        "file_path": "foundry_sandbox/docker.py",
+        "acceptance_criteria": [
+          "All docker.sh functions have Python equivalents",
+          "subprocess calls match current command construction",
+          "Timeout behavior preserved",
+          "Error messages match shell stderr format",
+          "Bridge-callable via __main__ dispatcher"
+        ],
+        "task_category": "implementation"
+      },
+      "dependencies": {
+        "blocks": [],
+        "blocked_by": [],
+        "depends": []
+      }
+    },
+    "task-4-3": {
+      "type": "task",
+      "title": "Create foundry_sandbox/validate.py input validation",
+      "status": "pending",
+      "parent": "phase-4",
+      "children": [],
+      "total_tasks": 1,
+      "completed_tasks": 0,
+      "metadata": {
+        "description": "Replaces lib/validate.sh (252 lines, 8KB). Pure validation logic for sandbox names, URLs, required env vars.",
+        "file_path": "foundry_sandbox/validate.py",
+        "acceptance_criteria": [
+          "validate_sandbox_name matches shell behavior for valid and invalid names",
+          "validate_repo_url matches shell behavior",
+          "Required env var checking matches shell",
+          "Bridge-callable via __main__ dispatcher"
+        ],
+        "task_category": "implementation"
+      },
+      "dependencies": {
+        "blocks": [],
+        "blocked_by": [],
+        "depends": []
+      }
+    },
+    "task-4-4": {
+      "type": "task",
+      "title": "Create foundry_sandbox/api_keys.py API key validation",
+      "status": "pending",
+      "parent": "phase-4",
+      "children": [],
+      "total_tasks": 1,
+      "completed_tasks": 0,
+      "metadata": {
+        "description": "Replaces lib/api_keys.sh (323 lines, 10KB). Environment variable checking with no side effects.",
+        "file_path": "foundry_sandbox/api_keys.py",
+        "acceptance_criteria": [
+          "All api_keys.sh functions have Python equivalents",
+          "Key format validation matches shell behavior",
+          "No side effects (read-only env var checking)",
+          "Bridge-callable via __main__ dispatcher"
+        ],
+        "task_category": "implementation"
+      },
+      "dependencies": {
+        "blocks": [],
+        "blocked_by": [],
+        "depends": []
+      }
+    },
+    "task-4-5": {
+      "type": "task",
+      "title": "Create shell bridge wrappers for state, docker, validate, api_keys",
+      "status": "pending",
+      "parent": "phase-4",
+      "children": [],
+      "total_tasks": 1,
+      "completed_tasks": 0,
+      "metadata": {
+        "description": "Replace shell function bodies with _bridge_call delegates following the bridge protocol. Keep shell function signatures. Delete shell logic per dual-implementation policy.",
+        "file_path": "lib/validate.sh",
+        "acceptance_criteria": [
+          "Each migrated function calls _bridge_call with correct module and function name",
+          "Shell function signatures unchanged (same args, same name)",
+          "Original shell logic removed from function bodies",
+          "Exit codes preserved via bridge protocol"
+        ],
+        "task_category": "refactoring"
+      },
+      "dependencies": {
+        "blocks": [],
+        "blocked_by": [],
+        "depends": []
+      }
+    },
+    "task-4-6": {
+      "type": "task",
+      "title": "Create unit tests for state module",
+      "status": "pending",
+      "parent": "phase-4",
+      "children": [],
+      "total_tasks": 1,
+      "completed_tasks": 0,
+      "metadata": {
+        "description": "State read/write tests: metadata serialization round-trips, listing, inspection, edge cases (missing files, corrupt JSON).",
+        "file_path": "tests/unit/test_state.py",
+        "acceptance_criteria": [
+          "Metadata write then read produces identical data",
+          "Listing returns correct sandbox set",
+          "Missing metadata file handled gracefully",
+          "Corrupt JSON handled with clear error"
+        ],
+        "task_category": "implementation"
+      },
+      "dependencies": {
+        "blocks": [],
+        "blocked_by": [],
+        "depends": []
+      }
+    },
+    "task-4-7": {
+      "type": "task",
+      "title": "Create unit tests for validation and Docker modules",
+      "status": "pending",
+      "parent": "phase-4",
+      "children": [],
+      "total_tasks": 1,
+      "completed_tasks": 0,
+      "metadata": {
+        "description": "Validation positive/negative cases (sandbox names, URLs, env vars). Docker wrapper failure paths (missing daemon, invalid args). API key near-miss strings.",
+        "file_path": "tests/unit/test_validate.py",
+        "acceptance_criteria": [
+          "Valid sandbox names accepted, invalid rejected",
+          "URL validation covers edge cases",
+          "Docker missing daemon produces clear error",
+          "API key near-miss strings rejected correctly"
+        ],
+        "task_category": "implementation"
+      },
+      "dependencies": {
+        "blocks": [],
+        "blocked_by": [],
+        "depends": []
+      }
+    },
+    "task-4-8": {
+      "type": "task",
+      "title": "Add Phase 2 Hypothesis fuzzing targets",
+      "status": "pending",
+      "parent": "phase-4",
+      "children": [],
+      "total_tasks": 1,
+      "completed_tasks": 0,
+      "metadata": {
+        "description": "Add fuzz targets: sandbox name validation (unicode, control chars, path traversal, Docker reserved words), URL validation (embedded credentials, file://, malformed schemes), key format validation, state metadata round-trips.",
+        "file_path": "tests/security/test_fuzzing.py",
+        "acceptance_criteria": [
+          "Sandbox name fuzzing covers unicode, control chars, ../,  Docker reserved words",
+          "URL fuzzing covers embedded credentials, file:// protocol",
+          "Key format fuzzing covers near-miss patterns",
+          "State metadata round-trip fuzzing with st.dictionaries",
+          "All use @settings(derandomize=True) in CI"
+        ],
+        "task_category": "implementation"
+      },
+      "dependencies": {
+        "blocks": [],
+        "blocked_by": [],
+        "depends": []
+      }
+    },
+    "verify-4-1": {
+      "type": "verify",
+      "title": "Verify Phase 2: state, docker, validation parity",
+      "status": "pending",
+      "parent": "phase-4",
+      "children": [],
+      "total_tasks": 1,
+      "completed_tasks": 0,
+      "metadata": {
+        "description": "Bridge wrappers follow protocol. State/validation parity confirmed. Docker wrappers preserve behavior. Shell smoke tests pass.",
+        "verification_type": "fidelity"
+      },
+      "dependencies": {
+        "blocks": [],
+        "blocked_by": [],
+        "depends": []
+      }
+    },
+    "phase-5": {
+      "type": "phase",
+      "title": "Phase 3: Git + Network + Proxy",
+      "status": "pending",
+      "parent": "spec-root",
+      "children": [
+        "task-5-1",
+        "task-5-2",
+        "task-5-3",
+        "task-5-4",
+        "task-5-5",
+        "task-5-6",
+        "task-5-7",
+        "task-5-8",
+        "task-5-9",
+        "verify-5-1"
+      ],
+      "total_tasks": 10,
+      "completed_tasks": 0,
+      "metadata": {
+        "purpose": "",
+        "description": "Migrate security-critical git operations, network isolation, and proxy management. Highest-risk library modules due to branch isolation, worktree path translation, network policy enforcement, and proxy lifecycle. Gated by Phase 0b completion (security tests must exist before migrating security-critical code)."
+      },
+      "dependencies": {
+        "blocks": [
+          "phase-6"
+        ],
+        "blocked_by": [
+          "phase-4"
+        ],
+        "depends": []
+      }
+    },
+    "task-5-1": {
+      "type": "task",
+      "title": "Create foundry_sandbox/git.py git operations",
+      "status": "pending",
+      "parent": "phase-5",
+      "children": [],
+      "total_tasks": 1,
+      "completed_tasks": 0,
+      "metadata": {
+        "description": "Replaces lib/git.sh. Git operations including path normalization and ref validation. Security-critical: branch isolation enforcement.",
+        "file_path": "foundry_sandbox/git.py",
+        "acceptance_criteria": [
+          "All git.sh functions have Python equivalents",
+          "Path normalization matches shell output",
+          "Ref validation preserves deny-by-default behavior",
+          "Bridge-callable via __main__ dispatcher"
+        ],
+        "task_category": "implementation"
+      },
+      "dependencies": {
+        "blocks": [],
+        "blocked_by": [],
+        "depends": []
+      }
+    },
+    "task-5-2": {
+      "type": "task",
+      "title": "Create foundry_sandbox/git_worktree.py worktree management",
+      "status": "pending",
+      "parent": "phase-5",
+      "children": [],
+      "total_tasks": 1,
+      "completed_tasks": 0,
+      "metadata": {
+        "description": "Replaces lib/git_worktree.sh. Worktree path translation, sparse-checkout management, cone patterns.",
+        "file_path": "foundry_sandbox/git_worktree.py",
+        "acceptance_criteria": [
+          "All git_worktree.sh functions have Python equivalents",
+          "Worktree path translation matches shell side effects",
+          "Sparse-checkout cone pattern management works correctly",
+          "Bridge-callable via __main__ dispatcher"
+        ],
+        "task_category": "implementation"
+      },
+      "dependencies": {
+        "blocks": [],
+        "blocked_by": [],
+        "depends": []
+      }
+    },
+    "task-5-3": {
+      "type": "task",
+      "title": "Create foundry_sandbox/network.py network isolation",
+      "status": "pending",
+      "parent": "phase-5",
+      "children": [],
+      "total_tasks": 1,
+      "completed_tasks": 0,
+      "metadata": {
+        "description": "Replaces lib/network.sh (409 lines, 11KB). Network mode generation matching existing compose/network policy behavior.",
+        "file_path": "foundry_sandbox/network.py",
+        "acceptance_criteria": [
+          "All network.sh functions have Python equivalents",
+          "Network mode generation matches existing compose config",
+          "Credential isolation network config preserved exactly",
+          "Bridge-callable via __main__ dispatcher"
+        ],
+        "task_category": "implementation"
+      },
+      "dependencies": {
+        "blocks": [],
+        "blocked_by": [],
+        "depends": []
+      }
+    },
+    "task-5-4": {
+      "type": "task",
+      "title": "Create foundry_sandbox/proxy.py proxy management",
+      "status": "pending",
+      "parent": "phase-5",
+      "children": [],
+      "total_tasks": 1,
+      "completed_tasks": 0,
+      "metadata": {
+        "description": "Replaces lib/proxy.sh (420 lines, 14KB). Proxy registration, health checks, readiness probes. Supports HTTP, Unix-socket, and exec modes.",
+        "file_path": "foundry_sandbox/proxy.py",
+        "acceptance_criteria": [
+          "All proxy.sh functions have Python equivalents",
+          "HTTP/Unix-socket/exec registration modes work",
+          "Health check and readiness probe behavior matches shell",
+          "Bridge-callable via __main__ dispatcher"
+        ],
+        "task_category": "implementation"
+      },
+      "dependencies": {
+        "blocks": [],
+        "blocked_by": [],
+        "depends": []
+      }
+    },
+    "task-5-5": {
+      "type": "task",
+      "title": "Create shell bridge wrappers for git, network, proxy modules",
+      "status": "pending",
+      "parent": "phase-5",
+      "children": [],
+      "total_tasks": 1,
+      "completed_tasks": 0,
+      "metadata": {
+        "description": "Replace shell function bodies with _bridge_call delegates. Delete shell logic per dual-implementation policy.",
+        "file_path": "lib/git.sh",
+        "acceptance_criteria": [
+          "Each migrated function calls _bridge_call",
+          "Shell function signatures unchanged",
+          "Original shell logic removed",
+          "Exit codes preserved via bridge protocol"
+        ],
+        "task_category": "refactoring"
+      },
+      "dependencies": {
+        "blocks": [],
+        "blocked_by": [],
+        "depends": []
+      }
+    },
+    "task-5-6": {
+      "type": "task",
+      "title": "Create unit tests for git and worktree modules",
+      "status": "pending",
+      "parent": "phase-5",
+      "children": [],
+      "total_tasks": 1,
+      "completed_tasks": 0,
+      "metadata": {
+        "description": "Git path normalization, worktree path translation tests matching shell output and side effects.",
+        "file_path": "tests/unit/test_git.py",
+        "acceptance_criteria": [
+          "Path normalization tests with known inputs/outputs",
+          "Worktree path translation tests match shell behavior",
+          "Sparse-checkout pattern tests"
+        ],
+        "task_category": "implementation"
+      },
+      "dependencies": {
+        "blocks": [],
+        "blocked_by": [],
+        "depends": []
+      }
+    },
+    "task-5-7": {
+      "type": "task",
+      "title": "Create unit tests for network and proxy modules",
+      "status": "pending",
+      "parent": "phase-5",
+      "children": [],
+      "total_tasks": 1,
+      "completed_tasks": 0,
+      "metadata": {
+        "description": "Network mode generation tests matching compose/network policy. Proxy registration lifecycle tests for all modes.",
+        "file_path": "tests/unit/test_network.py",
+        "acceptance_criteria": [
+          "Network mode tests cover all isolation modes",
+          "Proxy HTTP/Unix-socket/exec mode tests",
+          "Health check and readiness probe tests"
+        ],
+        "task_category": "implementation"
+      },
+      "dependencies": {
+        "blocks": [],
+        "blocked_by": [],
+        "depends": []
+      }
+    },
+    "task-5-8": {
+      "type": "task",
+      "title": "Create security-specific tests for git invariants",
+      "status": "pending",
+      "parent": "phase-5",
+      "children": [],
+      "total_tasks": 1,
+      "completed_tasks": 0,
+      "metadata": {
+        "description": "Security invariant tests: branch isolation deny-by-default/fail-closed, protected branch/tag deletion blocking, cross-sandbox branch visibility filtering.",
+        "file_path": "tests/security/test_git_migration_parity.py",
+        "acceptance_criteria": [
+          "Branch isolation is deny-by-default and fail-closed",
+          "Protected branch push protections enforced",
+          "Branch/tag deletion blocking enforced",
+          "Cross-sandbox branch visibility filtering intact"
+        ],
+        "task_category": "implementation"
+      },
+      "dependencies": {
+        "blocks": [],
+        "blocked_by": [],
+        "depends": []
+      }
+    },
+    "task-5-9": {
+      "type": "task",
+      "title": "Add Phase 3 Hypothesis fuzzing targets",
+      "status": "pending",
+      "parent": "phase-5",
+      "children": [],
+      "total_tasks": 1,
+      "completed_tasks": 0,
+      "metadata": {
+        "description": "Add fuzz targets: git path validation (symlink traversal, shell metacharacters in worktree names), branch name fuzzing (/, .., @{, ~, ^).",
+        "file_path": "tests/security/test_fuzzing.py",
+        "acceptance_criteria": [
+          "Git path fuzzing covers symlink traversal attempts",
+          "Worktree name fuzzing covers shell metacharacters",
+          "Branch name fuzzing covers /, .., @{, ~, ^ characters",
+          "All use @settings(derandomize=True) in CI"
+        ],
+        "task_category": "implementation"
+      },
+      "dependencies": {
+        "blocks": [],
+        "blocked_by": [],
+        "depends": []
+      }
+    },
+    "verify-5-1": {
+      "type": "verify",
+      "title": "Verify Phase 3: git, network, proxy parity and security",
+      "status": "pending",
+      "parent": "phase-5",
+      "children": [],
+      "total_tasks": 1,
+      "completed_tasks": 0,
+      "metadata": {
+        "description": "Git/network/proxy parity confirmed. Security invariants validated. All orchestration and security tests pass.",
+        "verification_type": "fidelity"
+      },
+      "dependencies": {
+        "blocks": [],
+        "blocked_by": [],
+        "depends": []
+      }
+    },
+    "phase-6": {
+      "type": "phase",
+      "title": "Phase 4: CLI Entrypoint + Command Handlers",
+      "status": "pending",
+      "parent": "spec-root",
+      "children": [
+        "task-6-1",
+        "task-6-2",
+        "task-6-3",
+        "task-6-4",
+        "task-6-5",
+        "task-6-6",
+        "task-6-7",
+        "task-6-8",
+        "task-6-9",
+        "task-6-10",
+        "task-6-11",
+        "task-6-12",
+        "task-6-13",
+        "task-6-14",
+        "task-6-15",
+        "task-6-16",
+        "task-6-17",
+        "task-6-18",
+        "task-6-19",
+        "task-6-20",
+        "task-6-21",
+        "task-6-22",
+        "verify-6-1",
+        "task-6-23"
+      ],
+      "total_tasks": 24,
+      "completed_tasks": 0,
+      "metadata": {
+        "purpose": "",
+        "description": "Introduce Click-based CLI entrypoint and migrate all 16 command handlers (simplest to most complex). Two entrypoints coexist \u2014 Python CLI falls back to sandbox.sh for unmigrated commands per fallback contract. lib/args.sh absorbed into Click decorators. new.sh (1,343 lines) migrated LAST and decomposed into focused modules."
+      },
+      "dependencies": {
+        "blocks": [
+          "phase-7"
+        ],
+        "blocked_by": [
+          "phase-5"
+        ],
+        "depends": []
+      }
+    },
+    "task-6-1": {
+      "type": "task",
+      "title": "Create foundry_sandbox/cli.py Click-based CLI entrypoint",
+      "status": "pending",
+      "parent": "phase-6",
+      "children": [],
+      "total_tasks": 1,
+      "completed_tasks": 0,
+      "metadata": {
+        "description": "Click-based CLI with command dispatch. Falls back to sandbox.sh for unmigrated commands per fallback contract (exec with env/cwd/stdout/stderr passthrough). Alias resolution: repeat\u2192new, reattach\u2192attach resolved before dispatch.",
+        "file_path": "foundry_sandbox/cli.py",
+        "acceptance_criteria": [
+          "Click group with subcommands for each migrated command",
+          "Unmigrated commands fall back to sandbox.sh exec",
+          "Fallback passes through env, cwd, stdout, stderr, exit code",
+          "Alias resolution happens before dispatch decision",
+          "SANDBOX_NONINTERACTIVE=1 support for non-interactive testing",
+          "CLI group uses allow_extra_args=True and allow_interspersed_args=True so unknown commands and flags pass through to shell unparsed (no Click parsing errors before fallback)",
+          "Unknown flags on migrated commands produce Click error (normal Click behavior)",
+          "Unknown commands route to shell fallback without Click interception"
+        ],
+        "task_category": "implementation"
+      },
+      "dependencies": {
+        "blocks": [],
+        "blocked_by": [],
+        "depends": []
+      }
+    },
+    "task-6-2": {
+      "type": "task",
+      "title": "Add CLI --help latency gate to test_import_latency.py",
+      "status": "pending",
+      "parent": "phase-6",
+      "children": [],
+      "total_tasks": 1,
+      "completed_tasks": 0,
+      "metadata": {
+        "description": "Now that CLI exists, add the <500ms latency gate for python3 -m foundry_sandbox.cli --help.",
+        "file_path": "tests/unit/test_import_latency.py",
+        "acceptance_criteria": [
+          "CLI --help completes in <500ms",
+          "Test measures via subprocess wall-clock time"
+        ],
+        "task_category": "implementation"
+      },
+      "dependencies": {
+        "blocks": [],
+        "blocked_by": [],
+        "depends": []
+      }
+    },
+    "task-6-3": {
+      "type": "task",
+      "title": "Migrate commands/list.sh to foundry_sandbox/commands/list_cmd.py",
+      "status": "pending",
+      "parent": "phase-6",
+      "children": [],
+      "total_tasks": 1,
+      "completed_tasks": 0,
+      "metadata": {
+        "description": "Simplest command (28 lines). JSON output must match existing structure exactly.",
+        "file_path": "foundry_sandbox/commands/list_cmd.py",
+        "acceptance_criteria": [
+          "Same CLI flags and behavior as shell version",
+          "JSON output structure matches (same keys, types, nesting)",
+          "Exit codes match shell version"
+        ],
+        "task_category": "implementation"
+      },
+      "dependencies": {
+        "blocks": [],
+        "blocked_by": [],
+        "depends": []
+      }
+    },
+    "task-6-4": {
+      "type": "task",
+      "title": "Migrate commands/info.sh to foundry_sandbox/commands/info.py",
+      "status": "pending",
+      "parent": "phase-6",
+      "children": [],
+      "total_tasks": 1,
+      "completed_tasks": 0,
+      "metadata": {
+        "description": "System info command (24 lines).",
+        "file_path": "foundry_sandbox/commands/info.py",
+        "acceptance_criteria": [
+          "Same output structure as shell version",
+          "Exit codes match"
+        ],
+        "task_category": "implementation"
+      },
+      "dependencies": {
+        "blocks": [],
+        "blocked_by": [],
+        "depends": []
+      }
+    },
+    "task-6-5": {
+      "type": "task",
+      "title": "Migrate commands/build.sh to foundry_sandbox/commands/build.py",
+      "status": "pending",
+      "parent": "phase-6",
+      "children": [],
+      "total_tasks": 1,
+      "completed_tasks": 0,
+      "metadata": {
+        "description": "Build images command (17 lines).",
+        "file_path": "foundry_sandbox/commands/build.py",
+        "acceptance_criteria": [
+          "Same Docker build behavior",
+          "Exit codes match"
+        ],
+        "task_category": "implementation"
+      },
+      "dependencies": {
+        "blocks": [],
+        "blocked_by": [],
+        "depends": []
+      }
+    },
+    "task-6-6": {
+      "type": "task",
+      "title": "Migrate commands/stop.sh to foundry_sandbox/commands/stop.py",
+      "status": "pending",
+      "parent": "phase-6",
+      "children": [],
+      "total_tasks": 1,
+      "completed_tasks": 0,
+      "metadata": {
+        "description": "Stop container command (24 lines).",
+        "file_path": "foundry_sandbox/commands/stop.py",
+        "acceptance_criteria": [
+          "Container stopped correctly",
+          "State preserved on stop",
+          "Exit codes match"
+        ],
+        "task_category": "implementation"
+      },
+      "dependencies": {
+        "blocks": [],
+        "blocked_by": [],
+        "depends": []
+      }
+    },
+    "task-6-7": {
+      "type": "task",
+      "title": "Migrate commands/status.sh to foundry_sandbox/commands/status.py",
+      "status": "pending",
+      "parent": "phase-6",
+      "children": [],
+      "total_tasks": 1,
+      "completed_tasks": 0,
+      "metadata": {
+        "description": "Status checks command (89 lines). Supports --json flag.",
+        "file_path": "foundry_sandbox/commands/status.py",
+        "acceptance_criteria": [
+          "Human-readable output matches structure",
+          "JSON output matches schema exactly",
+          "Exit codes match"
+        ],
+        "task_category": "implementation"
+      },
+      "dependencies": {
+        "blocks": [],
+        "blocked_by": [],
+        "depends": []
+      }
+    },
+    "task-6-8": {
+      "type": "task",
+      "title": "Migrate commands/help.sh to foundry_sandbox/commands/help_cmd.py",
+      "status": "pending",
+      "parent": "phase-6",
+      "children": [],
+      "total_tasks": 1,
+      "completed_tasks": 0,
+      "metadata": {
+        "description": "Help command (60 lines). Must match existing help text shape.",
+        "file_path": "foundry_sandbox/commands/help_cmd.py",
+        "acceptance_criteria": [
+          "Help text structure matches",
+          "Command listing matches",
+          "Exit codes match"
+        ],
+        "task_category": "implementation"
+      },
+      "dependencies": {
+        "blocks": [],
+        "blocked_by": [],
+        "depends": []
+      }
+    },
+    "task-6-9": {
+      "type": "task",
+      "title": "Migrate commands/config.sh to foundry_sandbox/commands/config.py",
+      "status": "pending",
+      "parent": "phase-6",
+      "children": [],
+      "total_tasks": 1,
+      "completed_tasks": 0,
+      "metadata": {
+        "description": "Configuration management command (70 lines).",
+        "file_path": "foundry_sandbox/commands/config.py",
+        "acceptance_criteria": [
+          "Config get/set behavior matches",
+          "Exit codes match"
+        ],
+        "task_category": "implementation"
+      },
+      "dependencies": {
+        "blocks": [],
+        "blocked_by": [],
+        "depends": []
+      }
+    },
+    "task-6-10": {
+      "type": "task",
+      "title": "Migrate commands/preset.sh to foundry_sandbox/commands/preset.py",
+      "status": "pending",
+      "parent": "phase-6",
+      "children": [],
+      "total_tasks": 1,
+      "completed_tasks": 0,
+      "metadata": {
+        "description": "Preset management command (51 lines).",
+        "file_path": "foundry_sandbox/commands/preset.py",
+        "acceptance_criteria": [
+          "Preset list/apply behavior matches",
+          "Exit codes match"
+        ],
+        "task_category": "implementation"
+      },
+      "dependencies": {
+        "blocks": [],
+        "blocked_by": [],
+        "depends": []
+      }
+    },
+    "task-6-11": {
+      "type": "task",
+      "title": "Migrate commands/destroy.sh to foundry_sandbox/commands/destroy.py",
+      "status": "pending",
+      "parent": "phase-6",
+      "children": [],
+      "total_tasks": 1,
+      "completed_tasks": 0,
+      "metadata": {
+        "description": "Cleanup command (82 lines). --force flag skips confirmation.",
+        "file_path": "foundry_sandbox/commands/destroy.py",
+        "acceptance_criteria": [
+          "All resources cleaned up (worktree, metadata, container)",
+          "--force flag works",
+          "Exit codes match"
+        ],
+        "task_category": "implementation"
+      },
+      "dependencies": {
+        "blocks": [],
+        "blocked_by": [],
+        "depends": []
+      }
+    },
+    "task-6-12": {
+      "type": "task",
+      "title": "Migrate commands/refresh_creds.sh to foundry_sandbox/commands/refresh_creds.py",
+      "status": "pending",
+      "parent": "phase-6",
+      "children": [],
+      "total_tasks": 1,
+      "completed_tasks": 0,
+      "metadata": {
+        "description": "Credential refresh command (94 lines).",
+        "file_path": "foundry_sandbox/commands/refresh_creds.py",
+        "acceptance_criteria": [
+          "Credential refresh behavior matches",
+          "Exit codes match"
+        ],
+        "task_category": "implementation"
+      },
+      "dependencies": {
+        "blocks": [],
+        "blocked_by": [],
+        "depends": []
+      }
+    },
+    "task-6-13": {
+      "type": "task",
+      "title": "Migrate commands/destroy_all.sh to foundry_sandbox/commands/destroy_all.py",
+      "status": "pending",
+      "parent": "phase-6",
+      "children": [],
+      "total_tasks": 1,
+      "completed_tasks": 0,
+      "metadata": {
+        "description": "Bulk cleanup command (106 lines).",
+        "file_path": "foundry_sandbox/commands/destroy_all.py",
+        "acceptance_criteria": [
+          "All sandboxes destroyed",
+          "Confirmation prompt works (--force skips)",
+          "Exit codes match"
+        ],
+        "task_category": "implementation"
+      },
+      "dependencies": {
+        "blocks": [],
+        "blocked_by": [],
+        "depends": []
+      }
+    },
+    "task-6-14": {
+      "type": "task",
+      "title": "Migrate commands/attach.sh to foundry_sandbox/commands/attach.py",
+      "status": "pending",
+      "parent": "phase-6",
+      "children": [],
+      "total_tasks": 1,
+      "completed_tasks": 0,
+      "metadata": {
+        "description": "Tmux attach command (123 lines). reattach alias resolves here.",
+        "file_path": "foundry_sandbox/commands/attach.py",
+        "acceptance_criteria": [
+          "Tmux attach behavior matches",
+          "reattach alias works",
+          "Exit codes match"
+        ],
+        "task_category": "implementation"
+      },
+      "dependencies": {
+        "blocks": [],
+        "blocked_by": [],
+        "depends": []
+      }
+    },
+    "task-6-15": {
+      "type": "task",
+      "title": "Migrate commands/prune.sh to foundry_sandbox/commands/prune.py",
+      "status": "pending",
+      "parent": "phase-6",
+      "children": [],
+      "total_tasks": 1,
+      "completed_tasks": 0,
+      "metadata": {
+        "description": "Prune stale resources command (178 lines).",
+        "file_path": "foundry_sandbox/commands/prune.py",
+        "acceptance_criteria": [
+          "Prune behavior matches (identifies and removes stale resources)",
+          "Exit codes match"
+        ],
+        "task_category": "implementation"
+      },
+      "dependencies": {
+        "blocks": [],
+        "blocked_by": [],
+        "depends": []
+      }
+    },
+    "task-6-16": {
+      "type": "task",
+      "title": "Migrate commands/start.sh to foundry_sandbox/commands/start.py",
+      "status": "pending",
+      "parent": "phase-6",
+      "children": [],
+      "total_tasks": 1,
+      "completed_tasks": 0,
+      "metadata": {
+        "description": "Start container command (203 lines).",
+        "file_path": "foundry_sandbox/commands/start.py",
+        "acceptance_criteria": [
+          "Container start behavior matches",
+          "State transitions correct",
+          "Exit codes match"
+        ],
+        "task_category": "implementation"
+      },
+      "dependencies": {
+        "blocks": [],
+        "blocked_by": [],
+        "depends": []
+      }
+    },
+    "task-6-17": {
+      "type": "task",
+      "title": "Migrate commands/upgrade.sh to foundry_sandbox/commands/upgrade.py",
+      "status": "pending",
+      "parent": "phase-6",
+      "children": [],
+      "total_tasks": 1,
+      "completed_tasks": 0,
+      "metadata": {
+        "description": "Upgrade sandbox command (43 lines).",
+        "file_path": "foundry_sandbox/commands/upgrade.py",
+        "acceptance_criteria": [
+          "Upgrade behavior matches",
+          "Exit codes match"
+        ],
+        "task_category": "implementation"
+      },
+      "dependencies": {
+        "blocks": [],
+        "blocked_by": [],
+        "depends": []
+      }
+    },
+    "task-6-18": {
+      "type": "task",
+      "title": "Create foundry_sandbox/tui.py interactive prompts",
+      "status": "pending",
+      "parent": "phase-6",
+      "children": [],
+      "total_tasks": 1,
+      "completed_tasks": 0,
+      "metadata": {
+        "description": "Reusable interactive prompts absorbing lib/prompt.sh: tui_input, tui_question, tui_confirm, tui_choose. Uses Click prompt/confirm where possible, custom for gum-backed choosers. Respects SANDBOX_NONINTERACTIVE=1.",
+        "file_path": "foundry_sandbox/tui.py",
+        "acceptance_criteria": [
+          "tui_input, tui_question, tui_confirm, tui_choose available",
+          "Click prompt/confirm used where possible",
+          "SANDBOX_NONINTERACTIVE=1 auto-accepts defaults",
+          "Same prompt text and flow as shell version"
+        ],
+        "task_category": "implementation"
+      },
+      "dependencies": {
+        "blocks": [],
+        "blocked_by": [],
+        "depends": []
+      }
+    },
+    "task-6-19": {
+      "type": "task",
+      "title": "Create foundry_sandbox/compose.py Docker Compose YAML assembly",
+      "status": "pending",
+      "parent": "phase-6",
+      "children": [],
+      "total_tasks": 1,
+      "completed_tasks": 0,
+      "metadata": {
+        "description": "Docker Compose YAML generation from sandbox config. Extracted from container_config.sh compose generation logic.",
+        "file_path": "foundry_sandbox/compose.py",
+        "acceptance_criteria": [
+          "Generated compose YAML matches shell output for same inputs",
+          "Network mode configuration correct",
+          "Volume mounts correct",
+          "Service definitions match"
+        ],
+        "task_category": "implementation"
+      },
+      "dependencies": {
+        "blocks": [],
+        "blocked_by": [],
+        "depends": []
+      }
+    },
+    "task-6-20": {
+      "type": "task",
+      "title": "Decompose and migrate commands/new.sh to foundry_sandbox/commands/new.py",
+      "status": "pending",
+      "parent": "phase-6",
+      "children": [],
+      "total_tasks": 1,
+      "completed_tasks": 0,
+      "metadata": {
+        "description": "Largest command (1,343 lines). Migrated LAST. Decomposed: input resolution (~60 lines), wizard flows (~400 lines using tui.py), sandbox creation orchestration (~350 lines), sparse checkout (~150 lines in git_worktree.py), compose generation (~113 lines in compose.py). lib/args.sh parsing absorbed into Click decorators. repeat alias resolves here.",
+        "file_path": "foundry_sandbox/commands/new.py",
+        "acceptance_criteria": [
+          "Full sandbox creation flow works end-to-end",
+          "Wizard prompts match shell flow exactly",
+          "Sparse checkout configuration works",
+          "Compose generation produces correct YAML",
+          "All args.sh flags accounted for in Click decorators",
+          "repeat alias works",
+          "--skip-key-check flag works",
+          "Exit codes match"
+        ],
+        "task_category": "implementation"
+      },
+      "dependencies": {
+        "blocks": [],
+        "blocked_by": [],
+        "depends": []
+      }
+    },
+    "task-6-21": {
+      "type": "task",
+      "title": "Record parity diffs for all migrated commands",
+      "status": "pending",
+      "parent": "phase-6",
+      "children": [],
+      "total_tasks": 1,
+      "completed_tasks": 0,
+      "metadata": {
+        "description": "For each migrated command, record parity diff against shell for exit code, stdout, stderr, and JSON output schema per parity contract.",
+        "acceptance_criteria": [
+          "Exit code parity documented per command",
+          "JSON schema parity confirmed for commands with --json output",
+          "stderr message parity confirmed for error paths",
+          "Flag-parity checklist completed (all args.sh flags in Click decorators)"
+        ],
+        "task_category": "investigation"
+      },
+      "dependencies": {
+        "blocks": [],
+        "blocked_by": [],
+        "depends": []
+      }
+    },
+    "task-6-22": {
+      "type": "task",
+      "title": "Set up behavioral equivalence CI job",
+      "status": "pending",
+      "parent": "phase-6",
+      "children": [],
+      "total_tasks": 1,
+      "completed_tasks": 0,
+      "metadata": {
+        "description": "Add CI job running orchestration tests against both SANDBOX_CLI=./sandbox.sh and SANDBOX_CLI='python3 -m foundry_sandbox.cli'. Both runs must produce same pass/fail.",
+        "file_path": ".github/workflows/orchestration-tests.yml",
+        "acceptance_criteria": [
+          "CI job runs orchestration tests with shell entrypoint",
+          "CI job runs orchestration tests with Python entrypoint",
+          "Both produce same pass/fail results",
+          "Failures in either entrypoint block merge"
+        ],
+        "task_category": "implementation"
+      },
+      "dependencies": {
+        "blocks": [],
+        "blocked_by": [],
+        "depends": []
+      }
+    },
+    "verify-6-1": {
+      "type": "verify",
+      "title": "Verify Phase 4: CLI and command handler parity",
+      "status": "pending",
+      "parent": "phase-6",
+      "children": [],
+      "total_tasks": 1,
+      "completed_tasks": 0,
+      "metadata": {
+        "description": "All commands migrated. Parity diffs clean. Both entrypoints pass orchestration tests. Aliases work. Security tests pass.",
+        "verification_type": "fidelity"
+      },
+      "dependencies": {
+        "blocks": [],
+        "blocked_by": [],
+        "depends": []
+      }
+    },
+    "phase-7": {
+      "type": "phase",
+      "title": "Phase 5: Container Config (The 86KB Monster)",
+      "status": "pending",
+      "parent": "spec-root",
+      "children": [
+        "task-7-1",
+        "task-7-2",
+        "task-7-3",
+        "task-7-4",
+        "task-7-5",
+        "task-7-6",
+        "task-7-7",
+        "task-7-8",
+        "task-7-9",
+        "task-7-10",
+        "task-7-11",
+        "task-7-12",
+        "task-7-13",
+        "task-7-14",
+        "task-7-15",
+        "verify-7-1"
+      ],
+      "total_tasks": 16,
+      "completed_tasks": 0,
+      "metadata": {
+        "purpose": "",
+        "description": "Migrate container_config.sh (2,370 lines, 86KB, 34 functions) split into 7 focused modules with ContainerConfigurator orchestration class. Migrate remaining small modules. Convert sandbox.sh to thin wrapper. Two-step bake for shell deletion of high-risk modules."
+      },
+      "dependencies": {
+        "blocks": [],
+        "blocked_by": [
+          "phase-6"
+        ],
+        "depends": []
+      }
+    },
+    "task-7-1": {
+      "type": "task",
+      "title": "Create foundry_sandbox/container_io.py shared I/O primitives",
+      "status": "pending",
+      "parent": "phase-7",
+      "children": [],
+      "total_tasks": 1,
+      "completed_tasks": 0,
+      "metadata": {
+        "description": "Shared container I/O: copy_file_to_container, copy_dir_to_container, copy_file_to_container_quiet, copy_dir_to_container_quiet, docker_exec_json, docker_exec_text. Leaf dependency (no upward imports) to keep graph acyclic.",
+        "file_path": "foundry_sandbox/container_io.py",
+        "acceptance_criteria": [
+          "All copy/exec primitives work correctly",
+          "Quiet variants suppress stderr",
+          "docker_exec_json returns parsed JSON",
+          "docker_exec_text returns string output",
+          "No imports from other foundry_sandbox modules except constants/utils"
+        ],
+        "task_category": "implementation"
+      },
+      "dependencies": {
+        "blocks": [],
+        "blocked_by": [],
+        "depends": []
+      }
+    },
+    "task-7-2": {
+      "type": "task",
+      "title": "Create foundry_sandbox/container_setup.py user setup",
+      "status": "pending",
+      "parent": "phase-7",
+      "children": [],
+      "total_tasks": 1,
+      "completed_tasks": 0,
+      "metadata": {
+        "description": "User/environment preparation: ensure_container_user, install_pip_requirements, block_pypi_after_install (iptables DROP), ssh_agent_preflight.",
+        "file_path": "foundry_sandbox/container_setup.py",
+        "acceptance_criteria": [
+          "ensure_container_user verifies container user exists",
+          "install_pip_requirements installs packages correctly",
+          "block_pypi_after_install adds iptables DROP rules",
+          "ssh_agent_preflight validates SSH agent forwarding"
+        ],
+        "task_category": "implementation"
+      },
+      "dependencies": {
+        "blocks": [],
+        "blocked_by": [],
+        "depends": []
+      }
+    },
+    "task-7-3": {
+      "type": "task",
+      "title": "Create foundry_sandbox/foundry_plugin.py MCP lifecycle",
+      "status": "pending",
+      "parent": "phase-7",
+      "children": [],
+      "total_tasks": 1,
+      "completed_tasks": 0,
+      "metadata": {
+        "description": "Foundry MCP lifecycle: prepopulate_foundry_global, ensure_claude_foundry_mcp, ensure_foundry_mcp_config, ensure_foundry_mcp_workspace_dirs, configure_foundry_research_providers, sync_marketplace_manifests. Absorbs lib/python/ensure_claude_foundry_mcp.py.",
+        "file_path": "foundry_sandbox/foundry_plugin.py",
+        "acceptance_criteria": [
+          "All foundry plugin functions work correctly",
+          "lib/python/ensure_claude_foundry_mcp.py functionality absorbed",
+          "Depends only on container_io.py (no upward imports)"
+        ],
+        "task_category": "implementation"
+      },
+      "dependencies": {
+        "blocks": [],
+        "blocked_by": [],
+        "depends": []
+      }
+    },
+    "task-7-4": {
+      "type": "task",
+      "title": "Create foundry_sandbox/stub_manager.py workspace documentation",
+      "status": "pending",
+      "parent": "phase-7",
+      "children": [],
+      "total_tasks": 1,
+      "completed_tasks": 0,
+      "metadata": {
+        "description": "Workspace documentation: install_foundry_workspace_docs (copy CLAUDE.md and AGENTS.md stubs), inject_sandbox_branch_context (inject branch info into CLAUDE.md).",
+        "file_path": "foundry_sandbox/stub_manager.py",
+        "acceptance_criteria": [
+          "CLAUDE.md and AGENTS.md stubs installed correctly",
+          "Branch context injected into CLAUDE.md",
+          "Depends only on container_io.py"
+        ],
+        "task_category": "implementation"
+      },
+      "dependencies": {
+        "blocks": [],
+        "blocked_by": [],
+        "depends": []
+      }
+    },
+    "task-7-5": {
+      "type": "task",
+      "title": "Create foundry_sandbox/git_path_fixer.py worktree path fixes",
+      "status": "pending",
+      "parent": "phase-7",
+      "children": [],
+      "total_tasks": 1,
+      "completed_tasks": 0,
+      "metadata": {
+        "description": "Worktree/proxy path fixes: fix_proxy_worktree_paths (symlinks and git config for proxy container), fix_worktree_paths (fix .git gitdir refs for username mismatches), detect_nested_git_repos (warn about nested .git shadowing).",
+        "file_path": "foundry_sandbox/git_path_fixer.py",
+        "acceptance_criteria": [
+          "fix_proxy_worktree_paths creates correct symlinks",
+          "fix_worktree_paths fixes gitdir refs correctly",
+          "detect_nested_git_repos warns about nested .git"
+        ],
+        "task_category": "implementation"
+      },
+      "dependencies": {
+        "blocks": [],
+        "blocked_by": [],
+        "depends": []
+      }
+    },
+    "task-7-6": {
+      "type": "task",
+      "title": "Create foundry_sandbox/credential_setup.py orchestrator",
+      "status": "pending",
+      "parent": "phase-7",
+      "children": [],
+      "total_tasks": 1,
+      "completed_tasks": 0,
+      "metadata": {
+        "description": "Config/credential orchestration: copy_configs_to_container (master orchestrator calling 20+ functions in sequence), sync_runtime_credentials (idempotent runtime sync), merge_claude_settings. Security-critical: must never leak real credentials.",
+        "file_path": "foundry_sandbox/credential_setup.py",
+        "acceptance_criteria": [
+          "copy_configs_to_container orchestrates all config steps in correct order",
+          "sync_runtime_credentials is idempotent",
+          "merge_claude_settings preserves hooks",
+          "Real credentials never appear in sandbox env/filesystem",
+          "Only placeholders injected"
+        ],
+        "task_category": "implementation"
+      },
+      "dependencies": {
+        "blocks": [],
+        "blocked_by": [],
+        "depends": []
+      }
+    },
+    "task-7-7": {
+      "type": "task",
+      "title": "Create foundry_sandbox/tool_configs.py tool-specific configs",
+      "status": "pending",
+      "parent": "phase-7",
+      "children": [],
+      "total_tasks": 1,
+      "completed_tasks": 0,
+      "metadata": {
+        "description": "Tool-specific configurations: ensure_claude_onboarding, ensure_claude_statusline, ensure_github_https_git, configure_gh_credential_helper, ensure_codex_config, ensure_gemini_settings, ensure_opencode_settings, ensure_opencode_default_model, ensure_opencode_tavily_mcp, sync_opencode_foundry, prefetch_opencode_npm_plugins, sync_opencode_local_plugins_on_first_attach.",
+        "file_path": "foundry_sandbox/tool_configs.py",
+        "acceptance_criteria": [
+          "All tool config functions work correctly",
+          "Claude/Codex/Gemini/OpenCode/gh configs match shell output",
+          "Depends only on container_io.py"
+        ],
+        "task_category": "implementation"
+      },
+      "dependencies": {
+        "blocks": [],
+        "blocked_by": [],
+        "depends": []
+      }
+    },
+    "task-7-8": {
+      "type": "task",
+      "title": "Create ContainerConfigurator orchestration class",
+      "status": "pending",
+      "parent": "phase-7",
+      "children": [],
+      "total_tasks": 1,
+      "completed_tasks": 0,
+      "metadata": {
+        "description": "Orchestration class with explicit constructor-injected dependencies (container_setup, foundry_plugin, stub_manager, git_path_fixer, credential_setup, tool_configs, container_io). Makes call graph explicit and testable. Integration test asserts canonical call sequence and resulting artifacts.",
+        "file_path": "foundry_sandbox/container_configurator.py",
+        "acceptance_criteria": [
+          "Constructor accepts all 7 module dependencies",
+          "Call sequence matches documented dependency graph",
+          "Dependencies injected (no hardcoded imports of sibling modules)",
+          "Integration test verifies call order and artifacts"
+        ],
+        "task_category": "implementation"
+      },
+      "dependencies": {
+        "blocks": [],
+        "blocked_by": [],
+        "depends": []
+      }
+    },
+    "task-7-9": {
+      "type": "task",
+      "title": "Create unit tests for credential setup",
+      "status": "pending",
+      "parent": "phase-7",
+      "children": [],
+      "total_tasks": 1,
+      "completed_tasks": 0,
+      "metadata": {
+        "description": "Tests for credential placeholder injection and runtime sync. Verifies real credentials never leak.",
+        "file_path": "tests/unit/test_credential_setup.py",
+        "acceptance_criteria": [
+          "Placeholder injection produces correct placeholders",
+          "Runtime sync is idempotent",
+          "Real credentials never appear in output",
+          "merge_claude_settings preserves hooks"
+        ],
+        "task_category": "implementation"
+      },
+      "dependencies": {
+        "blocks": [],
+        "blocked_by": [],
+        "depends": []
+      }
+    },
+    "task-7-10": {
+      "type": "task",
+      "title": "Create unit tests for git path fixer",
+      "status": "pending",
+      "parent": "phase-7",
+      "children": [],
+      "total_tasks": 1,
+      "completed_tasks": 0,
+      "metadata": {
+        "description": "Tests for git path fixing and nested .git detection.",
+        "file_path": "tests/unit/test_git_path_fixer.py",
+        "acceptance_criteria": [
+          "fix_worktree_paths corrects gitdir refs",
+          "fix_proxy_worktree_paths creates symlinks",
+          "detect_nested_git_repos identifies nested repos"
+        ],
+        "task_category": "implementation"
+      },
+      "dependencies": {
+        "blocks": [],
+        "blocked_by": [],
+        "depends": []
+      }
+    },
+    "task-7-11": {
+      "type": "task",
+      "title": "Create unit tests for tool configs",
+      "status": "pending",
+      "parent": "phase-7",
+      "children": [],
+      "total_tasks": 1,
+      "completed_tasks": 0,
+      "metadata": {
+        "description": "Tests for tool config provisioning: Claude, Codex, Gemini, OpenCode, gh.",
+        "file_path": "tests/unit/test_tool_configs.py",
+        "acceptance_criteria": [
+          "Each tool config function produces correct output",
+          "Config files match expected format"
+        ],
+        "task_category": "implementation"
+      },
+      "dependencies": {
+        "blocks": [],
+        "blocked_by": [],
+        "depends": []
+      }
+    },
+    "task-7-12": {
+      "type": "task",
+      "title": "Verify no cyclic imports in Phase 5 modules",
+      "status": "pending",
+      "parent": "phase-7",
+      "children": [],
+      "total_tasks": 1,
+      "completed_tasks": 0,
+      "metadata": {
+        "description": "Import test enforcing no cyclic imports between credential_setup.py, tool_configs.py, and container_io.py. container_io.py is leaf dependency.",
+        "file_path": "tests/unit/test_imports.py",
+        "acceptance_criteria": [
+          "All Phase 5 modules importable without circular import errors",
+          "container_io.py imports only from constants/utils",
+          "credential_setup.py can import all peer modules without cycles"
+        ],
+        "task_category": "implementation"
+      },
+      "dependencies": {
+        "blocks": [],
+        "blocked_by": [],
+        "depends": []
+      }
+    },
+    "task-7-13": {
+      "type": "task",
+      "title": "Migrate remaining small modules",
+      "status": "pending",
+      "parent": "phase-7",
+      "children": [],
+      "total_tasks": 1,
+      "completed_tasks": 0,
+      "metadata": {
+        "description": "Migrate remaining small shell modules: ide.sh \u2192 ide.py, permissions.sh \u2192 absorbed into os/stat, inspect.sh \u2192 absorbed into state, tmux.sh \u2192 tmux.py, image.sh \u2192 image.py. Delete host_config.sh (6 lines, empty stub). runtime.sh already absorbed in Phase 1.",
+        "file_path": "foundry_sandbox/tmux.py",
+        "acceptance_criteria": [
+          "ide.py functional (or absorbed)",
+          "tmux.py functional",
+          "image.py functional",
+          "permissions.sh absorbed into Python os/stat calls",
+          "inspect.sh absorbed into state module",
+          "host_config.sh deleted"
+        ],
+        "task_category": "implementation"
+      },
+      "dependencies": {
+        "blocks": [],
+        "blocked_by": [],
+        "depends": []
+      }
+    },
+    "task-7-14": {
+      "type": "task",
+      "title": "Convert sandbox.sh to thin Python wrapper",
+      "status": "pending",
+      "parent": "phase-7",
+      "children": [],
+      "total_tasks": 1,
+      "completed_tasks": 0,
+      "metadata": {
+        "description": "Replace sandbox.sh dispatcher with: exec python3 -m foundry_sandbox.cli \"$@\". Only after ALL parity and security gates pass. Preserves backward compatibility for scripts/docs referencing sandbox.sh.",
+        "file_path": "sandbox.sh",
+        "acceptance_criteria": [
+          "sandbox.sh exec's Python CLI with all args",
+          "Backward compatible (same interface)",
+          "Only done after all parity and security tests pass"
+        ],
+        "task_category": "refactoring"
+      },
+      "dependencies": {
+        "blocks": [],
+        "blocked_by": [],
+        "depends": []
+      }
+    },
+    "task-7-15": {
+      "type": "task",
+      "title": "Delete shell command handlers (two-step bake for high-risk)",
+      "status": "pending",
+      "parent": "phase-7",
+      "children": [],
+      "total_tasks": 1,
+      "completed_tasks": 0,
+      "metadata": {
+        "description": "Delete shell command handlers. Two-step for new.sh and container_config.sh: PR 1 = Python integration (shell unreachable), bake period, PR 2 = deletion in dedicated commits for clean git revert. Small modules deleted in same PR as integration.",
+        "file_path": "commands/new.sh",
+        "acceptance_criteria": [
+          "Small module shell handlers deleted in integration PR",
+          "new.sh and container_config.sh: PR 1 makes shell unreachable, shell logic preserved",
+          "PR 2 (after bake): dedicated deletion commits per module group",
+          "Each deletion commit independently revertible via git revert"
+        ],
+        "task_category": "refactoring"
+      },
+      "dependencies": {
+        "blocks": [],
+        "blocked_by": [],
+        "depends": []
+      }
+    },
+    "verify-7-1": {
+      "type": "verify",
+      "title": "Verify Phase 5: container config split and final migration",
+      "status": "pending",
+      "parent": "phase-7",
+      "children": [],
+      "total_tasks": 1,
+      "completed_tasks": 0,
+      "metadata": {
+        "description": "container_config.sh decomposed. ContainerConfigurator works. sandbox.sh is thin wrapper. All tests pass against Python CLI. Security invariants preserved. Full lifecycle smoke test passes.",
+        "verification_type": "fidelity"
+      },
+      "dependencies": {
+        "blocks": [],
+        "blocked_by": [],
+        "depends": []
+      }
+    },
+    "task-6-23": {
+      "type": "task",
+      "title": "Update documentation for Python entrypoint and requirements",
+      "status": "pending",
+      "parent": "phase-6",
+      "children": [],
+      "total_tasks": 1,
+      "completed_tasks": 0,
+      "metadata": {
+        "description": "Update docs to reflect the Python CLI entrypoint and pip install requirements. Covers docs/getting-started.md (add pip install -e . step), docs/usage/ (reference both sandbox.sh and python3 -m foundry_sandbox.cli), and README.md (Python 3.10+ prerequisite). Also document SANDBOX_CLI env var for advanced users and SANDBOX_NONINTERACTIVE for CI.",
+        "file_path": "docs/getting-started.md"
+      },
+      "dependencies": {
+        "blocks": [],
+        "blocked_by": [],
+        "depends": []
+      }
+    },
+    "task-3-16": {
+      "type": "task",
+      "title": "Create global import layering enforcement test",
+      "status": "pending",
+      "parent": "phase-3",
+      "children": [],
+      "total_tasks": 1,
+      "completed_tasks": 0,
+      "metadata": {
+        "description": "Enforce module dependency boundaries across the entire foundry_sandbox package. Base layer (constants, utils) may not import from any other foundry_sandbox module. Mid layer (paths, state, docker, git, validate, etc.) may import only from base. Top layer (commands/*, cli) may import from any layer. Bridge-callable modules may not import Click or Pydantic at module level. This prevents cyclic imports and import latency creep from Phase 1 onward.\"",
+        "file_path": "tests/unit/test_import_layering.py"
+      },
+      "dependencies": {
+        "blocks": [],
+        "blocked_by": [],
+        "depends": []
+      }
+    }
+  },
+  "journal": []
+}
