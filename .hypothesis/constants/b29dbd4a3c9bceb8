@@ -1,4 +1,0 @@
-# file: /workspace/foundry_sandbox/commands/destroy.py
-# hypothesis_version: 6.151.5
-
-['\nAborted.', '--force', '--keep-worktree', '--yes', '-f', '-t', '-y', '../', './', '.git', '/', '1', ':', 'Aborted.', 'Are you sure?', 'CONTAINER_NAME', 'Removing worktree...', 'Skip confirmation', 'branch', 'credential-isolation', 'docker', 'git@', 'https://', 'inspect', 'kill-session', 'name', 'network', 'proxy-egress', 'repo_url', 'rm', 'tmux', '~/']

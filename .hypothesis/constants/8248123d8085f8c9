@@ -1,4 +1,0 @@
-# file: /workspace/unified-proxy/logging_config.py
-# hypothesis_version: 6.151.5
-
-[1000, '%Y-%m-%dT%H:%M:%S', 'INFO', 'LOG_FORMAT', 'LOG_INCLUDE_LOCATION', 'LOG_LEVEL', 'LogContext', 'X-Container-ID', 'X-Request-ID', '_', 'args', 'client connect', 'client disconnect', 'container_id', 'created', 'duration_ms', 'event', 'exc_info', 'exc_text', 'exception', 'extra', 'extra_context', 'filename', 'funcName', 'http', 'json', 'level', 'levelname', 'levelno', 'lineno', 'location', 'logger', 'message', 'module', 'msecs', 'msg', 'name', 'pathname', 'process', 'processName', 'relativeCreated', 'request_complete', 'request_id', 'request_start', 'request_start_time', 'server connect', 'server disconnect', 'stack_info', 'status_code', 'taskName', 'thread', 'threadName', 'timestamp', 'true']

@@ -1,4 +1,0 @@
-# file: /workspace/lib/python/sync_opencode_foundry.py
-# hypothesis_version: 6.151.5
-
-['-', '-m', '-s', '../', './', '/', '/usr/bin/foundry-mcp', '/usr/bin/uvx', '/usr/local/bin/uvx', '0', '1', '@', '__main__', 'command', 'file', 'foundry-mcp', 'foundry_mcp', 'foundry_mcp.server', 'mcp', 'module', 'name', 'npm', 'package', 'path', 'plugin', 'python', 'python3', 'src', 'uvx', 'version', '~/']

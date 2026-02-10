@@ -1,4 +1,0 @@
-# file: /workspace/foundry_sandbox/git_worktree.py
-# hypothesis_version: 6.151.5
-
-['!', '!/*/', '--', '--cached', '--ff-only', '--file', '--force', '--get', '--git-dir', '--no-checkout', '--porcelain', '--quiet', '--verify', '-C', '-D', '-b', '.git', '/', '/*', '/*/', '/.github/', '0', '1', '^develop$', '^hotfix/', '^main$', '^master$', '^production$', '^release/', '__main__', 'add', 'branch', 'checkout', 'config', 'config.worktree', 'core.sparseCheckout', 'create-worktree', 'diff', 'fetch', 'git', 'gitdir: ', 'info', 'list', 'origin', 'prune', 'pull', 'remove', 'remove-worktree', 'rev-parse', 'show-ref', 'sparse-checkout', 'true', 'worktree', 'worktree-has-changes']

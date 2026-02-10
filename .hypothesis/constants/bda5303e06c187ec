@@ -1,4 +1,0 @@
-# file: /workspace/foundry_sandbox/config.py
-# hypothesis_version: 6.151.5
-
-['"', '.', '[', '[]', '\\', '\\"', '\\\\', '\\n', '\\r', '\\t', ']', '__main__', 'load', 'merge', 'w']

@@ -1,4 +1,0 @@
-# file: /home/tyler/.sandboxes/worktrees/tyler-foundry-sandbox-20260209-0718/foundry_sandbox/tool_configs.py
-# hypothesis_version: 6.148.11
-
-[384, '%Y-%m-%dT%H:%M:%SZ', '-', '-R', '-c', '-e', '-i', '-p', '-u', '0', '1', 'chown', 'cp', 'docker', 'exec', 'mkdir', 'python3', 'root', 'sh', 'true']

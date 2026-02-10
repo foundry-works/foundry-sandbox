@@ -1,4 +1,0 @@
-# file: /workspace/foundry_sandbox/state.py
-# hypothesis_version: 6.151.5
-
-[384, '#', '%Y-%m-%dT%H:%M:%SZ', '(', ')', '*.json', '--allow-pr', '--copy', '--mount', '--network', '--pip-requirements', '--sparse', '--wd', '--with-opencode', '--with-ssh', '--with-zai', '0', '1', '=', 'SANDBOX_BRANCH', 'SANDBOX_COPIES=', 'SANDBOX_FROM_BRANCH', 'SANDBOX_MOUNTS=', 'SANDBOX_NETWORK_MODE', 'SANDBOX_REPO_URL', 'SANDBOX_SYNC_SSH', '__main__', 'allow_pr', 'always', 'args', 'branch', 'cast new', 'command_line', 'copies', 'delete-preset', 'disabled', 'enable_opencode', 'enable_zai', 'from_branch', 'inspect', 'limited', 'list', 'list-presets', 'load-last-attach', 'load-metadata', 'mounts', 'name', 'network_mode', 'pip_requirements', 'repo', 'repo_url', 'sandbox_name', 'save-last-attach', 'show-preset', 'sparse', 'sparse_checkout', 'ssh_mode', 'sync_ssh', 'timestamp', 'utf-8', 'working_dir', 'write-metadata']

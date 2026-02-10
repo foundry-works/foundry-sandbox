@@ -1,4 +1,0 @@
-# file: /workspace/foundry_sandbox/proxy.py
-# hypothesis_version: 6.151.5
-
-[200, 404, 86400, '\n%{http_code}', '--unix-socket', '-H', '-X', '-d', '-dev-1', '-f', '-s', '-w', '/internal/containers', '/internal/health', '30', '<no value>', 'CONTAINER_NAME', 'DELETE', 'GET', 'POST', 'PROXY_CONTAINER_NAME', 'PROXY_SOCKET_PATH', 'PROXY_URL', 'Proxy is not ready', 'Remediation steps:', 'Unknown error', '__main__', 'body', 'container_id', 'credential-isolation', 'curl', 'docker', 'error', 'exec', 'healthy', 'http_code', 'inspect', 'ip_address', 'message', 'metadata', 'proxy-container-name', 'proxy-is-registered', 'proxy-register', 'proxy-unregister', 'proxy-wait-ready', 'raw', 'registered', 'status', 'success', 'ttl_seconds']

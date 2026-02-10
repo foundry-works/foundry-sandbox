@@ -1,4 +1,0 @@
-# file: /workspace/foundry_sandbox/commands/attach.py
-# hypothesis_version: 6.151.5
-
-['--height=10', '--ide-only', '--last', '--no-ide', '--reverse', '--with-ide', '0', '1', 'Skip IDE prompt', '_bridge_sync_creds', 'auto', 'fzf', 'ide_only', 'list', 'name', 'no_ide', 'sandbox.sh', 'start', 'use_last', 'with_ide', 'working_dir']

@@ -1,4 +1,0 @@
-# file: /workspace/foundry_sandbox/container_setup.py
-# hypothesis_version: 6.151.5
-
-['-C', '-I', '-S', '-c', '-d', '-f', '-j', '-q', '-r', '-u', '/', '/etc/resolv.conf', '1', 'DROP', 'OUTPUT', 'Permission denied', 'PyPI access blocked', 'SSH_AUTH_SOCK', 'auto', 'command not found', 'docker', 'exec', 'gateway\\|172\\.', 'getent', 'grep', 'hosts', 'id', 'install', 'iptables', 'pip', 'pypi.org', 'rm', 'sh', 'sudo', 'test', 'ubuntu', '~/']

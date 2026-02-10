@@ -1,4 +1,0 @@
-# file: /workspace/foundry_sandbox/constants.py
-# hypothesis_version: 6.151.5
-
-['.sandboxes', '/home/ubuntu', '/ssh-agent', '0', '1', '200000', 'SANDBOX_ASSUME_YES', 'SANDBOX_DEBUG', 'SANDBOX_HOME', 'SANDBOX_NETWORK_MODE', 'SANDBOX_SSH_MODE', 'SANDBOX_SYNC_SSH', 'SANDBOX_TMUX_MOUSE', 'SANDBOX_VERBOSE', 'always', 'claude-config', 'limited', 'openai/gpt-5.2-codex', 'repos', 'ubuntu', 'worktrees']

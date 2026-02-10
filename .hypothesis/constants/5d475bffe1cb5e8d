@@ -1,4 +1,0 @@
-# file: /workspace/foundry_sandbox/commands/destroy_all.py
-# hypothesis_version: 6.151.5
-
-['\nAborted.', '  - All worktrees', '--format', '--keep-worktree', '-t', '1', 'Aborted.', 'Including:', 'credential-isolation', 'destroy all', 'docker', 'inspect', 'kill-session', 'ls', 'network', 'proxy-egress', 'rm', 'tmux', '{{.Name}}']

@@ -1,4 +1,0 @@
-# file: /workspace/foundry_sandbox/commands/list_cmd.py
-# hypothesis_version: 6.151.5
-
-[' [tmux]', '--filter', '--format', '--json', '-a', '-t', '[]', 'attached', 'branch', 'claude_config', 'claude_config_exists', 'container', 'copies', 'docker', 'docker_status', 'from_branch', 'has-session', 'json_output', 'list', 'mounts', 'name', 'no container', 'none', 'ps', 'repo', 'repo_url', 'tmux', 'worktree', 'worktree_exists', '{{.Status}}', '─']

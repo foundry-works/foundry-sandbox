@@ -1,4 +1,0 @@
-# file: /workspace/foundry_sandbox/tmux.py
-# hypothesis_version: 6.151.5
-
-['-c', '-d', '-s', '-t', '1', '200000', 'CONTAINER_USER', 'SANDBOX_TMUX_MOUSE', 'attach-session', 'bash', 'has-session', 'history-limit', 'mouse', 'new-session', 'off', 'on', 'set-option', 'tmux']

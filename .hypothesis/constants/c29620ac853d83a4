@@ -1,4 +1,0 @@
-# file: /workspace/foundry_sandbox/tool_configs.py
-# hypothesis_version: 6.151.5
-
-['-', '-c', '-e', '-i', '-u', '0', '1', 'docker', 'exec', 'python3', 'sh', 'true']

@@ -1,4 +1,0 @@
-# file: /home/tyler/.sandboxes/worktrees/tyler-foundry-sandbox-20260209-0718/foundry_sandbox/git.py
-# hypothesis_version: 6.148.11
-
-[1.0, 120, '-', '--all', '--bare', '--branch', '--cached', '--ff-only', '--prune', '--quiet', '--verify', '-C', '-b', '.git', '__main__', 'branch-exists', 'checkout', 'clone', 'diff', 'ensure-bare-repo', 'ensure-repo-checkout', 'fetch', 'git', 'git-with-retry', 'main', 'origin', 'pull', 'returncode', 'show-ref', 'stderr', 'stdout', 'unknown error']

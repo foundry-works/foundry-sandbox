@@ -1,4 +1,0 @@
-# file: /home/tyler/.sandboxes/worktrees/tyler-foundry-sandbox-20260209-0718/foundry_sandbox/commands/upgrade.py
-# hypothesis_version: 6.148.11
-
-['--local', '--repo', '-fsSL', '-o', '.sh', 'bash', 'curl', 'install.sh', 'use_local']

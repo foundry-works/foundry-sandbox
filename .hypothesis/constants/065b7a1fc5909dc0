@@ -1,4 +1,0 @@
-# file: /workspace/foundry_sandbox/commands/preset.py
-# hypothesis_version: 6.151.5
-
-['Saved presets:', 'delete', 'list', 'name', 'remove', 'rm', 'show']

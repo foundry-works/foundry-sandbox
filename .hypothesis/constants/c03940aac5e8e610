@@ -1,4 +1,0 @@
-# file: /workspace/foundry_sandbox/paths.py
-# hypothesis_version: 6.151.5
-
-['.last-attach.json', '.last-cast-new.json', 'claude', 'metadata.env', 'metadata.json', 'presets']

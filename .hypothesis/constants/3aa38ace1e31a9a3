@@ -1,4 +1,0 @@
-# file: /home/tyler/.sandboxes/worktrees/tyler-foundry-sandbox-20260209-0718/foundry_sandbox/constants.py
-# hypothesis_version: 6.148.11
-
-[0.2, 200000, '.sandboxes', '/home/ubuntu', '/ssh-agent', 'SANDBOX_ASSUME_YES', 'SANDBOX_DEBUG', 'SANDBOX_HOME', 'SANDBOX_NETWORK_MODE', 'SANDBOX_SSH_MODE', 'SANDBOX_SYNC_SSH', 'SANDBOX_TMUX_MOUSE', 'SANDBOX_VERBOSE', 'always', 'claude-config', 'host-only', 'limited', 'none', 'openai/gpt-5.2-codex', 'repos', 'ubuntu', 'worktrees']

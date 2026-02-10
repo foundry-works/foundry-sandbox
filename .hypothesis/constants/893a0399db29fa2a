@@ -1,4 +1,0 @@
-# file: /workspace/unified-proxy/addons/container_identity.py
-# hypothesis_version: 6.151.5
-
-[b'Forbidden: Container identity verification failed', 403, '..', '.git', '/', 'Content-Type', 'REGISTRY_DB_PATH', 'REPOS_BASE_DIR', 'X-Container-Id', 'bare_repo_path', 'container_config', 'info', 'repo', 'text/plain', 'warn']

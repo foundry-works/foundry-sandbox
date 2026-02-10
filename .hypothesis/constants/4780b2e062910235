@@ -1,4 +1,0 @@
-# file: /home/tyler/.sandboxes/worktrees/tyler-foundry-sandbox-20260209-0718/foundry_sandbox/validate.py
-# hypothesis_version: 6.148.11
-
-[127, 128, 255, '(://[^:]+:)[^@]+(@)', '--filter', '--format', '-q', '.', '..', './', '.aws', '.azure', '.config', '.docker', '.git', '.gnupg', '.kube', '.netrc', '.npmrc', '.pypirc', '.ssh', '/', '/run/docker.sock', '/var/run/docker.sock', ':', '://', '\\', '\\1***\\2', '__main__', '_proxy-egress', 'always', 'available', 'capacity', 'check-docker', 'clean', 'config', 'create', 'disabled', 'docker', 'error', 'gcloud', 'gh', 'git', 'git@', 'http://', 'https://', 'info', 'init', 'ls', 'network', 'ps', 'require-command', 'rm', 'running', 'sandbox-', 'true', 'valid', 'validate-env', 'validate-git-remotes', 'validate-mount', 'validate-name', 'validate-ssh-mode', 'validate-url', '{{.Name}}', '~/']

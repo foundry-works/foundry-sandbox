@@ -1,4 +1,0 @@
-# file: /workspace/foundry_sandbox/cli.py
-# hypothesis_version: 6.151.5
-
-['--last', '1', '__main__', 'allow_extra_args', 'attach', 'build', 'config', 'destroy', 'destroy-all', 'help', 'info', 'list', 'new', 'noninteractive', 'preset', 'prune', 'reattach', 'refresh-credentials', 'repeat', 'sandbox.sh', 'start', 'status', 'stop', 'upgrade']

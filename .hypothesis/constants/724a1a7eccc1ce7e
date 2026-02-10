@@ -1,4 +1,0 @@
-# file: /workspace/foundry_sandbox/git_path_fixer.py
-# hypothesis_version: 6.151.5
-
-['-c', '/workspace', '^[a-zA-Z0-9._-]+$', 'docker', 'exec', 'sh']
