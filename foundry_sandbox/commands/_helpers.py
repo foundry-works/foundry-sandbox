@@ -13,6 +13,8 @@ from pathlib import Path
 
 from foundry_sandbox.constants import (
     SANDBOX_NAME_MAX_LENGTH,
+    TIMEOUT_DOCKER_EXEC,
+    TIMEOUT_DOCKER_QUERY,
     get_claude_configs_dir,
     get_repos_dir,
     get_worktrees_dir,
@@ -288,6 +290,7 @@ def uses_credential_isolation(container: str) -> bool:
             capture_output=True,
             text=True,
             check=False,
+            timeout=TIMEOUT_DOCKER_QUERY,
         )
         if result.returncode == 0:
             pattern = f"{container}-unified-proxy-"
@@ -352,9 +355,11 @@ def apply_network_restrictions(container_id: str, network_mode: str) -> None:
         subprocess.run(
             ["docker", "exec", container_id, "sudo", "/usr/local/bin/network-firewall.sh"],
             check=False,
+            timeout=TIMEOUT_DOCKER_EXEC,
         )
     else:
         subprocess.run(
             ["docker", "exec", container_id, "sudo", "/usr/local/bin/network-mode", network_mode],
             check=False,
+            timeout=TIMEOUT_DOCKER_EXEC,
         )

@@ -18,6 +18,7 @@ from pathlib import Path
 from typing import Any
 
 from foundry_sandbox._bridge import bridge_main
+from foundry_sandbox.constants import TIMEOUT_GIT_QUERY, TIMEOUT_GIT_TRANSFER
 from foundry_sandbox.git import git_with_retry
 from foundry_sandbox.utils import log_info, log_step, log_warn
 
@@ -83,6 +84,7 @@ def configure_sparse_checkout(
         capture_output=True,
         text=True,
         check=True,
+        timeout=TIMEOUT_GIT_QUERY,
     )
 
     # Bump repositoryformatversion to 1 if needed
@@ -91,6 +93,7 @@ def configure_sparse_checkout(
         capture_output=True,
         text=True,
         check=False,
+        timeout=TIMEOUT_GIT_QUERY,
     )
     version = int(version_result.stdout.strip() or "0")
     if version < 1:
@@ -99,6 +102,7 @@ def configure_sparse_checkout(
             capture_output=True,
             text=True,
             check=True,
+            timeout=TIMEOUT_GIT_QUERY,
         )
 
     # Enable sparse checkout in worktree config
@@ -108,12 +112,14 @@ def configure_sparse_checkout(
         capture_output=True,
         text=True,
         check=True,
+        timeout=TIMEOUT_GIT_QUERY,
     )
     subprocess.run(
         ["git", "config", "--file", str(worktree_config), "core.sparseCheckoutCone", "true"],
         capture_output=True,
         text=True,
         check=True,
+        timeout=TIMEOUT_GIT_QUERY,
     )
 
     # Build sparse-checkout patterns for cone mode
@@ -149,6 +155,7 @@ def configure_sparse_checkout(
         capture_output=True,
         text=True,
         check=False,
+        timeout=TIMEOUT_GIT_TRANSFER,
     )
     if result.returncode != 0:
         raise RuntimeError(f"Sparse checkout failed: {result.stderr.strip()}")
@@ -170,6 +177,7 @@ def worktree_has_changes(worktree_path: str | Path) -> bool:
         ["git", "-C", str(wt_p), "diff", "--quiet"],
         capture_output=True,
         check=False,
+        timeout=TIMEOUT_GIT_QUERY,
     )
 
     # Check staged changes
@@ -177,6 +185,7 @@ def worktree_has_changes(worktree_path: str | Path) -> bool:
         ["git", "-C", str(wt_p), "diff", "--cached", "--quiet"],
         capture_output=True,
         check=False,
+        timeout=TIMEOUT_GIT_QUERY,
     )
 
     # If either command returns non-zero, there are changes
@@ -220,6 +229,7 @@ def create_worktree(
         ["git", "-C", str(bare_p), "worktree", "prune"],
         capture_output=True,
         check=False,
+        timeout=TIMEOUT_GIT_QUERY,
     )
 
     if not wt_p.exists():
@@ -236,6 +246,7 @@ def create_worktree(
                 ["git", "-C", str(bare_p), "show-ref", "--verify", "--quiet", f"refs/heads/{branch}"],
                 capture_output=True,
                 check=False,
+                timeout=TIMEOUT_GIT_QUERY,
             ).returncode == 0
 
             if branch_exists:
@@ -246,6 +257,7 @@ def create_worktree(
                         capture_output=True,
                         text=True,
                         check=True,
+                        timeout=TIMEOUT_GIT_TRANSFER,
                     )
                     configure_sparse_checkout(bare_p, wt_p, working_dir)
                 else:
@@ -254,6 +266,7 @@ def create_worktree(
                         capture_output=True,
                         text=True,
                         check=True,
+                        timeout=TIMEOUT_GIT_TRANSFER,
                     )
             else:
                 log_step(f"Creating branch: {branch} (from {from_branch})")
@@ -263,6 +276,7 @@ def create_worktree(
                         capture_output=True,
                         text=True,
                         check=True,
+                        timeout=TIMEOUT_GIT_TRANSFER,
                     )
                     configure_sparse_checkout(bare_p, wt_p, working_dir)
                 else:
@@ -271,6 +285,7 @@ def create_worktree(
                         capture_output=True,
                         text=True,
                         check=True,
+                        timeout=TIMEOUT_GIT_TRANSFER,
                     )
         else:
             # No from_branch — try to create worktree directly
@@ -283,6 +298,7 @@ def create_worktree(
                     capture_output=True,
                     text=True,
                     check=False,
+                    timeout=TIMEOUT_GIT_TRANSFER,
                 )
                 if result.returncode != 0:
                     # Branch not found locally, try fetching
@@ -298,6 +314,7 @@ def create_worktree(
                         capture_output=True,
                         text=True,
                         check=True,
+                        timeout=TIMEOUT_GIT_TRANSFER,
                     )
 
                 configure_sparse_checkout(bare_p, wt_p, working_dir)
@@ -308,6 +325,7 @@ def create_worktree(
                     capture_output=True,
                     text=True,
                     check=False,
+                    timeout=TIMEOUT_GIT_TRANSFER,
                 )
                 if result.returncode != 0:
                     # Branch not found locally, try fetching
@@ -323,6 +341,7 @@ def create_worktree(
                         capture_output=True,
                         text=True,
                         check=True,
+                        timeout=TIMEOUT_GIT_TRANSFER,
                     )
     else:
         # Worktree exists — pull latest changes
@@ -378,6 +397,7 @@ def cleanup_sandbox_branch(branch: str, bare_path: str | Path) -> None:
         capture_output=True,
         text=True,
         check=False,
+        timeout=TIMEOUT_GIT_QUERY,
     )
 
     if worktree_list.returncode == 0:
@@ -391,6 +411,7 @@ def cleanup_sandbox_branch(branch: str, bare_path: str | Path) -> None:
         capture_output=True,
         text=True,
         check=False,
+        timeout=TIMEOUT_GIT_QUERY,
     )
     if result.returncode == 0:
         log_info(f"Cleaned up sandbox branch: {branch}")
@@ -414,6 +435,7 @@ def remove_worktree(worktree_path: str | Path) -> None:
         capture_output=True,
         text=True,
         check=False,
+        timeout=TIMEOUT_GIT_QUERY,
     )
 
     if git_dir_result.returncode == 0 and git_dir_result.stdout.strip():
@@ -426,6 +448,7 @@ def remove_worktree(worktree_path: str | Path) -> None:
             ["git", "-C", str(bare_p), "worktree", "remove", str(wt_p), "--force"],
             capture_output=True,
             check=False,
+            timeout=TIMEOUT_GIT_TRANSFER,
         )
         if remove_result.returncode == 0:
             return

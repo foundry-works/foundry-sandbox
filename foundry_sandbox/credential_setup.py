@@ -22,6 +22,7 @@ from foundry_sandbox.constants import (
     CONTAINER_READY_DELAY,
     CONTAINER_USER,
     SSH_AGENT_CONTAINER_SOCK,
+    TIMEOUT_DOCKER_EXEC,
     get_sandbox_debug,
     get_sandbox_home,
     get_sandbox_verbose,
@@ -61,6 +62,7 @@ def _merge_claude_settings_in_container(container_id: str, host_settings: str) -
         ],
         check=False,
         capture_output=True,
+        timeout=TIMEOUT_DOCKER_EXEC,
     )
 
     # Clean up temp file
@@ -68,6 +70,7 @@ def _merge_claude_settings_in_container(container_id: str, host_settings: str) -
         ["docker", "exec", container_id, "rm", "-f", temp_host],
         check=False,
         capture_output=True,
+        timeout=TIMEOUT_DOCKER_EXEC,
     )
 
 
@@ -81,6 +84,7 @@ def _merge_claude_settings_safe(container_id: str, host_settings: str) -> None:
     oauthTokens, apiKey.
     """
     import json as _json
+    import os as _os
     import tempfile as _tempfile
 
     try:
@@ -95,6 +99,7 @@ def _merge_claude_settings_safe(container_id: str, host_settings: str) -> None:
         data.pop(key, None)
 
     # Write sanitised copy to temp file, then merge normally
+    tmp_path: str | None = None
     try:
         with _tempfile.NamedTemporaryFile(
             mode="w", suffix=".json", delete=False, prefix="settings-safe-"
@@ -103,11 +108,11 @@ def _merge_claude_settings_safe(container_id: str, host_settings: str) -> None:
             tmp_path = tmp.name
         _merge_claude_settings_in_container(container_id, tmp_path)
     finally:
-        import os as _os
-        try:
-            _os.unlink(tmp_path)
-        except OSError:
-            pass
+        if tmp_path is not None:
+            try:
+                _os.unlink(tmp_path)
+            except OSError:
+                pass
 
 
 def _file_exists(path: str) -> bool:
@@ -147,6 +152,7 @@ def _stage_setup_user(container_id: str) -> None:
         result = subprocess.run(
             ["docker", "exec", container_id, "test", "-d", CONTAINER_HOME],
             capture_output=True,
+            timeout=TIMEOUT_DOCKER_EXEC,
         )
         if result.returncode == 0:
             break
@@ -174,6 +180,7 @@ def _stage_create_config_dirs(container_id: str) -> list[str]:
             ["docker", "exec", container_id, "mkdir", "-p", dir_path],
             check=False,
             capture_output=True,
+            timeout=TIMEOUT_DOCKER_EXEC,
         )
     return dirs
 
@@ -213,6 +220,7 @@ def _stage_setup_claude_config(
         ],
         check=False,
         capture_output=True,
+        timeout=TIMEOUT_DOCKER_EXEC,
     )
 
     log_step("Ensuring Claude onboarding")
@@ -527,6 +535,7 @@ def _stage_fix_ownership(
             ],
             check=False,
             capture_output=True,
+            timeout=TIMEOUT_DOCKER_EXEC,
         )
 
     if enable_ssh:
@@ -591,6 +600,7 @@ def copy_configs_to_container(
             ["docker", "exec", container_id, "ls", "-la", f"{CONTAINER_HOME}/.claude"],
             capture_output=True,
             text=True,
+            timeout=TIMEOUT_DOCKER_EXEC,
         )
         if result.returncode == 0:
             log_debug(f"~/.claude contents:\n{result.stdout}")

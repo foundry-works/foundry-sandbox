@@ -19,6 +19,8 @@ from urllib.parse import urlparse
 
 from foundry_sandbox._bridge import bridge_main
 from foundry_sandbox.constants import (
+    TIMEOUT_DOCKER_NETWORK,
+    TIMEOUT_DOCKER_QUERY,
     get_repos_dir,
     get_worktrees_dir,
     get_claude_configs_dir,
@@ -304,6 +306,7 @@ def check_docker_running() -> tuple[bool, str]:
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
             check=False,
+            timeout=TIMEOUT_DOCKER_QUERY,
         )
         if result.returncode != 0:
             return False, "Docker is not running or not accessible"
@@ -359,6 +362,7 @@ def check_docker_network_capacity(
         result = subprocess.run(
             ["docker", "network", "ls", "--format", "{{.Name}}"],
             capture_output=True, text=True, check=False,
+            timeout=TIMEOUT_DOCKER_QUERY,
         )
         for line in result.stdout.splitlines():
             if line.startswith("sandbox-"):
@@ -373,6 +377,7 @@ def check_docker_network_capacity(
             ["docker", "network", "create", test_name],
             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
             check=False,
+            timeout=TIMEOUT_DOCKER_NETWORK,
         )
         if result.returncode != 0:
             msg = (
@@ -402,6 +407,7 @@ def check_docker_network_capacity(
         ["docker", "network", "rm", test_name],
         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
         check=False,
+        timeout=TIMEOUT_DOCKER_NETWORK,
     )
 
     # Warn if many sandbox networks exist
@@ -412,6 +418,7 @@ def check_docker_network_capacity(
             result = subprocess.run(
                 ["docker", "network", "ls", "--format", "{{.Name}}"],
                 capture_output=True, text=True, check=False,
+                timeout=TIMEOUT_DOCKER_QUERY,
             )
             for net in result.stdout.splitlines():
                 if not net.startswith("sandbox-"):
@@ -421,6 +428,7 @@ def check_docker_network_capacity(
                 check = subprocess.run(
                     ["docker", "ps", "-q", "--filter", f"name=^{sandbox_name}-"],
                     capture_output=True, text=True, check=False,
+                    timeout=TIMEOUT_DOCKER_QUERY,
                 )
                 if not check.stdout.strip():
                     orphaned_count += 1

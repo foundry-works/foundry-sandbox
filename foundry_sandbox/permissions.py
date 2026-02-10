@@ -10,7 +10,7 @@ from __future__ import annotations
 import json
 import subprocess
 
-from foundry_sandbox.constants import CONTAINER_USER
+from foundry_sandbox.constants import CONTAINER_USER, TIMEOUT_DOCKER_EXEC
 from foundry_sandbox.utils import log_debug
 
 # Foundry permissions based on claude-foundry v2.1.0
@@ -143,6 +143,7 @@ def install_workspace_permissions(container_id: str) -> None:
         capture_output=True,
         text=True,
         check=False,
+        timeout=TIMEOUT_DOCKER_EXEC,
     )
     if result.returncode != 0:
         from foundry_sandbox.utils import log_error

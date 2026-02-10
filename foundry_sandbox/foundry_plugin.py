@@ -17,7 +17,7 @@ from pathlib import Path
 from typing import Any
 
 from foundry_sandbox.config import load_json, write_json
-from foundry_sandbox.constants import CONTAINER_HOME, CONTAINER_USER, get_sandbox_verbose
+from foundry_sandbox.constants import CONTAINER_HOME, CONTAINER_USER, TIMEOUT_DOCKER_EXEC, TIMEOUT_GIT_TRANSFER, TIMEOUT_LOCAL_CMD, get_sandbox_verbose
 from foundry_sandbox.permissions import FOUNDRY_ALLOW, FOUNDRY_DENY
 from foundry_sandbox.utils import log_debug, log_info, log_step, log_warn
 
@@ -83,7 +83,8 @@ def prepopulate_foundry_global(claude_home_path: str, *, skip_if_populated: bool
             ["git", "-C", str(foundry_cache), "pull", "--ff-only", "-q"],
             capture_output=True,
             text=True,
-            check=False
+            check=False,
+            timeout=TIMEOUT_GIT_TRANSFER,
         )
         if result.returncode != 0:
             log_warn("Failed to update foundry cache, using existing version")
@@ -95,7 +96,8 @@ def prepopulate_foundry_global(claude_home_path: str, *, skip_if_populated: bool
              str(foundry_cache)],
             capture_output=True,
             text=True,
-            check=False
+            check=False,
+            timeout=TIMEOUT_GIT_TRANSFER,
         )
         if result.returncode != 0:
             log_warn("Failed to clone foundry repo - network may be unavailable")
@@ -119,7 +121,8 @@ def prepopulate_foundry_global(claude_home_path: str, *, skip_if_populated: bool
             ["rsync", "-a", "--delete", f"{foundry_skills}/", f"{skills_dir}/"],
             capture_output=True,
             text=True,
-            check=False
+            check=False,
+            timeout=TIMEOUT_LOCAL_CMD,
         )
         if result.returncode != 0:
             # Fall back to cp
@@ -127,7 +130,8 @@ def prepopulate_foundry_global(claude_home_path: str, *, skip_if_populated: bool
                 ["cp", "-r"] + [str(f) for f in foundry_skills.glob("*")] + [str(skills_dir)],
                 capture_output=True,
                 text=True,
-                check=False
+                check=False,
+                timeout=TIMEOUT_LOCAL_CMD,
             )
         log_debug(f"Copied skills to {skills_dir}")
     else:
@@ -140,7 +144,7 @@ def prepopulate_foundry_global(claude_home_path: str, *, skip_if_populated: bool
         for hook_file in foundry_hooks.iterdir():
             if hook_file.is_file() and hook_file.name != "hooks.json":
                 dest = hooks_dir / hook_file.name
-                subprocess.run(["cp", str(hook_file), str(dest)], check=False)
+                subprocess.run(["cp", str(hook_file), str(dest)], check=False, timeout=TIMEOUT_LOCAL_CMD)
                 dest.chmod(0o755)
         log_debug(f"Copied hooks to {hooks_dir}")
     else:
@@ -242,7 +246,8 @@ with open(path, "w") as f:
         ["docker", "exec", "-u", CONTAINER_USER, "-i", container_id, "python3", "-c", python_script],
         capture_output=True,
         text=True,
-        check=False
+        check=False,
+        timeout=TIMEOUT_DOCKER_EXEC,
     )
 
     if result.returncode != 0 and not quiet:
@@ -307,7 +312,8 @@ with open(plugins_file, "w") as f:
              container_id, "python3", "-c", pyright_script],
             capture_output=True,
             text=True,
-            check=False
+            check=False,
+            timeout=TIMEOUT_DOCKER_EXEC,
         )
 
         if result.returncode == 0:
@@ -417,7 +423,8 @@ for path in paths:
         [container_id, "python3", "-c", python_script],
         capture_output=True,
         text=True,
-        check=False
+        check=False,
+        timeout=TIMEOUT_DOCKER_EXEC,
     )
 
     if result.returncode != 0 and not quiet:
@@ -460,7 +467,8 @@ def ensure_foundry_mcp_workspace_dirs(container_id: str, working_dir: str = "", 
     subprocess.run(
         ["docker", "exec", container_id, "mkdir", "-p"] + specs_dirs,
         capture_output=quiet,
-        check=False
+        check=False,
+        timeout=TIMEOUT_DOCKER_EXEC,
     )
 
     # Create home foundry-mcp directories
@@ -473,7 +481,8 @@ def ensure_foundry_mcp_workspace_dirs(container_id: str, working_dir: str = "", 
     subprocess.run(
         ["docker", "exec", container_id, "mkdir", "-p"] + home_dirs,
         capture_output=quiet,
-        check=False
+        check=False,
+        timeout=TIMEOUT_DOCKER_EXEC,
     )
 
     # Fix ownership — use shlex.quote to prevent injection via specs_base
@@ -481,13 +490,15 @@ def ensure_foundry_mcp_workspace_dirs(container_id: str, working_dir: str = "", 
         ["docker", "exec", container_id, "sh", "-c",
          f"chown -R {shlex.quote(CONTAINER_USER)}:{shlex.quote(CONTAINER_USER)} {shlex.quote(specs_base + '/specs')} 2>/dev/null || true"],
         capture_output=True,
-        check=False
+        check=False,
+        timeout=TIMEOUT_DOCKER_EXEC,
     )
     subprocess.run(
         ["docker", "exec", container_id, "sh", "-c",
          f"chown -R {shlex.quote(CONTAINER_USER)}:{shlex.quote(CONTAINER_USER)} {shlex.quote(CONTAINER_HOME + '/.foundry-mcp')} 2>/dev/null || true"],
         capture_output=True,
-        check=False
+        check=False,
+        timeout=TIMEOUT_DOCKER_EXEC,
     )
 
 
@@ -556,7 +567,8 @@ if os.path.isfile(mkt_json):
     subprocess.run(
         ["docker", "exec", "-u", CONTAINER_USER, "-i", container_id, "python3", "-c", python_script],
         stderr=stderr_mode,
-        check=False
+        check=False,
+        timeout=TIMEOUT_DOCKER_EXEC,
     )
 
     # Commit synthesised manifests
@@ -568,7 +580,8 @@ if os.path.isfile(mkt_json):
          f"commit -m 'Add missing plugin manifests' --allow-empty"],
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
-        check=False
+        check=False,
+        timeout=TIMEOUT_DOCKER_EXEC,
     )
 
 
@@ -623,5 +636,6 @@ with open(config_path, "w") as f:
         ["docker", "exec", "-u", CONTAINER_USER, container_id,
          "python3", "-c", python_script],
         stderr=subprocess.DEVNULL,
-        check=False
+        check=False,
+        timeout=TIMEOUT_DOCKER_EXEC,
     )

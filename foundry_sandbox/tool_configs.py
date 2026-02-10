@@ -17,6 +17,7 @@ from foundry_sandbox.constants import (
     CONTAINER_HOME,
     CONTAINER_OPENCODE_PLUGIN_DIR,
     CONTAINER_USER,
+    TIMEOUT_DOCKER_EXEC,
     get_sandbox_home,
     get_sandbox_opencode_default_model,
     get_sandbox_opencode_disable_npm_plugins,
@@ -56,6 +57,7 @@ def _docker_exec_python(
         text=True,
         capture_output=quiet,
         check=True,
+        timeout=TIMEOUT_DOCKER_EXEC,
     )
 
 
@@ -84,6 +86,7 @@ def _docker_exec_sh(
         capture_output=quiet,
         text=True,
         check=check,
+        timeout=TIMEOUT_DOCKER_EXEC,
     )
 
 
@@ -326,6 +329,7 @@ def configure_gh_credential_helper(container_id: str, *, quiet: bool = False) ->
         ["docker", "exec", "-u", CONTAINER_USER, container_id, "sh", "-c", command],
         capture_output=True,
         check=False,
+        timeout=TIMEOUT_DOCKER_EXEC,
     )
 
 
@@ -483,6 +487,7 @@ if changed:
         text=True,
         capture_output=quiet,
         check=True,
+        timeout=TIMEOUT_DOCKER_EXEC,
     )
 
 
@@ -596,6 +601,7 @@ if changed or not os.path.exists(path):
         text=True,
         capture_output=quiet,
         check=True,
+        timeout=TIMEOUT_DOCKER_EXEC,
     )
 
 
@@ -704,6 +710,7 @@ if not model:
         text=True,
         capture_output=quiet,
         check=True,
+        timeout=TIMEOUT_DOCKER_EXEC,
     )
 
 
@@ -916,6 +923,7 @@ except Exception as exc:
         text=True,
         capture_output=quiet,
         check=False,
+        timeout=TIMEOUT_DOCKER_EXEC,
     )
 
     if result.returncode != 0 and not quiet:
@@ -960,6 +968,7 @@ def sync_opencode_local_plugins_on_first_attach(
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
             check=False,
+            timeout=TIMEOUT_DOCKER_EXEC,
         ).returncode
         == 0
     )
@@ -977,6 +986,7 @@ def sync_opencode_local_plugins_on_first_attach(
         check=False,
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
+        timeout=TIMEOUT_DOCKER_EXEC,
     )
 
     copy_result = subprocess.run(
@@ -984,6 +994,7 @@ def sync_opencode_local_plugins_on_first_attach(
         check=False,
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
+        timeout=TIMEOUT_DOCKER_EXEC,
     )
 
     if copy_result.returncode != 0:
@@ -1006,6 +1017,7 @@ def sync_opencode_local_plugins_on_first_attach(
         check=False,
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
+        timeout=TIMEOUT_DOCKER_EXEC,
     )
     if chown_result.returncode != 0:
         if not quiet:

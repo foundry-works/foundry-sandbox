@@ -10,7 +10,7 @@ import shlex
 import subprocess
 import sys
 
-from foundry_sandbox.constants import CONTAINER_USER, get_sandbox_verbose
+from foundry_sandbox.constants import CONTAINER_USER, TIMEOUT_DOCKER_EXEC, get_sandbox_verbose
 from foundry_sandbox.utils import log_warn
 
 
@@ -78,6 +78,7 @@ fi
         check=False,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
+        timeout=TIMEOUT_DOCKER_EXEC,
     )
 
 
@@ -128,6 +129,7 @@ fi
         check=False,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
+        timeout=TIMEOUT_DOCKER_EXEC,
     )
 
 
@@ -159,6 +161,7 @@ def detect_nested_git_repos(container_id: str, workspace_path: str = "/workspace
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             text=True,
+            timeout=TIMEOUT_DOCKER_EXEC,
         )
 
         # Return empty list on failure

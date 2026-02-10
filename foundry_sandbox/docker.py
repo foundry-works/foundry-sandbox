@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import base64
 import hashlib
+import json
 import os
 import secrets
 import subprocess
@@ -18,7 +19,14 @@ from pathlib import Path
 from typing import Any
 
 from foundry_sandbox._bridge import bridge_main
-from foundry_sandbox.constants import get_sandbox_debug, get_sandbox_verbose
+from foundry_sandbox.constants import (
+    get_sandbox_debug,
+    get_sandbox_verbose,
+    TIMEOUT_DOCKER_COMPOSE,
+    TIMEOUT_DOCKER_QUERY,
+    TIMEOUT_DOCKER_VOLUME,
+    TIMEOUT_GIT_QUERY,
+)
 from foundry_sandbox.utils import log_debug, log_error
 
 
@@ -118,10 +126,11 @@ def setup_credential_placeholders() -> dict[str, str]:
     gemini_is_oauth = False
     if gemini_settings.is_file():
         try:
-            content = gemini_settings.read_text()
-            if '"selectedType"' in content and '"oauth-personal"' in content:
+            with open(gemini_settings) as f:
+                data = json.load(f)
+            if data.get("selectedType") == "oauth-personal":
                 gemini_is_oauth = True
-        except OSError as exc:
+        except (OSError, json.JSONDecodeError) as exc:
             log_debug(f"Could not read Gemini settings: {exc}")
     if gemini_is_oauth:
         env["SANDBOX_GEMINI_API_KEY"] = ""
@@ -301,6 +310,7 @@ def compose_up(
                 result = subprocess.run(
                     ["git", "config", "--global", "user.name"],
                     capture_output=True, text=True, check=False,
+                    timeout=TIMEOUT_GIT_QUERY,
                 )
                 env["GIT_USER_NAME"] = result.stdout.strip()
             except OSError as exc:
@@ -312,6 +322,7 @@ def compose_up(
                 result = subprocess.run(
                     ["git", "config", "--global", "user.email"],
                     capture_output=True, text=True, check=False,
+                    timeout=TIMEOUT_GIT_QUERY,
                 )
                 env["GIT_USER_EMAIL"] = result.stdout.strip()
             except OSError as exc:
@@ -336,6 +347,7 @@ def compose_up(
     result = subprocess.run(
         cmd, env=env, check=False,
         capture_output=True,
+        timeout=TIMEOUT_DOCKER_COMPOSE,
     )
     if result.returncode != 0:
         stderr_text = result.stderr.decode() if isinstance(result.stderr, bytes) else (result.stderr or "")
@@ -373,6 +385,7 @@ def compose_down(
             result = subprocess.run(
                 ["docker", "ps", "-a", "--format", "{{.Names}}"],
                 capture_output=True, text=True, check=False,
+                timeout=TIMEOUT_DOCKER_QUERY,
             )
             for line in result.stdout.splitlines():
                 if line.startswith(f"{container}-unified-proxy-"):
@@ -389,7 +402,7 @@ def compose_down(
     if get_sandbox_verbose():
         print(f"+ {' '.join(cmd)}", file=sys.stderr)
 
-    subprocess.run(cmd, env=env, check=True)
+    subprocess.run(cmd, env=env, check=True, timeout=TIMEOUT_DOCKER_COMPOSE)
 
 
 # ============================================================================
@@ -411,6 +424,7 @@ def container_is_running(container: str) -> bool:
             ["docker", "ps", "--filter", f"name=^{container}-dev",
              "--format", "{{.Names}}"],
             capture_output=True, text=True, check=False,
+            timeout=TIMEOUT_DOCKER_QUERY,
         )
         return bool(result.stdout.strip())
     except OSError as exc:
@@ -432,6 +446,7 @@ def get_unified_proxy_host_port(container: str) -> str:
         result = subprocess.run(
             ["docker", "port", proxy_container, "8080"],
             capture_output=True, text=True, check=False,
+            timeout=TIMEOUT_DOCKER_QUERY,
         )
         if result.returncode != 0 or not result.stdout.strip():
             return ""
@@ -505,6 +520,7 @@ def populate_stubs_volume(container: str) -> None:
         ["docker", "volume", "create", volume_name],
         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
         check=False,
+        timeout=TIMEOUT_DOCKER_VOLUME,
     )
 
     subprocess.run(
@@ -518,6 +534,7 @@ def populate_stubs_volume(container: str) -> None:
             "|| cp /src/stub-*.json /stubs/",
         ],
         check=True,
+        timeout=TIMEOUT_DOCKER_VOLUME,
     )
 
 
@@ -531,6 +548,7 @@ def remove_stubs_volume(container: str) -> None:
         ["docker", "volume", "rm", f"{container}_stubs"],
         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
         check=False,
+        timeout=TIMEOUT_DOCKER_VOLUME,
     )
 
 
@@ -555,6 +573,7 @@ def provision_hmac_secret(container: str, sandbox_id: str) -> None:
         ["docker", "volume", "create", volume_name],
         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
         check=False,
+        timeout=TIMEOUT_DOCKER_VOLUME,
     )
 
     # Write secret to volume using temporary container.
@@ -570,6 +589,7 @@ def provision_hmac_secret(container: str, sandbox_id: str) -> None:
         ],
         input=hmac_secret_b64.encode(),
         check=True,
+        timeout=TIMEOUT_DOCKER_VOLUME,
     )
 
 
@@ -593,6 +613,7 @@ def hmac_secret_file_count(container: str) -> int:
                 "find /secrets -mindepth 1 -maxdepth 1 -type f | wc -l",
             ],
             capture_output=True, text=True, check=False,
+            timeout=TIMEOUT_DOCKER_VOLUME,
         )
         return int(result.stdout.strip())
     except (OSError, ValueError) as exc:
@@ -616,6 +637,7 @@ def repair_hmac_secret_permissions(container: str) -> None:
             "find /secrets -mindepth 1 -maxdepth 1 -type f -exec chmod 0444 {} +",
         ],
         stdout=subprocess.DEVNULL, check=True,
+        timeout=TIMEOUT_DOCKER_VOLUME,
     )
 
 
@@ -629,6 +651,7 @@ def remove_hmac_volume(container: str) -> None:
         ["docker", "volume", "rm", f"{container}_hmac"],
         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
         check=False,
+        timeout=TIMEOUT_DOCKER_VOLUME,
     )
 
 

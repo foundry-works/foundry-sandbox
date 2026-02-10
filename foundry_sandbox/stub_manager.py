@@ -11,7 +11,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-from foundry_sandbox.constants import CONTAINER_USER, get_sandbox_home, get_sandbox_verbose
+from foundry_sandbox.constants import CONTAINER_USER, TIMEOUT_DOCKER_EXEC, get_sandbox_home, get_sandbox_verbose
 from foundry_sandbox.utils import log_debug, log_info
 
 
@@ -47,7 +47,7 @@ def install_foundry_workspace_docs(container_id: str) -> None:
             "grep", "-q", "<foundry-instructions>", target_path
         ]
 
-        result = subprocess.run(check_cmd, capture_output=True, text=True, check=False)
+        result = subprocess.run(check_cmd, capture_output=True, text=True, check=False, timeout=TIMEOUT_DOCKER_EXEC)
 
         if result.returncode == 0:
             # Marker found, skip
@@ -62,7 +62,7 @@ def install_foundry_workspace_docs(container_id: str) -> None:
             container_id,
             "touch", target_path
         ]
-        subprocess.run(touch_cmd, check=False)
+        subprocess.run(touch_cmd, check=False, timeout=TIMEOUT_DOCKER_EXEC)
 
         # Read stub content
         with open(stub_path, 'r') as f:
@@ -82,7 +82,8 @@ def install_foundry_workspace_docs(container_id: str) -> None:
             input=stub_content,
             text=True,
             capture_output=True,
-            check=False
+            check=False,
+            timeout=TIMEOUT_DOCKER_EXEC,
         )
 
         if result.returncode == 0:
@@ -127,7 +128,7 @@ def inject_sandbox_branch_context(
         "grep", "-q", "<sandbox-context>", target_path
     ]
 
-    result = subprocess.run(check_cmd, capture_output=True, text=True, check=False)
+    result = subprocess.run(check_cmd, capture_output=True, text=True, check=False, timeout=TIMEOUT_DOCKER_EXEC)
 
     if result.returncode == 0:
         if verbose:
@@ -173,7 +174,7 @@ def inject_sandbox_branch_context(
         container_id,
         "touch", target_path
     ]
-    subprocess.run(touch_cmd, check=False)
+    subprocess.run(touch_cmd, check=False, timeout=TIMEOUT_DOCKER_EXEC)
 
     # Append context block
     append_cmd = [
@@ -189,7 +190,8 @@ def inject_sandbox_branch_context(
         input=context_block,
         text=True,
         capture_output=True,
-        check=False
+        check=False,
+        timeout=TIMEOUT_DOCKER_EXEC,
     )
 
     if result.returncode == 0:

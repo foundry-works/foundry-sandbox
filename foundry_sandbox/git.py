@@ -18,6 +18,7 @@ from pathlib import Path
 from typing import Any, Callable
 
 from foundry_sandbox._bridge import bridge_main
+from foundry_sandbox.constants import TIMEOUT_GIT_QUERY, TIMEOUT_GIT_TRANSFER
 from foundry_sandbox.paths import ensure_dir
 from foundry_sandbox.utils import log_info, log_step, log_warn
 
@@ -170,11 +171,13 @@ def ensure_repo_checkout(
         ["git", "-C", str(cp), "diff", "--quiet"],
         capture_output=True,
         check=False,
+        timeout=TIMEOUT_GIT_QUERY,
     )
     diff_cached = subprocess.run(
         ["git", "-C", str(cp), "diff", "--cached", "--quiet"],
         capture_output=True,
         check=False,
+        timeout=TIMEOUT_GIT_QUERY,
     )
 
     if diff_staged.returncode != 0 or diff_cached.returncode != 0:
@@ -191,6 +194,7 @@ def ensure_repo_checkout(
         capture_output=True,
         text=True,
         check=False,
+        timeout=TIMEOUT_GIT_TRANSFER,
     )
     if checkout_result.returncode != 0:
         # Branch doesn't exist locally — create from origin
@@ -199,6 +203,7 @@ def ensure_repo_checkout(
             capture_output=True,
             text=True,
             check=False,
+            timeout=TIMEOUT_GIT_TRANSFER,
         )
         if create_result.returncode != 0:
             raise RuntimeError(
@@ -211,6 +216,7 @@ def ensure_repo_checkout(
         capture_output=True,
         text=True,
         check=False,
+        timeout=TIMEOUT_GIT_TRANSFER,
     )
     if pull_result.returncode != 0:
         log_warn(f"Could not fast-forward {cp}")
@@ -231,6 +237,7 @@ def branch_exists(repo_path: str | Path, branch: str) -> bool:
          f"refs/heads/{branch}"],
         capture_output=True,
         check=False,
+        timeout=TIMEOUT_GIT_QUERY,
     )
     return result.returncode == 0
 

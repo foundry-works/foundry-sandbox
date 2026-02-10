@@ -14,6 +14,8 @@ from foundry_sandbox.constants import (
     CONTAINER_HOME,
     CONTAINER_USER,
     SSH_AGENT_CONTAINER_SOCK,
+    TIMEOUT_DOCKER_EXEC,
+    TIMEOUT_PIP_INSTALL,
     get_sandbox_sync_ssh,
     get_sandbox_verbose,
 )
@@ -38,7 +40,7 @@ def ensure_container_user(container_id: str) -> None:
     if get_sandbox_verbose():
         print(f"+ {' '.join(cmd)}", file=sys.stderr)
 
-    result = subprocess.run(cmd, capture_output=True, text=True, check=False)
+    result = subprocess.run(cmd, capture_output=True, text=True, check=False, timeout=TIMEOUT_DOCKER_EXEC)
     if result.returncode != 0:
         log_warn(f"User {CONTAINER_USER} not found in image.")
         log_warn(f"Rebuild with: SANDBOX_USERNAME={CONTAINER_USER} cast build")
@@ -71,7 +73,7 @@ def install_pip_requirements(
         cmd = ["docker", "exec", container_id, "test", "-f", "/workspace/requirements.txt"]
         if get_sandbox_verbose():
             print(f"+ {' '.join(cmd)}", file=sys.stderr)
-        result = subprocess.run(cmd, capture_output=True, check=False)
+        result = subprocess.run(cmd, capture_output=True, check=False, timeout=TIMEOUT_DOCKER_EXEC)
 
         if result.returncode == 0:
             container_req_path = "/workspace/requirements.txt"
@@ -101,7 +103,7 @@ def install_pip_requirements(
         cmd = ["docker", "exec", container_id, "test", "-f", container_req_path]
         if get_sandbox_verbose():
             print(f"+ {' '.join(cmd)}", file=sys.stderr)
-        result = subprocess.run(cmd, capture_output=True, check=False)
+        result = subprocess.run(cmd, capture_output=True, check=False, timeout=TIMEOUT_DOCKER_EXEC)
 
         if result.returncode != 0:
             if not quiet:
@@ -119,7 +121,7 @@ def install_pip_requirements(
     if get_sandbox_verbose():
         print(f"+ {' '.join(cmd)}", file=sys.stderr)
 
-    result = subprocess.run(cmd, capture_output=True, text=True, check=False)
+    result = subprocess.run(cmd, capture_output=True, text=True, check=False, timeout=TIMEOUT_PIP_INSTALL)
     if result.returncode == 0:
         if not quiet:
             log_info("Python packages installed successfully")
@@ -132,7 +134,7 @@ def install_pip_requirements(
     cmd = ["docker", "exec", container_id, "grep", "-q", "gateway\\|172\\.", "/etc/resolv.conf"]
     if get_sandbox_verbose():
         print(f"+ {' '.join(cmd)}", file=sys.stderr)
-    result = subprocess.run(cmd, capture_output=True, check=False)
+    result = subprocess.run(cmd, capture_output=True, check=False, timeout=TIMEOUT_DOCKER_EXEC)
 
     if result.returncode == 0:
         block_pypi_after_install(container_id, quiet=quiet)
@@ -142,7 +144,7 @@ def install_pip_requirements(
         cmd = ["docker", "exec", container_id, "rm", "-f", container_req_path]
         if get_sandbox_verbose():
             print(f"+ {' '.join(cmd)}", file=sys.stderr)
-        subprocess.run(cmd, capture_output=True, check=False)
+        subprocess.run(cmd, capture_output=True, check=False, timeout=TIMEOUT_DOCKER_EXEC)
 
 
 def block_pypi_after_install(container_id: str, *, quiet: bool = False) -> None:
@@ -167,7 +169,7 @@ def block_pypi_after_install(container_id: str, *, quiet: bool = False) -> None:
         if get_sandbox_verbose():
             print(f"+ {' '.join(cmd)}", file=sys.stderr)
 
-        result = subprocess.run(cmd, capture_output=True, text=True, check=False)
+        result = subprocess.run(cmd, capture_output=True, text=True, check=False, timeout=TIMEOUT_DOCKER_EXEC)
         if result.returncode != 0 or not result.stdout.strip():
             if not quiet:
                 log_debug(f"Could not resolve {domain} (may already be blocked)")
@@ -189,7 +191,7 @@ def block_pypi_after_install(container_id: str, *, quiet: bool = False) -> None:
             if get_sandbox_verbose():
                 print(f"+ {' '.join(check_cmd)}", file=sys.stderr)
 
-            check_result = subprocess.run(check_cmd, capture_output=True, check=False)
+            check_result = subprocess.run(check_cmd, capture_output=True, check=False, timeout=TIMEOUT_DOCKER_EXEC)
             if check_result.returncode == 0:
                 if not quiet:
                     log_debug(f"DROP rule for {ip} already exists")
@@ -203,7 +205,7 @@ def block_pypi_after_install(container_id: str, *, quiet: bool = False) -> None:
             if get_sandbox_verbose():
                 print(f"+ {' '.join(insert_cmd)}", file=sys.stderr)
 
-            insert_result = subprocess.run(insert_cmd, capture_output=True, check=False)
+            insert_result = subprocess.run(insert_cmd, capture_output=True, check=False, timeout=TIMEOUT_DOCKER_EXEC)
             if insert_result.returncode == 0:
                 if not quiet:
                     log_debug(f"Added DROP rule for {domain} ({ip})")
@@ -245,7 +247,7 @@ def ssh_agent_preflight(
     if get_sandbox_verbose():
         print(f"+ {' '.join(cmd)}", file=sys.stderr)
 
-    result = subprocess.run(cmd, capture_output=True, check=False)
+    result = subprocess.run(cmd, capture_output=True, check=False, timeout=TIMEOUT_DOCKER_EXEC)
     if result.returncode != 0:
         log_warn(f"SSH agent socket not available at {SSH_AGENT_CONTAINER_SOCK} inside container.")
         return
@@ -258,7 +260,7 @@ def ssh_agent_preflight(
     if get_sandbox_verbose():
         print(f"+ {' '.join(cmd)}", file=sys.stderr)
 
-    result = subprocess.run(cmd, capture_output=True, text=True, check=False)
+    result = subprocess.run(cmd, capture_output=True, text=True, check=False, timeout=TIMEOUT_DOCKER_EXEC)
     ssh_add_output = result.stdout + result.stderr
 
     if result.returncode == 0:

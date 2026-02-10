@@ -23,7 +23,7 @@ import sys
 
 import click
 
-from foundry_sandbox.constants import get_claude_configs_dir, get_worktrees_dir
+from foundry_sandbox.constants import TIMEOUT_DOCKER_NETWORK, TIMEOUT_DOCKER_QUERY, get_claude_configs_dir, get_worktrees_dir
 from foundry_sandbox.docker import container_is_running, remove_stubs_volume, remove_hmac_volume
 from foundry_sandbox.git_worktree import cleanup_sandbox_branch, remove_worktree
 from foundry_sandbox.paths import derive_sandbox_paths, safe_remove
@@ -169,6 +169,7 @@ def prune(
                         capture_output=True,
                         text=True,
                         check=False,
+                        timeout=TIMEOUT_DOCKER_QUERY,
                     )
                     running = bool(result.stdout.strip())
                 except (OSError, subprocess.SubprocessError):
@@ -235,6 +236,7 @@ def prune(
                 capture_output=True,
                 text=True,
                 check=False,
+                timeout=TIMEOUT_DOCKER_QUERY,
             )
             if result.returncode == 0:
                 network_pattern = re.compile(r"^sandbox-.*_(credential-isolation|proxy-egress)$")
@@ -260,6 +262,7 @@ def prune(
                             capture_output=True,
                             text=True,
                             check=False,
+                            timeout=TIMEOUT_DOCKER_QUERY,
                         )
                         has_running = bool(ps_result.stdout.strip())
                     except (OSError, subprocess.SubprocessError):
@@ -289,6 +292,7 @@ def prune(
                                 capture_output=True,
                                 text=True,
                                 check=False,
+                                timeout=TIMEOUT_DOCKER_QUERY,
                             )
                             for stopped_id in stopped_result.stdout.splitlines():
                                 stopped_id = stopped_id.strip()
@@ -298,6 +302,7 @@ def prune(
                                         stdout=subprocess.DEVNULL,
                                         stderr=subprocess.DEVNULL,
                                         check=False,
+                                        timeout=TIMEOUT_DOCKER_QUERY,
                                     )
                         except (OSError, subprocess.SubprocessError):
                             pass
@@ -316,6 +321,7 @@ def prune(
                                 capture_output=True,
                                 text=True,
                                 check=False,
+                                timeout=TIMEOUT_DOCKER_NETWORK,
                             )
                             if inspect_result.returncode == 0:
                                 endpoints = inspect_result.stdout.strip().split()
@@ -326,6 +332,7 @@ def prune(
                                             stdout=subprocess.DEVNULL,
                                             stderr=subprocess.DEVNULL,
                                             check=False,
+                                            timeout=TIMEOUT_DOCKER_NETWORK,
                                         )
                         except (OSError, subprocess.SubprocessError):
                             pass
@@ -337,6 +344,7 @@ def prune(
                                 stdout=subprocess.DEVNULL,
                                 stderr=subprocess.DEVNULL,
                                 check=False,
+                                timeout=TIMEOUT_DOCKER_NETWORK,
                             )
                             if rm_result.returncode == 0:
                                 removed_networks.append(network_name)
