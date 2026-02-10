@@ -12,7 +12,7 @@ from __future__ import annotations
 import json
 import subprocess
 from pathlib import Path
-from unittest.mock import MagicMock, Mock, patch
+from unittest.mock import MagicMock, Mock, mock_open, patch
 
 import pytest
 
@@ -517,22 +517,11 @@ class TestCredentialPlaceholders:
         monkeypatch.delenv("TAVILY_API_KEY", raising=False)
         monkeypatch.setenv("SANDBOX_ENABLE_OPENCODE", "0")
 
-        # Mock Gemini settings with OAuth
-        fake_settings = MagicMock()
-        fake_settings.is_file.return_value = True
-        fake_settings.read_text.return_value = '{"selectedType": "oauth-personal"}'
-
         with patch("foundry_sandbox.docker.Path.home") as mock_home:
             mock_home.return_value = Path("/fake/home")
-            with patch("foundry_sandbox.docker.Path.is_file") as mock_is_file:
-                def is_file_side_effect():
-                    # Return True for Gemini settings path
-                    return True
-
-                mock_is_file.return_value = True
-
-                # Also need to mock read_text
-                with patch("pathlib.Path.read_text", return_value='{"selectedType": "oauth-personal"}'):
+            with patch("foundry_sandbox.docker.Path.is_file", return_value=True):
+                m = mock_open(read_data='{"selectedType": "oauth-personal"}')
+                with patch("builtins.open", m):
                     env = docker.setup_credential_placeholders()
                     assert env["SANDBOX_GEMINI_API_KEY"] == ""
 

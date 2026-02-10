@@ -99,6 +99,40 @@ CONTAINER_OPENCODE_PLUGIN_DIR: str = "/home/ubuntu/.config/opencode/plugins"
 SANDBOX_NAME_MAX_LENGTH: int = 120
 """Maximum length for auto-generated sandbox names before truncation+hash."""
 
+# ============================================================================
+# Subprocess Timeout Constants (seconds)
+# ============================================================================
+
+TIMEOUT_DOCKER_QUERY: int = 10
+"""Timeout for docker ps/inspect/port/info queries."""
+
+TIMEOUT_DOCKER_COMPOSE: int = 120
+"""Timeout for docker compose up/down operations."""
+
+TIMEOUT_DOCKER_VOLUME: int = 30
+"""Timeout for docker volume create/rm and short docker run operations."""
+
+TIMEOUT_DOCKER_EXEC: int = 60
+"""Timeout for docker exec operations."""
+
+TIMEOUT_DOCKER_NETWORK: int = 30
+"""Timeout for docker network create/rm/inspect."""
+
+TIMEOUT_GIT_TRANSFER: int = 120
+"""Timeout for git clone/fetch/worktree add (network-bound)."""
+
+TIMEOUT_GIT_QUERY: int = 10
+"""Timeout for git config/rev-parse/for-each-ref (local)."""
+
+TIMEOUT_LOCAL_CMD: int = 5
+"""Timeout for quick local commands (id, etc.)."""
+
+TIMEOUT_PIP_INSTALL: int = 300
+"""Timeout for pip install (can be very slow)."""
+
+TIMEOUT_DOCKER_BUILD: int = 600
+"""Timeout for docker compose build / docker build."""
+
 
 # ============================================================================
 # Runtime Flag Defaults (read from environment)

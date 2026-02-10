@@ -25,7 +25,7 @@ from foundry_sandbox.commands._helpers import (
     uses_credential_isolation as _uses_credential_isolation_shared,
 )
 from foundry_sandbox.credential_setup import sync_runtime_credentials
-from foundry_sandbox.constants import get_worktrees_dir
+from foundry_sandbox.constants import TIMEOUT_DOCKER_COMPOSE, get_worktrees_dir
 from foundry_sandbox.docker import container_is_running, get_compose_command
 from foundry_sandbox.paths import derive_sandbox_paths
 from foundry_sandbox.state import load_last_attach, load_sandbox_metadata
@@ -89,6 +89,7 @@ def _refresh_isolation_mode(name: str, container: str, override_file: str) -> No
         subprocess.run(
             compose_cmd + ["-p", container, "restart", "unified-proxy"],
             check=True,
+            timeout=TIMEOUT_DOCKER_COMPOSE,
         )
         click.echo("Credentials refreshed (unified-proxy restarted).")
     except subprocess.CalledProcessError as exc:

@@ -19,7 +19,7 @@ from typing import Any
 
 import click
 
-from foundry_sandbox.constants import get_worktrees_dir
+from foundry_sandbox.constants import TIMEOUT_DOCKER_QUERY, TIMEOUT_LOCAL_CMD, get_worktrees_dir
 from foundry_sandbox.paths import derive_sandbox_paths
 from foundry_sandbox.state import load_sandbox_metadata
 from foundry_sandbox.utils import BOLD, RESET, format_table_row
@@ -46,6 +46,7 @@ def _get_docker_status(container_name: str) -> str:
             capture_output=True,
             text=True,
             check=False,
+            timeout=TIMEOUT_DOCKER_QUERY,
         )
         status = result.stdout.strip().split("\n")[0] if result.stdout.strip() else ""
         return status if status else "no container"
@@ -67,6 +68,7 @@ def _tmux_session_exists(name: str) -> bool:
             ["tmux", "has-session", "-t", name],
             capture_output=True,
             check=False,
+            timeout=TIMEOUT_LOCAL_CMD,
         )
         return result.returncode == 0
     except Exception:

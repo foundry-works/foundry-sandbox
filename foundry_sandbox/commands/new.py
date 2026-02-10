@@ -52,7 +52,7 @@ from foundry_sandbox.commands._helpers import (
 from foundry_sandbox.utils import sanitize_ref_component
 from foundry_sandbox.api_keys import check_claude_key_required, export_gh_token, has_opencode_key, show_cli_status
 from foundry_sandbox.compose import assemble_override
-from foundry_sandbox.constants import get_repos_dir
+from foundry_sandbox.constants import TIMEOUT_GIT_QUERY, TIMEOUT_LOCAL_CMD, get_repos_dir
 from foundry_sandbox.container_io import copy_dir_to_container, copy_file_to_container
 from foundry_sandbox.container_setup import install_pip_requirements
 from foundry_sandbox.credential_setup import copy_configs_to_container
@@ -90,7 +90,8 @@ def _rollback_new(
     is not left with orphaned state.
     """
     import shutil
-    from foundry_sandbox.docker import compose_down
+    import subprocess as _sp
+    from foundry_sandbox.docker import compose_down, remove_stubs_volume, remove_hmac_volume
     from foundry_sandbox.git_worktree import remove_worktree
 
     # 1. Stop and remove containers
@@ -102,22 +103,43 @@ def _rollback_new(
             override_file=str(override_file),
             remove_volumes=True,
         )
-    except Exception:
-        pass
+    except Exception as exc:
+        log_warn(f"Rollback: failed to stop containers: {exc}")
 
-    # 2. Remove config directory
+    # 2. Remove Docker networks (best-effort)
+    for suffix in ("credential-isolation", "proxy-egress"):
+        try:
+            _sp.run(
+                ["docker", "network", "rm", f"{container}_{suffix}"],
+                stdout=_sp.DEVNULL, stderr=_sp.DEVNULL,
+                check=False, timeout=30,
+            )
+        except Exception as exc:
+            log_warn(f"Rollback: failed to remove network {container}_{suffix}: {exc}")
+
+    # 3. Remove stubs and HMAC volumes (best-effort)
+    try:
+        remove_stubs_volume(container)
+    except Exception as exc:
+        log_warn(f"Rollback: failed to remove stubs volume: {exc}")
+    try:
+        remove_hmac_volume(container)
+    except Exception as exc:
+        log_warn(f"Rollback: failed to remove HMAC volume: {exc}")
+
+    # 4. Remove config directory
     if claude_config_path.is_dir():
         try:
             shutil.rmtree(claude_config_path)
-        except Exception:
-            pass
+        except Exception as exc:
+            log_warn(f"Rollback: failed to remove config directory: {exc}")
 
-    # 3. Remove worktree
+    # 5. Remove worktree
     if worktree_path.is_dir():
         try:
             remove_worktree(str(worktree_path))
-        except Exception:
-            pass
+        except Exception as exc:
+            log_warn(f"Rollback: failed to remove worktree: {exc}")
 
 
 
@@ -231,6 +253,7 @@ def _resolve_repo_input(repo_input: str) -> tuple[str, str, str, str]:
             capture_output=True,
             text=True,
             check=False,
+            timeout=TIMEOUT_GIT_QUERY,
         )
         if result.returncode != 0:
             return ("", "", "", "")
@@ -241,6 +264,7 @@ def _resolve_repo_input(repo_input: str) -> tuple[str, str, str, str]:
             capture_output=True,
             text=True,
             check=False,
+            timeout=TIMEOUT_GIT_QUERY,
         )
 
         if origin_result.returncode == 0 and origin_result.stdout.strip():
@@ -255,6 +279,7 @@ def _resolve_repo_input(repo_input: str) -> tuple[str, str, str, str]:
             capture_output=True,
             text=True,
             check=False,
+            timeout=TIMEOUT_GIT_QUERY,
         )
         current_branch = branch_result.stdout.strip() if branch_result.returncode == 0 else ""
 
@@ -276,6 +301,7 @@ def _get_local_branches(repo_root: str) -> list[str]:
         capture_output=True,
         text=True,
         check=False,
+        timeout=TIMEOUT_GIT_QUERY,
     )
     if result.returncode != 0:
         return []
@@ -295,6 +321,7 @@ def _generate_branch_name(repo_url: str, from_branch: str) -> str:
                 capture_output=True,
                 text=True,
                 check=False,
+                timeout=TIMEOUT_LOCAL_CMD,
             ).stdout.strip()
         except Exception:
             pass
@@ -315,6 +342,7 @@ def _generate_branch_name(repo_url: str, from_branch: str) -> str:
         ["git", "check-ref-format", "--branch", branch],
         capture_output=True,
         check=False,
+        timeout=TIMEOUT_GIT_QUERY,
     )
 
     if check_result.returncode != 0:
@@ -323,6 +351,7 @@ def _generate_branch_name(repo_url: str, from_branch: str) -> str:
             ["git", "check-ref-format", "--branch", fallback_branch],
             capture_output=True,
             check=False,
+            timeout=TIMEOUT_GIT_QUERY,
         )
         if check_fallback.returncode == 0:
             branch = fallback_branch
@@ -353,6 +382,7 @@ def _wizard_repo() -> tuple[str, str, str, str]:
         capture_output=True,
         text=True,
         check=False,
+        timeout=TIMEOUT_GIT_QUERY,
     )
 
     if current_result.returncode == 0:
@@ -362,6 +392,7 @@ def _wizard_repo() -> tuple[str, str, str, str]:
             capture_output=True,
             text=True,
             check=False,
+            timeout=TIMEOUT_GIT_QUERY,
         )
         current_display = origin_result.stdout.strip() if origin_result.returncode == 0 else current_repo_root
 
@@ -409,6 +440,7 @@ def _wizard_branch(repo_root: str, current_branch: str) -> tuple[str, str, bool]
                     ["git", "check-ref-format", "--branch", branch],
                     capture_output=True,
                     check=False,
+                    timeout=TIMEOUT_GIT_QUERY,
                 )
                 if check_result.returncode == 0:
                     break

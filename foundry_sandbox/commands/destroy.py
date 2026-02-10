@@ -22,6 +22,7 @@ import sys
 
 import click
 
+from foundry_sandbox.constants import TIMEOUT_DOCKER_NETWORK, TIMEOUT_LOCAL_CMD
 from foundry_sandbox.docker import compose_down, remove_hmac_volume, remove_stubs_volume
 from foundry_sandbox.git_worktree import cleanup_sandbox_branch, remove_worktree
 from foundry_sandbox.paths import derive_sandbox_paths
@@ -93,6 +94,7 @@ def destroy(name: str, keep_worktree: bool, force: bool, yes: bool) -> None:
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
             check=False,
+            timeout=TIMEOUT_LOCAL_CMD,
         )
     except (OSError, subprocess.SubprocessError):
         pass  # tmux may not be installed or session may not exist
@@ -144,6 +146,7 @@ def destroy(name: str, keep_worktree: bool, force: bool, yes: bool) -> None:
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
                 check=False,
+                timeout=TIMEOUT_DOCKER_NETWORK,
             )
             if inspect_result.returncode == 0:
                 subprocess.run(
@@ -151,6 +154,7 @@ def destroy(name: str, keep_worktree: bool, force: bool, yes: bool) -> None:
                     stdout=subprocess.DEVNULL,
                     stderr=subprocess.DEVNULL,
                     check=False,
+                    timeout=TIMEOUT_DOCKER_NETWORK,
                 )
         except (OSError, subprocess.SubprocessError):
             pass

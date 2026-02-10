@@ -10,6 +10,7 @@ import sys
 
 import click
 
+from foundry_sandbox.constants import TIMEOUT_LOCAL_CMD
 from foundry_sandbox.docker import compose_down
 from foundry_sandbox.paths import derive_sandbox_paths
 from foundry_sandbox.utils import log_info, log_warn
@@ -40,6 +41,7 @@ def stop(name: str) -> None:
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
             check=False,
+            timeout=TIMEOUT_LOCAL_CMD,
         )
     except OSError:
         pass  # tmux may not be installed

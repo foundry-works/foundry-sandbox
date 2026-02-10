@@ -23,7 +23,7 @@ import sys
 
 import click
 
-from foundry_sandbox.constants import get_worktrees_dir
+from foundry_sandbox.constants import TIMEOUT_DOCKER_NETWORK, TIMEOUT_DOCKER_QUERY, TIMEOUT_LOCAL_CMD, get_worktrees_dir
 from foundry_sandbox.docker import compose_down, remove_hmac_volume, remove_stubs_volume
 from foundry_sandbox.git_worktree import cleanup_sandbox_branch, remove_worktree
 from foundry_sandbox.paths import derive_sandbox_paths
@@ -58,6 +58,7 @@ def _remove_network(network_name: str) -> bool:
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
             check=False,
+            timeout=TIMEOUT_DOCKER_NETWORK,
         )
         if inspect_result.returncode == 0:
             # Network exists, try to remove it
@@ -66,6 +67,7 @@ def _remove_network(network_name: str) -> bool:
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
                 check=False,
+                timeout=TIMEOUT_DOCKER_NETWORK,
             )
             return rm_result.returncode == 0
     except (OSError, subprocess.SubprocessError):
@@ -89,6 +91,7 @@ def _cleanup_orphaned_networks() -> int:
             stderr=subprocess.DEVNULL,
             check=False,
             text=True,
+            timeout=TIMEOUT_DOCKER_QUERY,
         )
         if result.returncode != 0:
             return 0
@@ -195,6 +198,7 @@ def destroy_all(keep_worktree: bool) -> None:
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
                 check=False,
+                timeout=TIMEOUT_LOCAL_CMD,
             )
         except (OSError, subprocess.SubprocessError):
             pass

@@ -16,7 +16,7 @@ from typing import Callable
 
 from foundry_sandbox import api_keys, container_io, container_setup, credential_setup, docker, foundry_plugin
 from foundry_sandbox.commands._helpers import repo_url_to_bare_path as _repo_url_to_bare_path
-from foundry_sandbox.constants import SANDBOX_NAME_MAX_LENGTH, get_claude_configs_dir, get_repos_dir, get_worktrees_dir
+from foundry_sandbox.constants import SANDBOX_NAME_MAX_LENGTH, TIMEOUT_DOCKER_COMPOSE, get_claude_configs_dir, get_repos_dir, get_worktrees_dir
 from foundry_sandbox.git_path_fixer import fix_proxy_worktree_paths
 from foundry_sandbox.network import add_network_to_override, append_override_list_item
 from foundry_sandbox.paths import derive_sandbox_paths, ensure_dir
@@ -97,7 +97,7 @@ def _ensure_override_from_metadata(name: str, override_file: str) -> tuple[int, 
     if network_mode:
         try:
             add_network_to_override(network_mode, override_file)
-        except Exception as exc:  # pragma: no cover - defensive compatibility path
+        except (ValueError, OSError) as exc:  # pragma: no cover - defensive compatibility path
             return 1, str(exc)
 
     return 0, ""
@@ -316,4 +316,4 @@ def run_legacy_command(*args: str, capture_output: bool = False) -> subprocess.C
     if capture_output:
         kwargs["capture_output"] = True
         kwargs["text"] = True
-    return subprocess.run([str(SANDBOX_SH), *args], **kwargs)
+    return subprocess.run([str(SANDBOX_SH), *args], timeout=TIMEOUT_DOCKER_COMPOSE, **kwargs)

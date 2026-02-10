@@ -18,13 +18,11 @@ from pathlib import Path
 from typing import Optional
 
 from foundry_sandbox._bridge import bridge_main
+from foundry_sandbox.constants import SSH_AGENT_CONTAINER_SOCK
 from foundry_sandbox.utils import log_warn
 
 # Characters safe for use in YAML volume mount paths (no YAML special chars)
 _SAFE_PATH_RE = re.compile(r"^[A-Za-z0-9_./ -]+$")
-
-# Constants
-SSH_AGENT_CONTAINER_SOCK = "/ssh-agent"
 
 
 def validate_network_mode(mode: str) -> None:

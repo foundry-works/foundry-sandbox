@@ -23,7 +23,7 @@ from pathlib import Path
 from typing import Any
 
 from foundry_sandbox._bridge import bridge_main
-from foundry_sandbox.constants import CONTAINER_READY_ATTEMPTS, CONTAINER_READY_DELAY, CONTAINER_USER, get_sandbox_verbose
+from foundry_sandbox.constants import CONTAINER_READY_ATTEMPTS, CONTAINER_READY_DELAY, CONTAINER_USER, TIMEOUT_DOCKER_EXEC, TIMEOUT_LOCAL_CMD, get_sandbox_verbose
 from foundry_sandbox.utils import log_debug, log_error
 
 
@@ -38,7 +38,7 @@ def _tar_supports_no_xattrs() -> bool:
     try:
         result = subprocess.run(
             ["tar", "--no-xattrs", "--version"],
-            capture_output=True, check=False,
+            capture_output=True, check=False, timeout=TIMEOUT_LOCAL_CMD,
         )
         return result.returncode == 0
     except OSError as exc:
@@ -52,7 +52,7 @@ def _tar_supports_transform() -> bool:
     try:
         result = subprocess.run(
             ["tar", "--help"],
-            capture_output=True, text=True, check=False,
+            capture_output=True, text=True, check=False, timeout=TIMEOUT_LOCAL_CMD,
         )
         return "--transform" in result.stdout or "--transform" in result.stderr
     except OSError as exc:
@@ -149,11 +149,20 @@ def _pipe_tar_to_docker(
             docker_cmd, stdin=tar_proc.stdout, **stderr_kwargs,
         )
         tar_proc.stdout.close()  # Allow tar_proc to receive SIGPIPE if docker_proc exits
-        docker_proc.wait()
+        try:
+            docker_proc.wait(timeout=TIMEOUT_DOCKER_EXEC)
+        except subprocess.TimeoutExpired:
+            docker_proc.kill()
+            docker_proc.wait()
+            raise
     finally:
         if tar_proc.stdout and not tar_proc.stdout.closed:
             tar_proc.stdout.close()
-        tar_proc.wait()
+        try:
+            tar_proc.wait(timeout=TIMEOUT_DOCKER_EXEC)
+        except subprocess.TimeoutExpired:
+            tar_proc.kill()
+            tar_proc.wait()
 
     # Check both processes — tar failure should not be silently ignored
     if tar_proc.returncode != 0 and docker_proc.returncode == 0:
@@ -218,7 +227,7 @@ def copy_file_to_container(
             container_id, "chmod", mode, dst,
         ]
         _verbose_trace(" ".join(chmod_cmd))
-        return subprocess.run(chmod_cmd, check=False, **stderr_kwargs).returncode == 0
+        return subprocess.run(chmod_cmd, check=False, timeout=TIMEOUT_DOCKER_EXEC, **stderr_kwargs).returncode == 0
 
     for attempt in range(CONTAINER_READY_ATTEMPTS):
         # Create parent directory inside container
@@ -227,7 +236,7 @@ def copy_file_to_container(
             container_id, "mkdir", "-p", parent_dir,
         ]
         _verbose_trace(" ".join(mkdir_cmd))
-        subprocess.run(mkdir_cmd, check=False, **stderr_kwargs)
+        subprocess.run(mkdir_cmd, check=False, timeout=TIMEOUT_DOCKER_EXEC, **stderr_kwargs)
 
         if not needs_rename:
             # Simple case: basenames match
@@ -290,7 +299,7 @@ def copy_file_to_container(
                     f"{parent_dir}/{src_base}", dst,
                 ]
                 _verbose_trace(" ".join(mv_cmd))
-                mv_result = subprocess.run(mv_cmd, check=False, **stderr_kwargs)
+                mv_result = subprocess.run(mv_cmd, check=False, timeout=TIMEOUT_DOCKER_EXEC, **stderr_kwargs)
                 if mv_result.returncode == 0 and _post_copy_chmod():
                     return True
 
@@ -351,7 +360,7 @@ def copy_dir_to_container(
             container_id, "mkdir", "-p", dst,
         ]
         _verbose_trace(" ".join(mkdir_cmd))
-        subprocess.run(mkdir_cmd, check=False, **stderr_kwargs)
+        subprocess.run(mkdir_cmd, check=False, timeout=TIMEOUT_DOCKER_EXEC, **stderr_kwargs)
 
         tar_cmd = ["tar"] + base_tar_args + exclude_args + ["-C", src, "-cf", "-", "."]
         docker_cmd = [
@@ -456,7 +465,7 @@ def docker_exec_json(
     _verbose_trace(" ".join(cmd))
 
     result = subprocess.run(
-        cmd, capture_output=True, text=True, check=True,
+        cmd, capture_output=True, text=True, check=True, timeout=TIMEOUT_DOCKER_EXEC,
     )
     try:
         return json.loads(result.stdout)
@@ -488,7 +497,7 @@ def docker_exec_text(
     _verbose_trace(" ".join(cmd))
 
     result = subprocess.run(
-        cmd, capture_output=True, text=True, check=True,
+        cmd, capture_output=True, text=True, check=True, timeout=TIMEOUT_DOCKER_EXEC,
     )
     return result.stdout.strip()
 

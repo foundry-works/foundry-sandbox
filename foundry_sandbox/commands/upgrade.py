@@ -13,6 +13,7 @@ from pathlib import Path
 
 import click
 
+from foundry_sandbox.constants import TIMEOUT_GIT_TRANSFER
 from foundry_sandbox.utils import log_error
 
 
@@ -29,7 +30,7 @@ def upgrade(use_local: bool) -> None:
             click.echo("Running local installer...")
             result = subprocess.run(
                 ["bash", str(install_sh), "--repo", str(SCRIPT_DIR)],
-                check=False,
+                check=False,  # no timeout: interactive installer
             )
             sys.exit(result.returncode)
         else:
@@ -44,6 +45,7 @@ def upgrade(use_local: bool) -> None:
             ["curl", "-fsSL", "-o", tmp_path,
              "https://raw.githubusercontent.com/foundry-works/foundry-sandbox/main/install.sh"],
             check=False,
+            timeout=TIMEOUT_GIT_TRANSFER,
         )
         if dl_result.returncode != 0:
             log_error("Failed to download installer")
@@ -51,6 +53,6 @@ def upgrade(use_local: bool) -> None:
             sys.exit(1)
 
         click.echo(f"Running installer from {tmp_path}...")
-        result = subprocess.run(["bash", tmp_path], check=False)
+        result = subprocess.run(["bash", tmp_path], check=False)  # no timeout: interactive installer
         os.unlink(tmp_path)
         sys.exit(result.returncode)

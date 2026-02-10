@@ -14,6 +14,7 @@ from pathlib import Path
 import click
 
 from foundry_sandbox.constants import (
+    TIMEOUT_DOCKER_QUERY,
     get_claude_configs_dir,
     get_repos_dir,
     get_sandbox_home,
@@ -104,6 +105,7 @@ def config(json_output: bool) -> None:
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
         check=False,
+        timeout=TIMEOUT_DOCKER_QUERY,
     )
     if result.returncode == 0:
         click.echo(format_kv("docker daemon", "ok"))

@@ -11,6 +11,7 @@ from pathlib import Path
 
 import click
 
+from foundry_sandbox.constants import TIMEOUT_DOCKER_BUILD
 from foundry_sandbox.utils import log_info
 
 SCRIPT_DIR = Path(__file__).resolve().parent.parent.parent
@@ -29,6 +30,7 @@ def build(no_cache: bool, without_opencode: bool) -> None:
         ["docker", "compose", "-f", str(SCRIPT_DIR / "docker-compose.yml"), "build"]
         + cache_args + build_args,
         check=False,
+        timeout=TIMEOUT_DOCKER_BUILD,
     )
     if result.returncode != 0:
         sys.exit(result.returncode)
@@ -38,6 +40,7 @@ def build(no_cache: bool, without_opencode: bool) -> None:
         ["docker", "build"] + cache_args + ["-t", "foundry-unified-proxy",
          str(SCRIPT_DIR / "unified-proxy")],
         check=False,
+        timeout=TIMEOUT_DOCKER_BUILD,
     )
     if result.returncode != 0:
         sys.exit(result.returncode)
