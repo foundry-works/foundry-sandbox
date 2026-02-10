@@ -22,7 +22,7 @@ import click
 from foundry_sandbox.constants import TIMEOUT_DOCKER_QUERY, TIMEOUT_LOCAL_CMD, get_worktrees_dir
 from foundry_sandbox.paths import derive_sandbox_paths
 from foundry_sandbox.state import load_sandbox_metadata
-from foundry_sandbox.utils import BOLD, RESET, format_table_row
+from foundry_sandbox.utils import BOLD, RESET, format_table_row, log_debug
 
 
 # ---------------------------------------------------------------------------
@@ -51,6 +51,7 @@ def _get_docker_status(container_name: str) -> str:
         status = result.stdout.strip().split("\n")[0] if result.stdout.strip() else ""
         return status if status else "no container"
     except Exception:
+        log_debug("Failed to query container status")
         return "no container"
 
 
@@ -72,6 +73,7 @@ def _tmux_session_exists(name: str) -> bool:
         )
         return result.returncode == 0
     except Exception:
+        log_debug("Failed to check tmux session")
         return False
 
 

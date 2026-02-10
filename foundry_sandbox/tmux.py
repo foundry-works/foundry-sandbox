@@ -10,7 +10,7 @@ import os
 import shlex
 import subprocess
 
-from foundry_sandbox.constants import CONTAINER_USER
+from foundry_sandbox.constants import CONTAINER_USER, TIMEOUT_LOCAL_CMD
 from foundry_sandbox.utils import log_info
 
 
@@ -28,6 +28,7 @@ def session_exists(session: str) -> bool:
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
         check=False,
+        timeout=TIMEOUT_LOCAL_CMD,
     )
     return result.returncode == 0
 
@@ -74,6 +75,7 @@ def create_and_attach(
             docker_command,
         ],
         check=False,
+        timeout=TIMEOUT_LOCAL_CMD,
     )
 
     subprocess.run(
@@ -81,6 +83,7 @@ def create_and_attach(
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
         check=False,
+        timeout=TIMEOUT_LOCAL_CMD,
     )
 
     mouse_setting = "on" if mouse == "1" else "off"
@@ -89,6 +92,7 @@ def create_and_attach(
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
         check=False,
+        timeout=TIMEOUT_LOCAL_CMD,
     )
 
     os.execvp("tmux", ["tmux", "attach-session", "-t", session])

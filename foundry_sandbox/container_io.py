@@ -16,6 +16,7 @@ from __future__ import annotations
 import functools
 import json
 import os
+import re
 import subprocess
 import sys
 import time
@@ -222,6 +223,8 @@ def copy_file_to_container(
         """Apply chmod immediately after copy to eliminate TOCTOU window."""
         if mode is None:
             return True
+        if not re.fullmatch(r"[0-7]{3,4}", mode):
+            raise ValueError(f"invalid chmod mode: {mode!r}")
         chmod_cmd = [
             "docker", "exec", "-u", CONTAINER_USER,
             container_id, "chmod", mode, dst,

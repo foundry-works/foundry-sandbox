@@ -1,4 +1,4 @@
-"""Security invariant tests for git migration parity.
+"""Security invariant tests for git branch isolation and protection.
 
 Validates that critical security properties of branch isolation, protected
 branch enforcement, and cross-sandbox visibility filtering are maintained.

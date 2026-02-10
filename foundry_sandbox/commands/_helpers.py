@@ -19,7 +19,7 @@ from foundry_sandbox.constants import (
     get_repos_dir,
     get_worktrees_dir,
 )
-from foundry_sandbox.utils import sanitize_ref_component
+from foundry_sandbox.utils import log_debug, sanitize_ref_component
 from foundry_sandbox.validate import validate_existing_sandbox_name
 
 
@@ -254,7 +254,7 @@ def fzf_select_sandbox() -> str | None:
         if result.returncode == 0 and result.stdout.strip():
             return result.stdout.strip()
     except Exception:
-        pass
+        log_debug("fzf selection failed, falling back")
 
     return None
 

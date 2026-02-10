@@ -139,7 +139,7 @@ class TestGitValidationFuzzing:
 
     @settings(
         derandomize=True,
-        max_examples=50,
+        max_examples=200,
         suppress_health_check=[HealthCheck.too_slow],
     )
     @given(argv=argv_tokens)
@@ -165,7 +165,7 @@ class TestGitValidationFuzzing:
 
     @settings(
         derandomize=True,
-        max_examples=50,
+        max_examples=200,
         suppress_health_check=[HealthCheck.too_slow],
     )
     @given(argv=argv_tokens)
@@ -280,7 +280,7 @@ class TestPolicyEvaluationFuzzing:
 
     @settings(
         derandomize=True,
-        max_examples=50,
+        max_examples=200,
         suppress_health_check=[HealthCheck.too_slow],
     )
     @given(
@@ -309,7 +309,7 @@ class TestPolicyEvaluationFuzzing:
 
     @settings(
         derandomize=True,
-        max_examples=50,
+        max_examples=200,
         suppress_health_check=[HealthCheck.too_slow],
     )
     @given(
@@ -354,7 +354,7 @@ class TestSandboxNameFuzzing:
 
     @settings(
         derandomize=True,
-        max_examples=50,
+        max_examples=200,
         suppress_health_check=[HealthCheck.too_slow],
     )
     @given(name=sandbox_name_strategy)
@@ -375,7 +375,7 @@ class TestSandboxNameFuzzing:
 
     @settings(
         derandomize=True,
-        max_examples=50,
+        max_examples=200,
         suppress_health_check=[HealthCheck.too_slow],
     )
     @given(name=st.just(""))
@@ -411,7 +411,7 @@ class TestUrlValidationFuzzing:
 
     @settings(
         derandomize=True,
-        max_examples=50,
+        max_examples=200,
         suppress_health_check=[HealthCheck.too_slow],
     )
     @given(url=url_strategy)
@@ -431,7 +431,7 @@ class TestUrlValidationFuzzing:
 
     @settings(
         derandomize=True,
-        max_examples=50,
+        max_examples=200,
         suppress_health_check=[HealthCheck.too_slow],
     )
     @given(
@@ -475,7 +475,7 @@ class TestMountPathFuzzing:
 
     @settings(
         derandomize=True,
-        max_examples=50,
+        max_examples=200,
         suppress_health_check=[HealthCheck.too_slow],
     )
     @given(path=st.text(min_size=0, max_size=300))
@@ -499,7 +499,7 @@ class TestKeyFormatFuzzing:
 
     @settings(
         derandomize=True,
-        max_examples=50,
+        max_examples=200,
         suppress_health_check=[HealthCheck.too_slow],
     )
     @given(key=key_strategy)
@@ -545,7 +545,7 @@ class TestKeyFormatFuzzing:
 
     @settings(
         derandomize=True,
-        max_examples=50,
+        max_examples=200,
         suppress_health_check=[HealthCheck.too_slow],
     )
     @given(key=key_strategy)
@@ -578,7 +578,7 @@ class TestStateMetadataFuzzing:
 
     @settings(
         derandomize=True,
-        max_examples=50,
+        max_examples=200,
         suppress_health_check=[HealthCheck.too_slow],
     )
     @given(
@@ -631,7 +631,7 @@ class TestStateMetadataFuzzing:
 
     @settings(
         derandomize=True,
-        max_examples=50,
+        max_examples=200,
         suppress_health_check=[HealthCheck.too_slow],
     )
     @given(content=st.text(min_size=0, max_size=500))
@@ -701,7 +701,7 @@ class TestGitPathFuzzing:
 
     @settings(
         derandomize=True,
-        max_examples=50,
+        max_examples=200,
         suppress_health_check=[HealthCheck.too_slow],
     )
     @given(path=traversal_paths)
@@ -747,7 +747,7 @@ class TestGitPathFuzzing:
 
     @settings(
         derandomize=True,
-        max_examples=50,
+        max_examples=200,
         suppress_health_check=[HealthCheck.too_slow],
     )
     @given(path=traversal_paths)
@@ -833,7 +833,7 @@ class TestWorktreeNameFuzzing:
 
     @settings(
         derandomize=True,
-        max_examples=50,
+        max_examples=200,
         suppress_health_check=[HealthCheck.too_slow],
     )
     @given(name=shell_metachar_names)
@@ -867,7 +867,7 @@ class TestWorktreeNameFuzzing:
 
     @settings(
         derandomize=True,
-        max_examples=50,
+        max_examples=200,
         suppress_health_check=[HealthCheck.too_slow],
     )
     @given(name=shell_metachar_names)
@@ -970,7 +970,7 @@ class TestBranchNameFuzzing:
 
     @settings(
         derandomize=True,
-        max_examples=50,
+        max_examples=200,
         suppress_health_check=[HealthCheck.too_slow],
     )
     @given(name=dangerous_branch_names)
@@ -995,7 +995,7 @@ class TestBranchNameFuzzing:
 
     @settings(
         derandomize=True,
-        max_examples=50,
+        max_examples=200,
         suppress_health_check=[HealthCheck.too_slow],
     )
     @given(name=dangerous_branch_names)
@@ -1020,7 +1020,7 @@ class TestBranchNameFuzzing:
 
     @settings(
         derandomize=True,
-        max_examples=50,
+        max_examples=200,
         suppress_health_check=[HealthCheck.too_slow],
     )
     @given(name=dangerous_branch_names)
@@ -1052,7 +1052,7 @@ class TestBranchNameFuzzing:
 
     @settings(
         derandomize=True,
-        max_examples=50,
+        max_examples=200,
         suppress_health_check=[HealthCheck.too_slow],
     )
     @given(name=dangerous_branch_names)

@@ -15,7 +15,7 @@ import os
 import re
 import tempfile
 from pathlib import Path
-from typing import Optional
+from typing import Callable, Optional
 
 from foundry_sandbox._bridge import bridge_main
 from foundry_sandbox.constants import SSH_AGENT_CONTAINER_SOCK
@@ -92,16 +92,23 @@ def ensure_override_header(override_file: str) -> None:
                 f.write(content)
 
 
-def strip_network_config(override_file: str) -> None:
-    """Remove network-related config from override file.
+def _strip_yaml_blocks(
+    override_file: str,
+    block_filters: dict[str, Callable[[str], bool]],
+) -> None:
+    """Remove matching items from YAML list blocks in an override file.
 
-    Removes:
-    - cap_add entries for NET_ADMIN, NET_RAW, SYS_ADMIN
-    - environment entries for SANDBOX_NETWORK_MODE
-    - Empty cap_add/environment headers if all items stripped
+    Scans the file for 4-space-indented block headers (e.g. ``    volumes:``)
+    that match keys in *block_filters*. Within each block, list items
+    (6-space ``      -`` prefix) are passed to the corresponding predicate;
+    items where the predicate returns ``True`` are dropped. Empty blocks
+    (all items removed) have their header dropped as well.
 
     Args:
         override_file: Path to docker-compose override file.
+        block_filters: Mapping of block name (e.g. ``"volumes"``) to a
+            predicate that receives the right-stripped line and returns
+            ``True`` for items that should be **removed**.
     """
     path = Path(override_file)
     if not path.exists():
@@ -110,241 +117,85 @@ def strip_network_config(override_file: str) -> None:
     with open(override_file, "r") as f:
         lines = f.readlines()
 
-    result = []
-    in_cap_add = False
-    in_environment = False
-    cap_add_header = ""
-    env_header = ""
-    cap_add_items = []
-    env_items = []
+    result: list[str] = []
+    current_block: str | None = None
+    block_header = ""
+    block_items: list[str] = []
+
+    def _flush() -> None:
+        nonlocal current_block, block_items
+        if current_block is not None and block_items:
+            result.append(block_header)
+            result.extend(block_items)
+        current_block = None
+        block_items = []
 
     for line in lines:
         stripped = line.rstrip()
 
-        # Check for cap_add header (4 spaces)
-        if stripped == "    cap_add:":
-            # Flush previous environment block if active
-            if in_environment:
-                if env_items:
-                    result.append(env_header)
-                    result.extend(env_items)
-                in_environment = False
-                env_items = []
-            # Start cap_add block
-            in_cap_add = True
-            cap_add_header = line
-            cap_add_items = []
+        # Detect a tracked block header (4-space indent)
+        matched = None
+        for name in block_filters:
+            if stripped == f"    {name}:":
+                matched = name
+                break
+
+        if matched is not None:
+            _flush()
+            current_block = matched
+            block_header = line
+            block_items = []
             continue
 
-        # Check for environment header (4 spaces)
-        if stripped == "    environment:":
-            # Flush previous cap_add block if active
-            if in_cap_add:
-                if cap_add_items:
-                    result.append(cap_add_header)
-                    result.extend(cap_add_items)
-                in_cap_add = False
-                cap_add_items = []
-            # Start environment block
-            in_environment = True
-            env_header = line
-            env_items = []
-            continue
-
-        # Process cap_add items
-        if in_cap_add:
-            # Check if this is a list item (6 spaces + dash)
+        # Inside a tracked block — filter list items
+        if current_block is not None:
             if stripped.startswith("      -"):
-                # Check if it's a network capability
-                if any(cap in stripped for cap in ["NET_ADMIN", "NET_RAW", "SYS_ADMIN"]):
-                    # Skip this item
-                    continue
-                else:
-                    # Keep this item
-                    cap_add_items.append(line)
-                    continue
+                if block_filters[current_block](stripped):
+                    continue  # drop this item
+                block_items.append(line)
+                continue
             else:
-                # No longer in cap_add section - flush it
-                if cap_add_items:
-                    result.append(cap_add_header)
-                    result.extend(cap_add_items)
-                in_cap_add = False
-                cap_add_items = []
-                # Fall through to process this line normally
+                _flush()
+                # fall through to append as a regular line
 
-        # Process environment items
-        if in_environment:
-            # Check if this is a list item (6 spaces + dash)
-            if stripped.startswith("      -"):
-                # Check if it's SANDBOX_NETWORK_MODE
-                if "SANDBOX_NETWORK_MODE=" in stripped:
-                    # Skip this item
-                    continue
-                else:
-                    # Keep this item
-                    env_items.append(line)
-                    continue
-            else:
-                # No longer in environment section - flush it
-                if env_items:
-                    result.append(env_header)
-                    result.extend(env_items)
-                in_environment = False
-                env_items = []
-                # Fall through to process this line normally
+        result.append(line)
 
-        # Regular line, not in any special block
-        if not in_cap_add and not in_environment:
-            result.append(line)
+    # File may end while still inside a block
+    _flush()
 
-    # Handle case where file ends while in a block
-    if in_cap_add and cap_add_items:
-        result.append(cap_add_header)
-        result.extend(cap_add_items)
-    if in_environment and env_items:
-        result.append(env_header)
-        result.extend(env_items)
-
-    # Write back
     with open(override_file, "w") as f:
         f.writelines(result)
+
+
+def strip_network_config(override_file: str) -> None:
+    """Remove network-related config from override file.
+
+    Removes cap_add entries for NET_ADMIN/NET_RAW/SYS_ADMIN and
+    environment entries for SANDBOX_NETWORK_MODE.
+
+    Args:
+        override_file: Path to docker-compose override file.
+    """
+    _strip_yaml_blocks(override_file, {
+        "cap_add": lambda line: any(c in line for c in ("NET_ADMIN", "NET_RAW", "SYS_ADMIN")),
+        "environment": lambda line: "SANDBOX_NETWORK_MODE=" in line,
+    })
 
 
 def strip_ssh_agent_config(override_file: str) -> None:
     """Remove SSH agent configuration from override file.
 
-    Removes:
-    - Volume mounts targeting SSH_AGENT_CONTAINER_SOCK
-    - group_add entries for "0"
-    - SSH_AUTH_SOCK environment entries
+    Removes volume mounts targeting SSH_AGENT_CONTAINER_SOCK,
+    group_add entries for "0", and SSH_AUTH_SOCK environment entries.
 
     Args:
         override_file: Path to docker-compose override file.
     """
-    path = Path(override_file)
-    if not path.exists():
-        return
-
-    with open(override_file, "r") as f:
-        lines = f.readlines()
-
-    result = []
-    in_volumes = False
-    in_group_add = False
-    in_environment = False
-    volumes_header = ""
-    group_add_header = ""
-    env_header = ""
-    volumes_items = []
-    group_add_items = []
-    env_items = []
-
-    def flush_block(block_name: str) -> None:
-        """Flush a block if it has items."""
-        nonlocal in_volumes, in_group_add, in_environment
-        nonlocal volumes_items, group_add_items, env_items
-
-        if block_name == "volumes" and volumes_items:
-            result.append(volumes_header)
-            result.extend(volumes_items)
-            volumes_items = []
-        elif block_name == "group_add" and group_add_items:
-            result.append(group_add_header)
-            result.extend(group_add_items)
-            group_add_items = []
-        elif block_name == "environment" and env_items:
-            result.append(env_header)
-            result.extend(env_items)
-            env_items = []
-
-        in_volumes = False
-        in_group_add = False
-        in_environment = False
-
-    for line in lines:
-        stripped = line.rstrip()
-
-        # Check for block headers (4 spaces)
-        if stripped == "    volumes:":
-            if in_volumes or in_group_add or in_environment:
-                flush_block("volumes" if in_volumes else "group_add" if in_group_add else "environment")
-            in_volumes = True
-            volumes_header = line
-            volumes_items = []
-            continue
-
-        if stripped == "    group_add:":
-            if in_volumes or in_group_add or in_environment:
-                flush_block("volumes" if in_volumes else "group_add" if in_group_add else "environment")
-            in_group_add = True
-            group_add_header = line
-            group_add_items = []
-            continue
-
-        if stripped == "    environment:":
-            if in_volumes or in_group_add or in_environment:
-                flush_block("volumes" if in_volumes else "group_add" if in_group_add else "environment")
-            in_environment = True
-            env_header = line
-            env_items = []
-            continue
-
-        # Process volumes items
-        if in_volumes:
-            if stripped.startswith("      -"):
-                if f":{SSH_AGENT_CONTAINER_SOCK}" in stripped:
-                    continue
-                else:
-                    volumes_items.append(line)
-                    continue
-            else:
-                flush_block("volumes")
-                # Fall through to process this line
-
-        # Process group_add items
-        if in_group_add:
-            if stripped.startswith("      -"):
-                # Check if this is group "0" (with or without quotes)
-                stripped_item = stripped.strip()
-                if stripped_item in ('- "0"', "- '0'", "- 0"):
-                    continue
-                else:
-                    group_add_items.append(line)
-                    continue
-            else:
-                flush_block("group_add")
-                # Fall through to process this line
-
-        # Process environment items
-        if in_environment:
-            if stripped.startswith("      -"):
-                if "SSH_AUTH_SOCK=" in stripped:
-                    continue
-                else:
-                    env_items.append(line)
-                    continue
-            else:
-                flush_block("environment")
-                # Fall through to process this line
-
-        # Regular line
-        if not in_volumes and not in_group_add and not in_environment:
-            result.append(line)
-
-    # Handle case where file ends while in a block
-    if in_volumes and volumes_items:
-        result.append(volumes_header)
-        result.extend(volumes_items)
-    if in_group_add and group_add_items:
-        result.append(group_add_header)
-        result.extend(group_add_items)
-    if in_environment and env_items:
-        result.append(env_header)
-        result.extend(env_items)
-
-    # Write back
-    with open(override_file, "w") as f:
-        f.writelines(result)
+    _strip_yaml_blocks(override_file, {
+        "volumes": lambda line: f":{SSH_AGENT_CONTAINER_SOCK}" in line,
+        "group_add": lambda line: line.strip() in ('- "0"', "- '0'", "- 0"),
+        "environment": lambda line: "SSH_AUTH_SOCK=" in line,
+    })
 
 
 def strip_claude_home_config(override_file: str) -> None:
@@ -355,171 +206,24 @@ def strip_claude_home_config(override_file: str) -> None:
     Args:
         override_file: Path to docker-compose override file.
     """
-    path = Path(override_file)
-    if not path.exists():
-        return
-
-    target = "/home/ubuntu/.claude"
-
-    with open(override_file, "r") as f:
-        lines = f.readlines()
-
-    result = []
-    in_volumes = False
-    volumes_header = ""
-    volumes_items = []
-
-    for line in lines:
-        stripped = line.rstrip()
-
-        # Check for volumes header (4 spaces)
-        if stripped == "    volumes:":
-            in_volumes = True
-            volumes_header = line
-            volumes_items = []
-            continue
-
-        # Process volumes items
-        if in_volumes:
-            if stripped.startswith("      -"):
-                # Check if this volume mounts to target
-                if f":{target}" in stripped:
-                    continue
-                else:
-                    volumes_items.append(line)
-                    continue
-            else:
-                # No longer in volumes - flush it
-                if volumes_items:
-                    result.append(volumes_header)
-                    result.extend(volumes_items)
-                in_volumes = False
-                volumes_items = []
-                # Fall through to process this line
-
-        # Regular line
-        if not in_volumes:
-            result.append(line)
-
-    # Handle case where file ends while in volumes
-    if in_volumes and volumes_items:
-        result.append(volumes_header)
-        result.extend(volumes_items)
-
-    # Write back
-    with open(override_file, "w") as f:
-        f.writelines(result)
+    _strip_yaml_blocks(override_file, {
+        "volumes": lambda line: ":/home/ubuntu/.claude" in line,
+    })
 
 
 def strip_timezone_config(override_file: str) -> None:
     """Remove timezone configuration from override file.
 
-    Removes:
-    - /etc/localtime and /etc/timezone volume mounts
-    - TZ= environment entries
+    Removes /etc/localtime and /etc/timezone volume mounts and TZ=
+    environment entries.
 
     Args:
         override_file: Path to docker-compose override file.
     """
-    path = Path(override_file)
-    if not path.exists():
-        return
-
-    with open(override_file, "r") as f:
-        lines = f.readlines()
-
-    result = []
-    in_volumes = False
-    in_environment = False
-    volumes_header = ""
-    env_header = ""
-    volumes_items = []
-    env_items = []
-
-    for line in lines:
-        stripped = line.rstrip()
-
-        # Check for volumes header (4 spaces)
-        if stripped == "    volumes:":
-            # Flush previous environment block if active
-            if in_environment:
-                if env_items:
-                    result.append(env_header)
-                    result.extend(env_items)
-                in_environment = False
-                env_items = []
-            # Start volumes block
-            in_volumes = True
-            volumes_header = line
-            volumes_items = []
-            continue
-
-        # Check for environment header (4 spaces)
-        if stripped == "    environment:":
-            # Flush previous volumes block if active
-            if in_volumes:
-                if volumes_items:
-                    result.append(volumes_header)
-                    result.extend(volumes_items)
-                in_volumes = False
-                volumes_items = []
-            # Start environment block
-            in_environment = True
-            env_header = line
-            env_items = []
-            continue
-
-        # Process volumes items
-        if in_volumes:
-            if stripped.startswith("      -"):
-                # Check if this is a timezone volume
-                if ":/etc/localtime" in stripped or ":/etc/timezone" in stripped:
-                    continue
-                else:
-                    volumes_items.append(line)
-                    continue
-            else:
-                # No longer in volumes - flush it
-                if volumes_items:
-                    result.append(volumes_header)
-                    result.extend(volumes_items)
-                in_volumes = False
-                volumes_items = []
-                # Fall through to process this line
-
-        # Process environment items
-        if in_environment:
-            if stripped.startswith("      -"):
-                # Check if it's TZ=
-                if "TZ=" in stripped:
-                    continue
-                else:
-                    env_items.append(line)
-                    continue
-            else:
-                # No longer in environment - flush it
-                if env_items:
-                    result.append(env_header)
-                    result.extend(env_items)
-                in_environment = False
-                env_items = []
-                # Fall through to process this line
-
-        # Regular line
-        if not in_volumes and not in_environment:
-            result.append(line)
-
-    # Handle case where file ends while in a block
-    if in_volumes and volumes_items:
-        result.append(volumes_header)
-        result.extend(volumes_items)
-    if in_environment and env_items:
-        result.append(env_header)
-        result.extend(env_items)
-
-    # Write back
-    with open(override_file, "w") as f:
-        f.writelines(result)
+    _strip_yaml_blocks(override_file, {
+        "volumes": lambda line: ":/etc/localtime" in line or ":/etc/timezone" in line,
+        "environment": lambda line: "TZ=" in line,
+    })
 
 
 def append_override_list_item(override_file: str, key: str, item: str) -> None:
