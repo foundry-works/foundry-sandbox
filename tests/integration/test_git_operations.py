@@ -31,12 +31,14 @@ class MockContainerConfig:
         container_id: str = "test-container",
         repos: Optional[list] = None,
         auth_mode: str = "user",
+        bare_repo_path: str = "/tmp",
     ):
         self.container_id = container_id
         self.ip_address = "172.17.0.2"
         self.metadata = {
             "repos": repos or ["owner/repo"],
             "auth_mode": auth_mode,
+            "bare_repo_path": bare_repo_path,
         }
 
 
@@ -93,6 +95,16 @@ def create_pktline_refs(*refs) -> bytes:
         lines.append(f"{pkt_len:04x}{line}".encode())
     lines.append(b"0000")  # Flush packet
     return b"".join(lines)
+
+
+@pytest.fixture(autouse=True)
+def bypass_restricted_path_check(monkeypatch):
+    """Integration tests here focus on auth/policy flow, not pack path scanning."""
+    monkeypatch.setattr(
+        GitProxyAddon,
+        "_check_restricted_paths",
+        lambda self, refs, bare_repo_path, pack_data, restricted_paths: None,
+    )
 
 
 class TestGitPathParsing:

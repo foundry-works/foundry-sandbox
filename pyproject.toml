@@ -41,6 +41,11 @@ python_classes = ["Test*"]
 python_functions = ["test_*"]
 addopts = "--import-mode=importlib"
 norecursedirs = ["__pycache__", ".git", ".hypothesis"]
+markers = [
+    "slow: marks tests as slow/integration-heavy",
+    "security: marks security-focused tests",
+    "orchestration: marks docker orchestration/lifecycle tests",
+]
 
 [tool.mypy]
 strict = true

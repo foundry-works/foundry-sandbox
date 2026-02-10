@@ -11,6 +11,8 @@ import os
 import sys
 from unittest import mock
 
+import pytest
+
 # Add unified-proxy to path
 unified_proxy_dir = os.path.join(
     os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
@@ -59,8 +61,12 @@ class MockHTTPResponse:
         return resp
 
 
-# Set up mitmproxy mocks if not already done
-if "mitmproxy" not in sys.modules:
+def _install_mitmproxy_mocks() -> None:
+    """Install stable mitmproxy mocks for unit tests.
+
+    Some test modules overwrite sys.modules["mitmproxy"] with ad-hoc mocks.
+    Reinstalling here keeps Response.make behavior deterministic.
+    """
     mock_http_module = mock.MagicMock()
     mock_http_module.Response = MockHTTPResponse
 
@@ -75,3 +81,13 @@ if "mitmproxy" not in sys.modules:
     sys.modules["mitmproxy.http"] = mock_http_module
     sys.modules["mitmproxy.ctx"] = mock_ctx
     sys.modules["mitmproxy.flow"] = mock.MagicMock()
+
+
+_install_mitmproxy_mocks()
+
+
+@pytest.fixture(autouse=True)
+def ensure_mitmproxy_mocks():
+    """Reapply mitmproxy mocks before each test to avoid cross-test leakage."""
+    _install_mitmproxy_mocks()
+    yield
