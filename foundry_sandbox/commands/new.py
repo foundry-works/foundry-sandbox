@@ -43,6 +43,7 @@ from foundry_sandbox.docker import compose_up, hmac_secret_file_count, populate_
 from foundry_sandbox.git import ensure_bare_repo
 from foundry_sandbox.git_worktree import create_worktree
 from foundry_sandbox.image import check_image_freshness
+from foundry_sandbox.legacy_bridge import run_legacy_command
 from foundry_sandbox.network import add_claude_home_to_override, add_ssh_agent_to_override, add_timezone_to_override
 from foundry_sandbox.paths import derive_sandbox_paths, ensure_dir, path_claude_home
 from foundry_sandbox.permissions import install_workspace_permissions
@@ -50,6 +51,7 @@ from foundry_sandbox.proxy import setup_proxy_registration
 from foundry_sandbox.state import load_sandbox_metadata, write_sandbox_metadata, save_last_cast_new, save_cast_preset, load_last_cast_new, load_cast_preset, save_last_attach
 from foundry_sandbox.tui import tui_choose, tui_confirm, tui_input
 from foundry_sandbox.utils import log_error, log_info, log_section, log_step, log_warn
+from foundry_sandbox.validate import validate_sandbox_name
 
 SANDBOX_SH = Path(__file__).resolve().parent.parent.parent / "sandbox.sh"
 
@@ -61,17 +63,12 @@ SANDBOX_SH = Path(__file__).resolve().parent.parent.parent / "sandbox.sh"
 
 def _shell_call(*args: str) -> subprocess.CompletedProcess[str]:
     """Call sandbox.sh with arguments."""
-    return subprocess.run([str(SANDBOX_SH), *args], check=False)
+    return run_legacy_command(*args, capture_output=False)
 
 
 def _shell_call_capture(*args: str) -> str:
     """Call sandbox.sh with arguments and capture stdout."""
-    result = subprocess.run(
-        [str(SANDBOX_SH), *args],
-        capture_output=True,
-        text=True,
-        check=False,
-    )
+    result = run_legacy_command(*args, capture_output=True)
     return result.stdout.strip() if result.returncode == 0 else ""
 
 
@@ -754,6 +751,11 @@ def new(
     # Generate sandbox name
     bare_path = _repo_to_path(repo_url)
     name = _sandbox_name(bare_path, branch)
+
+    valid_name, name_error = validate_sandbox_name(name)
+    if not valid_name:
+        log_error(f"Generated invalid sandbox name '{name}': {name_error}")
+        sys.exit(1)
 
     # Auto-generate unique name for --last / --preset
     if last or preset:

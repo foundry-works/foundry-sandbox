@@ -35,6 +35,7 @@ SANDBOX_SH = SCRIPT_DIR / "sandbox.sh"
 ALIASES: dict[str, tuple[str, list[str]]] = {
     "repeat": ("new", ["--last"]),
     "reattach": ("attach", ["--last"]),
+    "refresh-creds": ("refresh-credentials", []),
 }
 
 # All commands known to sandbox.sh (used to decide whether a fallback is
@@ -152,13 +153,6 @@ class CastGroup(click.Group):
         original_name = args[0]  # Use the original token (pre-alias)
         return cmd_name, _make_fallback_command(original_name), remaining
 
-    def parse_args(self, ctx: click.Context, args: list[str]) -> list[str]:
-        """Parse arguments, enabling extra-args passthrough on the group."""
-        ctx.allow_extra_args = True
-        ctx.allow_interspersed_args = True
-        return super().parse_args(ctx, args)
-
-
 def _make_fallback_command(cmd_name: str) -> click.Command:
     """Create a synthetic Click command that delegates to the shell fallback.
 
@@ -198,10 +192,6 @@ def _make_fallback_command(cmd_name: str) -> click.Command:
 @click.group(
     cls=CastGroup,
     invoke_without_command=True,
-    context_settings={
-        "allow_extra_args": True,
-        "allow_interspersed_args": True,
-    },
 )
 @click.pass_context
 def cli(ctx: click.Context) -> None:

@@ -44,7 +44,7 @@ class TestCLIGroup:
         expected = {
             "attach", "build", "config", "destroy", "destroy-all",
             "help", "info", "list", "new", "preset", "prune",
-            "refresh-creds", "start", "status", "stop", "upgrade",
+            "refresh-credentials", "start", "status", "stop", "upgrade",
         }
         registered = set(cli.commands.keys())
         assert expected.issubset(registered), f"Missing: {expected - registered}"
@@ -61,6 +61,7 @@ class TestAliasResolution:
     def test_aliases_dict_has_expected_entries(self) -> None:
         assert "repeat" in ALIASES
         assert "reattach" in ALIASES
+        assert "refresh-creds" in ALIASES
 
     def test_repeat_resolves_to_new_last(self) -> None:
         canonical, prepended = ALIASES["repeat"]
@@ -71,6 +72,11 @@ class TestAliasResolution:
         canonical, prepended = ALIASES["reattach"]
         assert canonical == "attach"
         assert "--last" in prepended
+
+    def test_refresh_creds_resolves_to_refresh_credentials(self) -> None:
+        canonical, prepended = ALIASES["refresh-creds"]
+        assert canonical == "refresh-credentials"
+        assert prepended == []
 
 
 # ---------------------------------------------------------------------------
@@ -161,6 +167,19 @@ class TestConfigCommand:
         assert result.exit_code == 0
         assert "SANDBOX_HOME" in result.output
         assert "SCRIPT_DIR" in result.output
+
+
+class TestCliFlagRouting:
+    """Smoke tests that command-level flags are routed to subcommands."""
+
+    def test_list_json_flag_routes_to_list(self, runner: click.testing.CliRunner) -> None:
+        result = runner.invoke(cli, ["list", "--json"])
+        assert result.exit_code == 0
+
+    def test_attach_help_routes_to_attach(self, runner: click.testing.CliRunner) -> None:
+        result = runner.invoke(cli, ["attach", "--help"])
+        assert result.exit_code == 0
+        assert "--last" in result.output
 
 
 # ---------------------------------------------------------------------------
