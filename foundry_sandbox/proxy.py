@@ -253,9 +253,9 @@ def proxy_wait_ready(
                 if body.get("status") == "healthy":
                     log_debug(f"Proxy is ready (took {elapsed}s)")
                     return True
-        except (RuntimeError, OSError, subprocess.TimeoutExpired):
+        except (RuntimeError, OSError, subprocess.TimeoutExpired) as exc:
             # Expected transient errors while proxy starts up
-            pass
+            log_debug(f"Proxy not ready yet: {type(exc).__name__}")
         except Exception as exc:
             # Structural errors (KeyError, TypeError, etc.) — log and break early
             log_debug(f"Unexpected error during proxy health check: {type(exc).__name__}: {exc}")
@@ -307,8 +307,8 @@ def proxy_get_container_ip(container_id: str, network: str = DEFAULT_NETWORK) ->
             # Docker returns "<no value>" when network not found
             if ip and ip != "<no value>":
                 return ip
-    except Exception:
-        pass
+    except Exception as exc:
+        log_debug(f"Could not get container IP on network '{network}': {exc}")
 
     return ""
 
@@ -397,7 +397,8 @@ def proxy_is_registered(container_id: str) -> bool:
     try:
         result = proxy_curl("GET", f"/internal/containers/{container_id}", include_status_code=True)
         return result["http_code"] == 200
-    except Exception:
+    except Exception as exc:
+        log_debug(f"Could not check proxy registration for {container_id}: {exc}")
         return False
 
 

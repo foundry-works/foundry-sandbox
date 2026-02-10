@@ -15,6 +15,7 @@ import shutil
 import subprocess
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlparse
 
 from foundry_sandbox._bridge import bridge_main
 from foundry_sandbox.constants import (
@@ -85,11 +86,16 @@ def validate_mount_path(mount_path: str) -> tuple[bool, str]:
     Checks the canonical path against known dangerous paths to prevent
     mounting credential directories into sandboxes.
 
+    When validation succeeds, the returned error_message contains the resolved
+    canonical path so callers can use it directly (avoiding TOCTOU races from
+    re-resolving the path later).
+
     Args:
         mount_path: Host path to validate.
 
     Returns:
-        Tuple of (is_valid, error_message). error_message is empty if valid.
+        Tuple of (is_valid, canonical_or_error). On success, second element is
+        the resolved canonical path string. On failure, it is an error message.
     """
     # Resolve the canonical path, preferring existing paths for security
     # (prevents TOCTOU race conditions with symlink swaps)
@@ -125,7 +131,7 @@ def validate_mount_path(mount_path: str) -> tuple[bool, str]:
         except ValueError:
             pass
 
-    return True, ""
+    return True, str(canonical)
 
 
 # ============================================================================
@@ -182,12 +188,20 @@ def validate_existing_sandbox_name(name: str) -> tuple[bool, str]:
 _ORG_REPO_PATTERN = re.compile(r"^[A-Za-z0-9._-]+/[A-Za-z0-9._-]+(?:\.git)?$")
 
 
+# Pattern for valid SSH hostnames (alphanumeric, dots, hyphens)
+_SSH_HOST_PATTERN = re.compile(r"^[A-Za-z0-9]([A-Za-z0-9._-]*[A-Za-z0-9])?$")
+
+# Sensitive filesystem prefixes that should not be cloned
+_SENSITIVE_PREFIXES = ("/etc", "/proc", "/sys", "/dev", "/var/run")
+
+
 def validate_git_url(url: str) -> tuple[bool, str]:
     """Validate a git repository URL.
 
     Accepts http(s) URLs, git@ SSH URLs, org/repo shorthand, and local
     filesystem paths (absolute or relative).
-    Rejects URLs with path traversal and malformed values.
+    Rejects URLs with path traversal, embedded credentials, sensitive
+    system paths, and malformed values.
 
     Args:
         url: Repository URL or local path to validate.
@@ -202,22 +216,39 @@ def validate_git_url(url: str) -> tuple[bool, str]:
     if ".." in url:
         return False, f"Invalid repository URL (path traversal): {url}"
 
-    # HTTPS/HTTP URLs: must have a host and path component
+    # HTTPS/HTTP URLs: use proper URL parsing
     if url.startswith(("https://", "http://")):
-        # Strip scheme, check for host/path
-        rest = url.split("://", 1)[1]
-        if "/" not in rest or rest.startswith("/"):
-            return False, f"Invalid repository URL (missing host or path): {url}"
+        parsed = urlparse(url)
+        if not parsed.hostname:
+            return False, f"Invalid repository URL (missing host): {url}"
+        if not parsed.path or parsed.path == "/":
+            return False, f"Invalid repository URL (missing path): {url}"
+        if parsed.username or parsed.password:
+            return False, f"Invalid repository URL (embedded credentials not allowed): {url}"
+        if ";" in parsed.netloc or " " in parsed.netloc:
+            return False, f"Invalid repository URL (suspicious characters in host): {url}"
         return True, ""
 
     # Git SSH URLs: git@host:owner/repo.git
     if url.startswith("git@"):
-        if ":" not in url[4:]:
-            return False, f"Invalid git SSH URL (expected git@host:path): {url}"
+        rest = url[4:]
+        colon_idx = rest.find(":")
+        if colon_idx < 1:
+            return False, f"Invalid git SSH URL (missing host): {url}"
+        host = rest[:colon_idx]
+        path = rest[colon_idx + 1:]
+        if not path or path.startswith("/"):
+            return False, f"Invalid git SSH URL (missing or absolute path): {url}"
+        if not _SSH_HOST_PATTERN.match(host):
+            return False, f"Invalid git SSH URL (invalid host): {url}"
         return True, ""
 
     # Local filesystem paths (absolute or relative)
     if url.startswith(("/", "./", "~/")) or url == ".":
+        resolved = os.path.realpath(os.path.expanduser(url))
+        for prefix in _SENSITIVE_PREFIXES:
+            if resolved == prefix or resolved.startswith(prefix + "/"):
+                return False, f"Invalid repository path (sensitive location): {url}"
         return True, ""
 
     # Org/repo shorthand: "owner/repo" (GitHub shorthand)

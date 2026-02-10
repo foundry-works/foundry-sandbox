@@ -41,7 +41,8 @@ def _tar_supports_no_xattrs() -> bool:
             capture_output=True, check=False,
         )
         return result.returncode == 0
-    except OSError:
+    except OSError as exc:
+        log_debug(f"tar --no-xattrs check failed: {exc}")
         return False
 
 
@@ -54,7 +55,8 @@ def _tar_supports_transform() -> bool:
             capture_output=True, text=True, check=False,
         )
         return "--transform" in result.stdout or "--transform" in result.stderr
-    except OSError:
+    except OSError as exc:
+        log_debug(f"tar --transform check failed: {exc}")
         return False
 
 

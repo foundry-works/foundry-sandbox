@@ -16,7 +16,31 @@ import pytest
 # Add unified-proxy to path
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../../unified-proxy"))
 
+import registry as _registry_module
 from registry import ContainerConfig, ContainerRegistry
+
+
+@pytest.fixture
+def time_control():
+    """Controllable time mock for registry tests.
+
+    Replaces time.time() in the registry module so tests can advance
+    time instantly instead of sleeping.
+    """
+    _now = [1000.0]
+    _original = _registry_module.time.time
+
+    def _fake_time():
+        return _now[0]
+
+    def _advance(seconds):
+        _now[0] += seconds
+
+    _registry_module.time.time = _fake_time
+    try:
+        yield _advance
+    finally:
+        _registry_module.time.time = _original
 
 
 @pytest.fixture
@@ -98,11 +122,11 @@ class TestBasicCRUD:
         """Test unregistering non-existent container returns False."""
         assert registry.unregister("nonexistent") is False
 
-    def test_renew(self, registry):
+    def test_renew(self, registry, time_control):
         """Test renewing registration updates last_seen."""
         registry.register(container_id="renewable", ip_address="172.17.0.8")
         original = registry.get_by_container_id("renewable")
-        time.sleep(0.1)
+        time_control(0.1)
         renewed = registry.renew("renewable")
         assert renewed is not None
         assert renewed.last_seen > original.last_seen
@@ -170,22 +194,22 @@ class TestCacheConsistency:
         assert registry.get_by_ip("172.17.0.22") is None
         assert registry.get_by_ip("172.17.0.23") is not None
 
-    def test_expired_entry_removed_from_cache(self, registry):
+    def test_expired_entry_removed_from_cache(self, registry, time_control):
         """Test expired entries are removed on access."""
         registry.register(
             container_id="expiring",
             ip_address="172.17.0.24",
             ttl_seconds=1,
         )
-        time.sleep(1.5)
+        time_control(1.5)
         assert registry.get_by_ip("172.17.0.24") is None
 
-    def test_cleanup_expired(self, registry):
+    def test_cleanup_expired(self, registry, time_control):
         """Test cleanup_expired removes all expired entries."""
         registry.register(container_id="old1", ip_address="172.17.0.25", ttl_seconds=1)
         registry.register(container_id="old2", ip_address="172.17.0.26", ttl_seconds=1)
         registry.register(container_id="fresh", ip_address="172.17.0.27", ttl_seconds=3600)
-        time.sleep(1.5)
+        time_control(1.5)
         removed = registry.cleanup_expired()
         assert removed == 2
         assert registry.count() == 1

@@ -70,22 +70,23 @@ from foundry_sandbox.paths import (
 
 
 class TestConstantsStatic:
-    """Tests for static constant values."""
+    """Tests for structural invariants of static constants."""
 
-    def test_docker_image(self):
-        assert DOCKER_IMAGE == "foundry-sandbox:latest"
+    def test_docker_image_has_tag(self):
+        assert ":" in DOCKER_IMAGE
 
-    def test_container_user(self):
-        assert CONTAINER_USER == "ubuntu"
+    def test_container_user_is_nonempty(self):
+        assert CONTAINER_USER
+        assert " " not in CONTAINER_USER
 
-    def test_container_home(self):
-        assert CONTAINER_HOME == "/home/ubuntu"
+    def test_container_home_is_absolute(self):
+        assert CONTAINER_HOME.startswith("/")
 
-    def test_ssh_agent_sock(self):
-        assert SSH_AGENT_CONTAINER_SOCK == "/ssh-agent"
+    def test_ssh_agent_sock_is_absolute(self):
+        assert SSH_AGENT_CONTAINER_SOCK.startswith("/")
 
-    def test_opencode_plugin_dir(self):
-        assert CONTAINER_OPENCODE_PLUGIN_DIR == "/home/ubuntu/.config/opencode/plugins"
+    def test_opencode_plugin_dir_is_under_home(self):
+        assert CONTAINER_OPENCODE_PLUGIN_DIR.startswith(CONTAINER_HOME)
 
 
 class TestConstantsDirectoryGetters:

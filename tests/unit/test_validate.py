@@ -116,6 +116,75 @@ class TestGitUrlValidation:
         assert "Invalid repository URL" in msg
         assert "invalid-url" in msg
 
+    def test_http_embedded_credentials_rejected(self):
+        """HTTP URLs with embedded credentials should be rejected."""
+        valid, msg = validate.validate_git_url("https://user:pass@github.com/repo")
+        assert valid is False
+        assert "embedded credentials" in msg
+
+    def test_http_semicolon_in_host_rejected(self):
+        """HTTP URLs with semicolons in netloc should be rejected."""
+        valid, msg = validate.validate_git_url("http://evil.com;@legit.com/repo")
+        assert valid is False
+
+    def test_http_missing_host_rejected(self):
+        """HTTP URLs without a host should be rejected."""
+        valid, msg = validate.validate_git_url("https:///path")
+        assert valid is False
+        assert "missing host" in msg
+
+    def test_http_missing_path_rejected(self):
+        """HTTP URLs without a repo path should be rejected."""
+        valid, msg = validate.validate_git_url("https://github.com")
+        assert valid is False
+        assert "missing path" in msg
+
+    def test_ssh_empty_host_rejected(self):
+        """SSH URLs with empty host should be rejected."""
+        valid, msg = validate.validate_git_url("git@:path")
+        assert valid is False
+        assert "missing host" in msg
+
+    def test_ssh_invalid_host_rejected(self):
+        """SSH URLs with invalid host characters should be rejected."""
+        valid, msg = validate.validate_git_url("git@host with spaces:repo")
+        assert valid is False
+        assert "invalid host" in msg
+
+    def test_ssh_absolute_path_rejected(self):
+        """SSH URLs with absolute paths after colon should be rejected."""
+        valid, msg = validate.validate_git_url("git@github.com:/absolute/path")
+        assert valid is False
+        assert "absolute path" in msg
+
+    def test_sensitive_path_etc_rejected(self):
+        """Paths to /etc should be rejected."""
+        valid, msg = validate.validate_git_url("/etc/passwd")
+        assert valid is False
+        assert "sensitive location" in msg
+
+    def test_sensitive_path_proc_rejected(self):
+        """Paths to /proc should be rejected."""
+        valid, msg = validate.validate_git_url("/proc/self")
+        assert valid is False
+        assert "sensitive location" in msg
+
+    def test_local_path_accepted(self):
+        """Valid local paths should be accepted."""
+        valid, msg = validate.validate_git_url("/home/user/repos/myrepo")
+        assert valid is True
+
+    def test_relative_path_accepted(self):
+        """Relative paths should be accepted."""
+        valid, msg = validate.validate_git_url("./my-repo")
+        assert valid is True
+
+    def test_path_traversal_rejected(self):
+        """Path traversal attempts should be rejected."""
+        valid, msg = validate.validate_git_url("https://example.com/../../etc/passwd")
+        assert valid is False
+        assert "path traversal" in msg
+
 
 class TestSshModeValidation:
     """Tests for validate_ssh_mode()."""
@@ -139,10 +208,11 @@ class TestMountPathValidation:
     """Tests for validate_mount_path()."""
 
     def test_safe_path_accepted(self, tmp_path):
-        """Safe paths should be accepted."""
-        valid, msg = validate.validate_mount_path(str(tmp_path))
+        """Safe paths should be accepted and return resolved canonical path."""
+        valid, canonical = validate.validate_mount_path(str(tmp_path))
         assert valid is True
-        assert msg == ""
+        # On success, the second element is the resolved canonical path
+        assert canonical == str(Path(tmp_path).resolve())
 
     def test_ssh_dir_rejected(self):
         """~/.ssh directory should be rejected."""
@@ -379,7 +449,7 @@ class TestCredentialPlaceholders:
     """Tests for setup_credential_placeholders()."""
 
     def test_oauth_mode(self, monkeypatch):
-        """OAuth token set should use OAuth placeholder."""
+        """OAuth token set should use per-sandbox random placeholder."""
         monkeypatch.setenv("CLAUDE_CODE_OAUTH_TOKEN", "test-token")
         monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
         monkeypatch.delenv("TAVILY_API_KEY", raising=False)
@@ -390,12 +460,14 @@ class TestCredentialPlaceholders:
             env = docker.setup_credential_placeholders()
 
             assert env["SANDBOX_ANTHROPIC_API_KEY"] == ""
-            assert env["SANDBOX_CLAUDE_OAUTH"] == "CREDENTIAL_PROXY_PLACEHOLDER"
-            assert env["SANDBOX_GEMINI_API_KEY"] == "CREDENTIAL_PROXY_PLACEHOLDER"
+            assert env["SANDBOX_CLAUDE_OAUTH"].startswith("CRED_PROXY_")
+            assert env["SANDBOX_GEMINI_API_KEY"].startswith("CRED_PROXY_")
             assert env["SANDBOX_ENABLE_TAVILY"] == "0"
+            # Each placeholder should be unique
+            assert env["SANDBOX_CLAUDE_OAUTH"] != env["SANDBOX_GEMINI_API_KEY"]
 
     def test_api_key_mode(self, monkeypatch):
-        """No OAuth token should use API key placeholder."""
+        """No OAuth token should use per-sandbox random placeholder."""
         monkeypatch.delenv("CLAUDE_CODE_OAUTH_TOKEN", raising=False)
         monkeypatch.delenv("TAVILY_API_KEY", raising=False)
         monkeypatch.setenv("SANDBOX_ENABLE_OPENCODE", "0")
@@ -403,11 +475,11 @@ class TestCredentialPlaceholders:
         with patch.object(Path, "is_file", return_value=False):
             env = docker.setup_credential_placeholders()
 
-            assert env["SANDBOX_ANTHROPIC_API_KEY"] == "CREDENTIAL_PROXY_PLACEHOLDER"
+            assert env["SANDBOX_ANTHROPIC_API_KEY"].startswith("CRED_PROXY_")
             assert env["SANDBOX_CLAUDE_OAUTH"] == ""
 
     def test_opencode_enabled(self, monkeypatch):
-        """OpenCode enabled should set PROXY_PLACEHOLDER_OPENCODE."""
+        """OpenCode enabled should set per-sandbox random placeholder."""
         monkeypatch.delenv("CLAUDE_CODE_OAUTH_TOKEN", raising=False)
         monkeypatch.setenv("SANDBOX_ENABLE_OPENCODE", "1")
         monkeypatch.delenv("TAVILY_API_KEY", raising=False)
@@ -415,7 +487,7 @@ class TestCredentialPlaceholders:
         with patch.object(Path, "is_file", return_value=False):
             env = docker.setup_credential_placeholders()
 
-            assert env["SANDBOX_ZHIPU_API_KEY"] == "PROXY_PLACEHOLDER_OPENCODE"
+            assert env["SANDBOX_ZHIPU_API_KEY"].startswith("CRED_PROXY_")
 
     def test_opencode_disabled(self, monkeypatch):
         """OpenCode disabled should not set Zhipu placeholder."""

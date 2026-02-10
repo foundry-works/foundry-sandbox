@@ -84,11 +84,21 @@ def _script_dir() -> Path:
 # ============================================================================
 
 
+def _credential_placeholder() -> str:
+    """Generate a random per-sandbox credential placeholder.
+
+    Uses a random nonce prefixed with a recognizable tag so the proxy can
+    identify placeholders without relying on a static shared secret.
+    """
+    return f"CRED_PROXY_{secrets.token_hex(16)}"
+
+
 def setup_credential_placeholders() -> dict[str, str]:
     """Detect host auth configuration and return appropriate sandbox env vars.
 
     Determines which placeholder credentials to use based on what's configured
     on the host. Returns a dict of environment variable names to values.
+    Each placeholder is a unique random nonce to prevent cross-sandbox forgery.
 
     Returns:
         Dictionary of env var names to their values.
@@ -98,9 +108,9 @@ def setup_credential_placeholders() -> dict[str, str]:
     # Claude: Use OAuth placeholder if CLAUDE_CODE_OAUTH_TOKEN is set on host
     if os.environ.get("CLAUDE_CODE_OAUTH_TOKEN"):
         env["SANDBOX_ANTHROPIC_API_KEY"] = ""
-        env["SANDBOX_CLAUDE_OAUTH"] = "CREDENTIAL_PROXY_PLACEHOLDER"
+        env["SANDBOX_CLAUDE_OAUTH"] = _credential_placeholder()
     else:
-        env["SANDBOX_ANTHROPIC_API_KEY"] = "CREDENTIAL_PROXY_PLACEHOLDER"
+        env["SANDBOX_ANTHROPIC_API_KEY"] = _credential_placeholder()
         env["SANDBOX_CLAUDE_OAUTH"] = ""
 
     # Gemini: Check selectedType in settings file
@@ -111,16 +121,16 @@ def setup_credential_placeholders() -> dict[str, str]:
             content = gemini_settings.read_text()
             if '"selectedType"' in content and '"oauth-personal"' in content:
                 gemini_is_oauth = True
-        except OSError:
-            pass
+        except OSError as exc:
+            log_debug(f"Could not read Gemini settings: {exc}")
     if gemini_is_oauth:
         env["SANDBOX_GEMINI_API_KEY"] = ""
     else:
-        env["SANDBOX_GEMINI_API_KEY"] = "CREDENTIAL_PROXY_PLACEHOLDER"
+        env["SANDBOX_GEMINI_API_KEY"] = _credential_placeholder()
 
     # OpenCode/Zhipu: Only set placeholder if OpenCode is explicitly enabled
     if os.environ.get("SANDBOX_ENABLE_OPENCODE", "0") == "1":
-        env["SANDBOX_ZHIPU_API_KEY"] = "PROXY_PLACEHOLDER_OPENCODE"
+        env["SANDBOX_ZHIPU_API_KEY"] = _credential_placeholder()
     else:
         env["SANDBOX_ZHIPU_API_KEY"] = ""
 
@@ -138,11 +148,42 @@ def setup_credential_placeholders() -> dict[str, str]:
 # ============================================================================
 
 
+def _get_existing_docker_subnets() -> set[str]:
+    """Return the set of subnets currently used by Docker networks."""
+    subnets: set[str] = set()
+    try:
+        result = subprocess.run(
+            ["docker", "network", "ls", "-q"],
+            capture_output=True, text=True, check=False, timeout=10,
+        )
+        if result.returncode != 0:
+            return subnets
+        for net_id in result.stdout.strip().splitlines():
+            if not net_id:
+                continue
+            try:
+                inspect = subprocess.run(
+                    ["docker", "network", "inspect", net_id,
+                     "--format", "{{range .IPAM.Config}}{{.Subnet}} {{end}}"],
+                    capture_output=True, text=True, check=False, timeout=5,
+                )
+                for s in inspect.stdout.strip().split():
+                    if s:
+                        subnets.add(s)
+            except (OSError, subprocess.TimeoutExpired):
+                pass
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        log_debug(f"Could not list Docker networks for collision check: {exc}")
+    return subnets
+
+
 def generate_sandbox_subnet(project_name: str) -> tuple[str, str]:
     """Generate a unique /24 subnet for the credential-isolation network.
 
     Uses SHA-256 of the project name to derive subnet bytes in the
-    10.x.x.0/24 range with values clamped to 1-254.
+    10.x.x.0/24 range with values clamped to 1-254.  Checks for
+    collisions with existing Docker networks and retries with a salt
+    if needed.
 
     Args:
         project_name: Docker compose project name.
@@ -150,16 +191,26 @@ def generate_sandbox_subnet(project_name: str) -> tuple[str, str]:
     Returns:
         Tuple of (subnet, proxy_ip) e.g. ("10.42.17.0/24", "10.42.17.2").
     """
-    digest = hashlib.sha256(project_name.encode()).digest()
-    # Use first two raw bytes — full 8-bit range each (vs 4 hex chars)
-    byte1 = digest[0]
-    byte2 = digest[1]
+    existing = _get_existing_docker_subnets()
 
-    # Clamp to valid range 1-254 (avoid 0=network and 255=broadcast)
-    byte1 = max(1, min(254, byte1))
-    byte2 = max(1, min(254, byte2))
+    for salt in range(16):
+        seed = project_name if salt == 0 else f"{project_name}\x00{salt}"
+        digest = hashlib.sha256(seed.encode()).digest()
+        # Use first two raw bytes — full 8-bit range each (vs 4 hex chars)
+        byte1 = digest[0]
+        byte2 = digest[1]
 
-    subnet = f"10.{byte1}.{byte2}.0/24"
+        # Clamp to valid range 1-254 (avoid 0=network and 255=broadcast)
+        byte1 = max(1, min(254, byte1))
+        byte2 = max(1, min(254, byte2))
+
+        subnet = f"10.{byte1}.{byte2}.0/24"
+        if subnet not in existing:
+            proxy_ip = f"10.{byte1}.{byte2}.2"
+            return subnet, proxy_ip
+        log_debug(f"Subnet {subnet} collides with existing network (salt={salt}), retrying")
+
+    # Exhausted retries — use last computed subnet
     proxy_ip = f"10.{byte1}.{byte2}.2"
     return subnet, proxy_ip
 
@@ -250,8 +301,8 @@ def compose_up(
                     capture_output=True, text=True, check=False,
                 )
                 env["GIT_USER_NAME"] = result.stdout.strip()
-            except OSError:
-                pass
+            except OSError as exc:
+                log_debug(f"Could not read git user.name: {exc}")
 
         env["GIT_USER_EMAIL"] = os.environ.get("GIT_USER_EMAIL", "")
         if not env["GIT_USER_EMAIL"]:
@@ -261,8 +312,8 @@ def compose_up(
                     capture_output=True, text=True, check=False,
                 )
                 env["GIT_USER_EMAIL"] = result.stdout.strip()
-            except OSError:
-                pass
+            except OSError as exc:
+                log_debug(f"Could not read git user.email: {exc}")
 
         # Git shadow mode: provision HMAC secret for git API authentication
         if sandbox_id:
@@ -325,8 +376,8 @@ def compose_down(
                 if line.startswith(f"{container}-unified-proxy-"):
                     isolate_credentials = True
                     break
-        except OSError:
-            pass
+        except OSError as exc:
+            log_debug(f"Could not detect credential isolation via docker ps: {exc}")
 
     compose_cmd = get_compose_command(override_file, isolate_credentials)
     cmd = compose_cmd + ["-p", container, "down"]
@@ -360,7 +411,8 @@ def container_is_running(container: str) -> bool:
             capture_output=True, text=True, check=False,
         )
         return bool(result.stdout.strip())
-    except OSError:
+    except OSError as exc:
+        log_debug(f"Could not check if container is running: {exc}")
         return False
 
 
@@ -385,7 +437,8 @@ def get_unified_proxy_host_port(container: str) -> str:
         first_line = result.stdout.strip().splitlines()[0]
         # Extract port after last colon
         return first_line.rsplit(":", 1)[-1]
-    except OSError:
+    except OSError as exc:
+        log_debug(f"Could not get proxy host port: {exc}")
         return ""
 
 
@@ -502,17 +555,18 @@ def provision_hmac_secret(container: str, sandbox_id: str) -> None:
         check=False,
     )
 
-    # Write secret to volume using temporary container
-    # Pass secret and sandbox_id as positional args to avoid shell injection
+    # Write secret to volume using temporary container.
+    # Secret is piped via stdin to avoid leaking in process args or Docker logs.
     subprocess.run(
         [
-            "docker", "run", "--rm",
+            "docker", "run", "--rm", "-i",
             "-v", f"{volume_name}:/secrets",
             "alpine:latest",
             "sh", "-c",
-            'echo -n "$1" > "/secrets/$2" && chmod 0444 "/secrets/$2"',
-            "_", hmac_secret_b64, sandbox_id,
+            'cat > "/secrets/$1" && chmod 0444 "/secrets/$1"',
+            "_", sandbox_id,
         ],
+        input=hmac_secret_b64.encode(),
         check=True,
     )
 
@@ -539,7 +593,8 @@ def hmac_secret_file_count(container: str) -> int:
             capture_output=True, text=True, check=False,
         )
         return int(result.stdout.strip())
-    except (OSError, ValueError):
+    except (OSError, ValueError) as exc:
+        log_debug(f"Could not count HMAC secret files: {exc}")
         return 0
 
 

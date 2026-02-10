@@ -750,16 +750,18 @@ class TestEdgeCases:
 
     def test_nonce_store_ttl_expiration(self):
         """Test that expired nonces are cleaned up."""
-        nonces = NonceStore(ttl=1, max_per_sandbox=100)
+        _now = [1000.0]
+        with patch.object(git_api.time, "time", side_effect=lambda: _now[0]):
+            nonces = NonceStore(ttl=1, max_per_sandbox=100)
 
-        # Store a nonce
-        assert nonces.check_and_store("sandbox1", "nonce1") is True
+            # Store a nonce
+            assert nonces.check_and_store("sandbox1", "nonce1") is True
 
-        # Wait for TTL expiration
-        time.sleep(1.1)
+            # Advance past TTL expiration
+            _now[0] += 1.1
 
-        # Same nonce should be allowed again after expiration
-        assert nonces.check_and_store("sandbox1", "nonce1") is True
+            # Same nonce should be allowed again after expiration
+            assert nonces.check_and_store("sandbox1", "nonce1") is True
 
     def test_nonce_store_lru_eviction(self):
         """Test that LRU eviction works when cache is full."""
@@ -778,22 +780,24 @@ class TestEdgeCases:
 
     def test_token_bucket_refill(self):
         """Test that token bucket refills over time."""
-        limiter = RateLimiter(burst=1, sustained=60, global_ceiling=1000)  # 1 token/sec
+        _now = [1000.0]
+        with patch.object(git_api.time, "time", side_effect=lambda: _now[0]):
+            limiter = RateLimiter(burst=1, sustained=60, global_ceiling=1000)  # 1 token/sec
 
-        # Consume the only token
-        allowed, retry = limiter.check_sandbox_rate("sandbox1")
-        assert allowed is True
+            # Consume the only token
+            allowed, retry = limiter.check_sandbox_rate("sandbox1")
+            assert allowed is True
 
-        # Immediate retry should fail
-        allowed, retry = limiter.check_sandbox_rate("sandbox1")
-        assert allowed is False
+            # Immediate retry should fail
+            allowed, retry = limiter.check_sandbox_rate("sandbox1")
+            assert allowed is False
 
-        # Wait for refill
-        time.sleep(1.1)
+            # Advance past refill interval
+            _now[0] += 1.1
 
-        # Should have a new token
-        allowed, retry = limiter.check_sandbox_rate("sandbox1")
-        assert allowed is True
+            # Should have a new token
+            allowed, retry = limiter.check_sandbox_rate("sandbox1")
+            assert allowed is True
 
     def test_clock_window_validation(self):
         """Test that requests outside clock window are rejected."""
