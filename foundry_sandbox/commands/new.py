@@ -36,7 +36,9 @@ from datetime import datetime
 from pathlib import Path
 
 import click
+from click.core import ParameterSource
 
+from foundry_sandbox.commands._helpers import flag_enabled as _saved_flag_enabled
 from foundry_sandbox.compose import assemble_override
 from foundry_sandbox.constants import get_repos_dir
 from foundry_sandbox.docker import compose_up, hmac_secret_file_count, populate_stubs_volume, repair_hmac_secret_permissions
@@ -70,6 +72,132 @@ def _shell_call_capture(*args: str) -> str:
     """Call sandbox.sh with arguments and capture stdout."""
     result = run_legacy_command(*args, capture_output=True)
     return result.stdout.strip() if result.returncode == 0 else ""
+
+
+def _rollback_new(
+    worktree_path: Path,
+    claude_config_path: Path,
+    container: str,
+    override_file: Path,
+) -> None:
+    """Best-effort cleanup of partially-created sandbox resources.
+
+    Called when the ``new`` command fails after beginning resource creation.
+    Cleans up containers, config directories, and worktrees so the user
+    is not left with orphaned state.
+    """
+    import shutil
+    from foundry_sandbox.docker import compose_down
+    from foundry_sandbox.git_worktree import remove_worktree
+
+    # 1. Stop and remove containers
+    try:
+        compose_down(
+            worktree_path=str(worktree_path),
+            claude_config_path=str(claude_config_path),
+            container=container,
+            override_file=str(override_file),
+            remove_volumes=True,
+        )
+    except Exception:
+        pass
+
+    # 2. Remove config directory
+    if claude_config_path.is_dir():
+        try:
+            shutil.rmtree(claude_config_path)
+        except Exception:
+            pass
+
+    # 3. Remove worktree
+    if worktree_path.is_dir():
+        try:
+            remove_worktree(str(worktree_path))
+        except Exception:
+            pass
+
+
+
+def _apply_saved_new_defaults(
+    saved: dict[str, object],
+    *,
+    explicit_params: set[str],
+    repo: str,
+    branch: str,
+    from_branch: str,
+    mounts: tuple[str, ...],
+    copies: tuple[str, ...],
+    network: str,
+    with_ssh: bool,
+    with_opencode: bool,
+    with_zai: bool,
+    wd: str,
+    sparse: bool,
+    pip_requirements: str,
+    allow_pr: bool,
+) -> tuple[
+    str,
+    str,
+    str,
+    tuple[str, ...],
+    tuple[str, ...],
+    str,
+    bool,
+    bool,
+    bool,
+    str,
+    bool,
+    str,
+    bool,
+]:
+    """Apply saved/preset values for parameters not explicitly set by the user."""
+    if "repo" not in explicit_params:
+        repo = str(saved.get("repo", "") or "")
+    if "branch" not in explicit_params:
+        branch = str(saved.get("branch", "") or "")
+    if "from_branch" not in explicit_params:
+        from_branch = str(saved.get("from_branch", "") or "")
+    if "network" not in explicit_params:
+        network = str(saved.get("network_mode", "") or "")
+    if "wd" not in explicit_params:
+        wd = str(saved.get("working_dir", "") or "")
+    if "sparse" not in explicit_params:
+        sparse = _saved_flag_enabled(saved.get("sparse", False))
+    if "pip_requirements" not in explicit_params:
+        pip_requirements = str(saved.get("pip_requirements", "") or "")
+    if "allow_pr" not in explicit_params:
+        allow_pr = _saved_flag_enabled(saved.get("allow_pr", False))
+    if "with_ssh" not in explicit_params:
+        with_ssh = _saved_flag_enabled(saved.get("sync_ssh", False))
+    if "with_opencode" not in explicit_params:
+        with_opencode = _saved_flag_enabled(saved.get("enable_opencode", False))
+    if "with_zai" not in explicit_params:
+        with_zai = _saved_flag_enabled(saved.get("enable_zai", False))
+
+    if "mounts" not in explicit_params:
+        saved_mounts = saved.get("mounts", [])
+        if isinstance(saved_mounts, list) and all(isinstance(v, str) for v in saved_mounts):
+            mounts = tuple(saved_mounts)
+    if "copies" not in explicit_params:
+        saved_copies = saved.get("copies", [])
+        if isinstance(saved_copies, list) and all(isinstance(v, str) for v in saved_copies):
+            copies = tuple(saved_copies)
+
+    return (
+        repo,
+        branch,
+        from_branch,
+        mounts,
+        copies,
+        network,
+        with_ssh,
+        with_opencode,
+        with_zai,
+        wd,
+        sparse,
+        pip_requirements,
+        allow_pr,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -596,7 +724,10 @@ def _guided_new() -> tuple[str, ...]:
 @click.option("--skip-key-check", is_flag=True, help="Skip API key validation")
 @click.option("--allow-dangerous-mount", is_flag=True, help="Bypass credential directory protection")
 @click.option("--from", "from_flag", metavar="BRANCH", help="Base branch (alias for from_branch arg)")
+@click.option("--name", "name_override", metavar="NAME", help="Override auto-generated sandbox name")
+@click.pass_context
 def new(
+    ctx: click.Context,
     repo: str,
     branch: str,
     from_branch: str,
@@ -620,12 +751,39 @@ def new(
     skip_key_check: bool,
     allow_dangerous_mount: bool,
     from_flag: str,
+    name_override: str,
 ) -> None:
     """Create a new sandbox with worktree and container."""
+
+    if last and preset:
+        log_error("Options --last and --preset cannot be used together")
+        sys.exit(1)
 
     # Handle --from flag
     if from_flag and not from_branch:
         from_branch = from_flag
+
+    explicit_param_names = {
+        "repo",
+        "branch",
+        "from_branch",
+        "mounts",
+        "copies",
+        "network",
+        "with_ssh",
+        "with_opencode",
+        "with_zai",
+        "wd",
+        "sparse",
+        "pip_requirements",
+        "allow_pr",
+    }
+    explicit_params = {
+        name for name in explicit_param_names
+        if ctx.get_parameter_source(name) == ParameterSource.COMMANDLINE
+    }
+    if ctx.get_parameter_source("from_flag") == ParameterSource.COMMANDLINE:
+        explicit_params.add("from_branch")
 
     # No args mode - run guided wizard
     if not repo and not last and not preset:
@@ -647,8 +805,37 @@ def new(
         click.echo()
         click.echo("Repeating last command")
         click.echo()
-        # Note: The actual parameter override happens in shell layer for now
-        # This is a hybrid approach where we validate but shell handles the reload
+        (
+            repo,
+            branch,
+            from_branch,
+            mounts,
+            copies,
+            network,
+            with_ssh,
+            with_opencode,
+            with_zai,
+            wd,
+            sparse,
+            pip_requirements,
+            allow_pr,
+        ) = _apply_saved_new_defaults(
+            last_data,
+            explicit_params=explicit_params,
+            repo=repo,
+            branch=branch,
+            from_branch=from_branch,
+            mounts=mounts,
+            copies=copies,
+            network=network,
+            with_ssh=with_ssh,
+            with_opencode=with_opencode,
+            with_zai=with_zai,
+            wd=wd,
+            sparse=sparse,
+            pip_requirements=pip_requirements,
+            allow_pr=allow_pr,
+        )
 
     # Handle --preset flag
     if preset:
@@ -659,7 +846,37 @@ def new(
         click.echo()
         click.echo(f"Using preset '{preset}'")
         click.echo()
-        # Note: The actual parameter override happens in shell layer for now
+        (
+            repo,
+            branch,
+            from_branch,
+            mounts,
+            copies,
+            network,
+            with_ssh,
+            with_opencode,
+            with_zai,
+            wd,
+            sparse,
+            pip_requirements,
+            allow_pr,
+        ) = _apply_saved_new_defaults(
+            preset_data,
+            explicit_params=explicit_params,
+            repo=repo,
+            branch=branch,
+            from_branch=from_branch,
+            mounts=mounts,
+            copies=copies,
+            network=network,
+            with_ssh=with_ssh,
+            with_opencode=with_opencode,
+            with_zai=with_zai,
+            wd=wd,
+            sparse=sparse,
+            pip_requirements=pip_requirements,
+            allow_pr=allow_pr,
+        )
 
     # Resolve repo input
     if not repo:
@@ -747,14 +964,18 @@ def new(
         if not ssh_agent_sock:
             log_warn("SSH agent not detected; SSH forwarding disabled (agent-only mode).")
             sync_ssh = "0"
+    sync_ssh_enabled = sync_ssh == "1"
 
     # Generate sandbox name
     bare_path = _repo_to_path(repo_url)
-    name = _sandbox_name(bare_path, branch)
+    if name_override:
+        name = name_override
+    else:
+        name = _sandbox_name(bare_path, branch)
 
     valid_name, name_error = validate_sandbox_name(name)
     if not valid_name:
-        log_error(f"Generated invalid sandbox name '{name}': {name_error}")
+        log_error(f"Invalid sandbox name '{name}': {name_error}")
         sys.exit(1)
 
     # Auto-generate unique name for --last / --preset
@@ -812,6 +1033,166 @@ def new(
     click.echo(f"Setting up your sandbox: {name}")
     log_section("Repository")
 
+    # -- Begin resource creation (wrapped for rollback on failure) --
+    try:
+        _new_setup(
+            repo_url=repo_url,
+            bare_path=bare_path,
+            worktree_path=worktree_path,
+            branch=branch,
+            from_branch=from_branch or "",
+            sparse=sparse,
+            wd=wd or "",
+            claude_config_path=claude_config_path,
+            override_file=override_file,
+            name=name,
+            container=container,
+            mounts=list(mounts),
+            copies=list(copies),
+            allow_dangerous_mount=allow_dangerous_mount,
+            network_mode=network_mode or "",
+            sync_ssh_enabled=sync_ssh_enabled,
+            ssh_agent_sock=ssh_agent_sock,
+            ssh_mode=ssh_mode,
+            isolate_credentials=isolate_credentials,
+            allow_pr=allow_pr,
+            pip_requirements=pip_requirements or "",
+            enable_opencode_flag=enable_opencode_flag,
+            enable_zai_flag=enable_zai_flag,
+        )
+    except SystemExit:
+        # sys.exit() calls from within _new_setup — re-raise without rollback
+        # since the sub-function already handled cleanup where needed
+        raise
+    except Exception as exc:
+        log_error(f"Sandbox creation failed: {exc}")
+        log_info("Cleaning up partial sandbox resources...")
+        _rollback_new(worktree_path, claude_config_path, container, override_file)
+        sys.exit(1)
+
+    # Save last command
+    save_last_cast_new(
+        repo=repo_url,
+        branch=branch,
+        from_branch=from_branch or "",
+        working_dir=wd or "",
+        sparse=sparse,
+        pip_requirements=pip_requirements or "",
+        allow_pr=allow_pr,
+        network_mode=network_mode or "",
+        sync_ssh=sync_ssh_enabled,
+        enable_opencode=with_opencode,
+        enable_zai=with_zai,
+        mounts=list(mounts),
+        copies=list(copies),
+    )
+
+    # Save last attached
+    save_last_attach(name)
+
+    # Save preset
+    if save_as:
+        save_cast_preset(
+            preset_name=save_as,
+            repo=repo_url,
+            branch=branch,
+            from_branch=from_branch or "",
+            working_dir=wd or "",
+            sparse=sparse,
+            pip_requirements=pip_requirements or "",
+            allow_pr=allow_pr,
+            network_mode=network_mode or "",
+            sync_ssh=sync_ssh_enabled,
+            enable_opencode=with_opencode,
+            enable_zai=with_zai,
+            mounts=list(mounts),
+            copies=list(copies),
+        )
+
+    # Success message
+    click.echo()
+    click.echo(f"✓ Your sandbox is ready!")
+    click.echo()
+    click.echo(f"  Sandbox    {name}")
+    click.echo(f"  Worktree   {worktree_path}")
+    click.echo()
+    click.echo("  Commands:")
+    click.echo(f"    cast attach {name}   - reconnect later")
+    click.echo("    cast reattach       - reconnect (auto-detects sandbox in worktree)")
+    click.echo(f"    cast stop {name}     - pause the sandbox")
+    click.echo(f"    cast destroy {name}  - remove completely")
+    click.echo("    cast repeat         - repeat this setup")
+    click.echo()
+
+    # IDE launch logic
+    skip_terminal = False
+
+    if sys.stdin.isatty():
+        from foundry_sandbox.ide import auto_launch_ide, prompt_ide_selection
+
+        if no_ide:
+            input("Press Enter to launch... ")
+        elif with_ide:
+            if auto_launch_ide(with_ide, str(worktree_path)):
+                if ide_only:
+                    skip_terminal = True
+                    click.echo()
+                    click.echo(f"IDE launched. Run 'cast attach {name}' for terminal.")
+                else:
+                    input("Press Enter to launch terminal... ")
+            else:
+                input("Press Enter to launch... ")
+        elif ide_only:
+            prompt_ide_selection(str(worktree_path), name)
+            skip_terminal = True
+            click.echo()
+            click.echo("  Run this in your IDE's terminal to connect:")
+            click.echo()
+            click.echo(f"    cast attach {name}")
+            click.echo()
+        else:
+            ide_was_launched = prompt_ide_selection(str(worktree_path), name)
+            if ide_was_launched:
+                click.echo()
+                click.echo("  Run this in your IDE's terminal to connect:")
+                click.echo()
+                click.echo(f"    cast attach {name}")
+                click.echo()
+                skip_terminal = True
+            else:
+                input("Press Enter to launch terminal... ")
+
+    if not skip_terminal and sys.stdin.isatty():
+        _shell_call("_bridge_tmux_attach", name, wd or "")
+
+
+def _new_setup(
+    *,
+    repo_url: str,
+    bare_path: str,
+    worktree_path: Path,
+    branch: str,
+    from_branch: str,
+    sparse: bool,
+    wd: str,
+    claude_config_path: Path,
+    override_file: Path,
+    name: str,
+    container: str,
+    mounts: list[str],
+    copies: list[str],
+    allow_dangerous_mount: bool,
+    network_mode: str,
+    sync_ssh_enabled: bool,
+    ssh_agent_sock: str,
+    ssh_mode: str,
+    isolate_credentials: bool,
+    allow_pr: bool,
+    pip_requirements: str,
+    enable_opencode_flag: str,
+    enable_zai_flag: str,
+) -> None:
+    """Inner setup logic for the ``new`` command, extracted for rollback."""
     # Clone/fetch bare repo
     ensure_bare_repo(repo_url, bare_path)
 
@@ -848,7 +1229,8 @@ def new(
             f.write("  dev:\n")
             f.write("    volumes:\n")
             for mount in mounts:
-                f.write(f"      - {mount}\n")
+                escaped = mount.replace('"', '\\"')
+                f.write(f'      - "{escaped}"\n')
 
     # Add network mode
     if network_mode:
@@ -869,7 +1251,7 @@ def new(
 
     # Add SSH agent
     runtime_enable_ssh = "0"
-    if sync_ssh == "1" and ssh_agent_sock:
+    if sync_ssh_enabled and ssh_agent_sock:
         log_step("SSH agent forwarding: enabled")
         add_ssh_agent_to_override(str(override_file), ssh_agent_sock)
         runtime_enable_ssh = "1"
@@ -887,7 +1269,7 @@ def new(
         pip_requirements=pip_requirements or "",
         allow_pr="1" if allow_pr else "0",
         network_mode=network_mode or "",
-        sync_ssh=sync_ssh,
+        sync_ssh=1 if sync_ssh_enabled else 0,
         ssh_mode=ssh_mode,
         enable_opencode=enable_opencode_flag,
         enable_zai=enable_zai_flag,
@@ -941,9 +1323,7 @@ def new(
             log_error("Failed to generate sandbox identity (missing SHA-256 toolchain)")
             sys.exit(1)
 
-        os.environ["SANDBOX_ID"] = sandbox_id
         log_step(f"Sandbox ID: {sandbox_id}")
-        os.environ["REPOS_DIR"] = str(get_repos_dir())
     else:
         sandbox_id = ""
 
@@ -964,6 +1344,7 @@ def new(
 
         # Fix proxy worktree paths
         proxy_container = f"{container}-unified-proxy-1"
+        os.environ["PROXY_CONTAINER_NAME"] = proxy_container
         username = os.environ.get("USER", "ubuntu")
         _shell_call("_bridge_fix_proxy_worktree_paths", proxy_container, username)
 
@@ -1042,98 +1423,3 @@ def new(
                 ["docker", "exec", container_id, "sudo", "/usr/local/bin/network-mode", network_mode],
                 check=False,
             )
-
-    # Save last command
-    save_last_cast_new(
-        repo_url=repo_url,
-        branch=branch,
-        from_branch=from_branch or "",
-        working_dir=wd or "",
-        sparse_checkout=sparse,
-        pip_requirements=pip_requirements or "",
-        allow_pr=allow_pr,
-        network_mode=network_mode or "",
-        sync_ssh=sync_ssh,
-        enable_opencode=with_opencode,
-        enable_zai=with_zai,
-        mounts=list(mounts),
-        copies=list(copies),
-    )
-
-    # Save last attached
-    save_last_attach(name)
-
-    # Save preset
-    if save_as:
-        save_cast_preset(
-            preset_name=save_as,
-            repo_url=repo_url,
-            branch=branch,
-            from_branch=from_branch or "",
-            working_dir=wd or "",
-            sparse_checkout=sparse,
-            pip_requirements=pip_requirements or "",
-            allow_pr=allow_pr,
-            network_mode=network_mode or "",
-            sync_ssh=sync_ssh,
-            enable_opencode=with_opencode,
-            enable_zai=with_zai,
-            mounts=list(mounts),
-            copies=list(copies),
-        )
-
-    # Success message
-    click.echo()
-    click.echo(f"✓ Your sandbox is ready!")
-    click.echo()
-    click.echo(f"  Sandbox    {name}")
-    click.echo(f"  Worktree   {worktree_path}")
-    click.echo()
-    click.echo("  Commands:")
-    click.echo(f"    cast attach {name}   - reconnect later")
-    click.echo("    cast reattach       - reconnect (auto-detects sandbox in worktree)")
-    click.echo(f"    cast stop {name}     - pause the sandbox")
-    click.echo(f"    cast destroy {name}  - remove completely")
-    click.echo("    cast repeat         - repeat this setup")
-    click.echo()
-
-    # IDE launch logic
-    skip_terminal = False
-
-    if sys.stdin.isatty():
-        from foundry_sandbox.ide import auto_launch_ide, prompt_ide_selection
-
-        if no_ide:
-            input("Press Enter to launch... ")
-        elif with_ide:
-            if auto_launch_ide(with_ide, str(worktree_path)):
-                if ide_only:
-                    skip_terminal = True
-                    click.echo()
-                    click.echo(f"IDE launched. Run 'cast attach {name}' for terminal.")
-                else:
-                    input("Press Enter to launch terminal... ")
-            else:
-                input("Press Enter to launch... ")
-        elif ide_only:
-            prompt_ide_selection(str(worktree_path), name)
-            skip_terminal = True
-            click.echo()
-            click.echo("  Run this in your IDE's terminal to connect:")
-            click.echo()
-            click.echo(f"    cast attach {name}")
-            click.echo()
-        else:
-            ide_was_launched = prompt_ide_selection(str(worktree_path), name)
-            if ide_was_launched:
-                click.echo()
-                click.echo("  Run this in your IDE's terminal to connect:")
-                click.echo()
-                click.echo(f"    cast attach {name}")
-                click.echo()
-                skip_terminal = True
-            else:
-                input("Press Enter to launch terminal... ")
-
-    if not skip_terminal:
-        _shell_call("_bridge_tmux_attach", name, wd or "")

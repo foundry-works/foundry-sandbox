@@ -57,15 +57,27 @@ def git_with_retry(
     """
     delay = initial_delay
     last_result: subprocess.CompletedProcess[str] | None = None
+    last_error: str = "unknown error"
 
     for attempt in range(1, max_attempts + 1):
-        result = subprocess.run(
-            ["git", *args],
-            capture_output=capture_output,
-            text=True,
-            check=False,
-            timeout=timeout,
-        )
+        try:
+            result = subprocess.run(
+                ["git", *args],
+                capture_output=capture_output,
+                text=True,
+                check=False,
+                timeout=timeout,
+            )
+        except subprocess.TimeoutExpired:
+            last_error = f"timed out after {timeout}s"
+            if attempt < max_attempts:
+                log_warn(
+                    f"Git command timed out (attempt {attempt}/{max_attempts}). "
+                    f"Retrying in {delay:.0f}s..."
+                )
+                _sleep(delay)
+                delay *= 2
+            continue
 
         if result.returncode == 0:
             return result
@@ -81,10 +93,11 @@ def git_with_retry(
             delay *= 2
 
     # All attempts exhausted
-    stderr = last_result.stderr.strip() if last_result else "unknown error"
+    if last_result is not None:
+        last_error = last_result.stderr.strip() if last_result.stderr else last_error
     msg = f"Git command failed after {max_attempts} attempts: git {' '.join(args)}"
-    if stderr:
-        msg += f"\n{stderr}"
+    if last_error:
+        msg += f"\n{last_error}"
     raise RuntimeError(msg)
 
 

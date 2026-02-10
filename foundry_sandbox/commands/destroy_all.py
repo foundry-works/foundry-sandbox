@@ -24,24 +24,18 @@ import sys
 import click
 
 from foundry_sandbox.constants import get_worktrees_dir
-from foundry_sandbox.docker import compose_down
-from foundry_sandbox.git_worktree import remove_worktree
+from foundry_sandbox.docker import compose_down, remove_hmac_volume, remove_stubs_volume
+from foundry_sandbox.git_worktree import cleanup_sandbox_branch, remove_worktree
 from foundry_sandbox.paths import derive_sandbox_paths
+from foundry_sandbox.proxy import cleanup_proxy_registration
+from foundry_sandbox.state import load_sandbox_metadata
 from foundry_sandbox.utils import log_warn
+from foundry_sandbox.commands._helpers import repo_url_to_bare_path as _repo_url_to_bare_path, tmux_session_name as _tmux_session_name
 
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
-
-
-def _tmux_session_name(name: str) -> str:
-    """Return the tmux session name for a sandbox.
-
-    Mirrors lib/tmux.sh ``tmux_session_name`` — which simply returns the
-    sandbox name as-is.
-    """
-    return name
 
 
 def _list_all_sandboxes() -> list[str]:
@@ -88,7 +82,7 @@ def _remove_network(network_name: str) -> bool:
                 check=False,
             )
             return rm_result.returncode == 0
-    except Exception:
+    except (OSError, subprocess.SubprocessError):
         pass
     return False
 
@@ -124,7 +118,7 @@ def _cleanup_orphaned_networks() -> int:
                     orphaned_count += 1
 
         return orphaned_count
-    except Exception:
+    except (OSError, subprocess.SubprocessError):
         return 0
 
 
@@ -216,10 +210,25 @@ def destroy_all(keep_worktree: bool) -> None:
                 stderr=subprocess.DEVNULL,
                 check=False,
             )
-        except Exception:
+        except (OSError, subprocess.SubprocessError):
             pass
 
-        # 2. Docker compose down (best effort)
+        # 2. Cleanup proxy registration (best effort)
+        try:
+            container_id = f"{container}-dev-1"
+            prev_container_name = os.environ.get("CONTAINER_NAME")
+            os.environ["CONTAINER_NAME"] = container
+            try:
+                cleanup_proxy_registration(container_id)
+            finally:
+                if prev_container_name is None:
+                    os.environ.pop("CONTAINER_NAME", None)
+                else:
+                    os.environ["CONTAINER_NAME"] = prev_container_name
+        except (OSError, subprocess.SubprocessError):
+            pass  # Proxy may not be running
+
+        # 3. Docker compose down (best effort)
         try:
             compose_down(
                 worktree_path=str(worktree_path),
@@ -228,17 +237,45 @@ def destroy_all(keep_worktree: bool) -> None:
                 override_file=str(override_file),
                 remove_volumes=True,
             )
-        except Exception:
+        except (OSError, subprocess.SubprocessError):
             pass  # Container may already be gone
 
-        # 3. Remove config directory (unless --keep-worktree)
+        # 4. Remove stubs volume (best effort)
+        try:
+            remove_stubs_volume(container)
+        except (OSError, subprocess.SubprocessError):
+            pass
+
+        # 5. Remove HMAC secrets volume (best effort)
+        try:
+            remove_hmac_volume(container)
+        except (OSError, subprocess.SubprocessError):
+            pass
+
+        # 6. Remove credential isolation networks for this sandbox
+        for network_suffix in ("credential-isolation", "proxy-egress"):
+            network_name = f"{container}_{network_suffix}"
+            _remove_network(network_name)
+
+        # 7. Load metadata BEFORE deleting config dir (needed for branch cleanup)
+        destroy_branch = ""
+        destroy_repo_url = ""
+        try:
+            metadata = load_sandbox_metadata(name)
+            if metadata:
+                destroy_branch = metadata.get("branch", "")
+                destroy_repo_url = metadata.get("repo_url", "")
+        except (OSError, ValueError):
+            pass
+
+        # 8. Remove config directory (unless --keep-worktree)
         if not keep_worktree and claude_config_path.is_dir():
             try:
                 shutil.rmtree(claude_config_path)
-            except Exception:
+            except OSError:
                 pass  # Best effort
 
-        # 4. Remove worktree (unless --keep-worktree)
+        # 9. Remove worktree (unless --keep-worktree)
         if not keep_worktree and worktree_path.is_dir():
             try:
                 remove_worktree(str(worktree_path))
@@ -247,10 +284,13 @@ def destroy_all(keep_worktree: bool) -> None:
                 failed.append(name)
                 continue  # Skip to next sandbox
 
-        # 5. Remove credential isolation networks for this sandbox
-        for network_suffix in ("credential-isolation", "proxy-egress"):
-            network_name = f"{container}_{network_suffix}"
-            _remove_network(network_name)
+        # 10. Cleanup sandbox branch from bare repo
+        if destroy_branch and destroy_repo_url:
+            try:
+                bare_path = _repo_url_to_bare_path(destroy_repo_url)
+                cleanup_sandbox_branch(destroy_branch, bare_path)
+            except Exception as exc:
+                log_warn(f"Could not cleanup branch for '{name}': {exc}")
 
         click.echo(f"Sandbox '{name}' destroyed.")
 
@@ -263,7 +303,7 @@ def destroy_all(keep_worktree: bool) -> None:
     # Print summary
     # ------------------------------------------------------------------
     click.echo("")
-    click.echo(f"Destroyed {len(sandboxes)} sandbox(es).")
+    click.echo(f"Destroyed {len(sandboxes) - len(failed)} sandbox(es).")
     if orphaned_count > 0:
         click.echo(f"Cleaned up {orphaned_count} orphaned network(s).")
 

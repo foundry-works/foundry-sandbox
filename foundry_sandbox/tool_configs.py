@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import os
 import subprocess
+from datetime import datetime, timezone
 from pathlib import Path
 
 from foundry_sandbox.constants import (
@@ -22,6 +23,7 @@ from foundry_sandbox.constants import (
     get_sandbox_opencode_plugin_dir,
     get_sandbox_opencode_prefetch_npm_plugins,
 )
+from foundry_sandbox.paths import ensure_dir, path_opencode_plugins_marker
 from foundry_sandbox.utils import log_debug, log_info, log_step, log_warn
 
 
@@ -926,22 +928,99 @@ def sync_opencode_local_plugins_on_first_attach(
     """Copy local plugin directory to container on first attach.
 
     Migrated from lib/container_config.sh:sync_opencode_local_plugins_on_first_attach (L831-886).
-    This is a stub implementation.
 
     Args:
         name: Sandbox name
         container_id: Container ID
         quiet: If True, suppress output
     """
-    # This function depends on:
-    # 1. opencode_enabled check
-    # 2. SANDBOX_OPENCODE_PLUGIN_DIR env var
-    # 3. Marker file tracking
-    # 4. copy_dir_to_container function
-    # For now, we'll implement a minimal stub
+    host_dir = get_sandbox_opencode_plugin_dir()
+    if not host_dir:
+        return
+
+    host_path = Path(host_dir).expanduser()
+    if not host_path.is_dir():
+        if not quiet:
+            log_warn(f"OpenCode local plugin dir not found: {host_path}")
+        return
+
+    marker = path_opencode_plugins_marker(name)
+
+    has_container_plugins = (
+        subprocess.run(
+            [
+                "docker",
+                "exec",
+                container_id,
+                "sh",
+                "-c",
+                f"test -d '{CONTAINER_OPENCODE_PLUGIN_DIR}' && "
+                f"[ \"$(ls -A '{CONTAINER_OPENCODE_PLUGIN_DIR}' 2>/dev/null)\" ]",
+            ],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            check=False,
+        ).returncode
+        == 0
+    )
+
+    if marker.exists() and has_container_plugins:
+        if not quiet:
+            log_debug("OpenCode local plugins already synced.")
+        return
 
     if not quiet:
-        log_debug("sync_opencode_local_plugins_on_first_attach: not fully implemented yet")
+        log_info(f"Syncing OpenCode local plugins from {host_path}...")
+
+    subprocess.run(
+        ["docker", "exec", container_id, "mkdir", "-p", CONTAINER_OPENCODE_PLUGIN_DIR],
+        check=False,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    )
+
+    copy_result = subprocess.run(
+        ["docker", "cp", f"{host_path}/.", f"{container_id}:{CONTAINER_OPENCODE_PLUGIN_DIR}"],
+        check=False,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    )
+
+    if copy_result.returncode != 0:
+        if not quiet:
+            log_warn(f"Failed to sync OpenCode local plugins from {host_path}")
+        return
+
+    chown_result = subprocess.run(
+        [
+            "docker",
+            "exec",
+            "-u",
+            "root",
+            container_id,
+            "chown",
+            "-R",
+            f"{CONTAINER_USER}:{CONTAINER_USER}",
+            CONTAINER_OPENCODE_PLUGIN_DIR,
+        ],
+        check=False,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    )
+    if chown_result.returncode != 0:
+        if not quiet:
+            log_warn(f"Failed to set ownership on synced OpenCode plugins in {container_id}")
+        return
+
+    ensure_dir(marker.parent)
+    marker.write_text(datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ") + "\n")
+    try:
+        marker.chmod(0o600)
+    except OSError:
+        pass
+
+    sync_opencode_foundry(container_id, quiet=quiet)
+    ensure_opencode_tavily_mcp(container_id, quiet=quiet)
 
 
 # ============================================================================

@@ -5,8 +5,10 @@ Migrated from commands/upgrade.sh.
 
 from __future__ import annotations
 
+import os
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 
 import click
@@ -34,9 +36,21 @@ def upgrade(use_local: bool) -> None:
             log_error(f"Local install.sh not found at {install_sh}")
             sys.exit(1)
     else:
-        click.echo("Fetching latest installer from GitHub...")
-        result = subprocess.run(
-            ["bash", "-c", "curl -fsSL https://raw.githubusercontent.com/foundry-works/foundry-sandbox/main/install.sh | bash"],
+        click.echo("Downloading latest installer from GitHub...")
+        with tempfile.NamedTemporaryFile(suffix=".sh", delete=False) as tmp:
+            tmp_path = tmp.name
+
+        dl_result = subprocess.run(
+            ["curl", "-fsSL", "-o", tmp_path,
+             "https://raw.githubusercontent.com/foundry-works/foundry-sandbox/main/install.sh"],
             check=False,
         )
+        if dl_result.returncode != 0:
+            log_error("Failed to download installer")
+            os.unlink(tmp_path)
+            sys.exit(1)
+
+        click.echo(f"Running installer from {tmp_path}...")
+        result = subprocess.run(["bash", tmp_path], check=False)
+        os.unlink(tmp_path)
         sys.exit(result.returncode)

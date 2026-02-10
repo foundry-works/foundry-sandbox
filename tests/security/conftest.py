@@ -9,7 +9,6 @@ Provides:
 
 import os
 import subprocess
-import uuid
 
 import pytest
 
@@ -42,6 +41,17 @@ def module_local_repo(tmp_path_factory):
     return repo
 
 
+def _extract_sandbox_name(stdout: str) -> str | None:
+    """Extract sandbox name from CLI output.
+
+    Looks for the line ``Setting up your sandbox: <name>``.
+    """
+    for line in stdout.splitlines():
+        if "Setting up your sandbox:" in line:
+            return line.split("Setting up your sandbox:")[-1].strip()
+    return None
+
+
 @pytest.fixture(scope="module")
 def running_sandbox(cli, has_docker, module_local_repo):
     """Create a sandbox with default settings and tear it down after the module.
@@ -52,15 +62,17 @@ def running_sandbox(cli, has_docker, module_local_repo):
     """
     if not has_docker:
         pytest.skip("Docker is not available")
-    name = f"test-{uuid.uuid4().hex[:8]}"
     result = cli(
         "new", str(module_local_repo),
         "--skip-key-check",
-        "--name", name,
     )
     assert result.returncode == 0, (
-        f"Failed to create sandbox {name!r} "
+        f"Failed to create sandbox "
         f"(rc={result.returncode}):\n{result.stderr}"
+    )
+    name = _extract_sandbox_name(result.stdout)
+    assert name, (
+        f"Could not extract sandbox name from output:\n{result.stdout}"
     )
     yield name
     cli("destroy", name, "--force")
@@ -75,7 +87,7 @@ def docker_exec(running_sandbox):
         result = docker_exec("whoami")
         result = docker_exec("cat", "/etc/hostname")
     """
-    container = f"sandbox-{running_sandbox}"
+    container = f"sandbox-{running_sandbox}-dev-1"
 
     def _exec(*args, **kwargs):
         cmd = ["docker", "exec", container] + list(args)

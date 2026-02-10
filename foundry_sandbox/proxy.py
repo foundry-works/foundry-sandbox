@@ -24,6 +24,7 @@ import time
 from typing import Any, Callable
 
 from foundry_sandbox._bridge import bridge_main
+from foundry_sandbox.constants import PROXY_TIMEOUT
 from foundry_sandbox.utils import log_debug, log_error, log_info, log_warn
 
 # Constants
@@ -85,7 +86,7 @@ def proxy_curl(
                 cmd.extend(["-H", "Content-Type: application/json", "-d", json.dumps(data)])
             cmd.append(f"{proxy_url}{path}")
 
-            result = subprocess.run(cmd, capture_output=True, text=True, check=False, timeout=30)
+            result = subprocess.run(cmd, capture_output=True, text=True, check=False, timeout=PROXY_TIMEOUT)
 
         elif proxy_socket:
             # Mode 2: Unix socket
@@ -96,7 +97,7 @@ def proxy_curl(
                 cmd.extend(["-H", "Content-Type: application/json", "-d", json.dumps(data)])
             cmd.append(f"http://localhost{path}")
 
-            result = subprocess.run(cmd, capture_output=True, text=True, check=False, timeout=30)
+            result = subprocess.run(cmd, capture_output=True, text=True, check=False, timeout=PROXY_TIMEOUT)
 
         else:
             # Mode 3: Docker exec fallback
@@ -112,7 +113,7 @@ def proxy_curl(
                 cmd.extend(["-H", "Content-Type: application/json", "-d", json.dumps(data)])
             cmd.append(f"http://localhost{path}")
 
-            result = subprocess.run(cmd, capture_output=True, text=True, check=False, timeout=30)
+            result = subprocess.run(cmd, capture_output=True, text=True, check=False, timeout=PROXY_TIMEOUT)
 
         if result.returncode != 0:
             raise RuntimeError(f"curl failed with exit code {result.returncode}: {result.stderr}")
@@ -252,9 +253,13 @@ def proxy_wait_ready(
                 if body.get("status") == "healthy":
                     log_debug(f"Proxy is ready (took {elapsed}s)")
                     return True
-        except Exception:
-            # Ignore errors during health check polling
+        except (RuntimeError, OSError, subprocess.TimeoutExpired):
+            # Expected transient errors while proxy starts up
             pass
+        except Exception as exc:
+            # Structural errors (KeyError, TypeError, etc.) — log and break early
+            log_debug(f"Unexpected error during proxy health check: {type(exc).__name__}: {exc}")
+            break
 
         # Calculate sleep time for this iteration
         remaining = timeout - elapsed

@@ -25,6 +25,7 @@ import json
 import os
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 import click
@@ -82,6 +83,30 @@ def _shell_call_capture(*args: str) -> str:
     """
     result = run_legacy_command(*args, capture_output=True)
     return result.stdout.strip() if result.returncode == 0 else ""
+
+
+from foundry_sandbox.commands._helpers import flag_enabled as _flag_enabled
+
+
+def _string_value(value: object) -> str:
+    """Convert metadata value to a safe string."""
+    return "" if value is None else str(value)
+
+
+def _export_feature_flags(
+    metadata: dict[str, object],
+    env: dict[str, str],
+) -> tuple[bool, bool]:
+    """Set feature flags in *env* dict and return normalized booleans.
+
+    Mutates the provided *env* dict instead of the global os.environ so
+    that side-effects are explicit and scoped to the caller.
+    """
+    enable_opencode = _flag_enabled(metadata.get("enable_opencode", False))
+    enable_zai = _flag_enabled(metadata.get("enable_zai", False))
+    env["SANDBOX_ENABLE_OPENCODE"] = "1" if enable_opencode else "0"
+    env["SANDBOX_ENABLE_ZAI"] = "1" if enable_zai else "0"
+    return enable_opencode, enable_zai
 
 
 def _has_zai_key() -> bool:
@@ -201,15 +226,18 @@ def start(name: str) -> None:
     if not metadata:
         metadata = {}
 
-    # Export enable flags to environment
-    enable_opencode = metadata.get("enable_opencode", "0")
-    enable_zai = metadata.get("enable_zai", "0")
-    os.environ["SANDBOX_ENABLE_OPENCODE"] = enable_opencode
-    os.environ["SANDBOX_ENABLE_ZAI"] = enable_zai
+    # Build a scoped env overlay for subprocess calls instead of mutating os.environ
+    cmd_env = dict(os.environ)
+
+    # Export enable flags
+    enable_opencode, enable_zai = _export_feature_flags(metadata, cmd_env)
 
     # Clear ZHIPU_API_KEY if ZAI is not enabled
-    if enable_zai != "1":
-        os.environ["ZHIPU_API_KEY"] = ""
+    if not enable_zai:
+        cmd_env["ZHIPU_API_KEY"] = ""
+
+    # Apply scoped env to os.environ for shell_call compatibility
+    os.environ.update(cmd_env)
 
     # ------------------------------------------------------------------
     # 4. Detect credential isolation mode
@@ -229,7 +257,7 @@ def start(name: str) -> None:
         # OpenCode CLI warning
         opencode_auth = Path.home() / ".local/share/opencode/auth.json"
         if not opencode_auth.is_file():
-            if enable_opencode == "1":
+            if enable_opencode:
                 if _has_zai_key():
                     log_warn("OpenCode enabled but auth file not found; relying on ZHIPU_API_KEY fallback (credential isolation).")
                 else:
@@ -246,11 +274,11 @@ def start(name: str) -> None:
             log_warn("Run 'gemini auth' or set GEMINI_API_KEY if you plan to use Gemini.")
 
     # ZAI key warning (non-credential-isolation mode)
-    if enable_zai == "1" and not _has_zai_key():
+    if enable_zai and not _has_zai_key():
         log_warn("ZAI enabled but ZHIPU_API_KEY not set on host; claude-zai will not work.")
 
     # OpenCode key warning (non-credential-isolation mode)
-    if enable_opencode == "1" and not _has_opencode_key() and not uses_credential_isolation:
+    if enable_opencode and not _has_opencode_key() and not uses_credential_isolation:
         log_warn("OpenCode enabled but auth file not found; OpenCode setup will be skipped.")
         log_warn("Run 'opencode auth login' or re-run with --with-opencode after configuring ~/.local/share/opencode/auth.json.")
 
@@ -278,10 +306,10 @@ def start(name: str) -> None:
     # 8. Handle SSH agent forwarding
     # ------------------------------------------------------------------
     enable_ssh = False
-    sync_ssh = metadata.get("sync_ssh", "0")
-    ssh_mode = metadata.get("ssh_mode", "")
+    sync_ssh = _flag_enabled(metadata.get("sync_ssh", False))
+    ssh_mode = _string_value(metadata.get("ssh_mode", ""))
 
-    if sync_ssh == "1":
+    if sync_ssh:
         if ssh_mode in ("init", "disabled"):
             log_warn(f"SSH mode '{ssh_mode}' disables forwarding; use --with-ssh to enable.")
             add_ssh_agent_to_override(str(override_file), "")
@@ -314,8 +342,6 @@ def start(name: str) -> None:
     if uses_credential_isolation:
         isolate_credentials = "true"
         populate_stubs_volume(container)
-        os.environ["STUBS_VOLUME_NAME"] = f"{container}_stubs"
-        os.environ["HMAC_VOLUME_NAME"] = f"{container}_hmac"
 
         # Check if HMAC volume exists and handle secret provisioning
         hmac_volume_name = f"{container}_hmac"
@@ -347,12 +373,11 @@ def start(name: str) -> None:
                     del os.environ["SANDBOX_ID"]
             elif hmac_count == 0:
                 # Existing volume with no secret: provision a new secret on start
-                seed = f"{container}:{name}:{os.times().elapsed}"
+                seed = f"{container}:{name}:{time.time_ns()}"
                 sandbox_id = _generate_sandbox_id(seed)
                 if not sandbox_id:
                     log_error("Failed to generate sandbox identity (missing SHA-256 toolchain)")
                     sys.exit(1)
-                os.environ["SANDBOX_ID"] = sandbox_id
                 log_warn(f"HMAC volume {hmac_volume_name} had no secrets; provisioning a new git shadow secret")
                 log_step(f"Sandbox ID: {sandbox_id}")
             else:
@@ -360,18 +385,17 @@ def start(name: str) -> None:
                 sys.exit(1)
         else:
             # Backward compatibility: old sandboxes may predate git shadow secret volumes
-            seed = f"{container}:{name}:{os.times().elapsed}"
+            seed = f"{container}:{name}:{time.time_ns()}"
             sandbox_id = _generate_sandbox_id(seed)
             if not sandbox_id:
                 log_error("Failed to generate sandbox identity (missing SHA-256 toolchain)")
                 sys.exit(1)
-            os.environ["SANDBOX_ID"] = sandbox_id
             log_warn(f"Missing HMAC volume {hmac_volume_name}; provisioning a new git shadow secret")
             log_step(f"Sandbox ID: {sandbox_id}")
 
         # Export ALLOW_PR_OPERATIONS from metadata
-        allow_pr = metadata.get("allow_pr", "0")
-        if allow_pr == "1":
+        allow_pr = _flag_enabled(metadata.get("allow_pr", False))
+        if allow_pr:
             os.environ["ALLOW_PR_OPERATIONS"] = "true"
         else:
             os.environ["ALLOW_PR_OPERATIONS"] = ""
@@ -395,7 +419,7 @@ def start(name: str) -> None:
     # 12. Register container with proxy (if credential isolation)
     # ------------------------------------------------------------------
     if isolate_credentials == "true":
-        sandbox_branch = metadata.get("branch", "")
+        sandbox_branch = _string_value(metadata.get("branch", ""))
         if not sandbox_branch:
             log_error("Sandbox branch identity missing (created before branch isolation support). Recreate sandbox with 'cast new'.")
             sys.exit(1)
@@ -404,11 +428,12 @@ def start(name: str) -> None:
 
         # Fix proxy worktree paths (shell fallback)
         proxy_container = f"{container}-unified-proxy-1"
+        os.environ["PROXY_CONTAINER_NAME"] = proxy_container
         username = os.environ.get("USER", "ubuntu")
         _shell_call("_bridge_fix_proxy_worktree_paths", proxy_container, username)
 
         # Prepare metadata JSON
-        repo_url = metadata.get("repo_url", "")
+        repo_url = _string_value(metadata.get("repo_url", ""))
         # Strip GitHub URL prefixes and .git suffix
         repo_spec = repo_url
         if repo_spec:
@@ -418,12 +443,12 @@ def start(name: str) -> None:
             if repo_spec.endswith(".git"):
                 repo_spec = repo_spec[:-4]
 
-        from_branch = metadata.get("from_branch", "")
+        from_branch = _string_value(metadata.get("from_branch", ""))
 
         # Build metadata JSON
         metadata_json = json.dumps({
             "repo": repo_spec,
-            "allow_pr": (allow_pr == "1"),
+            "allow_pr": allow_pr,
             "sandbox_branch": sandbox_branch,
             "from_branch": from_branch,
         })
@@ -438,10 +463,10 @@ def start(name: str) -> None:
     # ------------------------------------------------------------------
     # 13. Copy configs to container (shell fallback)
     # ------------------------------------------------------------------
-    working_dir = metadata.get("working_dir", "")
-    repo_url = metadata.get("repo_url", "")
-    from_branch = metadata.get("from_branch", "")
-    sandbox_branch = metadata.get("branch", "")
+    working_dir = _string_value(metadata.get("working_dir", ""))
+    repo_url = _string_value(metadata.get("repo_url", ""))
+    from_branch = _string_value(metadata.get("from_branch", ""))
+    sandbox_branch = _string_value(metadata.get("branch", ""))
 
     _shell_call(
         "_bridge_copy_configs_to_container",
@@ -458,20 +483,20 @@ def start(name: str) -> None:
     # ------------------------------------------------------------------
     # 14. Log sparse checkout reminder if enabled
     # ------------------------------------------------------------------
-    sparse_checkout = metadata.get("sparse_checkout", "0")
-    if sparse_checkout == "1" and working_dir:
+    sparse_checkout = _flag_enabled(metadata.get("sparse_checkout", False))
+    if sparse_checkout and working_dir:
         log_info(f"Sparse checkout active for: {working_dir}")
 
     # ------------------------------------------------------------------
     # 15. Install pip requirements if configured (shell fallback)
     # ------------------------------------------------------------------
-    pip_requirements = metadata.get("pip_requirements", "")
+    pip_requirements = _string_value(metadata.get("pip_requirements", ""))
     if pip_requirements:
         _shell_call("_bridge_install_pip_requirements", container_id, pip_requirements)
 
     # ------------------------------------------------------------------
     # 16. Apply network restrictions
     # ------------------------------------------------------------------
-    network_mode = metadata.get("network_mode", "")
+    network_mode = _string_value(metadata.get("network_mode", ""))
     if network_mode:
         _apply_network_restrictions(container_id, network_mode)

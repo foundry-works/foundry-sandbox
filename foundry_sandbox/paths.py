@@ -9,7 +9,6 @@ It provides functions for:
 
 from __future__ import annotations
 
-import shutil
 from pathlib import Path
 from typing import NamedTuple
 
@@ -218,20 +217,48 @@ def ensure_dir(path: str | Path) -> Path:
     return p
 
 
+def _rmtree_no_follow_symlinks(path: Path) -> None:
+    """Remove a directory tree without following symlinks within.
+
+    Walks the tree bottom-up. Symlinks (both files and dirs) are
+    unlinked rather than followed, preventing traversal outside
+    the intended directory.
+
+    Args:
+        path: Directory path to remove.
+    """
+    for child in path.iterdir():
+        if child.is_symlink():
+            child.unlink()
+        elif child.is_dir():
+            _rmtree_no_follow_symlinks(child)
+        else:
+            child.unlink()
+    path.rmdir()
+
+
 def safe_remove(path: str | Path) -> None:
     """Remove a file or directory tree safely.
 
-    Equivalent to `rm -rf`. For directories, removes the entire tree.
-    For files, removes just the file. Does nothing if path doesn't exist.
+    For directories, removes the entire tree without following symlinks
+    inside the tree. Top-level symlinks are unlinked rather than followed.
+
+    For files or symlinks, removes just the entry. Does nothing if path
+    doesn't exist.
 
     Args:
         path: File or directory path (string or Path)
     """
     p = Path(path)
-    if not p.exists():
+    if not p.exists() and not p.is_symlink():
+        return
+
+    # If the path itself is a symlink, just remove the link
+    if p.is_symlink():
+        p.unlink()
         return
 
     if p.is_dir():
-        shutil.rmtree(p)
+        _rmtree_no_follow_symlinks(p)
     else:
         p.unlink()

@@ -18,6 +18,8 @@ from pathlib import Path
 
 from foundry_sandbox.constants import (
     CONTAINER_HOME,
+    CONTAINER_READY_ATTEMPTS,
+    CONTAINER_READY_DELAY,
     CONTAINER_USER,
     SSH_AGENT_CONTAINER_SOCK,
     get_sandbox_debug,
@@ -32,6 +34,41 @@ from foundry_sandbox.container_io import (
     docker_exec_text,
 )
 from foundry_sandbox.utils import log_debug, log_info, log_step, log_warn
+
+
+def _merge_claude_settings_in_container(container_id: str, host_settings: str) -> None:
+    """Merge host Claude settings into container settings via docker exec.
+
+    Matches the shell merge_claude_settings() in lib/container_config.sh:
+    1. Copy host settings to temp location inside container
+    2. Run merge inside container (preserves hooks, model from container defaults)
+    3. Clean up temp file
+    """
+    temp_host = "/tmp/host-settings.json"
+    container_settings = f"{CONTAINER_HOME}/.claude/settings.json"
+
+    try:
+        copy_file_to_container(container_id, host_settings, temp_host)
+    except Exception:
+        log_warn("Failed to copy host settings for merge")
+        return
+
+    subprocess.run(
+        [
+            "docker", "exec", "-u", CONTAINER_USER, container_id,
+            "python3", "-m", "foundry_sandbox.claude_settings",
+            "merge", container_settings, temp_host,
+        ],
+        check=False,
+        capture_output=True,
+    )
+
+    # Clean up temp file
+    subprocess.run(
+        ["docker", "exec", container_id, "rm", "-f", temp_host],
+        check=False,
+        capture_output=True,
+    )
 
 
 def _file_exists(path: str) -> bool:
@@ -108,8 +145,6 @@ def copy_configs_to_container(
         ensure_gemini_settings,
         ensure_github_https_git,
     )
-    from foundry_sandbox.claude_settings import merge_claude_settings
-
     host_user = getpass.getuser()
     home = Path.home()
 
@@ -119,15 +154,15 @@ def copy_configs_to_container(
 
     # 2. Wait for container home to be ready
     log_step("Waiting for container home directory")
-    for attempt in range(5):
+    for attempt in range(CONTAINER_READY_ATTEMPTS):
         result = subprocess.run(
             ["docker", "exec", container_id, "test", "-d", CONTAINER_HOME],
             capture_output=True,
         )
         if result.returncode == 0:
             break
-        if attempt < 4:
-            time.sleep(0.2)
+        if attempt < CONTAINER_READY_ATTEMPTS - 1:
+            time.sleep(CONTAINER_READY_DELAY)
     else:
         log_warn(f"Container home {CONTAINER_HOME} not ready after 5 attempts")
 
@@ -182,16 +217,11 @@ def copy_configs_to_container(
     log_step("Ensuring Foundry MCP config")
     ensure_foundry_mcp_config(container_id)
 
-    # 8. Copy ~/.claude/settings.json, then merge
-    log_step("Copying Claude settings")
+    # 8. Merge host ~/.claude/settings.json into container settings
+    log_step("Merging Claude settings")
     settings_json = home / ".claude" / "settings.json"
     if settings_json.exists():
-        copy_file_to_container(
-            container_id,
-            str(settings_json),
-            f"{CONTAINER_HOME}/.claude/settings.json",
-        )
-        merge_claude_settings(container_id)
+        _merge_claude_settings_in_container(container_id, str(settings_json))
     else:
         log_debug("~/.claude/settings.json not found, skipping")
 
@@ -382,8 +412,8 @@ def copy_configs_to_container(
     else:
         log_debug("~/.gitconfig not found, skipping")
 
-    # 20. SSH key handling (if enable_ssh)
-    if enable_ssh:
+    # 20. SSH key handling (if enable_ssh AND NOT isolate_credentials)
+    if enable_ssh and not isolate_credentials:
         log_step("Setting up SSH keys")
         ssh_dir = home / ".ssh"
         if ssh_dir.exists():
@@ -536,13 +566,19 @@ def copy_configs_to_container(
             log_debug(f"~/.claude contents:\n{result.stdout}")
 
 
-def sync_runtime_credentials(container_id: str) -> None:
+def sync_runtime_credentials(
+    container_id: str,
+    isolate_credentials: bool = False,
+) -> None:
     """Sync credentials when attaching to running container.
 
     Idempotent sync of credentials and configs. Uses quiet mode.
+    When isolate_credentials is True, skips copying real credentials
+    (gh config, Gemini OAuth, OpenCode auth) to preserve isolation.
 
     Args:
         container_id: Container ID
+        isolate_credentials: If True, skip real credential copies
     """
     # Lazy imports
     from foundry_sandbox.container_setup import ensure_container_user
@@ -559,8 +595,6 @@ def sync_runtime_credentials(container_id: str) -> None:
         ensure_codex_config,
         ensure_gemini_settings,
     )
-    from foundry_sandbox.claude_settings import merge_claude_settings
-
     home = Path.home()
 
     # Copy .codex dir (quiet)
@@ -592,15 +626,10 @@ def sync_runtime_credentials(container_id: str) -> None:
     # Ensure foundry MCP config (quiet)
     ensure_foundry_mcp_config(container_id, quiet=True)
 
-    # Copy and merge settings.json (quiet)
+    # Merge host settings.json into container settings (quiet)
     settings_json = home / ".claude" / "settings.json"
     if settings_json.exists():
-        copy_file_to_container_quiet(
-            container_id,
-            str(settings_json),
-            f"{CONTAINER_HOME}/.claude/settings.json",
-        )
-        merge_claude_settings(container_id, quiet=True)
+        _merge_claude_settings_in_container(container_id, str(settings_json))
 
     # Copy statusline.conf (quiet)
     statusline_conf = home / ".claude" / "statusline.conf"
@@ -623,32 +652,34 @@ def sync_runtime_credentials(container_id: str) -> None:
     # Sync marketplace manifests (quiet)
     sync_marketplace_manifests(container_id, f"{CONTAINER_HOME}/.claude/marketplace_plugins", quiet=True)
 
-    # Copy gh config (quiet)
-    gh_config = home / ".config" / "gh"
-    if gh_config.exists():
-        copy_dir_to_container_quiet(
-            container_id,
-            str(gh_config),
-            f"{CONTAINER_HOME}/.config/gh",
-        )
+    # Copy real credentials only when NOT in isolation mode
+    if not isolate_credentials:
+        # Copy gh config (quiet)
+        gh_config = home / ".config" / "gh"
+        if gh_config.exists():
+            copy_dir_to_container_quiet(
+                container_id,
+                str(gh_config),
+                f"{CONTAINER_HOME}/.config/gh",
+            )
 
-    # Copy Gemini config (quiet)
-    gemini_oauth = home / ".gemini" / "oauth_credentials.json"
-    if gemini_oauth.exists():
-        copy_file_to_container_quiet(
-            container_id,
-            str(gemini_oauth),
-            f"{CONTAINER_HOME}/.gemini/oauth_credentials.json",
-        )
+        # Copy Gemini config (quiet)
+        gemini_oauth = home / ".gemini" / "oauth_credentials.json"
+        if gemini_oauth.exists():
+            copy_file_to_container_quiet(
+                container_id,
+                str(gemini_oauth),
+                f"{CONTAINER_HOME}/.gemini/oauth_credentials.json",
+            )
 
-    # Copy OpenCode auth (quiet)
-    opencode_auth = home / ".config" / "opencode" / "auth.json"
-    if opencode_auth.exists():
-        copy_file_to_container_quiet(
-            container_id,
-            str(opencode_auth),
-            f"{CONTAINER_HOME}/.config/opencode/auth.json",
-        )
+        # Copy OpenCode auth (quiet)
+        opencode_auth = home / ".config" / "opencode" / "auth.json"
+        if opencode_auth.exists():
+            copy_file_to_container_quiet(
+                container_id,
+                str(opencode_auth),
+                f"{CONTAINER_HOME}/.config/opencode/auth.json",
+            )
 
     # Ensure Gemini settings (quiet)
     ensure_gemini_settings(container_id, quiet=True)

@@ -141,8 +141,8 @@ def setup_credential_placeholders() -> dict[str, str]:
 def generate_sandbox_subnet(project_name: str) -> tuple[str, str]:
     """Generate a unique /24 subnet for the credential-isolation network.
 
-    Uses a hash of the project name to derive subnet bytes in the 10.x.x.0/24
-    range.
+    Uses SHA-256 of the project name to derive subnet bytes in the
+    10.x.x.0/24 range with values clamped to 1-254.
 
     Args:
         project_name: Docker compose project name.
@@ -150,19 +150,14 @@ def generate_sandbox_subnet(project_name: str) -> tuple[str, str]:
     Returns:
         Tuple of (subnet, proxy_ip) e.g. ("10.42.17.0/24", "10.42.17.2").
     """
-    digest = hashlib.md5(project_name.encode()).hexdigest()[:4]
-    byte1 = int(digest[:2], 16)
-    byte2 = int(digest[2:4], 16)
+    digest = hashlib.sha256(project_name.encode()).digest()
+    # Use first two raw bytes — full 8-bit range each (vs 4 hex chars)
+    byte1 = digest[0]
+    byte2 = digest[1]
 
-    # Avoid 0 (network) and ensure valid range 1-254
-    if byte1 == 0:
-        byte1 = 1
-    if byte2 == 0:
-        byte2 = 1
-    if byte1 > 254:
-        byte1 = 254
-    if byte2 > 254:
-        byte2 = 254
+    # Clamp to valid range 1-254 (avoid 0=network and 255=broadcast)
+    byte1 = max(1, min(254, byte1))
+    byte2 = max(1, min(254, byte2))
 
     subnet = f"10.{byte1}.{byte2}.0/24"
     proxy_ip = f"10.{byte1}.{byte2}.2"
@@ -285,10 +280,15 @@ def compose_up(
     if get_sandbox_verbose():
         print(f"+ {' '.join(cmd)}", file=sys.stderr)
 
-    subprocess.run(
-        cmd, env=env, check=True,
-        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+    result = subprocess.run(
+        cmd, env=env, check=False,
+        capture_output=True,
     )
+    if result.returncode != 0:
+        stderr_text = result.stderr.decode() if isinstance(result.stderr, bytes) else (result.stderr or "")
+        raise subprocess.CalledProcessError(
+            result.returncode, cmd, output=result.stdout, stderr=stderr_text,
+        )
 
 
 def compose_down(
@@ -503,14 +503,15 @@ def provision_hmac_secret(container: str, sandbox_id: str) -> None:
     )
 
     # Write secret to volume using temporary container
+    # Pass secret and sandbox_id as positional args to avoid shell injection
     subprocess.run(
         [
             "docker", "run", "--rm",
             "-v", f"{volume_name}:/secrets",
             "alpine:latest",
             "sh", "-c",
-            f"echo -n '{hmac_secret_b64}' > /secrets/{sandbox_id} "
-            f"&& chmod 0444 /secrets/{sandbox_id}",
+            'echo -n "$1" > "/secrets/$2" && chmod 0444 "/secrets/$2"',
+            "_", hmac_secret_b64, sandbox_id,
         ],
         check=True,
     )

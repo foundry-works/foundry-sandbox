@@ -481,10 +481,17 @@ class TestEdgeCases:
 
 
 class TestPathTraversalValidation:
-    """Tests for path traversal protection in bare_repo_path enrichment."""
+    """Tests for path traversal protection in bare_repo_path enrichment.
 
-    def test_repo_with_dotdot_in_owner_returns_403(self, addon, registry):
-        """Test that '..' in owner component is rejected."""
+    The enrichment only applies to repos matching the exact 'owner/repo'
+    format (exactly two non-empty components separated by a single '/').
+    Repos with multiple slashes (absolute paths, nested paths) skip
+    enrichment entirely — no bare_repo_path is constructed, so there is
+    no path traversal risk.
+    """
+
+    def test_multi_slash_repo_skips_enrichment(self, addon, registry):
+        """Test that repos with multiple slashes skip enrichment safely."""
         registry.register(
             container_id="traversal-container",
             ip_address="172.17.0.20",
@@ -494,11 +501,14 @@ class TestPathTraversalValidation:
         flow = create_flow("172.17.0.20")
         addon.request(flow)
 
-        assert flow.response is not None
-        assert flow.response.status_code == 403
+        # Request proceeds (no bare_repo_path constructed, so no risk)
+        assert flow.response is None
+        config = container_identity.get_container_config(flow)
+        assert config is not None
+        assert "bare_repo_path" not in config.metadata
 
-    def test_repo_with_dotdot_in_repo_name_returns_403(self, addon, registry):
-        """Test that '..' in repo name component is rejected."""
+    def test_multi_slash_nested_path_skips_enrichment(self, addon, registry):
+        """Test that nested paths with '..' skip enrichment safely."""
         registry.register(
             container_id="traversal-container-2",
             ip_address="172.17.0.21",
@@ -506,6 +516,37 @@ class TestPathTraversalValidation:
         )
 
         flow = create_flow("172.17.0.21")
+        addon.request(flow)
+
+        # Request proceeds (no bare_repo_path constructed)
+        assert flow.response is None
+        config = container_identity.get_container_config(flow)
+        assert config is not None
+        assert "bare_repo_path" not in config.metadata
+
+    def test_dotdot_in_two_part_owner_returns_403(self, addon, registry):
+        """Test that '..' in owner of a two-part repo is rejected."""
+        registry.register(
+            container_id="traversal-2part-container",
+            ip_address="172.17.0.26",
+            metadata={"repo": "../passwd"},
+        )
+
+        flow = create_flow("172.17.0.26")
+        addon.request(flow)
+
+        assert flow.response is not None
+        assert flow.response.status_code == 403
+
+    def test_dotdot_in_two_part_repo_name_returns_403(self, addon, registry):
+        """Test that '..' in repo name of a two-part repo is rejected."""
+        registry.register(
+            container_id="traversal-2part-container-2",
+            ip_address="172.17.0.27",
+            metadata={"repo": "owner/..secret"},
+        )
+
+        flow = create_flow("172.17.0.27")
         addon.request(flow)
 
         assert flow.response is not None
@@ -529,11 +570,11 @@ class TestPathTraversalValidation:
         assert config.metadata["bare_repo_path"].endswith("owner/repo-name.git")
 
     def test_traversal_rejection_logs_warning(self, addon, registry):
-        """Test that path traversal rejection is logged."""
+        """Test that path traversal rejection is logged for two-part repos."""
         registry.register(
             container_id="traversal-log-container",
             ip_address="172.17.0.23",
-            metadata={"repo": "../../evil/path"},
+            metadata={"repo": "../evil"},
         )
 
         flow = create_flow("172.17.0.23")
@@ -543,11 +584,11 @@ class TestPathTraversalValidation:
         messages = mock_ctx.log.get_messages("warn")
         assert any("path traversal" in msg.lower() for msg in messages)
 
-    def test_slash_in_repo_name_returns_403(self, addon, registry):
-        """Test that '/' in repo_name (after initial split) is rejected.
+    def test_three_part_repo_skips_enrichment(self, addon, registry):
+        """Test that 'owner/repo/extra' skips enrichment (no 403).
 
-        The initial split on '/' gives owner and repo_name. If repo_name
-        itself contains '/', it could be used for path injection.
+        Repos with more than two path components don't match the
+        'owner/repo' format, so no bare_repo_path is constructed.
         """
         registry.register(
             container_id="slash-container",
@@ -558,8 +599,30 @@ class TestPathTraversalValidation:
         flow = create_flow("172.17.0.24")
         addon.request(flow)
 
-        assert flow.response is not None
-        assert flow.response.status_code == 403
+        assert flow.response is None
+        config = container_identity.get_container_config(flow)
+        assert config is not None
+        assert "bare_repo_path" not in config.metadata
+
+    def test_absolute_path_skips_enrichment(self, addon, registry):
+        """Test that absolute filesystem paths skip enrichment.
+
+        Test sandboxes use local paths like '/tmp/pytest-xxx/repo0'.
+        These should not trigger path traversal rejection.
+        """
+        registry.register(
+            container_id="abspath-container",
+            ip_address="172.17.0.28",
+            metadata={"repo": "/tmp/pytest-of-user/pytest-1/repo0"},
+        )
+
+        flow = create_flow("172.17.0.28")
+        addon.request(flow)
+
+        assert flow.response is None
+        config = container_identity.get_container_config(flow)
+        assert config is not None
+        assert "bare_repo_path" not in config.metadata
 
     def test_realpath_validation_blocks_escape(self, addon, registry):
         """Test that os.path.realpath validation blocks path escape attempts.

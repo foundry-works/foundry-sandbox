@@ -54,12 +54,17 @@ def launch_ide(ide: str, path: str) -> None:
     """
     display = ide_display_name(ide)
     click.echo(f"Launching {display}...")
-    subprocess.Popen(
-        [ide, path],
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
-        start_new_session=True,
-    )
+    try:
+        proc = subprocess.Popen(
+            [ide, path],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            start_new_session=True,
+        )
+        # Detach: we don't wait on the IDE process, but prevent ResourceWarning
+        proc.returncode = 0
+    except (OSError, FileNotFoundError):
+        click.echo(f"Failed to launch {display}.", err=True)
 
 
 def auto_launch_ide(ide_name: str, path: str) -> bool:

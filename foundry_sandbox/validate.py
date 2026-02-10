@@ -178,22 +178,53 @@ def validate_existing_sandbox_name(name: str) -> tuple[bool, str]:
     return True, ""
 
 
+# Pattern for org/repo shorthand (e.g., "owner/repo" or "owner/repo.git")
+_ORG_REPO_PATTERN = re.compile(r"^[A-Za-z0-9._-]+/[A-Za-z0-9._-]+(?:\.git)?$")
+
+
 def validate_git_url(url: str) -> tuple[bool, str]:
     """Validate a git repository URL.
 
-    Accepts http(s) URLs, git@ SSH URLs, and org/repo shorthand.
+    Accepts http(s) URLs, git@ SSH URLs, org/repo shorthand, and local
+    filesystem paths (absolute or relative).
+    Rejects URLs with path traversal and malformed values.
 
     Args:
-        url: Repository URL to validate.
+        url: Repository URL or local path to validate.
 
     Returns:
         Tuple of (is_valid, error_message).
     """
     if not url:
         return False, "Repository URL required"
-    if not (url.startswith("http") or url.startswith("git@") or "/" in url):
-        return False, f"Invalid repository URL: {url}"
-    return True, ""
+
+    # Reject path traversal sequences
+    if ".." in url:
+        return False, f"Invalid repository URL (path traversal): {url}"
+
+    # HTTPS/HTTP URLs: must have a host and path component
+    if url.startswith(("https://", "http://")):
+        # Strip scheme, check for host/path
+        rest = url.split("://", 1)[1]
+        if "/" not in rest or rest.startswith("/"):
+            return False, f"Invalid repository URL (missing host or path): {url}"
+        return True, ""
+
+    # Git SSH URLs: git@host:owner/repo.git
+    if url.startswith("git@"):
+        if ":" not in url[4:]:
+            return False, f"Invalid git SSH URL (expected git@host:path): {url}"
+        return True, ""
+
+    # Local filesystem paths (absolute or relative)
+    if url.startswith(("/", "./", "~/")) or url == ".":
+        return True, ""
+
+    # Org/repo shorthand: "owner/repo" (GitHub shorthand)
+    if _ORG_REPO_PATTERN.match(url):
+        return True, ""
+
+    return False, f"Invalid repository URL: {url}"
 
 
 def validate_ssh_mode(mode: str) -> tuple[bool, str]:

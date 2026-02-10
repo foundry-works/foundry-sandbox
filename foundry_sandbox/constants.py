@@ -10,6 +10,14 @@ import os
 from pathlib import Path
 
 
+def _env_int(key: str, default: int) -> int:
+    """Read an integer from an environment variable, returning default on parse failure."""
+    try:
+        return int(os.environ.get(key, str(default)))
+    except (ValueError, TypeError):
+        return default
+
+
 # ============================================================================
 # Directory & Path Constants
 # ============================================================================
@@ -71,6 +79,19 @@ CONTAINER_HOME: str = "/home/ubuntu"
 """Container home directory (tmpfs mount with user's home symlinked there)."""
 
 SSH_AGENT_CONTAINER_SOCK: str = "/ssh-agent"
+
+# ============================================================================
+# Retry / Timeout Constants
+# ============================================================================
+
+CONTAINER_READY_ATTEMPTS: int = 5
+"""Number of attempts when waiting for container readiness."""
+
+CONTAINER_READY_DELAY: float = 0.2
+"""Seconds between container readiness retries."""
+
+PROXY_TIMEOUT: int = 30
+"""Default timeout in seconds for proxy HTTP operations."""
 """Path to SSH agent socket inside container."""
 
 CONTAINER_OPENCODE_PLUGIN_DIR: str = "/home/ubuntu/.config/opencode/plugins"
@@ -88,7 +109,7 @@ def get_sandbox_debug() -> int:
     Returns:
         1 if enabled, 0 if disabled (default)
     """
-    return int(os.environ.get("SANDBOX_DEBUG", "0"))
+    return _env_int("SANDBOX_DEBUG", 0)
 
 
 def get_sandbox_verbose() -> int:
@@ -97,7 +118,7 @@ def get_sandbox_verbose() -> int:
     Returns:
         1 if enabled, 0 if disabled (default)
     """
-    return int(os.environ.get("SANDBOX_VERBOSE", "0"))
+    return _env_int("SANDBOX_VERBOSE", 0)
 
 
 def get_sandbox_assume_yes() -> int:
@@ -106,7 +127,11 @@ def get_sandbox_assume_yes() -> int:
     Returns:
         1 if enabled, 0 if disabled (default)
     """
-    return int(os.environ.get("SANDBOX_ASSUME_YES", "0"))
+    return _env_int("SANDBOX_ASSUME_YES", 0)
+
+
+VALID_NETWORK_MODES = frozenset({"limited", "host-only", "none"})
+"""Allowed values for SANDBOX_NETWORK_MODE."""
 
 
 def get_sandbox_network_mode() -> str:
@@ -116,8 +141,17 @@ def get_sandbox_network_mode() -> str:
 
     Returns:
         Network mode (default: "limited")
+
+    Raises:
+        ValueError: If the environment variable contains an invalid value.
     """
-    return os.environ.get("SANDBOX_NETWORK_MODE", "limited")
+    mode = os.environ.get("SANDBOX_NETWORK_MODE", "limited")
+    if mode not in VALID_NETWORK_MODES:
+        raise ValueError(
+            f"Invalid SANDBOX_NETWORK_MODE={mode!r}; "
+            f"must be one of: {', '.join(sorted(VALID_NETWORK_MODES))}"
+        )
+    return mode
 
 
 def get_sandbox_sync_on_attach() -> int:
@@ -126,7 +160,7 @@ def get_sandbox_sync_on_attach() -> int:
     Returns:
         1 if enabled, 0 if disabled (default)
     """
-    return int(os.environ.get("SANDBOX_SYNC_ON_ATTACH", "0"))
+    return _env_int("SANDBOX_SYNC_ON_ATTACH", 0)
 
 
 def get_sandbox_sync_ssh() -> int:
@@ -135,7 +169,7 @@ def get_sandbox_sync_ssh() -> int:
     Returns:
         1 if enabled, 0 if disabled (default)
     """
-    return int(os.environ.get("SANDBOX_SYNC_SSH", "0"))
+    return _env_int("SANDBOX_SYNC_SSH", 0)
 
 
 def get_sandbox_ssh_mode() -> str:
@@ -153,7 +187,7 @@ def get_sandbox_opencode_disable_npm_plugins() -> int:
     Returns:
         1 if disabled (default), 0 if enabled
     """
-    return int(os.environ.get("SANDBOX_OPENCODE_DISABLE_NPM_PLUGINS", "1"))
+    return _env_int("SANDBOX_OPENCODE_DISABLE_NPM_PLUGINS", 1)
 
 
 def get_sandbox_opencode_plugin_dir() -> str:
@@ -171,7 +205,7 @@ def get_sandbox_opencode_prefetch_npm_plugins() -> int:
     Returns:
         1 if enabled (default), 0 if disabled
     """
-    return int(os.environ.get("SANDBOX_OPENCODE_PREFETCH_NPM_PLUGINS", "1"))
+    return _env_int("SANDBOX_OPENCODE_PREFETCH_NPM_PLUGINS", 1)
 
 
 def get_sandbox_opencode_default_model() -> str:
@@ -189,7 +223,7 @@ def get_sandbox_tmux_scrollback() -> int:
     Returns:
         Number of lines (default: 200000)
     """
-    return int(os.environ.get("SANDBOX_TMUX_SCROLLBACK", "200000"))
+    return _env_int("SANDBOX_TMUX_SCROLLBACK", 200000)
 
 
 def get_sandbox_tmux_mouse() -> int:
@@ -198,4 +232,4 @@ def get_sandbox_tmux_mouse() -> int:
     Returns:
         1 if enabled, 0 if disabled (default)
     """
-    return int(os.environ.get("SANDBOX_TMUX_MOUSE", "0"))
+    return _env_int("SANDBOX_TMUX_MOUSE", 0)

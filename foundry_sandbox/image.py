@@ -6,7 +6,6 @@ Docker image creation time to detect stale images.
 
 from __future__ import annotations
 
-import json
 import subprocess
 from pathlib import Path
 
@@ -51,28 +50,10 @@ def check_image_freshness() -> bool:
     # Parse the ISO 8601 timestamp from docker inspect
     image_created = result.stdout.strip()
     try:
-        # Use date command to convert ISO 8601 to epoch (cross-platform)
-        date_result = subprocess.run(
-            ["date", "-d", image_created, "+%s"],
-            capture_output=True,
-            text=True,
-            check=False,
-        )
-        if date_result.returncode != 0:
-            # macOS fallback
-            # Strip fractional seconds for macOS date
-            ts = image_created.split(".")[0]
-            date_result = subprocess.run(
-                ["date", "-j", "-f", "%Y-%m-%dT%H:%M:%S", ts, "+%s"],
-                capture_output=True,
-                text=True,
-                check=False,
-            )
-            if date_result.returncode != 0:
-                log_debug("Could not parse image timestamp, skipping freshness check")
-                return False
-
-        image_time = float(date_result.stdout.strip())
+        from datetime import datetime, timezone
+        # Handle fractional seconds and Z suffix
+        ts = image_created.replace("Z", "+00:00")
+        image_time = datetime.fromisoformat(ts).timestamp()
     except (ValueError, OSError):
         log_debug("Could not parse image timestamp, skipping freshness check")
         return False

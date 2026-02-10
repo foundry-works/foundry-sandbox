@@ -21,7 +21,9 @@ from pathlib import Path
 from typing import Any
 
 from foundry_sandbox._bridge import bridge_main
+from foundry_sandbox.commands._helpers import flag_enabled as _flag_enabled
 from foundry_sandbox.config import load_json, write_json
+from foundry_sandbox.models import SandboxMetadata
 from foundry_sandbox.paths import (
     ensure_dir,
     path_claude_config,
@@ -73,10 +75,25 @@ def metadata_is_secure(path: str | Path) -> bool:
 
 
 def _secure_write(path: Path, content: str) -> None:
-    """Write content to a file with 600 permissions."""
+    """Write content to a file atomically with 600 permissions.
+
+    Uses write-to-temp + os.replace() to avoid corrupted files on crash.
+    """
+    import tempfile
+
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(content)
-    path.chmod(0o600)
+    fd, tmp_path = tempfile.mkstemp(dir=str(path.parent), suffix=".tmp")
+    try:
+        with os.fdopen(fd, "w") as f:
+            f.write(content)
+        os.chmod(tmp_path, 0o600)
+        os.replace(tmp_path, path)
+    except BaseException:
+        try:
+            os.unlink(tmp_path)
+        except OSError:
+            pass
+        raise
 
 
 # ============================================================================
@@ -121,22 +138,24 @@ def write_sandbox_metadata(
         mounts: List of Docker mount specs.
         copies: List of copy specs.
     """
-    data = {
-        "repo_url": repo_url,
-        "branch": branch,
-        "from_branch": from_branch,
-        "network_mode": network_mode,
-        "sync_ssh": sync_ssh,
-        "ssh_mode": ssh_mode,
-        "working_dir": working_dir,
-        "sparse_checkout": sparse_checkout,
-        "pip_requirements": pip_requirements,
-        "allow_pr": allow_pr,
-        "enable_opencode": enable_opencode,
-        "enable_zai": enable_zai,
-        "mounts": mounts or [],
-        "copies": copies or [],
-    }
+    # Validate through Pydantic model before persisting
+    model = SandboxMetadata(
+        repo_url=repo_url,
+        branch=branch,
+        from_branch=from_branch,
+        network_mode=network_mode,
+        sync_ssh=sync_ssh,
+        ssh_mode=ssh_mode,
+        working_dir=working_dir,
+        sparse_checkout=sparse_checkout,
+        pip_requirements=pip_requirements,
+        allow_pr=allow_pr,
+        enable_opencode=enable_opencode,
+        enable_zai=enable_zai,
+        mounts=mounts or [],
+        copies=copies or [],
+    )
+    data = model.model_dump()
 
     path = path_metadata_file(name)
     content = json.dumps(data) + "\n"
@@ -223,7 +242,13 @@ def load_sandbox_metadata(name: str) -> dict[str, Any] | None:
             # Auto-derive ssh_mode if missing
             if not data.get("ssh_mode"):
                 data["ssh_mode"] = "always" if str(data.get("sync_ssh", "0")) == "1" else "disabled"
-            return data
+            # Validate through Pydantic model (lenient: extra keys are ignored)
+            try:
+                model = SandboxMetadata(**data)
+                return model.model_dump()
+            except Exception:
+                # Fall back to raw dict if validation fails (e.g. legacy data)
+                return data
         return None
 
     if legacy_path.exists():
@@ -335,19 +360,19 @@ def _build_command_line(
         parts.append(from_branch)
     if working_dir:
         parts.extend(["--wd", working_dir])
-    if sparse:
+    if _flag_enabled(sparse):
         parts.append("--sparse")
     if pip_requirements:
         parts.extend(["--pip-requirements", pip_requirements])
-    if allow_pr:
+    if _flag_enabled(allow_pr):
         parts.append("--allow-pr")
     if network_mode and network_mode != "limited":
         parts.extend(["--network", network_mode])
-    if sync_ssh:
+    if _flag_enabled(sync_ssh):
         parts.append("--with-ssh")
-    if enable_opencode:
+    if _flag_enabled(enable_opencode):
         parts.append("--with-opencode")
-    if enable_zai:
+    if _flag_enabled(enable_zai):
         parts.append("--with-zai")
     for mount in (mounts or []):
         parts.extend(["--mount", mount])
@@ -493,15 +518,15 @@ def _load_cast_new_json(path: str | Path) -> dict[str, Any] | None:
         "branch": args.get("branch", ""),
         "from_branch": args.get("from_branch", ""),
         "working_dir": args.get("working_dir", ""),
-        "sparse": bool(args.get("sparse", False)),
+        "sparse": _flag_enabled(args.get("sparse", False)),
         "pip_requirements": args.get("pip_requirements", ""),
-        "allow_pr": bool(args.get("allow_pr", False)),
+        "allow_pr": _flag_enabled(args.get("allow_pr", False)),
         "mounts": args.get("mounts", []),
         "copies": args.get("copies", []),
         "network_mode": args.get("network_mode", "limited"),
-        "sync_ssh": bool(args.get("sync_ssh", False)),
-        "enable_opencode": bool(args.get("enable_opencode", False)),
-        "enable_zai": bool(args.get("enable_zai", False)),
+        "sync_ssh": _flag_enabled(args.get("sync_ssh", False)),
+        "enable_opencode": _flag_enabled(args.get("enable_opencode", False)),
+        "enable_zai": _flag_enabled(args.get("enable_zai", False)),
     }
 
 
@@ -626,9 +651,19 @@ def _cmd_load_metadata(name: str) -> dict[str, Any] | None:
     return load_sandbox_metadata(name)
 
 
+_WRITE_METADATA_KEYS = frozenset({
+    "repo_url", "branch", "from_branch", "network_mode", "sync_ssh",
+    "ssh_mode", "working_dir", "sparse_checkout", "pip_requirements",
+    "allow_pr", "enable_opencode", "enable_zai", "mounts", "copies",
+})
+
+
 def _cmd_write_metadata(name: str, json_str: str) -> None:
     """Bridge command: Write sandbox metadata from JSON string."""
     data = json.loads(json_str)
+    unknown = set(data.keys()) - _WRITE_METADATA_KEYS
+    if unknown:
+        raise ValueError(f"Unknown metadata keys: {', '.join(sorted(unknown))}")
     write_sandbox_metadata(name, **data)
 
 

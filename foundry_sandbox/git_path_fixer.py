@@ -6,6 +6,7 @@ fix_worktree_paths, detect_nested_git_repos.
 from __future__ import annotations
 
 import re
+import shlex
 import subprocess
 import sys
 
@@ -148,7 +149,7 @@ def detect_nested_git_repos(container_id: str, workspace_path: str = "/workspace
 
     # Construct the shell script to run inside the container
     # This version only finds and returns paths - warnings are handled by caller
-    script = f'find {workspace_path} -mindepth 2 -name ".git" -type d 2>/dev/null'
+    script = f'find {shlex.quote(workspace_path)} -mindepth 2 -name ".git" -type d 2>/dev/null'
 
     try:
         # Execute the script in the container

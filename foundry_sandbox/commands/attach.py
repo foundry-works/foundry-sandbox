@@ -29,8 +29,9 @@ from foundry_sandbox.docker import container_is_running
 from foundry_sandbox.legacy_bridge import run_legacy_command
 from foundry_sandbox.paths import derive_sandbox_paths
 from foundry_sandbox.state import load_last_attach, load_sandbox_metadata, save_last_attach
+from foundry_sandbox.tool_configs import sync_opencode_local_plugins_on_first_attach
 from foundry_sandbox.tmux import attach as tmux_attach_session, session_exists as tmux_session_exists, create_and_attach as tmux_create_and_attach, attach_existing as tmux_attach_to_existing
-from foundry_sandbox.utils import log_debug, log_error, log_info
+from foundry_sandbox.utils import log_debug, log_error, log_info, log_warn
 from foundry_sandbox.validate import validate_existing_sandbox_name
 
 # Path to sandbox.sh for shell fallback
@@ -67,8 +68,9 @@ def _auto_detect_sandbox() -> str | None:
         parts = relative.parts
         if parts:
             name = parts[0]
-            # Verify the worktree directory exists
-            if (worktrees_dir / name).is_dir():
+            # Validate the detected name before returning
+            valid, _ = validate_existing_sandbox_name(name)
+            if valid and (worktrees_dir / name).is_dir():
                 return name
     except ValueError:
         # Not under worktrees_dir
@@ -119,6 +121,9 @@ def _fzf_select_sandbox() -> str | None:
     return None
 
 
+from foundry_sandbox.commands._helpers import flag_enabled as _flag_enabled
+
+
 def _start_container(name: str) -> None:
     """Start a sandbox container using shell fallback.
 
@@ -143,15 +148,17 @@ def _sync_credentials(container_id: str) -> None:
 
 
 def _sync_opencode_plugins(name: str, container_id: str) -> None:
-    """Sync OpenCode local plugins on first attach (stub).
+    """Sync OpenCode local plugins on first attach.
 
     Args:
         name: Sandbox name.
         container_id: Container ID.
     """
-    # This is handled by shell function sync_opencode_local_plugins_on_first_attach
-    # in lib/container_config.sh. For now, just log debug message.
-    log_debug(f"OpenCode plugin sync for {name} (container {container_id})")
+    try:
+        sync_opencode_local_plugins_on_first_attach(name, container_id)
+    except Exception as exc:
+        # Keep attach resilient; plugin sync is best-effort.
+        log_warn(f"OpenCode plugin sync skipped: {exc}")
 
 
 def _tmux_attach(name: str, working_dir: str, paths) -> None:
@@ -304,12 +311,14 @@ def attach(
     # 7. Ensure metadata is loaded (may not be if container was just started)
     # ------------------------------------------------------------------
     metadata = load_sandbox_metadata(name)
-    working_dir = metadata.get("working_dir", "") if metadata else ""
+    working_dir = str(metadata.get("working_dir", "")) if metadata else ""
+    enable_opencode = _flag_enabled(metadata.get("enable_opencode", False)) if metadata else False
 
     # ------------------------------------------------------------------
-    # 8. Sync OpenCode plugins on first attach (stub)
+    # 8. Sync OpenCode plugins on first attach
     # ------------------------------------------------------------------
-    _sync_opencode_plugins(name, container_id)
+    if enable_opencode:
+        _sync_opencode_plugins(name, container_id)
 
     # ------------------------------------------------------------------
     # 9. Save this sandbox as last attached

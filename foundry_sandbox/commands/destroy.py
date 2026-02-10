@@ -19,11 +19,9 @@ import os
 import shutil
 import subprocess
 import sys
-from pathlib import Path
 
 import click
 
-from foundry_sandbox.constants import get_repos_dir
 from foundry_sandbox.docker import compose_down, remove_hmac_volume, remove_stubs_volume
 from foundry_sandbox.git_worktree import cleanup_sandbox_branch, remove_worktree
 from foundry_sandbox.paths import derive_sandbox_paths
@@ -31,62 +29,7 @@ from foundry_sandbox.proxy import cleanup_proxy_registration
 from foundry_sandbox.state import load_sandbox_metadata
 from foundry_sandbox.utils import log_info, log_warn
 from foundry_sandbox.validate import validate_existing_sandbox_name
-
-
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
-
-
-def _repo_url_to_bare_path(repo_url: str) -> str:
-    """Convert a repository URL to its bare-clone path under REPOS_DIR.
-
-    Mirrors lib/utils.sh ``repo_to_path``.  Handles https://, git@, and
-    local filesystem paths.
-
-    Args:
-        repo_url: Repository URL or local path.
-
-    Returns:
-        Absolute path string to the bare repository.
-    """
-    repos_dir = str(get_repos_dir())
-
-    if not repo_url:
-        return f"{repos_dir}/unknown.git"
-
-    # Local filesystem path
-    if repo_url.startswith(("~/", "/", "./", "../")):
-        expanded = repo_url
-        if expanded.startswith("~/"):
-            expanded = str(Path.home()) + expanded[1:]
-        p = Path(expanded)
-        if p.exists():
-            try:
-                expanded = str(p.resolve())
-            except OSError:
-                pass
-        # Strip leading slash for path construction
-        stripped = expanded.lstrip("/")
-        return f"{repos_dir}/local/{stripped}.git"
-
-    # HTTPS or git@ URL
-    path = repo_url
-    path = path.removeprefix("https://")
-    path = path.removeprefix("git@")
-    path = path.replace(":", "/", 1) if ":" in path else path
-    if path.endswith(".git"):
-        path = path[:-4]
-    return f"{repos_dir}/{path}.git"
-
-
-def _tmux_session_name(name: str) -> str:
-    """Return the tmux session name for a sandbox.
-
-    Mirrors lib/tmux.sh ``tmux_session_name`` — which simply returns the
-    sandbox name as-is.
-    """
-    return name
+from foundry_sandbox.commands._helpers import repo_url_to_bare_path as _repo_url_to_bare_path, tmux_session_name as _tmux_session_name
 
 
 # ---------------------------------------------------------------------------
@@ -152,7 +95,7 @@ def destroy(name: str, keep_worktree: bool, force: bool, yes: bool) -> None:
             stderr=subprocess.DEVNULL,
             check=False,
         )
-    except Exception:
+    except (OSError, subprocess.SubprocessError):
         pass  # tmux may not be installed or session may not exist
 
     # ------------------------------------------------------------------
@@ -160,9 +103,18 @@ def destroy(name: str, keep_worktree: bool, force: bool, yes: bool) -> None:
     # ------------------------------------------------------------------
     try:
         container_id = f"{container}-dev-1"
+        # Set CONTAINER_NAME so proxy_container_name() can derive the proxy name.
+        # Saved/restored to avoid leaking into subsequent operations.
+        prev_container_name = os.environ.get("CONTAINER_NAME")
         os.environ["CONTAINER_NAME"] = container
-        cleanup_proxy_registration(container_id)
-    except Exception:
+        try:
+            cleanup_proxy_registration(container_id)
+        finally:
+            if prev_container_name is None:
+                os.environ.pop("CONTAINER_NAME", None)
+            else:
+                os.environ["CONTAINER_NAME"] = prev_container_name
+    except (OSError, subprocess.SubprocessError):
         pass  # Proxy may not be running
 
     # ------------------------------------------------------------------
@@ -176,7 +128,7 @@ def destroy(name: str, keep_worktree: bool, force: bool, yes: bool) -> None:
             override_file=str(override_file),
             remove_volumes=True,
         )
-    except Exception:
+    except (OSError, subprocess.SubprocessError):
         pass  # Container may already be gone
 
     # ------------------------------------------------------------------
@@ -184,7 +136,7 @@ def destroy(name: str, keep_worktree: bool, force: bool, yes: bool) -> None:
     # ------------------------------------------------------------------
     try:
         remove_stubs_volume(container)
-    except Exception:
+    except (OSError, subprocess.SubprocessError):
         pass
 
     # ------------------------------------------------------------------
@@ -192,7 +144,7 @@ def destroy(name: str, keep_worktree: bool, force: bool, yes: bool) -> None:
     # ------------------------------------------------------------------
     try:
         remove_hmac_volume(container)
-    except Exception:
+    except (OSError, subprocess.SubprocessError):
         pass
 
     # ------------------------------------------------------------------
@@ -214,7 +166,7 @@ def destroy(name: str, keep_worktree: bool, force: bool, yes: bool) -> None:
                     stderr=subprocess.DEVNULL,
                     check=False,
                 )
-        except Exception:
+        except (OSError, subprocess.SubprocessError):
             pass
 
     # ------------------------------------------------------------------
@@ -227,7 +179,7 @@ def destroy(name: str, keep_worktree: bool, force: bool, yes: bool) -> None:
         if metadata:
             destroy_branch = metadata.get("branch", "")
             destroy_repo_url = metadata.get("repo_url", "")
-    except Exception:
+    except (OSError, ValueError):
         pass
 
     # ------------------------------------------------------------------

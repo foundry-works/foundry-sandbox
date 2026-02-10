@@ -23,7 +23,7 @@ from pathlib import Path
 from typing import Any
 
 from foundry_sandbox._bridge import bridge_main
-from foundry_sandbox.constants import CONTAINER_USER, get_sandbox_verbose
+from foundry_sandbox.constants import CONTAINER_READY_ATTEMPTS, CONTAINER_READY_DELAY, CONTAINER_USER, get_sandbox_verbose
 from foundry_sandbox.utils import log_debug, log_error
 
 
@@ -119,12 +119,20 @@ def _pipe_tar_to_docker(
     tar_proc = subprocess.Popen(
         tar_cmd, stdout=subprocess.PIPE, env=_tar_env(), **stderr_kwargs,
     )
-    docker_proc = subprocess.Popen(
-        docker_cmd, stdin=tar_proc.stdout, **stderr_kwargs,
-    )
-    tar_proc.stdout.close()  # Allow tar_proc to receive SIGPIPE if docker_proc exits
-    docker_proc.wait()
-    tar_proc.wait()
+    try:
+        docker_proc = subprocess.Popen(
+            docker_cmd, stdin=tar_proc.stdout, **stderr_kwargs,
+        )
+        tar_proc.stdout.close()  # Allow tar_proc to receive SIGPIPE if docker_proc exits
+        docker_proc.wait()
+    finally:
+        if tar_proc.stdout and not tar_proc.stdout.closed:
+            tar_proc.stdout.close()
+        tar_proc.wait()
+
+    # Check both processes — tar failure should not be silently ignored
+    if tar_proc.returncode != 0 and docker_proc.returncode == 0:
+        return tar_proc.returncode
     return docker_proc.returncode
 
 
@@ -168,7 +176,7 @@ def copy_file_to_container(
     if quiet:
         stderr_kwargs["stderr"] = subprocess.DEVNULL
 
-    for attempt in range(5):
+    for attempt in range(CONTAINER_READY_ATTEMPTS):
         # Create parent directory inside container
         mkdir_cmd = [
             "docker", "exec", "-u", CONTAINER_USER,
@@ -242,10 +250,10 @@ def copy_file_to_container(
                 if mv_result.returncode == 0:
                     return True
 
-        if attempt < 4:
-            time.sleep(0.2)
+        if attempt < CONTAINER_READY_ATTEMPTS - 1:
+            time.sleep(CONTAINER_READY_DELAY)
 
-    log_error(f"copy_file_to_container failed after 5 attempts: {src} -> {dst}")
+    log_error(f"copy_file_to_container failed after {CONTAINER_READY_ATTEMPTS} attempts: {src} -> {dst}")
     return False
 
 
@@ -287,7 +295,7 @@ def copy_dir_to_container(
     if quiet:
         stderr_kwargs["stderr"] = subprocess.DEVNULL
 
-    for attempt in range(5):
+    for attempt in range(CONTAINER_READY_ATTEMPTS):
         # Create destination directory inside container
         mkdir_cmd = [
             "docker", "exec", "-u", CONTAINER_USER,
@@ -315,10 +323,10 @@ def copy_dir_to_container(
         if rc == 0:
             return True
 
-        if attempt < 4:
-            time.sleep(0.2)
+        if attempt < CONTAINER_READY_ATTEMPTS - 1:
+            time.sleep(CONTAINER_READY_DELAY)
 
-    log_error(f"copy_dir_to_container failed after 5 attempts: {src} -> {dst}")
+    log_error(f"copy_dir_to_container failed after {CONTAINER_READY_ATTEMPTS} attempts: {src} -> {dst}")
     return False
 
 

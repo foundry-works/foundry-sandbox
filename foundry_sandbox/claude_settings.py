@@ -10,7 +10,7 @@ Migrated from lib/python/merge_claude_settings.py.
 from __future__ import annotations
 
 from foundry_sandbox._bridge import bridge_main
-from foundry_sandbox.config import load_json, write_json
+from foundry_sandbox.config import deep_merge, load_json, write_json
 
 # Keys that should be preserved from container defaults, not overwritten by host
 PRESERVE_KEYS = {"model", "subagentModel", "hooks"}
@@ -29,8 +29,8 @@ def merge_claude_settings(container_path: str, host_path: str) -> None:
     # Save values that should be preserved from container
     preserved = {k: container_data[k] for k in PRESERVE_KEYS if k in container_data}
 
-    # Merge: host settings take precedence, except for preserved keys
-    merged = {**container_data, **host_data}
+    # Deep merge: host settings take precedence, except for preserved keys
+    merged = deep_merge(container_data, host_data)
 
     # Restore preserved settings (opus model, haiku subagent, hooks config)
     merged.update(preserved)

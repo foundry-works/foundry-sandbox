@@ -27,7 +27,7 @@ def _metadata_path(sandbox_name: str) -> str:
 
 def test_metadata_written_on_create(cli, sandbox_name, local_repo):
     """Creating a sandbox writes metadata.json with repo and branch info."""
-    result = cli("new", str(local_repo), "--skip-key-check")
+    result = cli("new", str(local_repo), "--skip-key-check", "--name", sandbox_name)
     assert result.returncode == 0, (
         f"sandbox new failed (rc={result.returncode}): {result.stderr}"
     )
@@ -47,7 +47,7 @@ def test_metadata_written_on_create(cli, sandbox_name, local_repo):
 
 def test_metadata_persists_across_stop_start(cli, sandbox_name, local_repo):
     """Metadata survives a stop/start cycle (container lifecycle)."""
-    result = cli("new", str(local_repo), "--skip-key-check")
+    result = cli("new", str(local_repo), "--skip-key-check", "--name", sandbox_name)
     assert result.returncode == 0, (
         f"sandbox new failed (rc={result.returncode}): {result.stderr}"
     )
@@ -85,7 +85,7 @@ def test_metadata_persists_across_stop_start(cli, sandbox_name, local_repo):
 
 def test_metadata_cleaned_on_destroy(cli, sandbox_name, local_repo):
     """Destroying a sandbox removes metadata.json and its config directory."""
-    result = cli("new", str(local_repo), "--skip-key-check")
+    result = cli("new", str(local_repo), "--skip-key-check", "--name", sandbox_name)
     assert result.returncode == 0, (
         f"sandbox new failed (rc={result.returncode}): {result.stderr}"
     )

@@ -20,63 +20,22 @@ import os
 import re
 import subprocess
 import sys
-from pathlib import Path
 
 import click
 
-from foundry_sandbox.constants import get_claude_configs_dir, get_repos_dir, get_worktrees_dir
-from foundry_sandbox.docker import container_is_running
+from foundry_sandbox.constants import get_claude_configs_dir, get_worktrees_dir
+from foundry_sandbox.docker import container_is_running, remove_stubs_volume, remove_hmac_volume
 from foundry_sandbox.git_worktree import cleanup_sandbox_branch, remove_worktree
 from foundry_sandbox.paths import derive_sandbox_paths, safe_remove
+from foundry_sandbox.proxy import cleanup_proxy_registration
 from foundry_sandbox.state import load_sandbox_metadata
 from foundry_sandbox.utils import format_kv, log_warn
+from foundry_sandbox.commands._helpers import repo_url_to_bare_path as _repo_url_to_bare_path
 
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
-
-
-def _repo_url_to_bare_path(repo_url: str) -> str:
-    """Convert a repository URL to its bare-clone path under REPOS_DIR.
-
-    Mirrors lib/utils.sh ``repo_to_path``.  Handles https://, git@, and
-    local filesystem paths.
-
-    Args:
-        repo_url: Repository URL or local path.
-
-    Returns:
-        Absolute path string to the bare repository.
-    """
-    repos_dir = str(get_repos_dir())
-
-    if not repo_url:
-        return f"{repos_dir}/unknown.git"
-
-    # Local filesystem path
-    if repo_url.startswith(("~/", "/", "./", "../")):
-        expanded = repo_url
-        if expanded.startswith("~/"):
-            expanded = str(Path.home()) + expanded[1:]
-        p = Path(expanded)
-        if p.exists():
-            try:
-                expanded = str(p.resolve())
-            except OSError:
-                pass
-        # Strip leading slash for path construction
-        stripped = expanded.lstrip("/")
-        return f"{repos_dir}/local/{stripped}.git"
-
-    # HTTPS or git@ URL
-    path = repo_url
-    path = path.removeprefix("https://")
-    path = path.removeprefix("git@")
-    path = path.replace(":", "/", 1) if ":" in path else path
-    if path.endswith(".git"):
-        path = path[:-4]
-    return f"{repos_dir}/{path}.git"
 
 
 def _load_prune_metadata(name: str) -> tuple[str, str]:
@@ -92,7 +51,7 @@ def _load_prune_metadata(name: str) -> tuple[str, str]:
         metadata = load_sandbox_metadata(name)
         if metadata:
             return metadata.get("branch", ""), metadata.get("repo_url", "")
-    except Exception:
+    except (OSError, ValueError):
         pass
     return "", ""
 
@@ -182,7 +141,7 @@ def prune(
                     try:
                         bare_path = _repo_url_to_bare_path(repo_url)
                         cleanup_sandbox_branch(branch, bare_path)
-                    except Exception:
+                    except (OSError, subprocess.SubprocessError):
                         pass  # Best effort
 
                 removed_orphaned_configs.append(name)
@@ -203,7 +162,7 @@ def prune(
                 # Check if container is running (stopped containers count as "no container")
                 # The shell version uses: docker ps --filter "name=^${container}-dev-1$" -q
                 # We use container_is_running which checks for running dev containers
-                running = False
+                running = True  # Fail-safe: assume running if Docker is unreachable
                 try:
                     # Match shell behavior: check for exact container name
                     result = subprocess.run(
@@ -213,8 +172,8 @@ def prune(
                         check=False,
                     )
                     running = bool(result.stdout.strip())
-                except Exception:
-                    running = False
+                except (OSError, subprocess.SubprocessError):
+                    running = True  # Fail-safe: assume running if Docker is unreachable
 
                 if not running:
                     if not skip_confirm:
@@ -231,6 +190,21 @@ def prune(
                     # Load metadata for branch cleanup
                     branch, repo_url = _load_prune_metadata(name)
 
+                    # Cleanup proxy registration (best effort)
+                    try:
+                        container_id = f"{container}-dev-1"
+                        prev_cn = os.environ.get("CONTAINER_NAME")
+                        os.environ["CONTAINER_NAME"] = container
+                        try:
+                            cleanup_proxy_registration(container_id)
+                        finally:
+                            if prev_cn is None:
+                                os.environ.pop("CONTAINER_NAME", None)
+                            else:
+                                os.environ["CONTAINER_NAME"] = prev_cn
+                    except (OSError, subprocess.SubprocessError):
+                        pass
+
                     # Remove worktree
                     try:
                         remove_worktree(str(worktree_dir))
@@ -242,12 +216,22 @@ def prune(
                     if config_dir.is_dir():
                         safe_remove(config_dir)
 
+                    # Remove stubs and HMAC volumes (best effort)
+                    try:
+                        remove_stubs_volume(container)
+                    except (OSError, subprocess.SubprocessError):
+                        pass
+                    try:
+                        remove_hmac_volume(container)
+                    except (OSError, subprocess.SubprocessError):
+                        pass
+
                     # Cleanup sandbox branch
                     if branch and repo_url:
                         try:
                             bare_path = _repo_url_to_bare_path(repo_url)
                             cleanup_sandbox_branch(branch, bare_path)
-                        except Exception:
+                        except (OSError, subprocess.SubprocessError):
                             pass  # Best effort
 
                     removed_no_container.append(name)
@@ -281,7 +265,7 @@ def prune(
 
                     # Check if any RUNNING containers belong to this sandbox
                     # Stopped containers are not a reason to keep the network
-                    has_running = False
+                    has_running = True  # Fail-safe: assume running if Docker is unreachable
                     try:
                         ps_result = subprocess.run(
                             ["docker", "ps", "-q", "--filter", f"name=^{sandbox_name}-"],
@@ -290,8 +274,8 @@ def prune(
                             check=False,
                         )
                         has_running = bool(ps_result.stdout.strip())
-                    except Exception:
-                        has_running = False
+                    except (OSError, subprocess.SubprocessError):
+                        has_running = True  # Fail-safe: assume running if Docker is unreachable
 
                     if not has_running:
                         if not skip_confirm:
@@ -327,7 +311,7 @@ def prune(
                                         stderr=subprocess.DEVNULL,
                                         check=False,
                                     )
-                        except Exception:
+                        except (OSError, subprocess.SubprocessError):
                             pass
 
                         # Disconnect any dangling endpoints before removal
@@ -355,7 +339,7 @@ def prune(
                                             stderr=subprocess.DEVNULL,
                                             check=False,
                                         )
-                        except Exception:
+                        except (OSError, subprocess.SubprocessError):
                             pass
 
                         # Remove the network
@@ -370,10 +354,10 @@ def prune(
                                 removed_networks.append(network_name)
                             else:
                                 log_warn(f"Failed to remove network: {network_name}")
-                        except Exception:
+                        except (OSError, subprocess.SubprocessError):
                             log_warn(f"Failed to remove network: {network_name}")
 
-        except Exception:
+        except (OSError, subprocess.SubprocessError):
             pass  # Docker may not be available
 
     # -----------------------------------------------------------------------

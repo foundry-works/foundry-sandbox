@@ -9,21 +9,11 @@ of environment, cwd, stdout, stderr, and exit code.
 from __future__ import annotations
 
 import os
-import subprocess
 import sys
-from pathlib import Path
 
 import click
 
 from foundry_sandbox.utils import log_debug
-
-# ---------------------------------------------------------------------------
-# Path constants
-# ---------------------------------------------------------------------------
-
-# The repository root is one level above this file's package directory.
-SCRIPT_DIR = Path(__file__).resolve().parent.parent
-SANDBOX_SH = SCRIPT_DIR / "sandbox.sh"
 
 # ---------------------------------------------------------------------------
 # Aliases
@@ -41,54 +31,6 @@ ALIASES: dict[str, tuple[str, list[str]]] = {
 # All commands known to sandbox.sh (used to decide whether a fallback is
 # reasonable vs. an outright typo).  Kept in sync with the case-statement
 # in sandbox.sh.
-KNOWN_SHELL_COMMANDS: set[str] = {
-    "new",
-    "list",
-    "attach",
-    "start",
-    "stop",
-    "destroy",
-    "build",
-    "help",
-    "status",
-    "config",
-    "prune",
-    "info",
-    "upgrade",
-    "preset",
-    "refresh-credentials",
-    "destroy-all",
-    # Aliases are resolved before we reach this set, but include them for
-    # completeness so they are never treated as "unknown".
-    "repeat",
-    "reattach",
-}
-
-
-# ---------------------------------------------------------------------------
-# Shell fallback
-# ---------------------------------------------------------------------------
-
-
-def _shell_fallback(cmd: str, args: list[str]) -> int:
-    """Fallback for commands not yet registered as Click subcommands.
-
-    Now that sandbox.sh is a thin wrapper around this CLI, shell fallback
-    would create infinite recursion. All commands should be registered as
-    Click subcommands. This function exists as a safety net and logs an
-    error instead of recursing.
-
-    Args:
-        cmd: The command name.
-        args: Additional arguments.
-
-    Returns:
-        Exit code 1 (always fails).
-    """
-    log_debug(f"Shell fallback requested for '{cmd}' but sandbox.sh now delegates to Python CLI")
-    click.echo(f"Error: command '{cmd}' not implemented in Python CLI", err=True)
-    return 1
-
 
 # ---------------------------------------------------------------------------
 # Custom Click Group
@@ -143,45 +85,10 @@ class CastGroup(click.Group):
         if cmd_obj is not None:
             return cmd_name, cmd_obj, remaining
 
-        # Step 3: Shell fallback -------------------------------------------
-        # Only fall back to shell for commands we know sandbox.sh handles.
-        # Reject genuinely unknown commands with a clear error message.
-        if cmd_name not in KNOWN_SHELL_COMMANDS:
-            ctx.fail(
-                f"Unknown command '{cmd_name}'. Run 'cast help' for available commands."
-            )
-        original_name = args[0]  # Use the original token (pre-alias)
-        return cmd_name, _make_fallback_command(original_name), remaining
-
-def _make_fallback_command(cmd_name: str) -> click.Command:
-    """Create a synthetic Click command that delegates to the shell fallback.
-
-    The command accepts *all* arguments without Click validation so that
-    flags and positional args are forwarded verbatim to sandbox.sh.
-
-    Args:
-        cmd_name: The command name to pass to sandbox.sh.
-
-    Returns:
-        A ``click.Command`` that, when invoked, calls :func:`_shell_fallback`.
-    """
-
-    @click.command(
-        name=cmd_name,
-        # Accept everything without Click parsing it.
-        context_settings={
-            "allow_extra_args": True,
-            "allow_interspersed_args": True,
-            "ignore_unknown_options": True,
-        },
-        add_help_option=False,
-    )
-    @click.pass_context
-    def _fallback(ctx: click.Context) -> None:  # noqa: ANN001
-        rc = _shell_fallback(cmd_name, ctx.args)
-        sys.exit(rc)
-
-    return _fallback
+        # Step 3: Unknown command -------------------------------------------
+        ctx.fail(
+            f"Unknown command '{cmd_name}'. Run 'cast help' for available commands."
+        )
 
 
 # ---------------------------------------------------------------------------

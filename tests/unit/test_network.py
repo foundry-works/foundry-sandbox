@@ -67,7 +67,7 @@ class TestGenerateNetworkConfig:
         content = f.read_text()
         assert "cap_add:" in content
         assert "NET_ADMIN" in content
-        assert "SYS_ADMIN" in content
+        assert "SYS_ADMIN" not in content
         assert "SANDBOX_NETWORK_MODE=limited" in content
 
     def test_host_only_mode(self, tmp_path):

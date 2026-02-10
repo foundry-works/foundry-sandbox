@@ -209,8 +209,8 @@ def create_worktree(
             # Fetch the base branch
             try:
                 git_with_retry(["-C", str(bare_p), "fetch", "origin", f"{from_branch}:{from_branch}"])
-            except RuntimeError:
-                pass  # Branch might already exist locally
+            except RuntimeError as e:
+                log_info(f"Fetch failed (may already exist locally): {e}")
 
             # Check if target branch already exists
             branch_exists = subprocess.run(
@@ -316,7 +316,7 @@ def create_worktree(
             try:
                 git_with_retry(["-C", str(wt_p), "pull", "--ff-only"])
             except RuntimeError as e:
-                log_warn("Could not fast-forward. You may need to pull manually.")
+                log_warn(f"Could not fast-forward: {e}. You may need to pull manually.")
 
 
 def cleanup_sandbox_branch(branch: str, bare_path: str | Path) -> None:

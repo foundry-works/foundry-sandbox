@@ -44,7 +44,7 @@ def test_default_network_mode(cli, sandbox_name, local_repo):
     Credential isolation is enabled by default, so the metadata should
     reflect network_mode='limited'.
     """
-    result = cli("new", str(local_repo), "--skip-key-check")
+    result = cli("new", str(local_repo), "--skip-key-check", "--name", sandbox_name)
     assert result.returncode == 0, (
         f"sandbox new failed (rc={result.returncode}): {result.stderr}"
     )
@@ -65,7 +65,8 @@ def test_no_isolate_credentials_flag(cli, sandbox_name, local_repo):
     the metadata should reflect this in the network_mode field.
     """
     result = cli(
-        "new", str(local_repo), "--skip-key-check", "--no-isolate-credentials"
+        "new", str(local_repo), "--skip-key-check", "--no-isolate-credentials",
+        "--name", sandbox_name,
     )
     assert result.returncode == 0, (
         f"sandbox new failed (rc={result.returncode}): {result.stderr}"
@@ -92,12 +93,12 @@ def test_network_isolation_active(cli, sandbox_name, local_repo):
     inspecting the Docker network configuration rather than testing
     actual network connectivity.
     """
-    result = cli("new", str(local_repo), "--skip-key-check")
+    result = cli("new", str(local_repo), "--skip-key-check", "--name", sandbox_name)
     assert result.returncode == 0, (
         f"sandbox new failed (rc={result.returncode}): {result.stderr}"
     )
 
-    container_name = f"sandbox-{sandbox_name}"
+    container_name = f"sandbox-{sandbox_name}-dev-1"
 
     # Inspect the container's network settings via docker inspect
     inspect_result = subprocess.run(
@@ -134,8 +135,13 @@ def test_network_isolation_active(cli, sandbox_name, local_repo):
     host_config = container.get("HostConfig", {})
     cap_add = host_config.get("CapAdd") or []
 
-    # In limited mode, NET_ADMIN should be added for iptables rules
-    assert "NET_ADMIN" in cap_add, (
+    # In limited mode, NET_ADMIN should be added for iptables rules.
+    # Docker may return capabilities with or without the CAP_ prefix
+    # depending on the runtime version.
+    has_net_admin = any(
+        c in ("NET_ADMIN", "CAP_NET_ADMIN") for c in cap_add
+    )
+    assert has_net_admin, (
         f"Container should have NET_ADMIN capability in limited mode, "
         f"got CapAdd={cap_add}"
     )

@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import os
+import subprocess
 import sys
 import traceback
 from typing import Any, Callable
@@ -65,7 +66,7 @@ def bridge_main(dispatch: dict[str, Callable]) -> None:
             result = handler(*args)
             _emit_success_envelope(result)
             sys.exit(0)
-        except (ValueError, KeyError, TypeError) as e:
+        except (ValueError, KeyError, TypeError, RuntimeError, OSError, subprocess.CalledProcessError) as e:
             # Known error types
             _emit_error_envelope(
                 code=type(e).__name__,
@@ -103,6 +104,14 @@ def _emit_error_envelope(code: str, message: str) -> None:
 
 
 def _emit_crash(exc: Exception) -> None:
-    """Handle a crash by emitting traceback to stderr if SANDBOX_DEBUG is set."""
+    """Handle a crash by emitting a JSON error envelope and optional traceback.
+
+    Always emits a JSON envelope so callers can parse the error.
+    Traceback is printed to stderr when SANDBOX_DEBUG=1.
+    """
+    _emit_error_envelope(
+        code="crash",
+        message=f"Unexpected error: {type(exc).__name__}: {exc}",
+    )
     if os.environ.get("SANDBOX_DEBUG") == "1":
         traceback.print_exc(file=sys.stderr)

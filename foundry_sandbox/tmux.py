@@ -7,6 +7,7 @@ managing tmux sessions that connect to sandbox Docker containers.
 from __future__ import annotations
 
 import os
+import shlex
 import subprocess
 
 from foundry_sandbox.constants import CONTAINER_USER
@@ -54,7 +55,7 @@ def create_and_attach(
     container_user = os.environ.get("CONTAINER_USER", CONTAINER_USER)
 
     if working_dir:
-        exec_cmd = f"bash -c 'cd /workspace/{working_dir} 2>/dev/null; exec bash'"
+        exec_cmd = f"bash -c 'cd /workspace/{shlex.quote(working_dir)} 2>/dev/null; exec bash'"
     else:
         exec_cmd = "bash"
 
@@ -62,7 +63,7 @@ def create_and_attach(
     mouse = os.environ.get("SANDBOX_TMUX_MOUSE", "1")
 
     docker_command = (
-        f"docker exec -u {container_user} -it {container_id} {exec_cmd}; "
+        f"docker exec -u {shlex.quote(container_user)} -it {shlex.quote(container_id)} {exec_cmd}; "
         "echo 'Container exited. Press enter to close.'; read"
     )
 

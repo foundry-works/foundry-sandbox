@@ -16,6 +16,7 @@ from pathlib import Path
 from typing import Callable
 
 from foundry_sandbox import api_keys, container_io, container_setup, credential_setup, docker, foundry_plugin
+from foundry_sandbox.commands._helpers import repo_url_to_bare_path as _repo_url_to_bare_path
 from foundry_sandbox.constants import get_claude_configs_dir, get_repos_dir, get_worktrees_dir
 from foundry_sandbox.git_path_fixer import fix_proxy_worktree_paths
 from foundry_sandbox.network import add_network_to_override, append_override_list_item
@@ -42,6 +43,13 @@ def _cp(
     return subprocess.CompletedProcess(args=args, returncode=returncode, stdout=stdout, stderr=stderr)
 
 
+def _parse_bool_arg(value: str | None) -> bool:
+    """Parse shell bridge boolean arguments."""
+    if value is None:
+        return False
+    return value.strip().lower() in {"1", "true", "yes", "on"}
+
+
 def _sanitize_ref_component(component: str) -> str:
     text = component.strip().replace("/", "-")
     text = re.sub(r"\s+", "-", text)
@@ -53,28 +61,11 @@ def _sanitize_ref_component(component: str) -> str:
 
 
 def _repo_to_path(repo_url: str) -> str:
-    repos_dir = str(get_repos_dir())
+    """Convert a repository URL to its bare-clone path.
 
-    if not repo_url:
-        return f"{repos_dir}/unknown.git"
-
-    if repo_url.startswith(("~/", "/", "./", "../")):
-        expanded = os.path.expanduser(repo_url)
-        try:
-            expanded = str(Path(expanded).resolve())
-        except OSError:
-            pass
-        stripped = expanded.lstrip("/")
-        return f"{repos_dir}/local/{stripped}.git"
-
-    path = repo_url
-    path = path.removeprefix("https://")
-    path = path.removeprefix("http://")
-    path = path.removeprefix("git@")
-    path = path.replace(":", "/", 1) if ":" in path else path
-    if path.endswith(".git"):
-        path = path[:-4]
-    return f"{repos_dir}/{path}.git"
+    Delegates to the shared implementation in commands._helpers.
+    """
+    return _repo_url_to_bare_path(repo_url)
 
 
 def _sandbox_name(bare_path: str, branch: str) -> str:
@@ -85,7 +76,7 @@ def _sandbox_name(bare_path: str, branch: str) -> str:
     branch_part = _sanitize_ref_component(branch) or "branch"
     name = f"{repo}-{branch_part}".lower()
     if len(name) > 120:
-        digest = hashlib.sha1(name.encode("utf-8")).hexdigest()[:8]
+        digest = hashlib.sha256(name.encode("utf-8")).hexdigest()[:8]
         name = f"{name[:111]}-{digest}"
     return name
 
@@ -160,7 +151,7 @@ def _run_bridge(command: str, bridge_args: list[str]) -> tuple[int, str, str]:
         return 1, "", msg
 
     if command == "_bridge_check_docker_network_capacity":
-        isolate = (bridge_args[0] if bridge_args else "true") == "true"
+        isolate = _parse_bool_arg(bridge_args[0] if bridge_args else "true")
         ok, msg = check_docker_network_capacity(isolate_credentials=isolate)
         return (0, "", "") if ok else (1, "", msg)
 
@@ -190,7 +181,7 @@ def _run_bridge(command: str, bridge_args: list[str]) -> tuple[int, str, str]:
         if token:
             os.environ["GITHUB_TOKEN"] = token
             os.environ["GH_TOKEN"] = token
-            return 0, token, ""
+            return 0, "", ""
         return 1, "", ""
 
     if command == "_bridge_fix_proxy_worktree_paths":
@@ -204,8 +195,8 @@ def _run_bridge(command: str, bridge_args: list[str]) -> tuple[int, str, str]:
         claude_config_path = bridge_args[1] if len(bridge_args) > 1 else ""
         container = bridge_args[2] if len(bridge_args) > 2 else ""
         override_file = bridge_args[3] if len(bridge_args) > 3 else ""
-        remove_volumes = (bridge_args[4] if len(bridge_args) > 4 else "false") == "true"
-        isolate = (bridge_args[5] if len(bridge_args) > 5 else "false") == "true"
+        remove_volumes = _parse_bool_arg(bridge_args[4] if len(bridge_args) > 4 else "false")
+        isolate = _parse_bool_arg(bridge_args[5] if len(bridge_args) > 5 else "false")
         docker.compose_down(
             worktree_path=worktree_path,
             claude_config_path=claude_config_path,
@@ -218,10 +209,10 @@ def _run_bridge(command: str, bridge_args: list[str]) -> tuple[int, str, str]:
 
     if command == "_bridge_copy_configs_to_container":
         container_id = bridge_args[0] if bridge_args else ""
-        skip_plugins = (bridge_args[1] if len(bridge_args) > 1 else "0") == "1"
-        enable_ssh = (bridge_args[2] if len(bridge_args) > 2 else "0") == "1"
+        skip_plugins = _parse_bool_arg(bridge_args[1] if len(bridge_args) > 1 else "0")
+        enable_ssh = _parse_bool_arg(bridge_args[2] if len(bridge_args) > 2 else "0")
         working_dir = bridge_args[3] if len(bridge_args) > 3 else ""
-        isolate_credentials = bool(bridge_args[4]) if len(bridge_args) > 4 else False
+        isolate_credentials = _parse_bool_arg(bridge_args[4] if len(bridge_args) > 4 else "")
         from_branch = bridge_args[5] if len(bridge_args) > 5 else ""
         branch = bridge_args[6] if len(bridge_args) > 6 else ""
         repo_url = bridge_args[7] if len(bridge_args) > 7 else ""

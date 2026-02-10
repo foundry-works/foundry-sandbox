@@ -11,6 +11,7 @@ from __future__ import annotations
 import json
 import os
 import sys
+import tempfile
 from typing import Any
 
 from foundry_sandbox._bridge import bridge_main
@@ -36,16 +37,25 @@ def load_json(path: str) -> dict[str, Any]:
 
 
 def write_json(path: str, data: dict[str, Any]) -> None:
-    """Write JSON data to a file, creating parent directories as needed.
+    """Write JSON data to a file atomically, creating parent directories as needed.
+
+    Uses write-to-temp + rename to avoid truncated files on interruption.
 
     Args:
         path: Path to write JSON file.
         data: Dictionary to serialize as JSON.
     """
-    os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
-    with open(path, "w") as f:
-        json.dump(data, f, indent=2)
-        f.write("\n")
+    dir_path = os.path.dirname(path) or "."
+    os.makedirs(dir_path, exist_ok=True)
+    fd, tmp_path = tempfile.mkstemp(dir=dir_path, suffix=".tmp")
+    try:
+        with os.fdopen(fd, "w") as f:
+            json.dump(data, f, indent=2)
+            f.write("\n")
+        os.rename(tmp_path, path)
+    except BaseException:
+        os.unlink(tmp_path)
+        raise
 
 
 def deep_merge(base: dict[str, Any], overlay: dict[str, Any]) -> dict[str, Any]:
@@ -89,22 +99,17 @@ def deep_merge_no_overwrite(base: dict[str, Any], overlay: dict[str, Any]) -> di
 def json_escape(s: str) -> str:
     """Escape a string for safe inclusion in JSON.
 
-    Handles backslashes, quotes, and control characters.
-    Migrated from lib/json.sh.
+    Uses json.dumps to handle all control characters per the JSON spec,
+    then strips the surrounding quotes.
 
     Args:
         s: String to escape.
 
     Returns:
-        Escaped string suitable for JSON.
+        Escaped string suitable for embedding in a JSON string literal.
     """
-    # Order matters: backslash must be first
-    s = s.replace("\\", "\\\\")
-    s = s.replace('"', '\\"')
-    s = s.replace("\n", "\\n")
-    s = s.replace("\r", "\\r")
-    s = s.replace("\t", "\\t")
-    return s
+    # json.dumps produces a quoted string with all required escapes
+    return json.dumps(s)[1:-1]
 
 
 def json_array_from_lines(lines: str) -> str:

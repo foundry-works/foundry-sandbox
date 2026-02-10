@@ -12,7 +12,7 @@ from unittest.mock import patch
 import click.testing
 import pytest
 
-from foundry_sandbox.cli import ALIASES, KNOWN_SHELL_COMMANDS, CastGroup, cli
+from foundry_sandbox.cli import ALIASES, CastGroup, cli
 
 
 @pytest.fixture()
@@ -96,14 +96,15 @@ class TestUnknownCommandValidation:
         result = runner.invoke(cli, ["destory"])  # typo of 'destroy'
         assert result.exit_code != 0
 
-    def test_known_shell_commands_is_comprehensive(self) -> None:
-        """KNOWN_SHELL_COMMANDS includes all commands from sandbox.sh case statement."""
+    def test_all_commands_registered_no_shell_fallback(self) -> None:
+        """All expected commands are registered as Click subcommands (no shell fallback needed)."""
         required = {
             "new", "list", "attach", "start", "stop", "destroy",
             "build", "help", "status", "config", "prune", "info",
             "upgrade", "preset", "refresh-credentials", "destroy-all",
         }
-        assert required.issubset(KNOWN_SHELL_COMMANDS)
+        registered = set(cli.commands.keys())
+        assert required.issubset(registered), f"Missing: {required - registered}"
 
 
 # ---------------------------------------------------------------------------

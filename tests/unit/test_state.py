@@ -632,6 +632,31 @@ class TestCastNewPresets:
         assert "https://github.com/test/repo.git" in preset["command_line"]
         assert "--sparse" in preset["command_line"]
 
+    def test_load_preset_coerces_string_booleans(self, sandbox_home):
+        """String booleans in preset args are normalized safely."""
+        preset_path = sandbox_home / "presets" / "string-bool.json"
+        preset_path.parent.mkdir(parents=True, exist_ok=True)
+        preset_path.write_text(json.dumps({
+            "command_line": "cast new demo/repo",
+            "args": {
+                "repo": "demo/repo",
+                "sparse": "0",
+                "allow_pr": "false",
+                "sync_ssh": "0",
+                "enable_opencode": "true",
+                "enable_zai": "1",
+            },
+        }))
+
+        preset = load_cast_preset("string-bool")
+
+        assert preset is not None
+        assert preset["sparse"] is False
+        assert preset["allow_pr"] is False
+        assert preset["sync_ssh"] is False
+        assert preset["enable_opencode"] is True
+        assert preset["enable_zai"] is True
+
 
 class TestLastCastNew:
     """Tests for last cast-new command persistence."""
@@ -671,6 +696,30 @@ class TestLastCastNew:
 
         assert last["repo"] == "https://github.com/test/second.git"
         assert last["branch"] == "dev"
+
+    def test_load_last_cast_new_coerces_string_booleans(self, sandbox_home):
+        """.last-cast-new JSON with string booleans is normalized safely."""
+        last_path = sandbox_home / ".last-cast-new.json"
+        last_path.write_text(json.dumps({
+            "command_line": "cast new demo/repo",
+            "args": {
+                "repo": "demo/repo",
+                "sparse": "0",
+                "allow_pr": "false",
+                "sync_ssh": "0",
+                "enable_opencode": "1",
+                "enable_zai": "yes",
+            },
+        }))
+
+        last = load_last_cast_new()
+
+        assert last is not None
+        assert last["sparse"] is False
+        assert last["allow_pr"] is False
+        assert last["sync_ssh"] is False
+        assert last["enable_opencode"] is True
+        assert last["enable_zai"] is True
 
 
 class TestLastAttach:

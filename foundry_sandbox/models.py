@@ -31,8 +31,8 @@ class SandboxMetadata(BaseModel):
     working_dir: str = ""
     """Working directory relative path."""
 
-    sparse_checkout: int = 0
-    """Whether to use sparse checkout (0 or 1)."""
+    sparse_checkout: bool = False
+    """Whether to use sparse checkout."""
 
     pip_requirements: str = ""
     """Path to pip requirements file or 'auto'."""

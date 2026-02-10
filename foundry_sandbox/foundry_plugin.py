@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json
 import os
+import shlex
 import subprocess
 import sys
 from pathlib import Path
@@ -17,71 +18,8 @@ from typing import Any
 
 from foundry_sandbox.config import load_json, write_json
 from foundry_sandbox.constants import CONTAINER_HOME, CONTAINER_USER, get_sandbox_verbose
+from foundry_sandbox.permissions import FOUNDRY_ALLOW, FOUNDRY_DENY
 from foundry_sandbox.utils import log_debug, log_info, log_step, log_warn
-
-
-# ============================================================================
-# Foundry Permission and Hook Constants
-# ============================================================================
-
-FOUNDRY_ALLOW = [
-    "Skill(foundry:*)",
-    "mcp__plugin_foundry_foundry-mcp__*",
-    "mcp__tavily-mcp__*",
-    "Bash(git add:*)",
-    "Bash(git branch:*)",
-    "Bash(git checkout:*)",
-    "Bash(git clone:*)",
-    "Bash(git commit:*)",
-    "Bash(git config:*)",
-    "Bash(git diff:*)",
-    "Bash(git fetch:*)",
-    "Bash(git init:*)",
-    "Bash(git log:*)",
-    "Bash(git ls-files:*)",
-    "Bash(git merge:*)",
-    "Bash(git mv:*)",
-    "Bash(git pull:*)",
-    "Bash(git push:*)",
-    "Bash(git remote:*)",
-    "Bash(git restore:*)",
-    "Bash(git rev-parse:*)",
-    "Bash(git revert:*)",
-    "Bash(git show:*)",
-    "Bash(git stash:*)",
-    "Bash(git status:*)",
-    "Bash(git switch:*)",
-    "Bash(git tag:*)",
-    "Bash(gh issue create:*)",
-    "Bash(gh issue list:*)",
-    "Bash(gh issue view:*)",
-    "Bash(gh pr checkout:*)",
-    "Bash(gh pr create:*)",
-    "Bash(gh pr list:*)",
-    "Bash(gh pr status:*)",
-    "Bash(gh pr view:*)",
-    "Bash(gh repo clone:*)",
-    "Bash(gh repo view:*)",
-    "Bash(pytest:*)",
-    "Bash(agent:*)",
-    "Bash(claude:*)",
-    "Bash(claude-agent:*)",
-    "Bash(codex:*)",
-    "Bash(gemini:*)",
-    "Bash(opencode:*)",
-    "Read(/workspace/**)",
-    "Write(/workspace/**)",
-    "Edit(/workspace/**)",
-]
-
-FOUNDRY_DENY = [
-    "Read(/workspace/**/specs/**/*.json)",
-    "Bash(gh api:*)",
-    "Bash(gh repo delete:*)",
-    "Bash(gh release delete:*)",
-    "Bash(gh secret:*)",
-    "Bash(gh variable:*)",
-]
 
 DEFAULT_HOOKS = {
     "PreToolUse": [
@@ -243,8 +181,13 @@ def ensure_claude_foundry_mcp(container_id: str, *, quiet: bool = False) -> None
         container_id: Container ID or name
         quiet: If True, suppress output and skip pyright-lsp pre-bake
     """
-    # Python script that runs inside the container
-    python_script = '''
+    # Python script that runs inside the container.
+    # Inject module-level constants via json.dumps() to avoid duplication.
+    allow_json = json.dumps(FOUNDRY_ALLOW)
+    deny_json = json.dumps(FOUNDRY_DENY)
+    hooks_json = json.dumps(DEFAULT_HOOKS)
+
+    python_script = f'''
 import json
 import os
 
@@ -255,7 +198,7 @@ def load_json(p):
         with open(p) as f:
             return json.load(f)
     except (FileNotFoundError, json.JSONDecodeError):
-        return {}
+        return {{}}
 
 data = load_json(path)
 
@@ -264,88 +207,16 @@ data["model"] = "opus"
 data["subagentModel"] = "haiku"
 data["alwaysThinkingEnabled"] = True
 
-# Configure hooks with absolute paths
-data["hooks"] = {
-    "PreToolUse": [
-        {
-            "matcher": "Read",
-            "hooks": [{"type": "command", "command": "/home/ubuntu/.claude/hooks/block-json-specs"}]
-        },
-        {
-            "matcher": "Bash",
-            "hooks": [{"type": "command", "command": "/home/ubuntu/.claude/hooks/block-spec-bash-access"}]
-        }
-    ],
-    "PostToolUse": [
-        {
-            "hooks": [{"type": "command", "command": "/home/ubuntu/.claude/hooks/context-monitor"}]
-        }
-    ]
-}
+# Configure hooks with absolute paths (injected from module constants)
+data["hooks"] = {hooks_json}
 
-# Foundry permissions based on claude-foundry v2.1.0
-FOUNDRY_ALLOW = [
-    "Skill(foundry:*)",
-    "mcp__plugin_foundry_foundry-mcp__*",
-    "mcp__tavily-mcp__*",
-    "Bash(git add:*)",
-    "Bash(git branch:*)",
-    "Bash(git checkout:*)",
-    "Bash(git clone:*)",
-    "Bash(git commit:*)",
-    "Bash(git config:*)",
-    "Bash(git diff:*)",
-    "Bash(git fetch:*)",
-    "Bash(git init:*)",
-    "Bash(git log:*)",
-    "Bash(git ls-files:*)",
-    "Bash(git merge:*)",
-    "Bash(git mv:*)",
-    "Bash(git pull:*)",
-    "Bash(git push:*)",
-    "Bash(git remote:*)",
-    "Bash(git restore:*)",
-    "Bash(git rev-parse:*)",
-    "Bash(git revert:*)",
-    "Bash(git show:*)",
-    "Bash(git stash:*)",
-    "Bash(git status:*)",
-    "Bash(git switch:*)",
-    "Bash(git tag:*)",
-    "Bash(gh issue create:*)",
-    "Bash(gh issue list:*)",
-    "Bash(gh issue view:*)",
-    "Bash(gh pr checkout:*)",
-    "Bash(gh pr create:*)",
-    "Bash(gh pr list:*)",
-    "Bash(gh pr status:*)",
-    "Bash(gh pr view:*)",
-    "Bash(gh repo clone:*)",
-    "Bash(gh repo view:*)",
-    "Bash(pytest:*)",
-    "Bash(agent:*)",
-    "Bash(claude:*)",
-    "Bash(claude-agent:*)",
-    "Bash(codex:*)",
-    "Bash(gemini:*)",
-    "Bash(opencode:*)",
-    "Read(/workspace/**)",
-    "Write(/workspace/**)",
-    "Edit(/workspace/**)",
-]
-
-FOUNDRY_DENY = [
-    "Read(/workspace/**/specs/**/*.json)",
-    "Bash(gh api:*)",
-    "Bash(gh repo delete:*)",
-    "Bash(gh release delete:*)",
-    "Bash(gh secret:*)",
-    "Bash(gh variable:*)",
-]
+# Foundry permissions (injected from module constants)
+FOUNDRY_ALLOW = {allow_json}
+FOUNDRY_DENY = {deny_json}
 
 # Merge permissions (preserving existing, adding foundry)
 if "permissions" not in data:
-    data["permissions"] = {}
+    data["permissions"] = {{}}
 existing_allow = set(data["permissions"].get("allow", []))
 existing_deny = set(data["permissions"].get("deny", []))
 data["permissions"]["allow"] = sorted(existing_allow | set(FOUNDRY_ALLOW))
@@ -605,16 +476,16 @@ def ensure_foundry_mcp_workspace_dirs(container_id: str, working_dir: str = "", 
         check=False
     )
 
-    # Fix ownership
+    # Fix ownership — use shlex.quote to prevent injection via specs_base
     subprocess.run(
         ["docker", "exec", container_id, "sh", "-c",
-         f"chown -R {CONTAINER_USER}:{CONTAINER_USER} {specs_base}/specs 2>/dev/null || true"],
+         f"chown -R {shlex.quote(CONTAINER_USER)}:{shlex.quote(CONTAINER_USER)} {shlex.quote(specs_base + '/specs')} 2>/dev/null || true"],
         capture_output=True,
         check=False
     )
     subprocess.run(
         ["docker", "exec", container_id, "sh", "-c",
-         f"chown -R {CONTAINER_USER}:{CONTAINER_USER} {CONTAINER_HOME}/.foundry-mcp 2>/dev/null || true"],
+         f"chown -R {shlex.quote(CONTAINER_USER)}:{shlex.quote(CONTAINER_USER)} {shlex.quote(CONTAINER_HOME + '/.foundry-mcp')} 2>/dev/null || true"],
         capture_output=True,
         check=False
     )
@@ -632,10 +503,11 @@ def sync_marketplace_manifests(container_id: str, plugins_dir: str, *, quiet: bo
         plugins_dir: Path to plugins directory in container
         quiet: If True, suppress stderr from docker exec
     """
+    plugins_dir_escaped = json.dumps(plugins_dir)
     python_script = f'''
 import json, os, sys
 
-plugins_dir = "{plugins_dir}"
+plugins_dir = {plugins_dir_escaped}
 mkt_name = "claude-plugins-official"
 mkt_install = os.path.join(plugins_dir, "marketplaces", mkt_name)
 
@@ -700,7 +572,7 @@ if os.path.isfile(mkt_json):
     )
 
 
-def configure_foundry_research_providers(container_id: str) -> None:
+def configure_foundry_research_providers(container_id: str, *, quiet: bool = False) -> None:
     """Configure foundry-mcp research providers based on available API keys.
 
     Updates deep_research_providers in foundry-mcp config.toml based on
@@ -710,44 +582,46 @@ def configure_foundry_research_providers(container_id: str) -> None:
     Args:
         container_id: Container ID or name
     """
-    bash_script = f'''
-CONFIG_PATH="{CONTAINER_HOME}/.config/foundry-mcp/config.toml"
-[ ! -f "$CONFIG_PATH" ] && exit 0
+    # Use a Python script inside the container to update the TOML config.
+    # This avoids heredoc variable expansion issues and shell injection risks.
+    container_home_escaped = json.dumps(CONTAINER_HOME)
+    python_script = f'''
+import re, os, sys
 
-# Check for explicit provider override
-if [ -n "${{FOUNDRY_SEARCH_PROVIDERS:-}}" ]; then
-    # Parse comma-separated list into TOML array format
-    # e.g., "tavily,perplexity" -> "\\"tavily\\", \\"perplexity\\""
-    PROVIDERS=$(echo "$FOUNDRY_SEARCH_PROVIDERS" | sed "s/,/\\", \\"/g" | sed "s/^/\\"/;s/$/\\"/"")
-else
-    # Auto-detect based on API keys
-    PROVIDERS=""
-    [ -n "${{TAVILY_API_KEY:-}}" ] && PROVIDERS="\\"tavily\\""
-    [ -n "${{PERPLEXITY_API_KEY:-}}" ] && {{
-        [ -n "$PROVIDERS" ] && PROVIDERS="$PROVIDERS, "
-        PROVIDERS="${{PROVIDERS}}\\"perplexity\\""
-    }}
+config_path = os.path.join({container_home_escaped}, ".config/foundry-mcp/config.toml")
+if not os.path.isfile(config_path):
+    sys.exit(0)
+
+# Determine providers
+explicit = os.environ.get("FOUNDRY_SEARCH_PROVIDERS", "")
+if explicit:
+    providers = [p.strip() for p in explicit.split(",") if p.strip()]
+else:
+    providers = []
+    if os.environ.get("TAVILY_API_KEY"):
+        providers.append("tavily")
+    if os.environ.get("PERPLEXITY_API_KEY"):
+        providers.append("perplexity")
     # semantic_scholar always included (no key required)
-    [ -n "$PROVIDERS" ] && PROVIDERS="$PROVIDERS, "
-    PROVIDERS="${{PROVIDERS}}\\"semantic_scholar\\""
-fi
+    providers.append("semantic_scholar")
 
-# Update the TOML using python
-python3 << 'EOF'
-import re
-with open("$CONFIG_PATH", "r") as f:
+# Format as TOML array
+toml_array = ", ".join(f'"{{p}}"' for p in providers)
+
+with open(config_path, "r") as f:
     content = f.read()
-# Replace deep_research_providers line
+
 pattern = r"deep_research_providers\\s*=\\s*\\[[^\\]]*\\]"
-replacement = f"deep_research_providers = [''' + PROVIDERS + ''']"
+replacement = f"deep_research_providers = [{{toml_array}}]"
 content = re.sub(pattern, replacement, content)
-with open("$CONFIG_PATH", "w") as f:
+
+with open(config_path, "w") as f:
     f.write(content)
-EOF
 '''
 
     subprocess.run(
-        ["docker", "exec", container_id, "bash", "-c", bash_script],
+        ["docker", "exec", "-u", CONTAINER_USER, container_id,
+         "python3", "-c", python_script],
         stderr=subprocess.DEVNULL,
         check=False
     )

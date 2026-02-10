@@ -62,7 +62,6 @@ def generate_network_config(mode: str, override_file: str) -> None:
             # Add capabilities for iptables
             f.write("    cap_add:\n")
             f.write("      - NET_ADMIN\n")
-            f.write("      - SYS_ADMIN\n")
             f.write("    environment:\n")
             f.write(f"      - SANDBOX_NETWORK_MODE={mode}\n")
 

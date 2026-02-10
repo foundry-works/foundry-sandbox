@@ -25,7 +25,7 @@ REPOS_DIR = os.path.expanduser("~/.sandboxes/repos")
 
 def test_worktree_created(cli, sandbox_name, local_repo):
     """Sandbox creation produces a worktree at ~/.sandboxes/worktrees/<name>."""
-    cli("new", str(local_repo), "--skip-key-check")
+    cli("new", str(local_repo), "--skip-key-check", "--name", sandbox_name)
 
     worktree_path = os.path.join(WORKTREES_DIR, sandbox_name)
     assert os.path.isdir(worktree_path), (
@@ -41,7 +41,7 @@ def test_worktree_created(cli, sandbox_name, local_repo):
 
 def test_worktree_on_correct_branch(cli, sandbox_name, local_repo):
     """Sandbox created with an explicit branch checks out that branch."""
-    cli("new", str(local_repo), "test-branch", "main", "--skip-key-check")
+    cli("new", str(local_repo), "test-branch", "main", "--skip-key-check", "--name", sandbox_name)
 
     worktree_path = os.path.join(WORKTREES_DIR, sandbox_name)
     result = subprocess.run(
@@ -58,7 +58,7 @@ def test_worktree_on_correct_branch(cli, sandbox_name, local_repo):
 
 def test_worktree_removed_on_destroy(cli, sandbox_name, local_repo):
     """Destroying a sandbox removes its worktree directory."""
-    cli("new", str(local_repo), "--skip-key-check")
+    cli("new", str(local_repo), "--skip-key-check", "--name", sandbox_name)
 
     worktree_path = os.path.join(WORKTREES_DIR, sandbox_name)
     assert os.path.isdir(worktree_path), "Worktree should exist after creation"
@@ -76,8 +76,8 @@ def test_bare_repo_shared(cli, local_repo):
     name_b = f"test-{uuid.uuid4().hex[:8]}"
 
     try:
-        cli("new", str(local_repo), f"{name_a}-branch", "main", "--skip-key-check")
-        cli("new", str(local_repo), f"{name_b}-branch", "main", "--skip-key-check")
+        cli("new", str(local_repo), f"{name_a}-branch", "main", "--skip-key-check", "--name", name_a)
+        cli("new", str(local_repo), f"{name_b}-branch", "main", "--skip-key-check", "--name", name_b)
 
         # Collect bare repo directories that contain objects for this repo.
         # Local repos are stored under ~/.sandboxes/repos/local/...
@@ -92,8 +92,8 @@ def test_bare_repo_shared(cli, local_repo):
 
         # Verify both worktrees reference the same bare repo by reading their
         # .git files and extracting the gitdir path.
-        worktree_a = os.path.join(WORKTREES_DIR, f"{name_a}-branch")
-        worktree_b = os.path.join(WORKTREES_DIR, f"{name_b}-branch")
+        worktree_a = os.path.join(WORKTREES_DIR, name_a)
+        worktree_b = os.path.join(WORKTREES_DIR, name_b)
 
         def bare_repo_for_worktree(worktree_path):
             git_file = os.path.join(worktree_path, ".git")

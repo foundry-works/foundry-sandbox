@@ -22,12 +22,14 @@ from unittest.mock import MagicMock, call, patch, ANY
 
 import pytest
 
+import foundry_sandbox.tool_configs as tool_configs_module
 from foundry_sandbox.tool_configs import (
     configure_claude,
     configure_codex,
     configure_gemini,
     configure_gh,
     configure_opencode,
+    sync_opencode_local_plugins_on_first_attach,
 )
 
 
@@ -619,6 +621,74 @@ class TestIdempotency:
         configure_codex(CONTAINER_ID)
 
         assert mock_run.call_count >= 2
+
+
+class TestOpenCodeLocalPluginSync:
+    """Tests for first-attach OpenCode local plugin sync behavior."""
+
+    def test_sync_skips_marker_when_chown_fails(self, tmp_path, monkeypatch):
+        host_plugins = tmp_path / "host-plugins"
+        host_plugins.mkdir()
+        marker = tmp_path / "opencode-plugins.synced"
+
+        responses = [
+            _make_completed(returncode=1),  # has_container_plugins check
+            _make_completed(returncode=0),  # mkdir in container
+            _make_completed(returncode=0),  # docker cp
+            _make_completed(returncode=1),  # chown fails
+        ]
+
+        def _fake_run(*args, **kwargs):
+            assert responses, "Unexpected subprocess.run call"
+            return responses.pop(0)
+
+        sync_foundry = MagicMock()
+        ensure_tavily = MagicMock()
+
+        monkeypatch.setattr(tool_configs_module, "get_sandbox_opencode_plugin_dir", lambda: str(host_plugins))
+        monkeypatch.setattr(tool_configs_module, "path_opencode_plugins_marker", lambda _name: marker)
+        monkeypatch.setattr(tool_configs_module.subprocess, "run", _fake_run)
+        monkeypatch.setattr(tool_configs_module, "sync_opencode_foundry", sync_foundry)
+        monkeypatch.setattr(tool_configs_module, "ensure_opencode_tavily_mcp", ensure_tavily)
+
+        sync_opencode_local_plugins_on_first_attach("demo", "sandbox-demo-dev-1")
+
+        assert not marker.exists()
+        sync_foundry.assert_not_called()
+        ensure_tavily.assert_not_called()
+        assert responses == []
+
+    def test_sync_writes_marker_and_runs_followups_on_success(self, tmp_path, monkeypatch):
+        host_plugins = tmp_path / "host-plugins"
+        host_plugins.mkdir()
+        marker = tmp_path / "opencode-plugins.synced"
+
+        responses = [
+            _make_completed(returncode=1),  # has_container_plugins check
+            _make_completed(returncode=0),  # mkdir in container
+            _make_completed(returncode=0),  # docker cp
+            _make_completed(returncode=0),  # chown succeeds
+        ]
+
+        def _fake_run(*args, **kwargs):
+            assert responses, "Unexpected subprocess.run call"
+            return responses.pop(0)
+
+        sync_foundry = MagicMock()
+        ensure_tavily = MagicMock()
+
+        monkeypatch.setattr(tool_configs_module, "get_sandbox_opencode_plugin_dir", lambda: str(host_plugins))
+        monkeypatch.setattr(tool_configs_module, "path_opencode_plugins_marker", lambda _name: marker)
+        monkeypatch.setattr(tool_configs_module.subprocess, "run", _fake_run)
+        monkeypatch.setattr(tool_configs_module, "sync_opencode_foundry", sync_foundry)
+        monkeypatch.setattr(tool_configs_module, "ensure_opencode_tavily_mcp", ensure_tavily)
+
+        sync_opencode_local_plugins_on_first_attach("demo", "sandbox-demo-dev-1")
+
+        assert marker.exists()
+        sync_foundry.assert_called_once()
+        ensure_tavily.assert_called_once()
+        assert responses == []
 
 
 if __name__ == "__main__":

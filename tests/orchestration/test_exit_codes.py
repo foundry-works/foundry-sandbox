@@ -357,12 +357,22 @@ class TestMissingArgumentExitCodes:
         Source: commands/refresh-credentials.sh -- when name is empty after
         all auto-detect attempts and fzf fallback, it prints usage, calls
         cmd_list, and exits 1.
+
+        NOTE: If running inside a sandbox worktree, auto-detection may
+        succeed and the command returns 0 instead.
         """
         result = cli("refresh-credentials")
-        assert result.returncode == 1, (
-            f"Expected exit code 1 for refresh-credentials with no name, "
-            f"got {result.returncode}.\nstdout: {result.stdout}"
-        )
+        if "Auto-detected sandbox" in result.stdout:
+            # Running inside a sandbox worktree; auto-detect succeeds
+            assert result.returncode == 0, (
+                f"Expected exit code 0 when sandbox auto-detected, "
+                f"got {result.returncode}.\nstdout: {result.stdout}"
+            )
+        else:
+            assert result.returncode == 1, (
+                f"Expected exit code 1 for refresh-credentials with no name, "
+                f"got {result.returncode}.\nstdout: {result.stdout}"
+            )
 
 
 # ============================================================================

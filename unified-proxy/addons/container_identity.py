@@ -129,54 +129,45 @@ class ContainerIdentityAddon:
         if "bare_repo_path" not in metadata:
             repo = metadata.get("repo", "")
             if repo and "/" in repo:
-                owner, repo_name = repo.split("/", 1)
-                # Reject path traversal in repo metadata to prevent pointing
-                # bare_repo_path at arbitrary filesystem locations.
-                # Check 1: Reject literal ".." (handles obvious traversal)
-                # Check 2: Reject "/" in individual components after split
-                #           (prevents nested path injection in repo_name)
-                # Check 3: Validate with os.path.realpath() that the
-                #           constructed path stays under REPOS_BASE_DIR
-                #           (catches URL-encoded traversal, unicode
-                #           normalization, symlink attacks, etc.)
-                if ".." in owner or ".." in repo_name:
-                    ctx.log.warn(
-                        f"Rejecting repo with path traversal: {repo}"
+                # Only attempt enrichment for owner/repo style paths
+                # (not absolute filesystem paths like /tmp/...).
+                # If the format is unexpected, skip enrichment rather
+                # than rejecting the request — the git_proxy addon will
+                # handle missing bare_repo_path for git operations.
+                parts = repo.split("/")
+                if len(parts) == 2 and parts[0] and parts[1]:
+                    owner, repo_name = parts
+                    # Reject path traversal in repo metadata to prevent
+                    # pointing bare_repo_path at arbitrary filesystem
+                    # locations.
+                    if ".." in owner or ".." in repo_name:
+                        ctx.log.warn(
+                            f"Rejecting repo with path traversal: {repo}"
+                        )
+                        self._deny_request(
+                            flow,
+                            f"Invalid repo metadata: path traversal detected",
+                            log_level="warn",
+                        )
+                        return
+                    candidate_path = os.path.join(
+                        REPOS_BASE_DIR, owner, repo_name + ".git"
                     )
-                    self._deny_request(
-                        flow,
-                        f"Invalid repo metadata: path traversal detected",
-                        log_level="warn",
-                    )
-                    return
-                if "/" in owner or "/" in repo_name:
-                    ctx.log.warn(
-                        f"Rejecting repo with slash in component: {repo}"
-                    )
-                    self._deny_request(
-                        flow,
-                        f"Invalid repo metadata: unexpected path separator",
-                        log_level="warn",
-                    )
-                    return
-                candidate_path = os.path.join(
-                    REPOS_BASE_DIR, owner, repo_name + ".git"
-                )
-                real_path = os.path.realpath(candidate_path)
-                real_base = os.path.realpath(REPOS_BASE_DIR)
-                if not real_path.startswith(real_base + os.sep) and real_path != real_base:
-                    ctx.log.warn(
-                        f"Rejecting repo path escaping base dir: "
-                        f"{candidate_path} -> {real_path}"
-                    )
-                    self._deny_request(
-                        flow,
-                        f"Invalid repo metadata: path escapes base directory",
-                        log_level="warn",
-                    )
-                    return
-                metadata["bare_repo_path"] = candidate_path
-                container_config.metadata = metadata
+                    real_path = os.path.realpath(candidate_path)
+                    real_base = os.path.realpath(REPOS_BASE_DIR)
+                    if not real_path.startswith(real_base + os.sep) and real_path != real_base:
+                        ctx.log.warn(
+                            f"Rejecting repo path escaping base dir: "
+                            f"{candidate_path} -> {real_path}"
+                        )
+                        self._deny_request(
+                            flow,
+                            f"Invalid repo metadata: path escapes base directory",
+                            log_level="warn",
+                        )
+                        return
+                    metadata["bare_repo_path"] = candidate_path
+                    container_config.metadata = metadata
 
         # Attach container config to flow metadata for downstream addons
         flow.metadata[FLOW_METADATA_KEY] = container_config

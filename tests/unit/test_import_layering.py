@@ -34,7 +34,16 @@ BASE_MODULES = {"constants", "utils", "_bridge", "models", "__init__"}
 MID_MODULES = {"paths", "config"}
 
 # Bridge-callable modules are those that use bridge_main in __main__ blocks.
-BRIDGE_CALLABLE_MODULES = {"claude_settings", "opencode_sync", "config", "state", "docker", "validate", "api_keys"}
+BRIDGE_CALLABLE_MODULES = {
+    "claude_settings", "opencode_sync", "config", "state", "docker", "validate", "api_keys",
+    "compose", "container_configurator", "container_io", "container_setup",
+    "credential_setup", "foundry_plugin", "git", "git_path_fixer", "git_worktree",
+    "image", "network", "permissions", "proxy", "stub_manager", "tmux", "tool_configs",
+}
+
+# Top-layer modules: unrestricted imports (CLI entrypoints, UI, compatibility shims).
+# These may import Click/Pydantic at module level and from any layer.
+TOP_MODULES = {"cli", "ide", "legacy_bridge", "tui"}
 
 # Heavy imports forbidden at module level in bridge-callable modules.
 FORBIDDEN_BRIDGE_IMPORTS = {"click", "pydantic"}
@@ -197,7 +206,7 @@ class TestAllModulesHaveLayerAssignment:
 
     def test_all_assigned(self):
         """All discovered modules should be in base, mid, or top layer."""
-        all_known = BASE_MODULES | MID_MODULES | BRIDGE_CALLABLE_MODULES
+        all_known = BASE_MODULES | MID_MODULES | BRIDGE_CALLABLE_MODULES | TOP_MODULES
         # Top-layer modules that aren't bridge-callable (future expansion)
         # are allowed to import anything, so they just need to exist.
 

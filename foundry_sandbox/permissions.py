@@ -74,12 +74,6 @@ FOUNDRY_DENY = [
 ]
 
 
-def _merge_permissions(existing: list[str], foundry: list[str]) -> list[str]:
-    """Merge permissions additively, preserving existing and adding foundry ones."""
-    combined = set(existing) | set(foundry)
-    return sorted(combined)
-
-
 # Python script to execute inside the container for permission installation.
 # Kept as a string to be piped via docker exec stdin.
 _INSTALL_SCRIPT = '''
@@ -143,8 +137,17 @@ def install_workspace_permissions(container_id: str) -> None:
         deny_json=json.dumps(FOUNDRY_DENY),
     )
 
-    subprocess.run(
+    result = subprocess.run(
         ["docker", "exec", "-u", CONTAINER_USER, "-i", container_id, "python3", "-"],
         input=script,
+        capture_output=True,
+        text=True,
         check=False,
     )
+    if result.returncode != 0:
+        from foundry_sandbox.utils import log_error
+        log_error(
+            f"Failed to install workspace permissions (exit {result.returncode}): "
+            f"{result.stderr.strip() if result.stderr else 'unknown error'}"
+        )
+        raise RuntimeError(f"Permission installation failed in container {container_id}")

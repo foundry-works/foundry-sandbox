@@ -18,6 +18,13 @@ from foundry_sandbox.state import (
 from foundry_sandbox.utils import log_error
 
 
+def _validate_preset_name(name: str) -> None:
+    """Validate preset name to prevent path traversal."""
+    if not name or "/" in name or "\\" in name or ".." in name or name.startswith("."):
+        click.echo(f"Error: Invalid preset name: {name}", err=True)
+        sys.exit(1)
+
+
 def _list_presets() -> None:
     """Print saved presets to stdout."""
     click.echo("Saved presets:")
@@ -35,6 +42,13 @@ def preset(ctx: click.Context) -> None:
         _list_presets()
 
 
+@preset.command("help")
+@click.pass_context
+def help_cmd(ctx: click.Context) -> None:
+    """Show preset usage information."""
+    click.echo(ctx.parent.get_help())
+
+
 @preset.command("list")
 def list_cmd() -> None:
     """List all saved presets."""
@@ -45,6 +59,7 @@ def list_cmd() -> None:
 @click.argument("name")
 def show(name: str) -> None:
     """Show preset details."""
+    _validate_preset_name(name)
     result = show_cast_preset(name)
     if result is None:
         log_error(f"Preset not found: {name}")
@@ -56,6 +71,7 @@ def show(name: str) -> None:
 @click.argument("name")
 def delete(name: str) -> None:
     """Delete a preset."""
+    _validate_preset_name(name)
     deleted = delete_cast_preset(name)
     if not deleted:
         log_error(f"Preset not found: {name}")
@@ -67,6 +83,7 @@ def delete(name: str) -> None:
 @click.argument("name")
 def rm(name: str) -> None:
     """Delete a preset (alias for delete)."""
+    _validate_preset_name(name)
     deleted = delete_cast_preset(name)
     if not deleted:
         log_error(f"Preset not found: {name}")
@@ -78,6 +95,7 @@ def rm(name: str) -> None:
 @click.argument("name")
 def remove(name: str) -> None:
     """Delete a preset (alias for delete)."""
+    _validate_preset_name(name)
     deleted = delete_cast_preset(name)
     if not deleted:
         log_error(f"Preset not found: {name}")
