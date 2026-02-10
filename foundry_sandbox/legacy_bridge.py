@@ -17,7 +17,7 @@ from typing import Callable
 
 from foundry_sandbox import api_keys, container_io, container_setup, credential_setup, docker, foundry_plugin
 from foundry_sandbox.commands._helpers import repo_url_to_bare_path as _repo_url_to_bare_path
-from foundry_sandbox.constants import get_claude_configs_dir, get_repos_dir, get_worktrees_dir
+from foundry_sandbox.constants import SANDBOX_NAME_MAX_LENGTH, get_claude_configs_dir, get_repos_dir, get_worktrees_dir
 from foundry_sandbox.git_path_fixer import fix_proxy_worktree_paths
 from foundry_sandbox.network import add_network_to_override, append_override_list_item
 from foundry_sandbox.paths import derive_sandbox_paths, ensure_dir
@@ -75,9 +75,9 @@ def _sandbox_name(bare_path: str, branch: str) -> str:
     repo = _sanitize_ref_component(repo) or "repo"
     branch_part = _sanitize_ref_component(branch) or "branch"
     name = f"{repo}-{branch_part}".lower()
-    if len(name) > 120:
+    if len(name) > SANDBOX_NAME_MAX_LENGTH:
         digest = hashlib.sha256(name.encode("utf-8")).hexdigest()[:8]
-        name = f"{name[:111]}-{digest}"
+        name = f"{name[:SANDBOX_NAME_MAX_LENGTH - 9]}-{digest}"
     return name
 
 
@@ -135,155 +135,198 @@ def _ensure_override_from_metadata(name: str, override_file: str) -> tuple[int, 
     return 0, ""
 
 
+def _arg(args: list[str], idx: int, default: str = "") -> str:
+    """Safely get a positional argument by index, with default."""
+    return args[idx] if idx < len(args) else default
+
+
+# --- Individual bridge handlers ---
+# Each returns (returncode, stdout, stderr).
+
+
+def _h_validate_git_url(a: list[str]) -> tuple[int, str, str]:
+    ok, msg = validate_git_url(_arg(a, 0))
+    return (0, "", "") if ok else (1, "", msg)
+
+
+def _h_validate_mount_path(a: list[str]) -> tuple[int, str, str]:
+    ok, msg = validate_mount_path(_arg(a, 0))
+    return (0, "", "") if ok else (1, "", msg)
+
+
+def _h_check_claude_key_required(a: list[str]) -> tuple[int, str, str]:
+    ok, msg = api_keys.check_claude_key_required()
+    return (0, msg, "") if ok else (1, "", msg)
+
+
+def _h_check_docker_network_capacity(a: list[str]) -> tuple[int, str, str]:
+    isolate = _parse_bool_arg(_arg(a, 0, "true"))
+    ok, msg = check_docker_network_capacity(isolate_credentials=isolate)
+    return (0, "", "") if ok else (1, "", msg)
+
+
+def _h_validate_git_remotes(a: list[str]) -> tuple[int, str, str]:
+    ok, msg = validate_git_remotes(_arg(a, 0, ".git"))
+    return (0, "", "") if ok else (1, "", msg)
+
+
+def _h_add_network_to_override(a: list[str]) -> tuple[int, str, str]:
+    add_network_to_override(_arg(a, 0), _arg(a, 1))
+    return 0, "", ""
+
+
+def _h_prepopulate_foundry_global(a: list[str]) -> tuple[int, str, str]:
+    foundry_plugin.prepopulate_foundry_global(
+        _arg(a, 0), skip_if_populated=_arg(a, 1, "0") == "1",
+    )
+    return 0, "", ""
+
+
+def _h_show_cli_status(a: list[str]) -> tuple[int, str, str]:
+    api_keys.show_cli_status()
+    return 0, "", ""
+
+
+def _h_export_gh_token(a: list[str]) -> tuple[int, str, str]:
+    token = api_keys.export_gh_token()
+    if token:
+        os.environ["GITHUB_TOKEN"] = token
+        os.environ["GH_TOKEN"] = token
+        return 0, "", ""
+    return 1, "", ""
+
+
+def _h_fix_proxy_worktree_paths(a: list[str]) -> tuple[int, str, str]:
+    fix_proxy_worktree_paths(_arg(a, 0), _arg(a, 1))
+    return 0, "", ""
+
+
+def _h_compose_down(a: list[str]) -> tuple[int, str, str]:
+    docker.compose_down(
+        worktree_path=_arg(a, 0),
+        claude_config_path=_arg(a, 1),
+        container=_arg(a, 2),
+        override_file=_arg(a, 3),
+        remove_volumes=_parse_bool_arg(_arg(a, 4, "false")),
+        isolate_credentials=_parse_bool_arg(_arg(a, 5, "false")),
+    )
+    return 0, "", ""
+
+
+def _h_copy_configs_to_container(a: list[str]) -> tuple[int, str, str]:
+    credential_setup.copy_configs_to_container(
+        _arg(a, 0),
+        skip_plugins=_parse_bool_arg(_arg(a, 1, "0")),
+        enable_ssh=_parse_bool_arg(_arg(a, 2, "0")),
+        working_dir=_arg(a, 3),
+        isolate_credentials=_parse_bool_arg(_arg(a, 4)),
+        from_branch=_arg(a, 5),
+        branch=_arg(a, 6),
+        repo_url=_arg(a, 7),
+    )
+    return 0, "", ""
+
+
+def _h_copy_dir_to_container(a: list[str]) -> tuple[int, str, str]:
+    container_io.copy_dir_to_container(a[0], a[1], a[2])
+    return 0, "", ""
+
+
+def _h_copy_file_to_container(a: list[str]) -> tuple[int, str, str]:
+    container_io.copy_file_to_container(a[0], a[1], a[2])
+    return 0, "", ""
+
+
+def _h_install_pip_requirements(a: list[str]) -> tuple[int, str, str]:
+    container_setup.install_pip_requirements(a[0], a[1])
+    return 0, "", ""
+
+
+def _h_tmux_attach(a: list[str]) -> tuple[int, str, str]:
+    name = _arg(a, 0)
+    paths = derive_sandbox_paths(name)
+    tmux_attach(name, f"{paths.container_name}-dev-1", str(paths.worktree_path), _arg(a, 1))
+    return 0, "", ""
+
+
+def _h_sync_creds(a: list[str]) -> tuple[int, str, str]:
+    credential_setup.sync_runtime_credentials(_arg(a, 0))
+    return 0, "", ""
+
+
+def _h_sanitize_ref_component(a: list[str]) -> tuple[int, str, str]:
+    return 0, _sanitize_ref_component(_arg(a, 0)), ""
+
+
+def _h_repo_to_path(a: list[str]) -> tuple[int, str, str]:
+    return 0, _repo_to_path(_arg(a, 0)), ""
+
+
+def _h_sandbox_name(a: list[str]) -> tuple[int, str, str]:
+    return 0, _sandbox_name(_arg(a, 0), _arg(a, 1)), ""
+
+
+def _h_find_next_sandbox_name(a: list[str]) -> tuple[int, str, str]:
+    return 0, _find_next_sandbox_name(_arg(a, 0)), ""
+
+
+def _h_container_name(a: list[str]) -> tuple[int, str, str]:
+    return 0, _container_name(_arg(a, 0)), ""
+
+
+def _h_resolve_ssh_agent_sock(a: list[str]) -> tuple[int, str, str]:
+    return 0, _resolve_ssh_agent_sock(), ""
+
+
+def _h_generate_sandbox_id(a: list[str]) -> tuple[int, str, str]:
+    return 0, _generate_sandbox_id(_arg(a, 0)), ""
+
+
+def _h_has_opencode_key(a: list[str]) -> tuple[int, str, str]:
+    return 0, "1" if api_keys.has_opencode_key() else "", ""
+
+
+def _h_ensure_override_from_metadata(a: list[str]) -> tuple[int, str, str]:
+    rc, msg = _ensure_override_from_metadata(_arg(a, 0), _arg(a, 1))
+    return rc, "", msg
+
+
+# Dispatch table: command name → handler(args) → (returncode, stdout, stderr)
+_BRIDGE_DISPATCH: dict[str, Callable[[list[str]], tuple[int, str, str]]] = {
+    "_bridge_validate_git_url": _h_validate_git_url,
+    "_bridge_validate_mount_path": _h_validate_mount_path,
+    "_bridge_check_claude_key_required": _h_check_claude_key_required,
+    "_bridge_check_docker_network_capacity": _h_check_docker_network_capacity,
+    "_bridge_validate_git_remotes": _h_validate_git_remotes,
+    "_bridge_add_network_to_override": _h_add_network_to_override,
+    "_bridge_prepopulate_foundry_global": _h_prepopulate_foundry_global,
+    "_bridge_show_cli_status": _h_show_cli_status,
+    "_bridge_export_gh_token": _h_export_gh_token,
+    "_bridge_fix_proxy_worktree_paths": _h_fix_proxy_worktree_paths,
+    "_bridge_compose_down": _h_compose_down,
+    "_bridge_copy_configs_to_container": _h_copy_configs_to_container,
+    "_bridge_copy_dir_to_container": _h_copy_dir_to_container,
+    "_bridge_copy_file_to_container": _h_copy_file_to_container,
+    "_bridge_install_pip_requirements": _h_install_pip_requirements,
+    "_bridge_tmux_attach": _h_tmux_attach,
+    "_bridge_sync_creds": _h_sync_creds,
+    "_bridge_sanitize_ref_component": _h_sanitize_ref_component,
+    "_bridge_repo_to_path": _h_repo_to_path,
+    "_bridge_sandbox_name": _h_sandbox_name,
+    "_bridge_find_next_sandbox_name": _h_find_next_sandbox_name,
+    "_bridge_container_name": _h_container_name,
+    "_bridge_resolve_ssh_agent_sock": _h_resolve_ssh_agent_sock,
+    "_bridge_generate_sandbox_id": _h_generate_sandbox_id,
+    "_bridge_has_opencode_key": _h_has_opencode_key,
+    "_bridge_ensure_override_from_metadata": _h_ensure_override_from_metadata,
+}
+
+
 def _run_bridge(command: str, bridge_args: list[str]) -> tuple[int, str, str]:
-    if command == "_bridge_validate_git_url":
-        ok, msg = validate_git_url(bridge_args[0] if bridge_args else "")
-        return (0, "", "") if ok else (1, "", msg)
-
-    if command == "_bridge_validate_mount_path":
-        ok, msg = validate_mount_path(bridge_args[0] if bridge_args else "")
-        return (0, "", "") if ok else (1, "", msg)
-
-    if command == "_bridge_check_claude_key_required":
-        ok, msg = api_keys.check_claude_key_required()
-        if ok:
-            return 0, msg, ""
-        return 1, "", msg
-
-    if command == "_bridge_check_docker_network_capacity":
-        isolate = _parse_bool_arg(bridge_args[0] if bridge_args else "true")
-        ok, msg = check_docker_network_capacity(isolate_credentials=isolate)
-        return (0, "", "") if ok else (1, "", msg)
-
-    if command == "_bridge_validate_git_remotes":
-        git_dir = bridge_args[0] if bridge_args else ".git"
-        ok, msg = validate_git_remotes(git_dir)
-        return (0, "", "") if ok else (1, "", msg)
-
-    if command == "_bridge_add_network_to_override":
-        mode = bridge_args[0] if bridge_args else ""
-        override_file = bridge_args[1] if len(bridge_args) > 1 else ""
-        add_network_to_override(mode, override_file)
-        return 0, "", ""
-
-    if command == "_bridge_prepopulate_foundry_global":
-        claude_home = bridge_args[0] if bridge_args else ""
-        skip = (bridge_args[1] if len(bridge_args) > 1 else "0") == "1"
-        foundry_plugin.prepopulate_foundry_global(claude_home, skip_if_populated=skip)
-        return 0, "", ""
-
-    if command == "_bridge_show_cli_status":
-        api_keys.show_cli_status()
-        return 0, "", ""
-
-    if command == "_bridge_export_gh_token":
-        token = api_keys.export_gh_token()
-        if token:
-            os.environ["GITHUB_TOKEN"] = token
-            os.environ["GH_TOKEN"] = token
-            return 0, "", ""
-        return 1, "", ""
-
-    if command == "_bridge_fix_proxy_worktree_paths":
-        proxy_container = bridge_args[0] if bridge_args else ""
-        host_user = bridge_args[1] if len(bridge_args) > 1 else ""
-        fix_proxy_worktree_paths(proxy_container, host_user)
-        return 0, "", ""
-
-    if command == "_bridge_compose_down":
-        worktree_path = bridge_args[0] if bridge_args else ""
-        claude_config_path = bridge_args[1] if len(bridge_args) > 1 else ""
-        container = bridge_args[2] if len(bridge_args) > 2 else ""
-        override_file = bridge_args[3] if len(bridge_args) > 3 else ""
-        remove_volumes = _parse_bool_arg(bridge_args[4] if len(bridge_args) > 4 else "false")
-        isolate = _parse_bool_arg(bridge_args[5] if len(bridge_args) > 5 else "false")
-        docker.compose_down(
-            worktree_path=worktree_path,
-            claude_config_path=claude_config_path,
-            container=container,
-            override_file=override_file,
-            remove_volumes=remove_volumes,
-            isolate_credentials=isolate,
-        )
-        return 0, "", ""
-
-    if command == "_bridge_copy_configs_to_container":
-        container_id = bridge_args[0] if bridge_args else ""
-        skip_plugins = _parse_bool_arg(bridge_args[1] if len(bridge_args) > 1 else "0")
-        enable_ssh = _parse_bool_arg(bridge_args[2] if len(bridge_args) > 2 else "0")
-        working_dir = bridge_args[3] if len(bridge_args) > 3 else ""
-        isolate_credentials = _parse_bool_arg(bridge_args[4] if len(bridge_args) > 4 else "")
-        from_branch = bridge_args[5] if len(bridge_args) > 5 else ""
-        branch = bridge_args[6] if len(bridge_args) > 6 else ""
-        repo_url = bridge_args[7] if len(bridge_args) > 7 else ""
-        credential_setup.copy_configs_to_container(
-            container_id,
-            skip_plugins=skip_plugins,
-            enable_ssh=enable_ssh,
-            working_dir=working_dir,
-            isolate_credentials=isolate_credentials,
-            from_branch=from_branch,
-            branch=branch,
-            repo_url=repo_url,
-        )
-        return 0, "", ""
-
-    if command == "_bridge_copy_dir_to_container":
-        container_io.copy_dir_to_container(bridge_args[0], bridge_args[1], bridge_args[2])
-        return 0, "", ""
-
-    if command == "_bridge_copy_file_to_container":
-        container_io.copy_file_to_container(bridge_args[0], bridge_args[1], bridge_args[2])
-        return 0, "", ""
-
-    if command == "_bridge_install_pip_requirements":
-        container_setup.install_pip_requirements(bridge_args[0], bridge_args[1])
-        return 0, "", ""
-
-    if command == "_bridge_tmux_attach":
-        name = bridge_args[0] if bridge_args else ""
-        working_dir = bridge_args[1] if len(bridge_args) > 1 else ""
-        paths = derive_sandbox_paths(name)
-        tmux_attach(name, f"{paths.container_name}-dev-1", str(paths.worktree_path), working_dir)
-        return 0, "", ""
-
-    if command == "_bridge_sync_creds":
-        credential_setup.sync_runtime_credentials(bridge_args[0] if bridge_args else "")
-        return 0, "", ""
-
-    if command == "_bridge_sanitize_ref_component":
-        return 0, _sanitize_ref_component(bridge_args[0] if bridge_args else ""), ""
-
-    if command == "_bridge_repo_to_path":
-        return 0, _repo_to_path(bridge_args[0] if bridge_args else ""), ""
-
-    if command == "_bridge_sandbox_name":
-        bare_path = bridge_args[0] if bridge_args else ""
-        branch = bridge_args[1] if len(bridge_args) > 1 else ""
-        return 0, _sandbox_name(bare_path, branch), ""
-
-    if command == "_bridge_find_next_sandbox_name":
-        return 0, _find_next_sandbox_name(bridge_args[0] if bridge_args else ""), ""
-
-    if command == "_bridge_container_name":
-        return 0, _container_name(bridge_args[0] if bridge_args else ""), ""
-
-    if command == "_bridge_resolve_ssh_agent_sock":
-        return 0, _resolve_ssh_agent_sock(), ""
-
-    if command == "_bridge_generate_sandbox_id":
-        return 0, _generate_sandbox_id(bridge_args[0] if bridge_args else ""), ""
-
-    if command == "_bridge_has_opencode_key":
-        return 0, "1" if api_keys.has_opencode_key() else "", ""
-
-    if command == "_bridge_ensure_override_from_metadata":
-        name = bridge_args[0] if bridge_args else ""
-        override_file = bridge_args[1] if len(bridge_args) > 1 else ""
-        rc, msg = _ensure_override_from_metadata(name, override_file)
-        return rc, "", msg
-
-    return 1, "", f"Unknown legacy bridge command: {command}"
+    handler = _BRIDGE_DISPATCH.get(command)
+    if handler is None:
+        return 1, "", f"Unknown legacy bridge command: {command}"
+    return handler(bridge_args)
 
 
 def run_legacy_command(*args: str, capture_output: bool = False) -> subprocess.CompletedProcess[str]:

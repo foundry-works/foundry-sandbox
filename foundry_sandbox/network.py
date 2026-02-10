@@ -639,7 +639,9 @@ def add_claude_home_to_override(override_file: str, claude_home: str) -> None:
     if not claude_home:
         return
 
-    mount_entry = f'"{claude_home}:/home/ubuntu/.claude"'
+    # Escape double quotes in path to prevent YAML injection
+    safe_path = claude_home.replace('"', '\\"')
+    mount_entry = f'"{safe_path}:/home/ubuntu/.claude"'
     append_override_list_item(override_file, "volumes", mount_entry)
 
 
@@ -658,7 +660,9 @@ def add_ssh_agent_to_override(override_file: str, agent_sock: str) -> None:
     if not agent_sock:
         return
 
-    mount_entry = f'"{agent_sock}:{SSH_AGENT_CONTAINER_SOCK}"'
+    # Escape double quotes in path to prevent YAML injection
+    safe_sock = agent_sock.replace('"', '\\"')
+    mount_entry = f'"{safe_sock}:{SSH_AGENT_CONTAINER_SOCK}"'
     append_override_list_item(override_file, "volumes", mount_entry)
     append_override_list_item(override_file, "environment", f"SSH_AUTH_SOCK={SSH_AGENT_CONTAINER_SOCK}")
 

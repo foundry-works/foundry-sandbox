@@ -65,6 +65,29 @@ def _tar_supports_transform() -> bool:
 # ============================================================================
 
 
+# Directories that container copy operations should never target.
+# These are system paths that, if overwritten, could compromise the container.
+_CONTAINER_BLOCKED_PREFIXES = (
+    "/etc/", "/proc/", "/sys/", "/dev/",
+    "/var/run/", "/run/", "/sbin/", "/bin/",
+    "/usr/sbin/", "/usr/bin/",
+)
+
+
+def _validate_container_dst(dst: str) -> None:
+    """Reject container destination paths targeting sensitive system directories.
+
+    Raises:
+        ValueError: If dst targets a blocked system path.
+    """
+    normalized = dst.rstrip("/") + "/"
+    for prefix in _CONTAINER_BLOCKED_PREFIXES:
+        if normalized.startswith(prefix) or dst == prefix.rstrip("/"):
+            raise ValueError(
+                f"Refusing to copy to container system path: {dst}"
+            )
+
+
 def _build_tar_base_args() -> list[str]:
     """Build base tar arguments including --no-xattrs if supported.
 
@@ -149,6 +172,7 @@ def copy_file_to_container(
     dst: str,
     *,
     quiet: bool = False,
+    mode: str | None = None,
 ) -> bool:
     """Copy a single file from host to container using tar piped into docker exec.
 
@@ -160,10 +184,17 @@ def copy_file_to_container(
         src: Source file path on the host.
         dst: Destination file path inside the container.
         quiet: If True, suppress stderr output.
+        mode: If set, chmod the file to this mode immediately after copy
+              (e.g. "0600"). Eliminates TOCTOU window for sensitive files.
 
     Returns:
         True on success, False after exhausting retries.
+
+    Raises:
+        ValueError: If dst targets a blocked system path.
     """
+    _validate_container_dst(dst)
+
     src_path = Path(src)
     dst_path = Path(dst)
     parent_dir = str(dst_path.parent)
@@ -177,6 +208,17 @@ def copy_file_to_container(
     stderr_kwargs: dict[str, Any] = {}
     if quiet:
         stderr_kwargs["stderr"] = subprocess.DEVNULL
+
+    def _post_copy_chmod() -> bool:
+        """Apply chmod immediately after copy to eliminate TOCTOU window."""
+        if mode is None:
+            return True
+        chmod_cmd = [
+            "docker", "exec", "-u", CONTAINER_USER,
+            container_id, "chmod", mode, dst,
+        ]
+        _verbose_trace(" ".join(chmod_cmd))
+        return subprocess.run(chmod_cmd, check=False, **stderr_kwargs).returncode == 0
 
     for attempt in range(CONTAINER_READY_ATTEMPTS):
         # Create parent directory inside container
@@ -202,7 +244,7 @@ def copy_file_to_container(
                 f' tar --warning=no-unknown-keyword -C "{parent_dir}" -xf -'
             )
             rc = _pipe_tar_to_docker(tar_cmd, docker_cmd, quiet=quiet)
-            if rc == 0:
+            if rc == 0 and _post_copy_chmod():
                 return True
         elif _tar_supports_transform():
             # Rename during transfer using --transform
@@ -224,7 +266,7 @@ def copy_file_to_container(
                 f' tar --warning=no-unknown-keyword -C "{parent_dir}" -xf -'
             )
             rc = _pipe_tar_to_docker(tar_cmd, docker_cmd, quiet=quiet)
-            if rc == 0:
+            if rc == 0 and _post_copy_chmod():
                 return True
         else:
             # Fallback: tar with original name, then mv to rename
@@ -249,7 +291,7 @@ def copy_file_to_container(
                 ]
                 _verbose_trace(" ".join(mv_cmd))
                 mv_result = subprocess.run(mv_cmd, check=False, **stderr_kwargs)
-                if mv_result.returncode == 0:
+                if mv_result.returncode == 0 and _post_copy_chmod():
                     return True
 
         if attempt < CONTAINER_READY_ATTEMPTS - 1:
@@ -285,7 +327,12 @@ def copy_dir_to_container(
 
     Returns:
         True on success, False after exhausting retries.
+
+    Raises:
+        ValueError: If dst targets a blocked system path.
     """
+    _validate_container_dst(dst)
+
     base_tar_args = _build_tar_base_args()
 
     exclude_args: list[str] = []

@@ -89,6 +89,24 @@ def log_step(msg: str) -> None:
 # Formatting helper functions (pure functions, not logging)
 
 
+def flag_enabled(value: object) -> bool:
+    """Parse persisted 0/1/true/false style flag values.
+
+    Args:
+        value: Value to parse (bool, int, or str).
+
+    Returns:
+        True if the value represents an enabled flag.
+    """
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, int):
+        return value != 0
+    if isinstance(value, str):
+        return value.strip().lower() in {"1", "true", "yes", "on"}
+    return False
+
+
 def format_kv(key: str, value: str) -> str:
     """Format a key-value pair with 2 spaces indent.
 

@@ -114,6 +114,7 @@ key_strategy = st.one_of(
     st.text(min_size=0, max_size=100),
     st.just("CREDENTIAL_PROXY_PLACEHOLDER"),
     st.just("PROXY_PLACEHOLDER_OPENCODE"),
+    st.just("CRED_PROXY_abcdef1234567890abcdef1234567890"),
     st.just(""),
     st.just("sk-ant-valid-looking-key"),
     st.from_regex(r"sk-ant-[a-zA-Z0-9]{20,50}", fullmatch=True),
@@ -527,6 +528,7 @@ class TestKeyFormatFuzzing:
         placeholders = [
             "CREDENTIAL_PROXY_PLACEHOLDER",
             "PROXY_PLACEHOLDER_OPENCODE",
+            "CRED_PROXY_abcdef1234567890abcdef1234567890",
             "",
         ]
         old = os.environ.get("ZHIPU_API_KEY")

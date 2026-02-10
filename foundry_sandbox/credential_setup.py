@@ -49,7 +49,7 @@ def _merge_claude_settings_in_container(container_id: str, host_settings: str) -
 
     try:
         copy_file_to_container(container_id, host_settings, temp_host)
-    except Exception:
+    except (OSError, subprocess.CalledProcessError):
         log_warn("Failed to copy host settings for merge")
         return
 
@@ -426,19 +426,7 @@ def copy_configs_to_container(
                         container_id,
                         str(key_path),
                         f"{CONTAINER_HOME}/.ssh/{key_file}",
-                    )
-                    # Set permissions
-                    subprocess.run(
-                        [
-                            "docker",
-                            "exec",
-                            container_id,
-                            "chmod",
-                            "600",
-                            f"{CONTAINER_HOME}/.ssh/{key_file}",
-                        ],
-                        check=False,
-                        capture_output=True,
+                        mode="0600",
                     )
                 if pub_path.exists():
                     copy_file_to_container(

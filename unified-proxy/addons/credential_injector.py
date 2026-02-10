@@ -57,10 +57,26 @@ try:
 except ImportError:
     GeminiTokenManager = None  # type: ignore[misc, assignment]
 
-# OAuth placeholder tokens that sandbox sees
-OAUTH_PLACEHOLDER = "CREDENTIAL_PROXY_PLACEHOLDER"
-OPENCODE_PLACEHOLDER = "PROXY_PLACEHOLDER_OPENCODE"
-GITHUB_PLACEHOLDER_MARKER = "CREDENTIAL_PROXY_PLACEHOLDER"
+# Credential placeholder prefix used by per-sandbox random nonces.
+# The host generates unique placeholders like "CRED_PROXY_<hex>" for each sandbox.
+# We detect them by prefix match to avoid relying on a static shared secret.
+# Legacy static placeholders are also accepted for backward compatibility.
+_CRED_PROXY_PREFIX = "CRED_PROXY_"
+_LEGACY_PLACEHOLDER = "CREDENTIAL_PROXY_PLACEHOLDER"
+_LEGACY_OPENCODE_PLACEHOLDER = "PROXY_PLACEHOLDER_OPENCODE"
+
+# Public aliases for test imports
+OAUTH_PLACEHOLDER = _LEGACY_PLACEHOLDER
+
+
+def _has_credential_placeholder(header_value: str) -> bool:
+    """Check if a header value contains a credential placeholder (new or legacy)."""
+    return _CRED_PROXY_PREFIX in header_value or _LEGACY_PLACEHOLDER in header_value
+
+
+def _has_opencode_placeholder(header_value: str) -> bool:
+    """Check if a header value contains an OpenCode credential placeholder."""
+    return _CRED_PROXY_PREFIX in header_value or _LEGACY_OPENCODE_PLACEHOLDER in header_value
 
 # OAuth token refresh endpoints to intercept
 REFRESH_ENDPOINTS = [
@@ -342,7 +358,7 @@ class CredentialInjector:
             return False
 
         auth_header = flow.request.headers.get("Authorization", "")
-        if OAUTH_PLACEHOLDER not in auth_header:
+        if not _has_credential_placeholder(auth_header):
             return False
 
         # Only handle OpenAI/ChatGPT endpoints (Codex CLI)
@@ -379,7 +395,7 @@ class CredentialInjector:
         Returns True if API key was injected, False otherwise.
         """
         auth_header = flow.request.headers.get("Authorization", "")
-        if OPENCODE_PLACEHOLDER not in auth_header:
+        if not _has_opencode_placeholder(auth_header):
             return False
 
         host = flow.request.host
@@ -435,7 +451,7 @@ class CredentialInjector:
             return False
 
         auth_header = flow.request.headers.get("Authorization", "")
-        if OAUTH_PLACEHOLDER not in auth_header:
+        if not _has_credential_placeholder(auth_header):
             return False
 
         host = flow.request.host
@@ -599,7 +615,7 @@ class CredentialInjector:
     def _strip_github_placeholder(self, flow: http.HTTPFlow) -> None:
         """Remove placeholder GitHub Authorization header to allow anonymous access."""
         auth_header = flow.request.headers.get("Authorization", "")
-        if GITHUB_PLACEHOLDER_MARKER in auth_header:
+        if _has_credential_placeholder(auth_header):
             del flow.request.headers["Authorization"]
             ctx.log.info("Removed placeholder GitHub Authorization header")
 

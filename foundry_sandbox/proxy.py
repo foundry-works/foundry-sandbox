@@ -219,7 +219,7 @@ def proxy_unregister(container_id: str) -> int:
             error_msg = body.get("message", body.get("error", "Unknown error"))
             log_warn(f"proxy_unregister: Unexpected response ({http_code}): {error_msg}")
 
-    except Exception as e:
+    except (OSError, RuntimeError, subprocess.SubprocessError, ValueError, KeyError) as e:
         log_warn(f"proxy_unregister: error (may be expected if proxy stopped): {e}")
 
     return 0
@@ -307,7 +307,7 @@ def proxy_get_container_ip(container_id: str, network: str = DEFAULT_NETWORK) ->
             # Docker returns "<no value>" when network not found
             if ip and ip != "<no value>":
                 return ip
-    except Exception as exc:
+    except (OSError, subprocess.SubprocessError, ValueError) as exc:
         log_debug(f"Could not get container IP on network '{network}': {exc}")
 
     return ""

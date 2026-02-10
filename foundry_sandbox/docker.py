@@ -210,9 +210,11 @@ def generate_sandbox_subnet(project_name: str) -> tuple[str, str]:
             return subnet, proxy_ip
         log_debug(f"Subnet {subnet} collides with existing network (salt={salt}), retrying")
 
-    # Exhausted retries — use last computed subnet
-    proxy_ip = f"10.{byte1}.{byte2}.2"
-    return subnet, proxy_ip
+    # Exhausted retries — raise instead of silently using a colliding subnet
+    raise RuntimeError(
+        f"Could not find an unused /24 subnet for project '{project_name}' "
+        f"after {16} attempts. Consider removing unused Docker networks."
+    )
 
 
 # ============================================================================

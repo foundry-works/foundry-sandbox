@@ -97,6 +97,9 @@ PROXY_TIMEOUT: int = 30
 CONTAINER_OPENCODE_PLUGIN_DIR: str = "/home/ubuntu/.config/opencode/plugins"
 """Default OpenCode plugins directory inside container."""
 
+SANDBOX_NAME_MAX_LENGTH: int = 120
+"""Maximum length for auto-generated sandbox names before truncation+hash."""
+
 
 # ============================================================================
 # Runtime Flag Defaults (read from environment)

@@ -64,7 +64,7 @@ def has_gemini_key() -> bool:
     if (Path.home() / ".gemini" / "oauth_creds.json").is_file():
         return True
     api_key = os.environ.get("GEMINI_API_KEY", "")
-    return bool(api_key and api_key != "CREDENTIAL_PROXY_PLACEHOLDER")
+    return bool(api_key and api_key != "CREDENTIAL_PROXY_PLACEHOLDER" and not api_key.startswith("CRED_PROXY_"))
 
 
 def has_opencode_key() -> bool:
@@ -98,7 +98,7 @@ def has_zai_key() -> bool:
     key = os.environ.get("ZHIPU_API_KEY", "")
     if not key:
         return False
-    return key not in ("CREDENTIAL_PROXY_PLACEHOLDER", "PROXY_PLACEHOLDER_OPENCODE")
+    return key not in ("CREDENTIAL_PROXY_PLACEHOLDER", "PROXY_PLACEHOLDER_OPENCODE") and not key.startswith("CRED_PROXY_")
 
 
 def opencode_enabled() -> bool:

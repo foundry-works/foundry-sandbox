@@ -52,22 +52,8 @@ def repo_url_to_bare_path(repo_url: str) -> str:
     return f"{repos_dir}/{path}.git"
 
 
-def flag_enabled(value: object) -> bool:
-    """Parse persisted 0/1/true/false style flag values.
-
-    Args:
-        value: Value to parse (bool, int, or str).
-
-    Returns:
-        True if the value represents an enabled flag.
-    """
-    if isinstance(value, bool):
-        return value
-    if isinstance(value, int):
-        return value != 0
-    if isinstance(value, str):
-        return value.strip().lower() in {"1", "true", "yes", "on"}
-    return False
+# Re-export from canonical location for backwards compatibility
+from foundry_sandbox.utils import flag_enabled  # noqa: F401
 
 
 def tmux_session_name(name: str) -> str:

@@ -21,8 +21,8 @@ from pathlib import Path
 from typing import Any
 
 from foundry_sandbox._bridge import bridge_main
-from foundry_sandbox.commands._helpers import flag_enabled as _flag_enabled
 from foundry_sandbox.config import load_json, write_json
+from foundry_sandbox.utils import flag_enabled as _flag_enabled
 from foundry_sandbox.models import SandboxMetadata
 from foundry_sandbox.paths import (
     ensure_dir,
@@ -246,7 +246,7 @@ def load_sandbox_metadata(name: str) -> dict[str, Any] | None:
             try:
                 model = SandboxMetadata(**data)
                 return model.model_dump()
-            except Exception:
+            except (ValueError, TypeError):
                 # Fall back to raw dict if validation fails (e.g. legacy data)
                 return data
         return None
