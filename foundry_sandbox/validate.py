@@ -144,6 +144,37 @@ def validate_sandbox_name(name: str) -> tuple[bool, str]:
     """
     if not name:
         return False, "Sandbox name required"
+    if len(name) > 128:
+        return False, "Sandbox name too long (max 128 characters)"
+    if name in {".", ".."}:
+        return False, "Sandbox name cannot be '.' or '..'"
+    if "/" in name or "\\" in name:
+        return False, "Sandbox name cannot contain path separators"
+    if any(ch.isspace() for ch in name):
+        return False, "Sandbox name cannot contain whitespace"
+    if not re.match(r"^[A-Za-z0-9][A-Za-z0-9._-]*$", name):
+        return False, (
+            "Invalid sandbox name (allowed: letters, numbers, '.', '_', '-')"
+        )
+    return True, ""
+
+
+def validate_existing_sandbox_name(name: str) -> tuple[bool, str]:
+    """Validate sandbox names for lifecycle commands on existing sandboxes.
+
+    This is intentionally more permissive than validate_sandbox_name() to avoid
+    locking out older sandboxes that predate stricter naming rules.
+    """
+    if not name:
+        return False, "Sandbox name required"
+    if len(name) > 255:
+        return False, "Sandbox name too long (max 255 characters)"
+    if name in {".", ".."}:
+        return False, "Sandbox name cannot be '.' or '..'"
+    if "/" in name or "\\" in name:
+        return False, "Sandbox name cannot contain path separators"
+    if any(ord(ch) < 32 or ord(ch) == 127 for ch in name):
+        return False, "Sandbox name cannot contain control characters"
     return True, ""
 
 

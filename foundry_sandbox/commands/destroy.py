@@ -30,6 +30,7 @@ from foundry_sandbox.paths import derive_sandbox_paths
 from foundry_sandbox.proxy import cleanup_proxy_registration
 from foundry_sandbox.state import load_sandbox_metadata
 from foundry_sandbox.utils import log_info, log_warn
+from foundry_sandbox.validate import validate_existing_sandbox_name
 
 
 # ---------------------------------------------------------------------------
@@ -100,6 +101,10 @@ def _tmux_session_name(name: str) -> str:
 @click.option("--yes", "-y", is_flag=True, help="Skip confirmation")
 def destroy(name: str, keep_worktree: bool, force: bool, yes: bool) -> None:
     """Destroy a sandbox and clean up all resources."""
+    valid_name, name_error = validate_existing_sandbox_name(name)
+    if not valid_name:
+        click.echo(f"Error: {name_error}", err=True)
+        sys.exit(1)
 
     # ------------------------------------------------------------------
     # Derive paths

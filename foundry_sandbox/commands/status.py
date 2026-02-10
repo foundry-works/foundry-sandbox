@@ -15,6 +15,7 @@ from foundry_sandbox.constants import get_claude_configs_dir, get_worktrees_dir
 from foundry_sandbox.paths import derive_sandbox_paths
 from foundry_sandbox.state import load_sandbox_metadata
 from foundry_sandbox.utils import BOLD, RESET, format_kv, format_table_row
+from foundry_sandbox.validate import validate_existing_sandbox_name
 
 
 def _get_docker_status(container_name: str) -> str:
@@ -105,6 +106,11 @@ def status(name: str | None, json_output: bool) -> None:
         return
 
     # Single sandbox detail
+    valid_name, name_error = validate_existing_sandbox_name(name)
+    if not valid_name:
+        click.echo(f"Error: {name_error}", err=True)
+        raise SystemExit(1)
+
     info = _collect_sandbox_info(name)
 
     if json_output:

@@ -39,12 +39,41 @@ class TestSandboxNameValidation:
         assert valid is True
         assert msg == ""
 
-    def test_any_nonempty_string_accepted(self):
-        """Any non-empty string should be a valid sandbox name."""
-        for name in ["a", "123", "test_name", "valid-sandbox-123"]:
+    def test_valid_name_variants_accepted(self):
+        """Safe sandbox names should be accepted."""
+        for name in ["a", "123", "test_name", "valid-sandbox-123", "a.b-c_d"]:
             valid, msg = validate.validate_sandbox_name(name)
             assert valid is True
             assert msg == ""
+
+    def test_rejects_path_separators(self):
+        for name in ["../x", "a/b", r"a\\b"]:
+            valid, _ = validate.validate_sandbox_name(name)
+            assert valid is False
+
+    def test_rejects_whitespace(self):
+        for name in ["has space", "tab\tname", "line\nname"]:
+            valid, _ = validate.validate_sandbox_name(name)
+            assert valid is False
+
+
+class TestExistingSandboxNameValidation:
+    """Tests for validate_existing_sandbox_name()."""
+
+    def test_allows_legacy_name_with_space(self):
+        valid, msg = validate.validate_existing_sandbox_name("legacy sandbox name")
+        assert valid is True
+        assert msg == ""
+
+    def test_rejects_path_separators(self):
+        for name in ["../x", "a/b", r"a\\b"]:
+            valid, _ = validate.validate_existing_sandbox_name(name)
+            assert valid is False
+
+    def test_rejects_control_characters(self):
+        for name in ["name\nx", "name\tx", "name\rx", "name\x7fx"]:
+            valid, _ = validate.validate_existing_sandbox_name(name)
+            assert valid is False
 
 
 class TestGitUrlValidation:

@@ -37,6 +37,7 @@ from foundry_sandbox.docker import (
     repair_hmac_secret_permissions,
 )
 from foundry_sandbox.image import check_image_freshness
+from foundry_sandbox.legacy_bridge import run_legacy_command
 from foundry_sandbox.network import (
     add_claude_home_to_override,
     add_ssh_agent_to_override,
@@ -47,6 +48,7 @@ from foundry_sandbox.paths import derive_sandbox_paths, ensure_dir, path_claude_
 from foundry_sandbox.proxy import setup_proxy_registration
 from foundry_sandbox.state import load_sandbox_metadata
 from foundry_sandbox.utils import log_error, log_info, log_step, log_warn
+from foundry_sandbox.validate import validate_existing_sandbox_name
 
 # Path to sandbox.sh for shell fallback
 SANDBOX_SH = Path(__file__).resolve().parent.parent.parent / "sandbox.sh"
@@ -66,10 +68,7 @@ def _shell_call(*args: str) -> subprocess.CompletedProcess[str]:
     Returns:
         CompletedProcess result.
     """
-    return subprocess.run(
-        [str(SANDBOX_SH), *args],
-        check=False,
-    )
+    return run_legacy_command(*args, capture_output=False)
 
 
 def _shell_call_capture(*args: str) -> str:
@@ -81,12 +80,7 @@ def _shell_call_capture(*args: str) -> str:
     Returns:
         stdout output as string (stripped).
     """
-    result = subprocess.run(
-        [str(SANDBOX_SH), *args],
-        capture_output=True,
-        text=True,
-        check=False,
-    )
+    result = run_legacy_command(*args, capture_output=True)
     return result.stdout.strip() if result.returncode == 0 else ""
 
 
@@ -142,13 +136,7 @@ def _generate_sandbox_id(seed: str) -> str:
     Returns:
         Generated sandbox ID, or empty string on failure.
     """
-    result = subprocess.run(
-        ["bash", "-c", f"source {SANDBOX_SH} && generate_sandbox_id '{seed}'"],
-        capture_output=True,
-        text=True,
-        check=False,
-    )
-    return result.stdout.strip() if result.returncode == 0 else ""
+    return _shell_call_capture("_bridge_generate_sandbox_id", seed)
 
 
 def _apply_network_restrictions(container_id: str, network_mode: str) -> None:
@@ -181,6 +169,10 @@ def _apply_network_restrictions(container_id: str, network_mode: str) -> None:
 @click.argument("name")
 def start(name: str) -> None:
     """Start a stopped sandbox container."""
+    valid_name, name_error = validate_existing_sandbox_name(name)
+    if not valid_name:
+        log_error(name_error)
+        sys.exit(1)
 
     # ------------------------------------------------------------------
     # 1. Derive paths and check worktree exists
@@ -308,10 +300,7 @@ def start(name: str) -> None:
     # ------------------------------------------------------------------
     # 9. Export GitHub token (shell fallback)
     # ------------------------------------------------------------------
-    result = subprocess.run(
-        ["bash", "-c", f"source {SANDBOX_SH} && export_gh_token"],
-        check=False,
-    )
+    result = _shell_call("_bridge_export_gh_token")
     if result.returncode == 0:
         log_info("GitHub CLI token exported for container")
 

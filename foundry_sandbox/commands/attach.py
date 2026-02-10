@@ -17,6 +17,7 @@ Migrated from commands/attach.sh. Performs the following sequence:
 from __future__ import annotations
 
 import os
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -25,10 +26,12 @@ import click
 
 from foundry_sandbox.constants import get_worktrees_dir
 from foundry_sandbox.docker import container_is_running
+from foundry_sandbox.legacy_bridge import run_legacy_command
 from foundry_sandbox.paths import derive_sandbox_paths
 from foundry_sandbox.state import load_last_attach, load_sandbox_metadata, save_last_attach
 from foundry_sandbox.tmux import attach as tmux_attach_session, session_exists as tmux_session_exists, create_and_attach as tmux_create_and_attach, attach_existing as tmux_attach_to_existing
 from foundry_sandbox.utils import log_debug, log_error, log_info
+from foundry_sandbox.validate import validate_existing_sandbox_name
 
 # Path to sandbox.sh for shell fallback
 SANDBOX_SH = Path(__file__).resolve().parent.parent.parent / "sandbox.sh"
@@ -41,7 +44,7 @@ SANDBOX_SH = Path(__file__).resolve().parent.parent.parent / "sandbox.sh"
 
 def _list_sandboxes() -> None:
     """Display available sandboxes (fallback to shell for now)."""
-    subprocess.run([str(SANDBOX_SH), "list"], check=False)
+    run_legacy_command("list", capture_output=False)
 
 
 def _auto_detect_sandbox() -> str | None:
@@ -86,13 +89,7 @@ def _fzf_select_sandbox() -> str | None:
         return None
 
     # Check if fzf is available
-    if subprocess.run(
-        ["command", "-v", "fzf"],
-        shell=True,
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
-        check=False,
-    ).returncode != 0:
+    if shutil.which("fzf") is None:
         return None
 
     try:
@@ -129,10 +126,7 @@ def _start_container(name: str) -> None:
         name: Sandbox name.
     """
     click.echo("Container not running. Starting...")
-    result = subprocess.run(
-        [str(SANDBOX_SH), "start", name],
-        check=False,
-    )
+    result = run_legacy_command("start", name, capture_output=False)
     if result.returncode != 0:
         sys.exit(result.returncode)
 
@@ -145,12 +139,7 @@ def _sync_credentials(container_id: str) -> None:
     """
     # Shell fallback for now - this function is in lib/container_config.sh
     log_debug(f"Syncing credentials to {container_id}")
-    subprocess.run(
-        [str(SANDBOX_SH), "_bridge_sync_creds", container_id],
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
-        check=False,
-    )
+    run_legacy_command("_bridge_sync_creds", container_id, capture_output=False)
 
 
 def _sync_opencode_plugins(name: str, container_id: str) -> None:
@@ -273,6 +262,11 @@ def attach(
             click.echo("")
             _list_sandboxes()
             sys.exit(1)
+
+    valid_name, name_error = validate_existing_sandbox_name(name)
+    if not valid_name:
+        log_error(name_error)
+        sys.exit(1)
 
     # ------------------------------------------------------------------
     # 4. Derive sandbox paths

@@ -18,11 +18,13 @@ from pathlib import Path
 
 import click
 
+from foundry_sandbox.credential_setup import sync_runtime_credentials
 from foundry_sandbox.constants import get_worktrees_dir
 from foundry_sandbox.docker import container_is_running, get_compose_command
 from foundry_sandbox.paths import derive_sandbox_paths
 from foundry_sandbox.state import load_last_attach, load_sandbox_metadata
 from foundry_sandbox.utils import log_error, log_info
+from foundry_sandbox.validate import validate_existing_sandbox_name
 
 
 def _auto_detect_sandbox() -> str | None:
@@ -150,68 +152,11 @@ def _refresh_direct_mode(container_id: str) -> None:
     """
     click.echo("Syncing credentials to sandbox...")
 
-    # For direct mode, we need to sync credential files from host to container.
-    # The shell version calls sync_runtime_credentials which is in lib/container_config.sh.
-    # Since that hasn't been migrated yet, we'll use subprocess to call docker exec
-    # to copy the key credential files.
-
-    # Key files to sync (based on sync_runtime_credentials in container_config.sh):
-    # - ~/.codex (excluding logs)
-    # - ~/.claude.json
-    # - ~/.claude/settings.json
-    # - ~/.config/gh
-    # - ~/.gemini
-    # - ~/.local/share/opencode/auth.json
-    # - ~/.foundry-mcp.toml
-
-    # Since the full implementation is complex and involves calling Python helpers
-    # that may not all be migrated yet, we'll use a simpler approach: shell out to
-    # the Docker commands directly for the essential credential files.
-
-    home = Path.home()
-    container_home = "/home/ubuntu"
-
-    # Sync essential credential files
-    credential_files = [
-        ("~/.claude.json", f"{container_home}/.claude.json"),
-        ("~/.claude.json", f"{container_home}/.claude/.claude.json"),
-    ]
-
-    for src_path, dest_path in credential_files:
-        src = Path(src_path.replace("~", str(home)))
-        if src.exists():
-            try:
-                subprocess.run(
-                    ["docker", "cp", str(src), f"{container_id}:{dest_path}"],
-                    stdout=subprocess.DEVNULL,
-                    stderr=subprocess.DEVNULL,
-                    check=False,
-                )
-            except Exception:
-                pass
-
-    # Sync directories
-    credential_dirs = [
-        ("~/.config/gh", f"{container_home}/.config/gh"),
-        ("~/.codex", f"{container_home}/.codex"),
-        ("~/.gemini", f"{container_home}/.gemini"),
-    ]
-
-    for src_dir, dest_dir in credential_dirs:
-        src = Path(src_dir.replace("~", str(home)))
-        if src.exists() and src.is_dir():
-            try:
-                # Use tar pipe for directory sync (like the shell version)
-                # This is more reliable than docker cp for directories
-                subprocess.run(
-                    f"tar -C {src} -cf - . | docker exec -i {container_id} sh -c 'mkdir -p {dest_dir} && tar -C {dest_dir} -xf -'",
-                    shell=True,
-                    stdout=subprocess.DEVNULL,
-                    stderr=subprocess.DEVNULL,
-                    check=False,
-                )
-            except Exception:
-                pass
+    try:
+        sync_runtime_credentials(container_id)
+    except Exception as exc:
+        log_error(f"Failed to sync credentials: {exc}")
+        sys.exit(1)
 
     click.echo("Credentials refreshed successfully.")
 
@@ -244,7 +189,7 @@ def _refresh_isolation_mode(name: str, container: str, override_file: str) -> No
         sys.exit(1)
 
 
-@click.command()
+@click.command("refresh-credentials")
 @click.argument("name", required=False, default=None)
 @click.option("--last", "-l", is_flag=True, help="Refresh last attached sandbox")
 def refresh_creds(name: str | None, last: bool) -> None:
@@ -277,6 +222,11 @@ def refresh_creds(name: str | None, last: bool) -> None:
             click.echo("")
             _list_sandboxes_simple()
             sys.exit(1)
+
+    valid_name, name_error = validate_existing_sandbox_name(name)
+    if not valid_name:
+        log_error(name_error)
+        sys.exit(1)
 
     # Derive paths
     paths = derive_sandbox_paths(name)
