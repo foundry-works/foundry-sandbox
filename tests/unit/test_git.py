@@ -495,3 +495,28 @@ class TestRemoveWorktree:
         git_worktree.remove_worktree(wt)
 
         mock_rmtree.assert_called_once_with(wt, ignore_errors=True)
+
+
+# ============================================================================
+# Ref Injection Prevention Tests
+# ============================================================================
+
+
+class TestRefInjectionPrevention:
+    """Branches starting with '-' must be rejected to prevent flag injection."""
+
+    def test_create_worktree_rejects_dash_branch(self):
+        with pytest.raises(ValueError, match="must not start with"):
+            git_worktree.create_worktree("/bare", "/wt", "--upload-pack=evil")
+
+    def test_create_worktree_rejects_dash_from_branch(self):
+        with pytest.raises(ValueError, match="must not start with"):
+            git_worktree.create_worktree("/bare", "/wt", "ok-branch", from_branch="--upload-pack=evil")
+
+    def test_cleanup_sandbox_branch_rejects_dash(self):
+        with pytest.raises(ValueError, match="must not start with"):
+            git_worktree.cleanup_sandbox_branch("--upload-pack=evil", "/bare")
+
+    def test_ensure_repo_checkout_rejects_dash_branch(self):
+        with pytest.raises(ValueError, match="must not start with"):
+            git.ensure_repo_checkout("https://example.com/repo", "/checkout", branch="--upload-pack=evil")

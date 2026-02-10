@@ -1,0 +1,4 @@
+# file: /workspace/foundry_sandbox/network.py
+# hypothesis_version: 6.151.5
+
+['      -', '      - NET_ADMIN\n', '      - SYS_ADMIN\n', '    cap_add:', '    cap_add:\n', '    environment:', '    environment:\n', '    group_add:', '    volumes:', '- "0"', "- '0'", '- 0', '/etc/localtime', '/etc/timezone', '/home/ubuntu/.claude', '/ssh-agent', '/zoneinfo/', ':/etc/localtime', ':/etc/timezone', 'NET_ADMIN', 'NET_RAW', 'SSH_AUTH_SOCK=', 'SYS_ADMIN', 'TZ', 'TZ=', '__main__', 'a', 'environment', 'full', 'group_add', 'host-only', 'limited', 'none', 'r', 'services:', 'services:\n  dev:\n', 'strip-network-config', 'volumes', 'w']

@@ -1,0 +1,4 @@
+# file: /workspace/foundry_sandbox/commands/start.py
+# hypothesis_version: 6.151.5
+
+['--format', '-a', '.codex/auth.json', '.git', '0', '1', 'ALLOW_PR_OPERATIONS', 'GEMINI_API_KEY', 'HMAC_VOLUME_NAME', 'Rebuild image now?', 'SANDBOX_ENABLE_ZAI', 'SANDBOX_ID', 'STUBS_VOLUME_NAME', 'USER', 'ZHIPU_API_KEY', 'allow_pr', 'branch', 'build', 'disabled', 'docker', 'enable_opencode', 'enable_zai', 'exec', 'from_branch', 'git@github.com:', 'http://github.com/', 'https://github.com/', 'init', 'inspect', 'limited', 'name', 'network_mode', 'pip_requirements', 'ps', 'repo', 'repo_url', 'sandbox.sh', 'sandbox_branch', 'sparse_checkout', 'ssh_mode', 'sudo', 'sync_ssh', 'true', 'ubuntu', 'volume', 'working_dir', '{{.Names}}']

@@ -1,4 +1,5 @@
 #!/bin/bash
+set -u
 
 # Create home directories (needed because /home/ubuntu is tmpfs with read-only root)
 # These would normally be created by Dockerfile but tmpfs is empty on each start
@@ -138,7 +139,7 @@ fi
 # Copy proxy stub files when in credential isolation mode
 # Stubs are in a named volume (populated by populate_stubs_volume) with original filenames
 # Volume mount avoids Docker Desktop VirtioFS/gRPC-FUSE staleness issues
-if [ "$SANDBOX_GATEWAY_ENABLED" = "true" ]; then
+if [ "${SANDBOX_GATEWAY_ENABLED:-}" = "true" ]; then
     if [ -f "/etc/proxy-stubs/stub-auth-codex.json" ]; then
         cp /etc/proxy-stubs/stub-auth-codex.json "$HOME/.codex/auth.json"
     fi
@@ -233,7 +234,7 @@ fi
 # This enables domain allowlisting - only approved domains can be resolved
 # Note: In credential-isolation mode, DNS is configured by entrypoint-root.sh (as root)
 # before this script runs. This block handles non-credential-isolation proxy mode.
-if [ "$SANDBOX_GATEWAY_ENABLED" = "true" ]; then
+if [ "${SANDBOX_GATEWAY_ENABLED:-}" = "true" ]; then
     # Check if DNS is already configured (by root wrapper)
     if grep -q "unified-proxy" /etc/resolv.conf 2>/dev/null || grep -q "172\." /etc/resolv.conf 2>/dev/null; then
         echo "DNS already configured for unified-proxy"
@@ -258,7 +259,7 @@ fi
 if [ -f "/certs/mitmproxy-ca.pem" ]; then
     echo "Configuring CA trust for proxy..."
 
-    if [ "${SANDBOX_CA_MODE}" = "combined" ]; then
+    if [ "${SANDBOX_CA_MODE:-}" = "combined" ]; then
         # Combined bundle mode (credential-isolation with read-only FS).
         # Env vars (NODE_EXTRA_CA_CERTS, REQUESTS_CA_BUNDLE, etc.) are set
         # via docker-compose.credential-isolation.yml.

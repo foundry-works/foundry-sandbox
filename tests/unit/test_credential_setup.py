@@ -215,12 +215,12 @@ class TestNoCredentialLeaks:
                     f"API key {key_name} leaked in subprocess args: {cmd_str}"
 
     def test_credential_paths_not_in_isolation_code_path(self):
-        """The isolation=True branch must not reference real credential paths."""
+        """The credential stage must have an isolation guard."""
         import ast
         import inspect
         from foundry_sandbox import credential_setup
 
-        source = inspect.getsource(credential_setup.copy_configs_to_container)
+        source = inspect.getsource(credential_setup._stage_setup_credentials)
         tree = ast.parse(source)
 
         # Find the `if not isolate_credentials:` block — real creds should
@@ -236,7 +236,7 @@ class TestNoCredentialLeaks:
                         found_isolation_guard = True
 
         assert found_isolation_guard, (
-            "copy_configs_to_container must have an `if not isolate_credentials:` guard "
+            "_stage_setup_credentials must have an `if not isolate_credentials:` guard "
             "to prevent real credentials from being copied in isolation mode"
         )
 
@@ -304,6 +304,90 @@ class TestSyncRuntimeCredentials:
         # the function may have both paths, but quiet should be dominant)
         assert mock_cpf_q.called or mock_cpd_q.called, \
             "sync_runtime_credentials should use quiet copy functions"
+
+
+# ---------------------------------------------------------------------------
+# TestSyncRuntimeCredentialIsolation
+# ---------------------------------------------------------------------------
+
+
+class TestSyncRuntimeCredentialIsolation:
+    """sync_runtime_credentials must respect isolate_credentials on re-attach."""
+
+    @patch("foundry_sandbox.credential_setup.subprocess.run", return_value=_completed())
+    @patch("foundry_sandbox.credential_setup.copy_file_to_container")
+    @patch("foundry_sandbox.credential_setup.copy_file_to_container_quiet")
+    @patch("foundry_sandbox.credential_setup.copy_dir_to_container")
+    @patch("foundry_sandbox.credential_setup.copy_dir_to_container_quiet")
+    @patch("foundry_sandbox.credential_setup.docker_exec_text")
+    def test_isolation_skips_codex_on_sync(
+        self, mock_exec, mock_cpd_q, mock_cpd, mock_cpf_q, mock_cpf, mock_run,
+        _mock_lazy_imports,
+    ):
+        """.codex dir must not be copied when isolate_credentials=True on sync."""
+        from foundry_sandbox.credential_setup import sync_runtime_credentials
+
+        with patch("pathlib.Path.home", return_value=Path("/fake/home")), \
+             patch("pathlib.Path.exists", return_value=True):
+            sync_runtime_credentials("container-abc", isolate_credentials=True)
+
+        for c in mock_cpd_q.call_args_list:
+            args = c[0] if c[0] else ()
+            for arg in args:
+                if isinstance(arg, str):
+                    assert ".codex" not in arg, \
+                        f".codex dir copied despite isolation on sync: {c}"
+
+    @patch("foundry_sandbox.credential_setup.subprocess.run", return_value=_completed())
+    @patch("foundry_sandbox.credential_setup.copy_file_to_container")
+    @patch("foundry_sandbox.credential_setup.copy_file_to_container_quiet")
+    @patch("foundry_sandbox.credential_setup.copy_dir_to_container")
+    @patch("foundry_sandbox.credential_setup.copy_dir_to_container_quiet")
+    @patch("foundry_sandbox.credential_setup.docker_exec_text")
+    @patch("foundry_sandbox.credential_setup._merge_claude_settings_safe")
+    @patch("foundry_sandbox.credential_setup._merge_claude_settings_in_container")
+    def test_isolation_uses_safe_merge_on_sync(
+        self, mock_merge_full, mock_merge_safe,
+        mock_exec, mock_cpd_q, mock_cpd, mock_cpf_q, mock_cpf, mock_run,
+        _mock_lazy_imports,
+    ):
+        """Settings merge must use _safe variant when isolate_credentials=True on sync."""
+        from foundry_sandbox.credential_setup import sync_runtime_credentials
+
+        with patch("pathlib.Path.home", return_value=Path("/fake/home")), \
+             patch("pathlib.Path.exists", return_value=True):
+            sync_runtime_credentials("container-abc", isolate_credentials=True)
+
+        # Safe merge should be called, full merge should not
+        assert mock_merge_safe.called, \
+            "sync should use _merge_claude_settings_safe when isolate_credentials=True"
+        assert not mock_merge_full.called, \
+            "sync should NOT use _merge_claude_settings_in_container when isolate_credentials=True"
+
+    @patch("foundry_sandbox.credential_setup.subprocess.run", return_value=_completed())
+    @patch("foundry_sandbox.credential_setup.copy_file_to_container")
+    @patch("foundry_sandbox.credential_setup.copy_file_to_container_quiet")
+    @patch("foundry_sandbox.credential_setup.copy_dir_to_container")
+    @patch("foundry_sandbox.credential_setup.copy_dir_to_container_quiet")
+    @patch("foundry_sandbox.credential_setup.docker_exec_text")
+    @patch("foundry_sandbox.credential_setup._merge_claude_settings_safe")
+    @patch("foundry_sandbox.credential_setup._merge_claude_settings_in_container")
+    def test_no_isolation_uses_full_merge_on_sync(
+        self, mock_merge_full, mock_merge_safe,
+        mock_exec, mock_cpd_q, mock_cpd, mock_cpf_q, mock_cpf, mock_run,
+        _mock_lazy_imports,
+    ):
+        """Settings merge must use full variant when isolate_credentials=False on sync."""
+        from foundry_sandbox.credential_setup import sync_runtime_credentials
+
+        with patch("pathlib.Path.home", return_value=Path("/fake/home")), \
+             patch("pathlib.Path.exists", return_value=True):
+            sync_runtime_credentials("container-abc", isolate_credentials=False)
+
+        assert mock_merge_full.called, \
+            "sync should use _merge_claude_settings_in_container when isolate_credentials=False"
+        assert not mock_merge_safe.called, \
+            "sync should NOT use _merge_claude_settings_safe when isolate_credentials=False"
 
 
 # ---------------------------------------------------------------------------
@@ -526,12 +610,11 @@ class TestCopyConfigsStructure:
     """Structural tests for copy_configs_to_container."""
 
     def test_creates_required_directories(self):
-        """The function must create all required config directories."""
-        import ast
+        """The stage function must create all required config directories."""
         import inspect
         from foundry_sandbox import credential_setup
 
-        source = inspect.getsource(credential_setup.copy_configs_to_container)
+        source = inspect.getsource(credential_setup._stage_create_config_dirs)
 
         # Required directories that must be created
         required_dirs = [
@@ -545,7 +628,7 @@ class TestCopyConfigsStructure:
 
         for dir_name in required_dirs:
             assert dir_name in source, \
-                f"copy_configs_to_container must create {dir_name} directory"
+                f"_stage_create_config_dirs must create {dir_name} directory"
 
     def test_function_accepts_isolation_parameter(self):
         """copy_configs_to_container must accept isolate_credentials kwarg."""

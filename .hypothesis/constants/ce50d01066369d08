@@ -1,0 +1,4 @@
+# file: /home/tyler/.sandboxes/worktrees/tyler-foundry-sandbox-20260209-0718/foundry_sandbox/commands/destroy_all.py
+# hypothesis_version: 6.148.11
+
+['\nAborted.', '  - All worktrees', '--format', '--keep-worktree', '-t', '1', 'Aborted.', 'CONTAINER_NAME', 'Including:', 'branch', 'credential-isolation', 'destroy all', 'docker', 'inspect', 'kill-session', 'ls', 'network', 'proxy-egress', 'repo_url', 'rm', 'tmux', '{{.Name}}']

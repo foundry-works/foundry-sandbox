@@ -1,0 +1,4 @@
+# file: /workspace/foundry_sandbox/commands/build.py
+# hypothesis_version: 6.151.5
+
+['--build-arg', '--no-cache', '--without-opencode', '-f', '-t', 'INCLUDE_OPENCODE=0', 'build', 'compose', 'docker', 'docker-compose.yml', 'unified-proxy']

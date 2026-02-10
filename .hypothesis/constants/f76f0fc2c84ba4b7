@@ -1,0 +1,4 @@
+# file: /home/tyler/.sandboxes/worktrees/tyler-foundry-sandbox-20260209-0718/foundry_sandbox/commands/attach.py
+# hypothesis_version: 6.148.11
+
+['--height=10', '--ide-only', '--last', '--no-ide', '--reverse', '--with-ide', '0', '1', 'Skip IDE prompt', '_bridge_sync_creds', 'auto', 'enable_opencode', 'fzf', 'ide_only', 'list', 'name', 'no_ide', 'sandbox.sh', 'start', 'use_last', 'with_ide', 'working_dir']

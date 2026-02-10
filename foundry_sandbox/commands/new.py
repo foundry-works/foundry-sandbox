@@ -32,46 +32,49 @@ import os
 import re
 import subprocess
 import sys
+from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 
 import click
 from click.core import ParameterSource
 
-from foundry_sandbox.commands._helpers import flag_enabled as _saved_flag_enabled
+from foundry_sandbox.commands._helpers import (
+    apply_network_restrictions,
+    find_next_sandbox_name,
+    flag_enabled as _saved_flag_enabled,
+    generate_sandbox_id,
+    repo_url_to_bare_path,
+    resolve_ssh_agent_sock,
+    sandbox_name as _helpers_sandbox_name,
+    strip_github_url,
+)
+from foundry_sandbox.utils import sanitize_ref_component
+from foundry_sandbox.api_keys import check_claude_key_required, export_gh_token, has_opencode_key, show_cli_status
 from foundry_sandbox.compose import assemble_override
 from foundry_sandbox.constants import get_repos_dir
-from foundry_sandbox.docker import compose_up, hmac_secret_file_count, populate_stubs_volume, repair_hmac_secret_permissions
+from foundry_sandbox.container_io import copy_dir_to_container, copy_file_to_container
+from foundry_sandbox.container_setup import install_pip_requirements
+from foundry_sandbox.credential_setup import copy_configs_to_container
+from foundry_sandbox.docker import compose_down, compose_up, hmac_secret_file_count, populate_stubs_volume, repair_hmac_secret_permissions
+from foundry_sandbox.foundry_plugin import prepopulate_foundry_global
 from foundry_sandbox.git import ensure_bare_repo
+from foundry_sandbox.git_path_fixer import fix_proxy_worktree_paths
 from foundry_sandbox.git_worktree import create_worktree
 from foundry_sandbox.image import check_image_freshness
 from foundry_sandbox.legacy_bridge import run_legacy_command
-from foundry_sandbox.network import add_claude_home_to_override, add_ssh_agent_to_override, add_timezone_to_override
+from foundry_sandbox.network import add_claude_home_to_override, add_network_to_override, add_ssh_agent_to_override, add_timezone_to_override
 from foundry_sandbox.paths import derive_sandbox_paths, ensure_dir, path_claude_home
 from foundry_sandbox.permissions import install_workspace_permissions
 from foundry_sandbox.proxy import setup_proxy_registration
 from foundry_sandbox.state import load_sandbox_metadata, write_sandbox_metadata, save_last_cast_new, save_cast_preset, load_last_cast_new, load_cast_preset, save_last_attach
+from foundry_sandbox import tmux
 from foundry_sandbox.tui import tui_choose, tui_confirm, tui_input
 from foundry_sandbox.utils import log_error, log_info, log_section, log_step, log_warn
-from foundry_sandbox.validate import validate_sandbox_name
+from foundry_sandbox.validate import check_docker_network_capacity, validate_git_remotes, validate_git_url, validate_mount_path, validate_sandbox_name
 
-SANDBOX_SH = Path(__file__).resolve().parent.parent.parent / "sandbox.sh"
-
-
-# ---------------------------------------------------------------------------
-# Shell Fallbacks
-# ---------------------------------------------------------------------------
-
-
-def _shell_call(*args: str) -> subprocess.CompletedProcess[str]:
-    """Call sandbox.sh with arguments."""
-    return run_legacy_command(*args, capture_output=False)
-
-
-def _shell_call_capture(*args: str) -> str:
-    """Call sandbox.sh with arguments and capture stdout."""
-    result = run_legacy_command(*args, capture_output=True)
-    return result.stdout.strip() if result.returncode == 0 else ""
+class _SetupError(Exception):
+    """Raised by ``_new_setup`` to signal a failure that should trigger rollback."""
 
 
 def _rollback_new(
@@ -118,6 +121,25 @@ def _rollback_new(
 
 
 
+@dataclass
+class NewDefaults:
+    """Resolved default values for the ``new`` command parameters."""
+
+    repo: str
+    branch: str
+    from_branch: str
+    mounts: tuple[str, ...]
+    copies: tuple[str, ...]
+    network: str
+    with_ssh: bool
+    with_opencode: bool
+    with_zai: bool
+    wd: str
+    sparse: bool
+    pip_requirements: str
+    allow_pr: bool
+
+
 def _apply_saved_new_defaults(
     saved: dict[str, object],
     *,
@@ -135,21 +157,7 @@ def _apply_saved_new_defaults(
     sparse: bool,
     pip_requirements: str,
     allow_pr: bool,
-) -> tuple[
-    str,
-    str,
-    str,
-    tuple[str, ...],
-    tuple[str, ...],
-    str,
-    bool,
-    bool,
-    bool,
-    str,
-    bool,
-    str,
-    bool,
-]:
+) -> NewDefaults:
     """Apply saved/preset values for parameters not explicitly set by the user."""
     if "repo" not in explicit_params:
         repo = str(saved.get("repo", "") or "")
@@ -183,20 +191,20 @@ def _apply_saved_new_defaults(
         if isinstance(saved_copies, list) and all(isinstance(v, str) for v in saved_copies):
             copies = tuple(saved_copies)
 
-    return (
-        repo,
-        branch,
-        from_branch,
-        mounts,
-        copies,
-        network,
-        with_ssh,
-        with_opencode,
-        with_zai,
-        wd,
-        sparse,
-        pip_requirements,
-        allow_pr,
+    return NewDefaults(
+        repo=repo,
+        branch=branch,
+        from_branch=from_branch,
+        mounts=mounts,
+        copies=copies,
+        network=network,
+        with_ssh=with_ssh,
+        with_opencode=with_opencode,
+        with_zai=with_zai,
+        wd=wd,
+        sparse=sparse,
+        pip_requirements=pip_requirements,
+        allow_pr=allow_pr,
     )
 
 
@@ -274,12 +282,6 @@ def _get_local_branches(repo_root: str) -> list[str]:
     return [line for line in result.stdout.strip().split("\n") if line]
 
 
-def _sanitize_ref_component(component: str) -> str:
-    """Sanitize a string for use in git ref names."""
-    result = _shell_call_capture("_bridge_sanitize_ref_component", component)
-    return result if result else component.replace("/", "-").replace(" ", "-")
-
-
 def _generate_branch_name(repo_url: str, from_branch: str) -> str:
     """Generate a branch name for a new sandbox."""
     timestamp = datetime.now().strftime("%Y%m%d-%H%M")
@@ -300,8 +302,8 @@ def _generate_branch_name(repo_url: str, from_branch: str) -> str:
     if not user_segment:
         user_segment = "user"
 
-    user_segment = _sanitize_ref_component(user_segment)
-    safe_repo_name = _sanitize_ref_component(repo_name)
+    user_segment = sanitize_ref_component(user_segment)
+    safe_repo_name = sanitize_ref_component(repo_name)
 
     if not safe_repo_name:
         safe_repo_name = "repo"
@@ -328,26 +330,6 @@ def _generate_branch_name(repo_url: str, from_branch: str) -> str:
             branch = f"sandbox-{timestamp}"
 
     return branch
-
-
-def _repo_to_path(repo_url: str) -> str:
-    """Convert repo URL to bare path using shell fallback."""
-    return _shell_call_capture("_bridge_repo_to_path", repo_url)
-
-
-def _sandbox_name(bare_path: str, branch: str) -> str:
-    """Generate sandbox name using shell fallback."""
-    return _shell_call_capture("_bridge_sandbox_name", bare_path, branch)
-
-
-def _find_next_sandbox_name(base_name: str) -> str:
-    """Find next available sandbox name using shell fallback."""
-    return _shell_call_capture("_bridge_find_next_sandbox_name", base_name)
-
-
-def _container_name(sandbox_name: str) -> str:
-    """Generate container name using shell fallback."""
-    return _shell_call_capture("_bridge_container_name", sandbox_name)
 
 
 # ---------------------------------------------------------------------------
@@ -805,21 +787,7 @@ def new(
         click.echo()
         click.echo("Repeating last command")
         click.echo()
-        (
-            repo,
-            branch,
-            from_branch,
-            mounts,
-            copies,
-            network,
-            with_ssh,
-            with_opencode,
-            with_zai,
-            wd,
-            sparse,
-            pip_requirements,
-            allow_pr,
-        ) = _apply_saved_new_defaults(
+        _defaults = _apply_saved_new_defaults(
             last_data,
             explicit_params=explicit_params,
             repo=repo,
@@ -836,6 +804,19 @@ def new(
             pip_requirements=pip_requirements,
             allow_pr=allow_pr,
         )
+        repo = _defaults.repo
+        branch = _defaults.branch
+        from_branch = _defaults.from_branch
+        mounts = _defaults.mounts
+        copies = _defaults.copies
+        network = _defaults.network
+        with_ssh = _defaults.with_ssh
+        with_opencode = _defaults.with_opencode
+        with_zai = _defaults.with_zai
+        wd = _defaults.wd
+        sparse = _defaults.sparse
+        pip_requirements = _defaults.pip_requirements
+        allow_pr = _defaults.allow_pr
 
     # Handle --preset flag
     if preset:
@@ -846,21 +827,7 @@ def new(
         click.echo()
         click.echo(f"Using preset '{preset}'")
         click.echo()
-        (
-            repo,
-            branch,
-            from_branch,
-            mounts,
-            copies,
-            network,
-            with_ssh,
-            with_opencode,
-            with_zai,
-            wd,
-            sparse,
-            pip_requirements,
-            allow_pr,
-        ) = _apply_saved_new_defaults(
+        _defaults = _apply_saved_new_defaults(
             preset_data,
             explicit_params=explicit_params,
             repo=repo,
@@ -877,6 +844,19 @@ def new(
             pip_requirements=pip_requirements,
             allow_pr=allow_pr,
         )
+        repo = _defaults.repo
+        branch = _defaults.branch
+        from_branch = _defaults.from_branch
+        mounts = _defaults.mounts
+        copies = _defaults.copies
+        network = _defaults.network
+        with_ssh = _defaults.with_ssh
+        with_opencode = _defaults.with_opencode
+        with_zai = _defaults.with_zai
+        wd = _defaults.wd
+        sparse = _defaults.sparse
+        pip_requirements = _defaults.pip_requirements
+        allow_pr = _defaults.allow_pr
 
     # Resolve repo input
     if not repo:
@@ -922,15 +902,16 @@ def new(
     if not repo_url.startswith(("http://", "https://", "git@")) and "://" not in repo_url and not repo_url.startswith("/"):
         repo_url = f"https://github.com/{repo_url}"
 
-    # Validate git URL (shell fallback)
-    validate_result = _shell_call("_bridge_validate_git_url", repo_url)
-    if validate_result.returncode != 0:
+    # Validate git URL
+    ok, msg = validate_git_url(repo_url)
+    if not ok:
+        log_error(msg)
         sys.exit(1)
 
     # Check API keys unless skipped
     if not skip_key_check:
-        check_result = _shell_call("_bridge_check_claude_key_required")
-        if check_result.returncode != 0:
+        ok, msg = check_claude_key_required()
+        if not ok:
             log_error("Sandbox creation cancelled - Claude authentication required.")
             sys.exit(1)
 
@@ -944,12 +925,13 @@ def new(
     # Check image freshness
     if check_image_freshness():
         if click.confirm("Rebuild image now?", default=True):
-            _shell_call("build")
+            run_legacy_command("build", capture_output=False)
 
     # Check network capacity
     isolate_credentials = not no_isolate_credentials
-    check_capacity = _shell_call("_bridge_check_docker_network_capacity", "true" if isolate_credentials else "false")
-    if check_capacity.returncode != 0:
+    ok, msg = check_docker_network_capacity(isolate_credentials)
+    if not ok:
+        log_error(msg)
         sys.exit(1)
 
     # Setup network and SSH flags
@@ -960,18 +942,18 @@ def new(
     # Resolve SSH agent socket
     ssh_agent_sock = ""
     if sync_ssh == "1":
-        ssh_agent_sock = _shell_call_capture("_bridge_resolve_ssh_agent_sock")
+        ssh_agent_sock = resolve_ssh_agent_sock()
         if not ssh_agent_sock:
             log_warn("SSH agent not detected; SSH forwarding disabled (agent-only mode).")
             sync_ssh = "0"
     sync_ssh_enabled = sync_ssh == "1"
 
     # Generate sandbox name
-    bare_path = _repo_to_path(repo_url)
+    bare_path = repo_url_to_bare_path(repo_url)
     if name_override:
         name = name_override
     else:
-        name = _sandbox_name(bare_path, branch)
+        name = _helpers_sandbox_name(bare_path, branch)
 
     valid_name, name_error = validate_sandbox_name(name)
     if not valid_name:
@@ -981,7 +963,7 @@ def new(
     # Auto-generate unique name for --last / --preset
     if last or preset:
         original_name = name
-        name = _find_next_sandbox_name(name)
+        name = find_next_sandbox_name(name)
         if name != original_name:
             suffix = name[len(original_name):]
             branch = f"{branch}{suffix}"
@@ -1001,8 +983,9 @@ def new(
     if not allow_dangerous_mount:
         for mount in mounts:
             src = mount.split(":")[0]
-            validate_mount = _shell_call("_bridge_validate_mount_path", src)
-            if validate_mount.returncode != 0:
+            ok, msg = validate_mount_path(src)
+            if not ok:
+                log_error(msg)
                 click.echo("Use --allow-dangerous-mount to bypass this check (not recommended)")
                 sys.exit(1)
 
@@ -1011,7 +994,7 @@ def new(
     enable_zai_flag = "0"
 
     if with_opencode:
-        if _shell_call_capture("_bridge_has_opencode_key"):
+        if has_opencode_key():
             enable_opencode_flag = "1"
         else:
             log_warn("OpenCode requested but auth file not found; skipping OpenCode setup.")
@@ -1022,78 +1005,62 @@ def new(
         else:
             log_warn("ZAI requested but ZHIPU_API_KEY not set; skipping ZAI setup.")
 
-    os.environ["SANDBOX_ENABLE_OPENCODE"] = enable_opencode_flag
-    os.environ["SANDBOX_ENABLE_ZAI"] = enable_zai_flag
-
-    if enable_zai_flag != "1":
-        os.environ["ZHIPU_API_KEY"] = ""
-
-    # Start creation
-    click.echo()
-    click.echo(f"Setting up your sandbox: {name}")
-    log_section("Repository")
-
-    # -- Begin resource creation (wrapped for rollback on failure) --
+    # Save and restore environment around mutations (matches start.py pattern)
+    _saved_env = dict(os.environ)
     try:
-        _new_setup(
-            repo_url=repo_url,
-            bare_path=bare_path,
-            worktree_path=worktree_path,
-            branch=branch,
-            from_branch=from_branch or "",
-            sparse=sparse,
-            wd=wd or "",
-            claude_config_path=claude_config_path,
-            override_file=override_file,
-            name=name,
-            container=container,
-            mounts=list(mounts),
-            copies=list(copies),
-            allow_dangerous_mount=allow_dangerous_mount,
-            network_mode=network_mode or "",
-            sync_ssh_enabled=sync_ssh_enabled,
-            ssh_agent_sock=ssh_agent_sock,
-            ssh_mode=ssh_mode,
-            isolate_credentials=isolate_credentials,
-            allow_pr=allow_pr,
-            pip_requirements=pip_requirements or "",
-            enable_opencode_flag=enable_opencode_flag,
-            enable_zai_flag=enable_zai_flag,
-        )
-    except SystemExit:
-        # sys.exit() calls from within _new_setup — re-raise without rollback
-        # since the sub-function already handled cleanup where needed
-        raise
-    except Exception as exc:
-        log_error(f"Sandbox creation failed: {exc}")
-        log_info("Cleaning up partial sandbox resources...")
-        _rollback_new(worktree_path, claude_config_path, container, override_file)
-        sys.exit(1)
+        os.environ["SANDBOX_ENABLE_OPENCODE"] = enable_opencode_flag
+        os.environ["SANDBOX_ENABLE_ZAI"] = enable_zai_flag
 
-    # Save last command
-    save_last_cast_new(
-        repo=repo_url,
-        branch=branch,
-        from_branch=from_branch or "",
-        working_dir=wd or "",
-        sparse=sparse,
-        pip_requirements=pip_requirements or "",
-        allow_pr=allow_pr,
-        network_mode=network_mode or "",
-        sync_ssh=sync_ssh_enabled,
-        enable_opencode=with_opencode,
-        enable_zai=with_zai,
-        mounts=list(mounts),
-        copies=list(copies),
-    )
+        if enable_zai_flag != "1":
+            os.environ["ZHIPU_API_KEY"] = ""
 
-    # Save last attached
-    save_last_attach(name)
+        # Start creation
+        click.echo()
+        click.echo(f"Setting up your sandbox: {name}")
+        log_section("Repository")
 
-    # Save preset
-    if save_as:
-        save_cast_preset(
-            preset_name=save_as,
+        # -- Begin resource creation (wrapped for rollback on failure) --
+        try:
+            _new_setup(
+                repo_url=repo_url,
+                bare_path=bare_path,
+                worktree_path=worktree_path,
+                branch=branch,
+                from_branch=from_branch or "",
+                sparse=sparse,
+                wd=wd or "",
+                claude_config_path=claude_config_path,
+                override_file=override_file,
+                name=name,
+                container=container,
+                mounts=list(mounts),
+                copies=list(copies),
+                allow_dangerous_mount=allow_dangerous_mount,
+                network_mode=network_mode or "",
+                sync_ssh_enabled=sync_ssh_enabled,
+                ssh_agent_sock=ssh_agent_sock,
+                ssh_mode=ssh_mode,
+                isolate_credentials=isolate_credentials,
+                allow_pr=allow_pr,
+                pip_requirements=pip_requirements or "",
+                enable_opencode_flag=enable_opencode_flag,
+                enable_zai_flag=enable_zai_flag,
+            )
+        except _SetupError as exc:
+            log_error(str(exc))
+            log_info("Cleaning up partial sandbox resources...")
+            _rollback_new(worktree_path, claude_config_path, container, override_file)
+            sys.exit(1)
+        except SystemExit:
+            raise
+        except Exception as exc:
+            log_error(f"Sandbox creation failed: {exc}")
+            log_info("Cleaning up partial sandbox resources...")
+            _rollback_new(worktree_path, claude_config_path, container, override_file)
+            sys.exit(1)
+
+        # Save last command
+        save_last_cast_new(
             repo=repo_url,
             branch=branch,
             from_branch=from_branch or "",
@@ -1109,61 +1076,86 @@ def new(
             copies=list(copies),
         )
 
-    # Success message
-    click.echo()
-    click.echo(f"✓ Your sandbox is ready!")
-    click.echo()
-    click.echo(f"  Sandbox    {name}")
-    click.echo(f"  Worktree   {worktree_path}")
-    click.echo()
-    click.echo("  Commands:")
-    click.echo(f"    cast attach {name}   - reconnect later")
-    click.echo("    cast reattach       - reconnect (auto-detects sandbox in worktree)")
-    click.echo(f"    cast stop {name}     - pause the sandbox")
-    click.echo(f"    cast destroy {name}  - remove completely")
-    click.echo("    cast repeat         - repeat this setup")
-    click.echo()
+        # Save last attached
+        save_last_attach(name)
 
-    # IDE launch logic
-    skip_terminal = False
+        # Save preset
+        if save_as:
+            save_cast_preset(
+                preset_name=save_as,
+                repo=repo_url,
+                branch=branch,
+                from_branch=from_branch or "",
+                working_dir=wd or "",
+                sparse=sparse,
+                pip_requirements=pip_requirements or "",
+                allow_pr=allow_pr,
+                network_mode=network_mode or "",
+                sync_ssh=sync_ssh_enabled,
+                enable_opencode=with_opencode,
+                enable_zai=with_zai,
+                mounts=list(mounts),
+                copies=list(copies),
+            )
 
-    if sys.stdin.isatty():
-        from foundry_sandbox.ide import auto_launch_ide, prompt_ide_selection
+        # Success message
+        click.echo()
+        click.echo(f"✓ Your sandbox is ready!")
+        click.echo()
+        click.echo(f"  Sandbox    {name}")
+        click.echo(f"  Worktree   {worktree_path}")
+        click.echo()
+        click.echo("  Commands:")
+        click.echo(f"    cast attach {name}   - reconnect later")
+        click.echo("    cast reattach       - reconnect (auto-detects sandbox in worktree)")
+        click.echo(f"    cast stop {name}     - pause the sandbox")
+        click.echo(f"    cast destroy {name}  - remove completely")
+        click.echo("    cast repeat         - repeat this setup")
+        click.echo()
 
-        if no_ide:
-            input("Press Enter to launch... ")
-        elif with_ide:
-            if auto_launch_ide(with_ide, str(worktree_path)):
-                if ide_only:
-                    skip_terminal = True
-                    click.echo()
-                    click.echo(f"IDE launched. Run 'cast attach {name}' for terminal.")
-                else:
-                    input("Press Enter to launch terminal... ")
-            else:
+        # IDE launch logic
+        skip_terminal = False
+
+        if sys.stdin.isatty():
+            from foundry_sandbox.ide import auto_launch_ide, prompt_ide_selection
+
+            if no_ide:
                 input("Press Enter to launch... ")
-        elif ide_only:
-            prompt_ide_selection(str(worktree_path), name)
-            skip_terminal = True
-            click.echo()
-            click.echo("  Run this in your IDE's terminal to connect:")
-            click.echo()
-            click.echo(f"    cast attach {name}")
-            click.echo()
-        else:
-            ide_was_launched = prompt_ide_selection(str(worktree_path), name)
-            if ide_was_launched:
+            elif with_ide:
+                if auto_launch_ide(with_ide, str(worktree_path)):
+                    if ide_only:
+                        skip_terminal = True
+                        click.echo()
+                        click.echo(f"IDE launched. Run 'cast attach {name}' for terminal.")
+                    else:
+                        input("Press Enter to launch terminal... ")
+                else:
+                    input("Press Enter to launch... ")
+            elif ide_only:
+                prompt_ide_selection(str(worktree_path), name)
+                skip_terminal = True
                 click.echo()
                 click.echo("  Run this in your IDE's terminal to connect:")
                 click.echo()
                 click.echo(f"    cast attach {name}")
                 click.echo()
-                skip_terminal = True
             else:
-                input("Press Enter to launch terminal... ")
+                ide_was_launched = prompt_ide_selection(str(worktree_path), name)
+                if ide_was_launched:
+                    click.echo()
+                    click.echo("  Run this in your IDE's terminal to connect:")
+                    click.echo()
+                    click.echo(f"    cast attach {name}")
+                    click.echo()
+                    skip_terminal = True
+                else:
+                    input("Press Enter to launch terminal... ")
 
-    if not skip_terminal and sys.stdin.isatty():
-        _shell_call("_bridge_tmux_attach", name, wd or "")
+        if not skip_terminal and sys.stdin.isatty():
+            tmux.attach(name, f"{container}-dev-1", str(worktree_path), wd or "")
+    finally:
+        os.environ.clear()
+        os.environ.update(_saved_env)
 
 
 def _new_setup(
@@ -1235,7 +1227,7 @@ def _new_setup(
     # Add network mode
     if network_mode:
         log_step(f"Network mode: {network_mode}")
-        _shell_call("_bridge_add_network_to_override", network_mode, str(override_file))
+        add_network_to_override(network_mode, str(override_file))
 
     # Add Claude home
     claude_home_path = path_claude_home(name)
@@ -1244,10 +1236,10 @@ def _new_setup(
     add_timezone_to_override(str(override_file))
 
     # Pre-populate foundry global
-    _shell_call("_bridge_prepopulate_foundry_global", str(claude_home_path), "0")
+    prepopulate_foundry_global(str(claude_home_path))
 
     # Show CLI status
-    _shell_call("_bridge_show_cli_status")
+    show_cli_status()
 
     # Add SSH agent
     runtime_enable_ssh = "0"
@@ -1280,7 +1272,10 @@ def _new_setup(
     container_id = f"{container}-dev-1"
 
     # Export GH token
-    _shell_call("_bridge_export_gh_token")
+    token = export_gh_token()
+    if token:
+        os.environ["GITHUB_TOKEN"] = token
+        os.environ["GH_TOKEN"] = token
 
     log_section("Container")
     log_step("Starting container...")
@@ -1303,10 +1298,9 @@ def _new_setup(
             log_warn("Credential isolation: ~/.gemini/oauth_creds.json not found and GEMINI_API_KEY not set; Gemini CLI will not work.")
 
         # Validate git remotes
-        validate_remotes = _shell_call("_bridge_validate_git_remotes", str(worktree_path / ".git"))
-        if validate_remotes.returncode != 0:
-            log_error("Cannot enable credential isolation with embedded git credentials")
-            sys.exit(1)
+        ok, msg = validate_git_remotes(str(worktree_path / ".git"))
+        if not ok:
+            raise _SetupError("Cannot enable credential isolation with embedded git credentials")
 
         # Set ALLOW_PR_OPERATIONS
         if allow_pr:
@@ -1318,10 +1312,9 @@ def _new_setup(
 
         # Generate sandbox ID
         seed = f"{container}:{name}:{int(datetime.now().timestamp() * 1e9)}"
-        sandbox_id = _shell_call_capture("_bridge_generate_sandbox_id", seed)
+        sandbox_id = generate_sandbox_id(seed)
         if not sandbox_id:
-            log_error("Failed to generate sandbox identity (missing SHA-256 toolchain)")
-            sys.exit(1)
+            raise _SetupError("Failed to generate sandbox identity")
 
         log_step(f"Sandbox ID: {sandbox_id}")
     else:
@@ -1346,15 +1339,10 @@ def _new_setup(
         proxy_container = f"{container}-unified-proxy-1"
         os.environ["PROXY_CONTAINER_NAME"] = proxy_container
         username = os.environ.get("USER", "ubuntu")
-        _shell_call("_bridge_fix_proxy_worktree_paths", proxy_container, username)
+        fix_proxy_worktree_paths(proxy_container, username)
 
         # Extract repo spec
-        repo_spec = repo_url
-        repo_spec = repo_spec.removeprefix("https://github.com/")
-        repo_spec = repo_spec.removeprefix("http://github.com/")
-        repo_spec = repo_spec.removeprefix("git@github.com:")
-        if repo_spec.endswith(".git"):
-            repo_spec = repo_spec[:-4]
+        repo_spec = strip_github_url(repo_url)
 
         metadata_json = {
             "repo": repo_spec,
@@ -1366,24 +1354,22 @@ def _new_setup(
         try:
             setup_proxy_registration(container_id, metadata_json)
         except Exception as e:
-            log_error(f"Failed to register container with unified-proxy: {e}")
-            _shell_call("_bridge_compose_down", str(worktree_path), str(claude_config_path), container, str(override_file), "true", "true")
-            click.echo()
-            click.echo("Container registration failed. See error messages above for remediation.")
-            click.echo("To create sandbox without credential isolation, use --no-isolate-credentials flag.")
-            sys.exit(1)
+            raise _SetupError(
+                f"Failed to register container with unified-proxy: {e}\n"
+                "Container registration failed. See error messages above for remediation.\n"
+                "To create sandbox without credential isolation, use --no-isolate-credentials flag."
+            ) from e
 
     # Copy configs to container
-    _shell_call(
-        "_bridge_copy_configs_to_container",
+    copy_configs_to_container(
         container_id,
-        "0",
-        runtime_enable_ssh,
-        wd or "",
-        "true" if isolate_credentials else "",
-        from_branch or "",
-        branch,
-        repo_url,
+        skip_plugins=False,
+        enable_ssh=runtime_enable_ssh == "1",
+        working_dir=wd or "",
+        isolate_credentials=isolate_credentials,
+        from_branch=from_branch or "",
+        branch=branch,
+        repo_url=repo_url,
     )
 
     # Copy files
@@ -1400,26 +1386,17 @@ def _new_setup(
 
             click.echo(f"  {src} -> {dst}")
             if os.path.isdir(src):
-                _shell_call("_bridge_copy_dir_to_container", container_id, src, dst)
+                copy_dir_to_container(container_id, src, dst)
             else:
-                _shell_call("_bridge_copy_file_to_container", container_id, src, dst)
+                copy_file_to_container(container_id, src, dst)
 
     # Install workspace permissions
     install_workspace_permissions(container_id)
 
     # Install pip requirements
     if pip_requirements:
-        _shell_call("_bridge_install_pip_requirements", container_id, pip_requirements)
+        install_pip_requirements(container_id, pip_requirements)
 
     # Apply network restrictions
     if network_mode:
-        if network_mode == "limited":
-            subprocess.run(
-                ["docker", "exec", container_id, "sudo", "/usr/local/bin/network-firewall.sh"],
-                check=False,
-            )
-        else:
-            subprocess.run(
-                ["docker", "exec", container_id, "sudo", "/usr/local/bin/network-mode", network_mode],
-                check=False,
-            )
+        apply_network_restrictions(container_id, network_mode)

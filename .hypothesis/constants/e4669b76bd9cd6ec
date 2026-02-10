@@ -1,0 +1,4 @@
+# file: /home/tyler/.sandboxes/worktrees/tyler-foundry-sandbox-20260209-0718/foundry_sandbox/legacy_bridge.py
+# hypothesis_version: 6.148.11
+
+[120, 10000, '-', '-{2,}', '.', '.-', '..', '.git', '/', '0', '1', 'GH_TOKEN', 'GITHUB_TOKEN', 'Missing command', 'SSH_AUTH_SOCK', '[^A-Za-z0-9._-]', '\\s+', '_bridge_', '_bridge_compose_down', '_bridge_repo_to_path', '_bridge_sandbox_name', '_bridge_sync_creds', '_bridge_tmux_attach', 'branch', 'capture_output', 'check', 'false', 'mounts', 'network_mode', 'on', 'repo', 'sandbox.sh', 'services:\n  dev:\n', 'text', 'true', 'utf-8', 'volumes', 'yes']

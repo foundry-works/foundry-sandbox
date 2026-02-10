@@ -24,6 +24,7 @@ from pathlib import Path
 
 import click
 
+from foundry_sandbox.commands._helpers import auto_detect_sandbox as _auto_detect_sandbox, fzf_select_sandbox as _fzf_select_sandbox_shared
 from foundry_sandbox.constants import get_worktrees_dir
 from foundry_sandbox.docker import container_is_running
 from foundry_sandbox.legacy_bridge import run_legacy_command
@@ -33,10 +34,6 @@ from foundry_sandbox.tool_configs import sync_opencode_local_plugins_on_first_at
 from foundry_sandbox.tmux import attach as tmux_attach_session, session_exists as tmux_session_exists, create_and_attach as tmux_create_and_attach, attach_existing as tmux_attach_to_existing
 from foundry_sandbox.utils import log_debug, log_error, log_info, log_warn
 from foundry_sandbox.validate import validate_existing_sandbox_name
-
-# Path to sandbox.sh for shell fallback
-SANDBOX_SH = Path(__file__).resolve().parent.parent.parent / "sandbox.sh"
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -48,77 +45,9 @@ def _list_sandboxes() -> None:
     run_legacy_command("list", capture_output=False)
 
 
-def _auto_detect_sandbox() -> str | None:
-    """Auto-detect sandbox from current working directory.
-
-    Returns:
-        Sandbox name if detected, None otherwise.
-    """
-    try:
-        cwd = Path.cwd().resolve()
-    except OSError:
-        return None
-
-    worktrees_dir = get_worktrees_dir()
-
-    # Check if we're under the worktrees directory
-    try:
-        relative = cwd.relative_to(worktrees_dir)
-        # Extract first component (sandbox name)
-        parts = relative.parts
-        if parts:
-            name = parts[0]
-            # Validate the detected name before returning
-            valid, _ = validate_existing_sandbox_name(name)
-            if valid and (worktrees_dir / name).is_dir():
-                return name
-    except ValueError:
-        # Not under worktrees_dir
-        pass
-
-    return None
-
-
 def _fzf_select_sandbox() -> str | None:
-    """Interactively select a sandbox using fzf.
-
-    Returns:
-        Selected sandbox name, or None if canceled/unavailable.
-    """
-    worktrees_dir = get_worktrees_dir()
-
-    if not worktrees_dir.is_dir():
-        return None
-
-    # Check if fzf is available
-    if shutil.which("fzf") is None:
-        return None
-
-    try:
-        # List directories in worktrees
-        sandboxes = sorted(
-            entry.name for entry in worktrees_dir.iterdir()
-            if entry.is_dir()
-        )
-
-        if not sandboxes:
-            return None
-
-        # Run fzf with sandbox list
-        result = subprocess.run(
-            ["fzf", "--prompt=Select sandbox: ", "--height=10", "--reverse"],
-            input="\n".join(sandboxes),
-            text=True,
-            capture_output=True,
-            check=False,
-        )
-
-        if result.returncode == 0:
-            return result.stdout.strip()
-    except Exception:
-        pass
-
-    return None
+    """Interactively select a sandbox using fzf."""
+    return _fzf_select_sandbox_shared()
 
 
 from foundry_sandbox.commands._helpers import flag_enabled as _flag_enabled

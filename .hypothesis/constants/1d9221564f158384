@@ -1,0 +1,4 @@
+# file: /workspace/unified-proxy/git_policies.py
+# hypothesis_version: 6.151.5
+
+[',', '.github/actions', '.github/workflows', '0', '1', 'enabled', 'git', 'patterns', 'protected_branches', 'refs/heads/main', 'refs/heads/master', 'refs/heads/release/*', 'true', 'yes']

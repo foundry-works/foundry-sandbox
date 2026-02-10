@@ -1,0 +1,4 @@
+# file: /workspace/foundry_sandbox/container_io.py
+# hypothesis_version: 6.151.5
+
+[0.2, '-', '--help', '--no-xattrs', '--transform', '--version', '-C', '-cf', '-f', '-i', '-p', '-u', '-xf', '.', '1', 'COPYFILE_DISABLE', '__main__', 'copy-dir', 'copy-dir-quiet', 'copy-file', 'copy-file-quiet', 'docker', 'exec', 'exec-json', 'exec-text', 'mkdir', 'mv', 'stderr', 'tar']

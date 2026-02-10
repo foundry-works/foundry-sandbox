@@ -1,0 +1,4 @@
+# file: /home/tyler/.sandboxes/worktrees/tyler-foundry-sandbox-20260209-0718/foundry_sandbox/credential_setup.py
+# hypothesis_version: 6.148.11
+
+[',', '--exclude', '--quiet', '-R', '-a', '-d', '-f', '-la', '-m', '-p', '-u', '.claude', '.claude.json', '.codex', '.config', '.gemini', '.gitconfig', '.local', '.ssh', '/workspace', '1', '600', 'Config copy complete', 'Configuring OpenCode', 'Copying git config', 'Fixing ownership', 'OPENCODE_ENABLED', 'SCRIPT_DIR', 'SSH agent preflight', 'SSH_AUTH_SOCK', 'Setting up SSH keys', 'auth.json', 'chmod', 'chown', 'config', 'config.json', 'default-model.json', 'docker', 'exec', 'foundry-mcp', 'gh', 'id_ecdsa', 'id_ed25519', 'id_rsa', 'known_hosts', 'logs', 'ls', 'marketplace_plugins', 'merge', 'mkdir', 'opencode', 'python3', 'repos', 'rm', 'rsync', 'settings.json', 'share', 'statusline.conf', 'tavily-mcp', 'test', 'true', 'yes']

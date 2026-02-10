@@ -1,0 +1,4 @@
+# file: /workspace/foundry_sandbox/commands/config.py
+# hypothesis_version: 6.151.5
+
+['--json', '1', 'CLAUDE_CONFIGS_DIR', 'DOCKER_GID', 'DOCKER_IMAGE', 'DOCKER_UID', 'Output as JSON', 'REPOS_DIR', 'SANDBOX_ASSUME_YES', 'SANDBOX_DEBUG', 'SANDBOX_HOME', 'SANDBOX_NETWORK_MODE', 'SANDBOX_SSH_MODE', 'SANDBOX_SYNC_SSH', 'SANDBOX_VERBOSE', 'SCRIPT_DIR', 'WORKTREES_DIR', 'assume_yes', 'claude_configs_dir', 'debug', 'docker', 'docker daemon', 'docker_gid', 'docker_image', 'docker_uid', 'false', 'foundry-sandbox', 'git', 'info', 'json_output', 'limited', 'missing', 'network_mode', 'not running', 'ok', 'repos_dir', 'sandbox_home', 'script_dir', 'ssh_mode', 'sync_ssh', 'true', 'verbose', 'worktrees_dir']

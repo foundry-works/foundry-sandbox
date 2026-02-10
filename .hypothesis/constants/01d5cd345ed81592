@@ -1,0 +1,4 @@
+# file: /workspace/foundry_sandbox/commands/stop.py
+# hypothesis_version: 6.151.5
+
+['-t', 'kill-session', 'name', 'tmux']

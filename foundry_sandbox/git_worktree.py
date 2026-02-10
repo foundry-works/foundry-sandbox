@@ -23,6 +23,21 @@ from foundry_sandbox.utils import log_info, log_step, log_warn
 
 
 # ============================================================================
+# Ref Safety
+# ============================================================================
+
+
+def _assert_safe_ref(name: str, label: str = "ref") -> None:
+    """Reject ref names that look like git flags.
+
+    Raises:
+        ValueError: If *name* starts with ``-``.
+    """
+    if name and name.startswith("-"):
+        raise ValueError(f"{label} must not start with '-': {name!r}")
+
+
+# ============================================================================
 # Core Worktree Operations
 # ============================================================================
 
@@ -193,6 +208,10 @@ def create_worktree(
     Raises:
         RuntimeError: If git operations fail.
     """
+    _assert_safe_ref(branch, "branch")
+    if from_branch:
+        _assert_safe_ref(from_branch, "from_branch")
+
     bare_p = Path(bare_path)
     wt_p = Path(worktree_path)
 
@@ -208,7 +227,7 @@ def create_worktree(
         if from_branch:
             # Fetch the base branch
             try:
-                git_with_retry(["-C", str(bare_p), "fetch", "origin", f"{from_branch}:{from_branch}"])
+                git_with_retry(["-C", str(bare_p), "fetch", "origin", "--", f"{from_branch}:{from_branch}"])
             except RuntimeError as e:
                 log_info(f"Fetch failed (may already exist locally): {e}")
 
@@ -223,7 +242,7 @@ def create_worktree(
                 log_step(f"Using existing branch: {branch}")
                 if sparse_checkout and working_dir:
                     subprocess.run(
-                        ["git", "-C", str(bare_p), "worktree", "add", "--no-checkout", str(wt_p), branch],
+                        ["git", "-C", str(bare_p), "worktree", "add", "--no-checkout", "--", str(wt_p), branch],
                         capture_output=True,
                         text=True,
                         check=True,
@@ -231,7 +250,7 @@ def create_worktree(
                     configure_sparse_checkout(bare_p, wt_p, working_dir)
                 else:
                     subprocess.run(
-                        ["git", "-C", str(bare_p), "worktree", "add", str(wt_p), branch],
+                        ["git", "-C", str(bare_p), "worktree", "add", "--", str(wt_p), branch],
                         capture_output=True,
                         text=True,
                         check=True,
@@ -240,7 +259,7 @@ def create_worktree(
                 log_step(f"Creating branch: {branch} (from {from_branch})")
                 if sparse_checkout and working_dir:
                     subprocess.run(
-                        ["git", "-C", str(bare_p), "worktree", "add", "--no-checkout", "-b", branch, str(wt_p), from_branch],
+                        ["git", "-C", str(bare_p), "worktree", "add", "--no-checkout", "-b", branch, "--", str(wt_p), from_branch],
                         capture_output=True,
                         text=True,
                         check=True,
@@ -248,7 +267,7 @@ def create_worktree(
                     configure_sparse_checkout(bare_p, wt_p, working_dir)
                 else:
                     subprocess.run(
-                        ["git", "-C", str(bare_p), "worktree", "add", "-b", branch, str(wt_p), from_branch],
+                        ["git", "-C", str(bare_p), "worktree", "add", "-b", branch, "--", str(wt_p), from_branch],
                         capture_output=True,
                         text=True,
                         check=True,
@@ -260,7 +279,7 @@ def create_worktree(
             if sparse_checkout and working_dir:
                 # Try creating worktree without checkout
                 result = subprocess.run(
-                    ["git", "-C", str(bare_p), "worktree", "add", "--no-checkout", str(wt_p), branch],
+                    ["git", "-C", str(bare_p), "worktree", "add", "--no-checkout", "--", str(wt_p), branch],
                     capture_output=True,
                     text=True,
                     check=False,
@@ -269,13 +288,13 @@ def create_worktree(
                     # Branch not found locally, try fetching
                     log_step("Branch not found locally, fetching...")
                     try:
-                        git_with_retry(["-C", str(bare_p), "fetch", "origin", f"{branch}:{branch}"])
+                        git_with_retry(["-C", str(bare_p), "fetch", "origin", "--", f"{branch}:{branch}"])
                     except RuntimeError:
                         # Try alternative fetch format
                         git_with_retry(["-C", str(bare_p), "fetch", "origin", f"refs/heads/{branch}:refs/heads/{branch}"])
 
                     subprocess.run(
-                        ["git", "-C", str(bare_p), "worktree", "add", "--no-checkout", str(wt_p), branch],
+                        ["git", "-C", str(bare_p), "worktree", "add", "--no-checkout", "--", str(wt_p), branch],
                         capture_output=True,
                         text=True,
                         check=True,
@@ -285,7 +304,7 @@ def create_worktree(
             else:
                 # Normal checkout
                 result = subprocess.run(
-                    ["git", "-C", str(bare_p), "worktree", "add", str(wt_p), branch],
+                    ["git", "-C", str(bare_p), "worktree", "add", "--", str(wt_p), branch],
                     capture_output=True,
                     text=True,
                     check=False,
@@ -294,13 +313,13 @@ def create_worktree(
                     # Branch not found locally, try fetching
                     log_step("Branch not found locally, fetching...")
                     try:
-                        git_with_retry(["-C", str(bare_p), "fetch", "origin", f"{branch}:{branch}"])
+                        git_with_retry(["-C", str(bare_p), "fetch", "origin", "--", f"{branch}:{branch}"])
                     except RuntimeError:
                         # Try alternative fetch format
                         git_with_retry(["-C", str(bare_p), "fetch", "origin", f"refs/heads/{branch}:refs/heads/{branch}"])
 
                     subprocess.run(
-                        ["git", "-C", str(bare_p), "worktree", "add", str(wt_p), branch],
+                        ["git", "-C", str(bare_p), "worktree", "add", "--", str(wt_p), branch],
                         capture_output=True,
                         text=True,
                         check=True,
@@ -333,6 +352,8 @@ def cleanup_sandbox_branch(branch: str, bare_path: str | Path) -> None:
     """
     if not branch or not bare_path:
         return
+
+    _assert_safe_ref(branch, "branch")
 
     # Skip protected branches
     protected_patterns = [

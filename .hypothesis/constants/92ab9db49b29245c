@@ -1,0 +1,4 @@
+# file: /workspace/foundry_sandbox/commands/status.py
+# hypothesis_version: 6.151.5
+
+[' [tmux]', '--filter', '--format', '--json', '-a', '-t', 'Branch', 'Claude config', 'Container', 'Copies', 'From branch', 'Metadata', 'Mounts', 'Output as JSON', 'Repo', 'Tmux', 'Worktree', 'attached', 'branch', 'claude_config', 'claude_config_exists', 'container', 'copies', 'docker', 'docker_status', 'from_branch', 'has-session', 'json_output', 'missing', 'mounts', 'name', 'no container', 'none', 'ps', 'repo', 'repo_url', 'tmux', 'worktree', 'worktree_exists', '{{.Status}}']

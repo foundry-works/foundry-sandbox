@@ -1,0 +1,4 @@
+# file: /workspace/foundry_sandbox/commands/refresh_creds.py
+# hypothesis_version: 6.151.5
+
+['--format', '--height=10', '--last', '--reverse', '-a', '-l', '-p', '/home/ubuntu', 'Available sandboxes:', 'No sandboxes found.', 'cp', 'docker', 'fzf', 'name', 'ps', 'restart', 'unified-proxy', '{{.Names}}', '~', '~/.claude.json', '~/.codex', '~/.config/gh', '~/.gemini']

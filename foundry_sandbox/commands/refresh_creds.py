@@ -18,6 +18,12 @@ from pathlib import Path
 
 import click
 
+from foundry_sandbox.commands._helpers import (
+    auto_detect_sandbox as _auto_detect_sandbox,
+    fzf_select_sandbox as _fzf_select_sandbox_shared,
+    list_sandbox_names as _list_sandbox_names_shared,
+    uses_credential_isolation as _uses_credential_isolation_shared,
+)
 from foundry_sandbox.credential_setup import sync_runtime_credentials
 from foundry_sandbox.constants import get_worktrees_dir
 from foundry_sandbox.docker import container_is_running, get_compose_command
@@ -27,121 +33,25 @@ from foundry_sandbox.utils import log_error, log_info
 from foundry_sandbox.validate import validate_existing_sandbox_name
 
 
-def _auto_detect_sandbox() -> str | None:
-    """Auto-detect sandbox name from current directory.
-
-    Returns:
-        Sandbox name if detected, None otherwise.
-    """
-    worktrees_dir = get_worktrees_dir()
-    try:
-        # Get canonical path (resolves symlinks)
-        cwd = Path.cwd().resolve()
-    except OSError:
-        cwd = Path.cwd()
-
-    # Check if we're under WORKTREES_DIR
-    try:
-        relative = cwd.relative_to(worktrees_dir)
-        # Get first path component as sandbox name
-        parts = relative.parts
-        if parts:
-            name = parts[0]
-            sandbox_path = worktrees_dir / name
-            if sandbox_path.is_dir():
-                click.echo(f"Auto-detected sandbox: {name}")
-                return name
-    except ValueError:
-        # Not relative to worktrees_dir
-        pass
-
-    return None
-
-
 def _fzf_select_sandbox() -> str | None:
-    """Use fzf to select a sandbox interactively.
-
-    Returns:
-        Selected sandbox name, or None if cancelled or no sandboxes.
-    """
-    if not shutil.which("fzf"):
-        return None
-
-    worktrees_dir = get_worktrees_dir()
-    if not worktrees_dir.is_dir():
-        return None
-
-    # List sandbox directories
-    try:
-        sandboxes = sorted([d.name for d in worktrees_dir.iterdir() if d.is_dir()])
-    except OSError:
-        return None
-
-    if not sandboxes:
-        return None
-
-    # Run fzf
-    try:
-        result = subprocess.run(
-            ["fzf", "--prompt=Select sandbox: ", "--height=10", "--reverse"],
-            input="\n".join(sandboxes),
-            capture_output=True,
-            text=True,
-            check=False,
-        )
-        if result.returncode == 0 and result.stdout.strip():
-            return result.stdout.strip()
-    except Exception:
-        pass
-
-    return None
+    """Interactively select a sandbox using fzf."""
+    return _fzf_select_sandbox_shared()
 
 
 def _list_sandboxes_simple() -> None:
-    """Print simple list of sandboxes (fallback when list command isn't available)."""
-    worktrees_dir = get_worktrees_dir()
-    if not worktrees_dir.is_dir():
-        click.echo("No sandboxes found.")
-        return
-
-    try:
-        sandboxes = sorted([d.name for d in worktrees_dir.iterdir() if d.is_dir()])
-        if sandboxes:
-            click.echo("Available sandboxes:")
-            for name in sandboxes:
-                click.echo(f"  - {name}")
-        else:
-            click.echo("No sandboxes found.")
-    except OSError:
+    """Print simple list of sandboxes."""
+    sandboxes = _list_sandbox_names_shared()
+    if sandboxes:
+        click.echo("Available sandboxes:")
+        for name in sandboxes:
+            click.echo(f"  - {name}")
+    else:
         click.echo("No sandboxes found.")
 
 
 def _check_isolation_mode(container: str) -> bool:
-    """Check if credential isolation is enabled for this sandbox.
-
-    Args:
-        container: Container name prefix.
-
-    Returns:
-        True if using isolation mode (unified-proxy exists), False otherwise.
-    """
-    try:
-        result = subprocess.run(
-            ["docker", "ps", "-a", "--format", "{{.Names}}"],
-            capture_output=True,
-            text=True,
-            check=False,
-        )
-        if result.returncode == 0:
-            # Look for unified-proxy container
-            pattern = f"{container}-unified-proxy-"
-            for line in result.stdout.splitlines():
-                if line.strip().startswith(pattern):
-                    return True
-    except Exception:
-        pass
-
-    return False
+    """Check if credential isolation is enabled for this sandbox."""
+    return _uses_credential_isolation_shared(container)
 
 
 def _refresh_direct_mode(container_id: str) -> None:

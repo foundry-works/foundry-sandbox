@@ -1,0 +1,4 @@
+# file: /home/tyler/.sandboxes/worktrees/tyler-foundry-sandbox-20260209-0718/foundry_sandbox/utils.py
+# hypothesis_version: 6.148.11
+
+['\x1b[0m', '\x1b[1m', '\x1b[91m', '\x1b[92m', '\x1b[93m', '\x1b[94m', '1', 'SANDBOX_DEBUG', 'TERM', 'dumb']

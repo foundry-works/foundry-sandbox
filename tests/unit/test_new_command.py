@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import click.testing
 
-from foundry_sandbox.commands.new import _apply_saved_new_defaults, new
+from foundry_sandbox.commands.new import NewDefaults, _apply_saved_new_defaults, new
 
 
 def test_apply_saved_new_defaults_uses_saved_values() -> None:
@@ -42,19 +42,20 @@ def test_apply_saved_new_defaults_uses_saved_values() -> None:
         allow_pr=False,
     )
 
-    assert result[0] == "octocat/hello-world"
-    assert result[1] == "sandbox/test"
-    assert result[2] == "main"
-    assert result[3] == ("a:/a:ro",)
-    assert result[4] == ("b:/b",)
-    assert result[5] == "host-only"
-    assert result[6] is True
-    assert result[7] is True
-    assert result[8] is False
-    assert result[9] == "apps/api"
-    assert result[10] is True
-    assert result[11] == "requirements.txt"
-    assert result[12] is True
+    assert isinstance(result, NewDefaults)
+    assert result.repo == "octocat/hello-world"
+    assert result.branch == "sandbox/test"
+    assert result.from_branch == "main"
+    assert result.mounts == ("a:/a:ro",)
+    assert result.copies == ("b:/b",)
+    assert result.network == "host-only"
+    assert result.with_ssh is True
+    assert result.with_opencode is True
+    assert result.with_zai is False
+    assert result.wd == "apps/api"
+    assert result.sparse is True
+    assert result.pip_requirements == "requirements.txt"
+    assert result.allow_pr is True
 
 
 def test_apply_saved_new_defaults_preserves_explicit_values() -> None:
@@ -82,9 +83,9 @@ def test_apply_saved_new_defaults_preserves_explicit_values() -> None:
         allow_pr=True,
     )
 
-    assert result[0] == "explicit/repo"
-    assert result[1] == "explicit/branch"
-    assert result[12] is True
+    assert result.repo == "explicit/repo"
+    assert result.branch == "explicit/branch"
+    assert result.allow_pr is True
 
 
 def test_new_rejects_last_and_preset_together() -> None:

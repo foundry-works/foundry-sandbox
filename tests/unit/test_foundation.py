@@ -243,6 +243,46 @@ class TestDeriveSandboxPaths:
         assert str(result.override_file) == "/tmp/sb/claude-config/test-box/docker-compose.override.yml"
 
 
+class TestPathSafetyAssertions:
+    """Tests for path traversal prevention via _assert_safe_path_component."""
+
+    @pytest.fixture(autouse=True)
+    def set_sandbox_home(self, monkeypatch):
+        monkeypatch.setenv("SANDBOX_HOME", "/tmp/sb")
+
+    @pytest.mark.parametrize("bad_name", [
+        "../evil",
+        "../../etc/passwd",
+        "foo/bar",
+        "foo\\bar",
+        "..",
+        ".",
+        "",
+    ])
+    def test_path_worktree_rejects_traversal(self, bad_name):
+        with pytest.raises(ValueError):
+            path_worktree(bad_name)
+
+    @pytest.mark.parametrize("bad_name", [
+        "../evil",
+        "../../etc/passwd",
+    ])
+    def test_path_preset_file_rejects_traversal(self, bad_name):
+        with pytest.raises(ValueError):
+            path_preset_file(bad_name)
+
+    @pytest.mark.parametrize("bad_name", ["../x", "a/b", ".", "..", ""])
+    def test_derive_sandbox_paths_rejects_traversal(self, bad_name):
+        with pytest.raises(ValueError):
+            derive_sandbox_paths(bad_name)
+
+    def test_valid_names_pass(self):
+        # Should NOT raise
+        path_worktree("my-sandbox")
+        path_preset_file("default")
+        derive_sandbox_paths("test-box")
+
+
 class TestFilesystemHelpers:
     """Tests for ensure_dir and safe_remove."""
 

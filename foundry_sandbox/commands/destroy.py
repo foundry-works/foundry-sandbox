@@ -25,11 +25,10 @@ import click
 from foundry_sandbox.docker import compose_down, remove_hmac_volume, remove_stubs_volume
 from foundry_sandbox.git_worktree import cleanup_sandbox_branch, remove_worktree
 from foundry_sandbox.paths import derive_sandbox_paths
-from foundry_sandbox.proxy import cleanup_proxy_registration
 from foundry_sandbox.state import load_sandbox_metadata
 from foundry_sandbox.utils import log_info, log_warn
 from foundry_sandbox.validate import validate_existing_sandbox_name
-from foundry_sandbox.commands._helpers import repo_url_to_bare_path as _repo_url_to_bare_path, tmux_session_name as _tmux_session_name
+from foundry_sandbox.commands._helpers import proxy_cleanup as _proxy_cleanup, repo_url_to_bare_path as _repo_url_to_bare_path, tmux_session_name as _tmux_session_name
 
 
 # ---------------------------------------------------------------------------
@@ -101,21 +100,8 @@ def destroy(name: str, keep_worktree: bool, force: bool, yes: bool) -> None:
     # ------------------------------------------------------------------
     # 2. Cleanup proxy registration (best effort)
     # ------------------------------------------------------------------
-    try:
-        container_id = f"{container}-dev-1"
-        # Set CONTAINER_NAME so proxy_container_name() can derive the proxy name.
-        # Saved/restored to avoid leaking into subsequent operations.
-        prev_container_name = os.environ.get("CONTAINER_NAME")
-        os.environ["CONTAINER_NAME"] = container
-        try:
-            cleanup_proxy_registration(container_id)
-        finally:
-            if prev_container_name is None:
-                os.environ.pop("CONTAINER_NAME", None)
-            else:
-                os.environ["CONTAINER_NAME"] = prev_container_name
-    except (OSError, subprocess.SubprocessError):
-        pass  # Proxy may not be running
+    container_id = f"{container}-dev-1"
+    _proxy_cleanup(container, container_id)
 
     # ------------------------------------------------------------------
     # 3. Docker compose down (containers + volumes)

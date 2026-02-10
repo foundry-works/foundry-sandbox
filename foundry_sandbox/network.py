@@ -12,12 +12,16 @@ Supported modes:
 from __future__ import annotations
 
 import os
+import re
 import tempfile
 from pathlib import Path
 from typing import Optional
 
 from foundry_sandbox._bridge import bridge_main
 from foundry_sandbox.utils import log_warn
+
+# Characters safe for use in YAML volume mount paths (no YAML special chars)
+_SAFE_PATH_RE = re.compile(r"^[A-Za-z0-9_./ -]+$")
 
 # Constants
 SSH_AGENT_CONTAINER_SOCK = "/ssh-agent"
@@ -639,9 +643,13 @@ def add_claude_home_to_override(override_file: str, claude_home: str) -> None:
     if not claude_home:
         return
 
-    # Escape double quotes in path to prevent YAML injection
-    safe_path = claude_home.replace('"', '\\"')
-    mount_entry = f'"{safe_path}:/home/ubuntu/.claude"'
+    # Reject paths with YAML-unsafe characters to prevent injection
+    if not _SAFE_PATH_RE.match(claude_home):
+        raise ValueError(
+            f"Claude home path contains unsafe characters: {claude_home!r}\n"
+            "Paths may only contain alphanumerics, spaces, dots, underscores, hyphens, and slashes."
+        )
+    mount_entry = f'"{claude_home}:/home/ubuntu/.claude"'
     append_override_list_item(override_file, "volumes", mount_entry)
 
 
@@ -660,9 +668,13 @@ def add_ssh_agent_to_override(override_file: str, agent_sock: str) -> None:
     if not agent_sock:
         return
 
-    # Escape double quotes in path to prevent YAML injection
-    safe_sock = agent_sock.replace('"', '\\"')
-    mount_entry = f'"{safe_sock}:{SSH_AGENT_CONTAINER_SOCK}"'
+    # Reject paths with YAML-unsafe characters to prevent injection
+    if not _SAFE_PATH_RE.match(agent_sock):
+        raise ValueError(
+            f"SSH agent socket path contains unsafe characters: {agent_sock!r}\n"
+            "Paths may only contain alphanumerics, spaces, dots, underscores, hyphens, and slashes."
+        )
+    mount_entry = f'"{agent_sock}:{SSH_AGENT_CONTAINER_SOCK}"'
     append_override_list_item(override_file, "volumes", mount_entry)
     append_override_list_item(override_file, "environment", f"SSH_AUTH_SOCK={SSH_AGENT_CONTAINER_SOCK}")
 

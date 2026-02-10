@@ -9,7 +9,6 @@ from __future__ import annotations
 
 import hashlib
 import os
-import re
 import subprocess
 import sys
 from pathlib import Path
@@ -22,6 +21,7 @@ from foundry_sandbox.git_path_fixer import fix_proxy_worktree_paths
 from foundry_sandbox.network import add_network_to_override, append_override_list_item
 from foundry_sandbox.paths import derive_sandbox_paths, ensure_dir
 from foundry_sandbox.state import load_sandbox_metadata
+from foundry_sandbox.utils import sanitize_ref_component
 from foundry_sandbox.tmux import attach as tmux_attach
 from foundry_sandbox.validate import (
     check_docker_network_capacity,
@@ -50,16 +50,6 @@ def _parse_bool_arg(value: str | None) -> bool:
     return value.strip().lower() in {"1", "true", "yes", "on"}
 
 
-def _sanitize_ref_component(component: str) -> str:
-    text = component.strip().replace("/", "-")
-    text = re.sub(r"\s+", "-", text)
-    text = re.sub(r"[^A-Za-z0-9._-]", "-", text)
-    text = re.sub(r"-{2,}", "-", text).strip(".-")
-    if text in {"", ".", ".."}:
-        return ""
-    return text
-
-
 def _repo_to_path(repo_url: str) -> str:
     """Convert a repository URL to its bare-clone path.
 
@@ -69,33 +59,13 @@ def _repo_to_path(repo_url: str) -> str:
 
 
 def _sandbox_name(bare_path: str, branch: str) -> str:
-    repo = Path(bare_path).name
-    if repo.endswith(".git"):
-        repo = repo[:-4]
-    repo = _sanitize_ref_component(repo) or "repo"
-    branch_part = _sanitize_ref_component(branch) or "branch"
-    name = f"{repo}-{branch_part}".lower()
-    if len(name) > SANDBOX_NAME_MAX_LENGTH:
-        digest = hashlib.sha256(name.encode("utf-8")).hexdigest()[:8]
-        name = f"{name[:SANDBOX_NAME_MAX_LENGTH - 9]}-{digest}"
-    return name
+    from foundry_sandbox.commands._helpers import sandbox_name
+    return sandbox_name(bare_path, branch)
 
 
 def _find_next_sandbox_name(base_name: str) -> str:
-    worktrees = get_worktrees_dir()
-    configs = get_claude_configs_dir()
-
-    def _taken(candidate: str) -> bool:
-        return (worktrees / candidate).exists() or (configs / candidate).exists()
-
-    if not _taken(base_name):
-        return base_name
-
-    for i in range(2, 10_000):
-        candidate = f"{base_name}-{i}"
-        if not _taken(candidate):
-            return candidate
-    return f"{base_name}-{os.getpid()}"
+    from foundry_sandbox.commands._helpers import find_next_sandbox_name
+    return find_next_sandbox_name(base_name)
 
 
 def _container_name(name: str) -> str:
@@ -103,15 +73,13 @@ def _container_name(name: str) -> str:
 
 
 def _resolve_ssh_agent_sock() -> str:
-    sock = os.environ.get("SSH_AUTH_SOCK", "")
-    if not sock:
-        return ""
-    p = Path(sock)
-    return sock if p.exists() else ""
+    from foundry_sandbox.commands._helpers import resolve_ssh_agent_sock
+    return resolve_ssh_agent_sock()
 
 
 def _generate_sandbox_id(seed: str) -> str:
-    return hashlib.sha256(seed.encode("utf-8")).hexdigest()[:32]
+    from foundry_sandbox.commands._helpers import generate_sandbox_id
+    return generate_sandbox_id(seed)
 
 
 def _ensure_override_from_metadata(name: str, override_file: str) -> tuple[int, str]:
@@ -228,17 +196,17 @@ def _h_copy_configs_to_container(a: list[str]) -> tuple[int, str, str]:
 
 
 def _h_copy_dir_to_container(a: list[str]) -> tuple[int, str, str]:
-    container_io.copy_dir_to_container(a[0], a[1], a[2])
+    container_io.copy_dir_to_container(_arg(a, 0), _arg(a, 1), _arg(a, 2))
     return 0, "", ""
 
 
 def _h_copy_file_to_container(a: list[str]) -> tuple[int, str, str]:
-    container_io.copy_file_to_container(a[0], a[1], a[2])
+    container_io.copy_file_to_container(_arg(a, 0), _arg(a, 1), _arg(a, 2))
     return 0, "", ""
 
 
 def _h_install_pip_requirements(a: list[str]) -> tuple[int, str, str]:
-    container_setup.install_pip_requirements(a[0], a[1])
+    container_setup.install_pip_requirements(_arg(a, 0), _arg(a, 1))
     return 0, "", ""
 
 
@@ -255,7 +223,7 @@ def _h_sync_creds(a: list[str]) -> tuple[int, str, str]:
 
 
 def _h_sanitize_ref_component(a: list[str]) -> tuple[int, str, str]:
-    return 0, _sanitize_ref_component(_arg(a, 0)), ""
+    return 0, sanitize_ref_component(_arg(a, 0)), ""
 
 
 def _h_repo_to_path(a: list[str]) -> tuple[int, str, str]:

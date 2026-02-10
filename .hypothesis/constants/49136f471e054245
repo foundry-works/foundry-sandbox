@@ -1,0 +1,4 @@
+# file: /workspace/unified-proxy/config.py
+# hypothesis_version: 6.151.5
+
+[256, 1024, '*', '**', '.+', '/', '://', 'DELETE', 'GET', 'HEAD', 'OPTIONS', 'PATCH', 'POST', 'PROXY_ALLOWLIST_PATH', 'PROXY_POLICY_PATH', 'PUT', '[^/]+', '\\A', '\\Z', 'allow', 'allowlist.yaml', 'blocked_paths', 'blocked_patterns', 'capacity', 'circuit_breaker', 'default', 'default_action', 'deny', 'domains', 'failure_threshold', 'host', 'http_endpoints', 'method', 'methods', 'path_pattern', 'paths', 'patterns', 'policy.yaml', 'r', 'rate_limits', 'recovery_timeout', 'refill_rate', 'success_threshold', 'version']

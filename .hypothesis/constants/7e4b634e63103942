@@ -1,0 +1,4 @@
+# file: /workspace/foundry_sandbox/docker.py
+# hypothesis_version: 6.151.5
+
+[254, '"oauth-personal"', '"selectedType"', '--filter', '--format', '--global', '--rm', '-a', '-c', '-d', '-f', '-p', '-v', '.gemini', '0', '1', '8080', ':', 'CLAUDE_CONFIG_PATH', 'CONTAINER_NAME', 'GIT_USER_EMAIL', 'GIT_USER_NAME', 'HMAC_VOLUME_NAME', 'REPOS_DIR', 'SANDBOX_CLAUDE_OAUTH', 'SANDBOX_PROXY_IP', 'SANDBOX_SUBNET', 'STUBS_VOLUME_NAME', 'TAVILY_API_KEY', 'WORKSPACE_PATH', '__main__', 'alpine:latest', 'check', 'compose', 'compose-down', 'compose-up', 'config', 'container-is-running', 'copy-to', 'cp', 'create', 'docker', 'down', 'exec', 'false', 'generate-subnet', 'get-proxy-port', 'git', 'hmac-file-count', 'populate-stubs', 'port', 'provision-hmac', 'proxy_ip', 'ps', 'remove-hmac', 'remove-stubs', 'rm', 'run', 'settings.json', 'setup-proxy-url', 'sh', 'stderr', 'stdout', 'subnet', 'timeout', 'true', 'up', 'user.email', 'user.name', 'volume', '{{.Names}}']

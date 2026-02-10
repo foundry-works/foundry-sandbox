@@ -48,44 +48,15 @@ from foundry_sandbox.network import (
 from foundry_sandbox.paths import derive_sandbox_paths, ensure_dir, path_claude_home
 from foundry_sandbox.proxy import setup_proxy_registration
 from foundry_sandbox.state import load_sandbox_metadata
+from foundry_sandbox.commands._helpers import (
+    apply_network_restrictions as _apply_network_restrictions_shared,
+    flag_enabled as _flag_enabled,
+    shell_call as _shell_call,
+    shell_call_capture as _shell_call_capture,
+    uses_credential_isolation as _uses_credential_isolation_shared,
+)
 from foundry_sandbox.utils import log_error, log_info, log_step, log_warn
 from foundry_sandbox.validate import validate_existing_sandbox_name
-
-# Path to sandbox.sh for shell fallback
-SANDBOX_SH = Path(__file__).resolve().parent.parent.parent / "sandbox.sh"
-
-
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
-
-
-def _shell_call(*args: str) -> subprocess.CompletedProcess[str]:
-    """Call sandbox.sh with arguments.
-
-    Args:
-        *args: Arguments to pass to sandbox.sh.
-
-    Returns:
-        CompletedProcess result.
-    """
-    return run_legacy_command(*args, capture_output=False)
-
-
-def _shell_call_capture(*args: str) -> str:
-    """Call sandbox.sh with arguments and capture stdout.
-
-    Args:
-        *args: Arguments to pass to sandbox.sh.
-
-    Returns:
-        stdout output as string (stripped).
-    """
-    result = run_legacy_command(*args, capture_output=True)
-    return result.stdout.strip() if result.returncode == 0 else ""
-
-
-from foundry_sandbox.commands._helpers import flag_enabled as _flag_enabled
 
 
 def _string_value(value: object) -> str:
@@ -129,27 +100,8 @@ def _has_opencode_key() -> bool:
 
 
 def _uses_credential_isolation(container: str) -> bool:
-    """Check if a sandbox uses credential isolation.
-
-    Args:
-        container: Container name.
-
-    Returns:
-        True if unified-proxy container exists.
-    """
-    try:
-        result = subprocess.run(
-            ["docker", "ps", "-a", "--format", "{{.Names}}"],
-            capture_output=True,
-            text=True,
-            check=False,
-        )
-        for line in result.stdout.splitlines():
-            if line.startswith(f"{container}-unified-proxy-"):
-                return True
-    except OSError:
-        pass
-    return False
+    """Check if a sandbox uses credential isolation."""
+    return _uses_credential_isolation_shared(container)
 
 
 def _generate_sandbox_id(seed: str) -> str:
@@ -165,24 +117,9 @@ def _generate_sandbox_id(seed: str) -> str:
 
 
 def _apply_network_restrictions(container_id: str, network_mode: str) -> None:
-    """Apply network restrictions to container.
-
-    Args:
-        container_id: Container ID.
-        network_mode: Network mode (limited, host-only, none).
-    """
+    """Apply network restrictions to container."""
     click.echo(f"Applying network mode: {network_mode}")
-
-    if network_mode == "limited":
-        subprocess.run(
-            ["docker", "exec", container_id, "sudo", "/usr/local/bin/network-firewall.sh"],
-            check=False,
-        )
-    else:
-        subprocess.run(
-            ["docker", "exec", container_id, "sudo", "/usr/local/bin/network-mode", network_mode],
-            check=False,
-        )
+    _apply_network_restrictions_shared(container_id, network_mode)
 
 
 # ---------------------------------------------------------------------------

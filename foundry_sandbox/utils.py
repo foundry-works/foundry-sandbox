@@ -7,6 +7,7 @@ the shell scripts lib/utils.sh, lib/format.sh, and lib/runtime.sh.
 from __future__ import annotations
 
 import os
+import re
 import sys
 
 
@@ -141,3 +142,18 @@ def format_table_row(
         row += f" {col}"
 
     return row
+
+
+def sanitize_ref_component(component: str) -> str:
+    """Sanitize a string for use as a git ref component or path segment.
+
+    Strips whitespace, replaces slashes and special characters with hyphens,
+    collapses runs of hyphens, and rejects degenerate values.
+    """
+    text = component.strip().replace("/", "-")
+    text = re.sub(r"\s+", "-", text)
+    text = re.sub(r"[^A-Za-z0-9._-]", "-", text)
+    text = re.sub(r"-{2,}", "-", text).strip(".-")
+    if text in {"", ".", ".."}:
+        return ""
+    return text

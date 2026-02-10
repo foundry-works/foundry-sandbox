@@ -5,10 +5,20 @@ start.py, attach.py, and new.py.
 """
 from __future__ import annotations
 
+import hashlib
 import os
+import shutil
+import subprocess
 from pathlib import Path
 
-from foundry_sandbox.constants import get_repos_dir
+from foundry_sandbox.constants import (
+    SANDBOX_NAME_MAX_LENGTH,
+    get_claude_configs_dir,
+    get_repos_dir,
+    get_worktrees_dir,
+)
+from foundry_sandbox.utils import sanitize_ref_component
+from foundry_sandbox.validate import validate_existing_sandbox_name
 
 
 def repo_url_to_bare_path(repo_url: str) -> str:
@@ -68,3 +78,283 @@ def tmux_session_name(name: str) -> str:
         Tmux session name.
     """
     return name
+
+
+def shell_call(*args: str) -> subprocess.CompletedProcess[str]:
+    """Call legacy bridge with arguments (stdout/stderr passed through).
+
+    Args:
+        *args: Arguments to pass to the legacy bridge.
+
+    Returns:
+        CompletedProcess result.
+    """
+    from foundry_sandbox.legacy_bridge import run_legacy_command
+    return run_legacy_command(*args, capture_output=False)
+
+
+def shell_call_capture(*args: str) -> str:
+    """Call legacy bridge with arguments and capture stdout.
+
+    Args:
+        *args: Arguments to pass to the legacy bridge.
+
+    Returns:
+        stdout output as string (stripped), or empty string on failure.
+    """
+    from foundry_sandbox.legacy_bridge import run_legacy_command
+    result = run_legacy_command(*args, capture_output=True)
+    return result.stdout.strip() if result.returncode == 0 else ""
+
+
+def auto_detect_sandbox() -> str | None:
+    """Auto-detect sandbox name from current working directory.
+
+    If the cwd is under the worktrees directory, extracts the first path
+    component as the sandbox name.
+
+    Returns:
+        Sandbox name if detected, None otherwise.
+    """
+    try:
+        cwd = Path.cwd().resolve()
+    except OSError:
+        return None
+
+    worktrees_dir = get_worktrees_dir()
+
+    try:
+        relative = cwd.relative_to(worktrees_dir)
+        parts = relative.parts
+        if parts:
+            name = parts[0]
+            valid, _ = validate_existing_sandbox_name(name)
+            if valid and (worktrees_dir / name).is_dir():
+                return name
+    except ValueError:
+        pass
+
+    return None
+
+
+# ---------------------------------------------------------------------------
+# Pure functions (moved from legacy_bridge.py)
+# ---------------------------------------------------------------------------
+
+
+def sandbox_name(bare_path: str, branch: str) -> str:
+    """Generate a sandbox name from bare repo path and branch.
+
+    Args:
+        bare_path: Path to bare repository.
+        branch: Branch name.
+
+    Returns:
+        Sanitised sandbox name.
+    """
+    repo = Path(bare_path).name
+    if repo.endswith(".git"):
+        repo = repo[:-4]
+    repo = sanitize_ref_component(repo) or "repo"
+    branch_part = sanitize_ref_component(branch) or "branch"
+    name = f"{repo}-{branch_part}".lower()
+    if len(name) > SANDBOX_NAME_MAX_LENGTH:
+        digest = hashlib.sha256(name.encode("utf-8")).hexdigest()[:8]
+        name = f"{name[:SANDBOX_NAME_MAX_LENGTH - 9]}-{digest}"
+    return name
+
+
+def find_next_sandbox_name(base_name: str) -> str:
+    """Find next available sandbox name by appending a numeric suffix.
+
+    Args:
+        base_name: Desired sandbox name.
+
+    Returns:
+        *base_name* if available, otherwise *base_name*-N.
+    """
+    worktrees = get_worktrees_dir()
+    configs = get_claude_configs_dir()
+
+    def _taken(candidate: str) -> bool:
+        return (worktrees / candidate).exists() or (configs / candidate).exists()
+
+    if not _taken(base_name):
+        return base_name
+
+    for i in range(2, 10_000):
+        candidate = f"{base_name}-{i}"
+        if not _taken(candidate):
+            return candidate
+    return f"{base_name}-{os.getpid()}"
+
+
+def resolve_ssh_agent_sock() -> str:
+    """Find SSH agent socket from environment.
+
+    Returns:
+        Socket path if it exists, empty string otherwise.
+    """
+    sock = os.environ.get("SSH_AUTH_SOCK", "")
+    if not sock:
+        return ""
+    return sock if Path(sock).exists() else ""
+
+
+def generate_sandbox_id(seed: str) -> str:
+    """Generate a sandbox ID from a seed string using SHA-256.
+
+    Args:
+        seed: Seed string.
+
+    Returns:
+        32-character hex digest.
+    """
+    return hashlib.sha256(seed.encode("utf-8")).hexdigest()[:32]
+
+
+# ---------------------------------------------------------------------------
+# Shared UI helpers (deduplicated from attach.py, refresh_creds.py)
+# ---------------------------------------------------------------------------
+
+
+def fzf_select_sandbox() -> str | None:
+    """Interactively select a sandbox using fzf.
+
+    Returns:
+        Selected sandbox name, or None if canceled/unavailable.
+    """
+    worktrees_dir = get_worktrees_dir()
+
+    if not worktrees_dir.is_dir():
+        return None
+
+    if shutil.which("fzf") is None:
+        return None
+
+    try:
+        sandboxes = sorted(
+            entry.name for entry in worktrees_dir.iterdir()
+            if entry.is_dir()
+        )
+
+        if not sandboxes:
+            return None
+
+        result = subprocess.run(
+            ["fzf", "--prompt=Select sandbox: ", "--height=10", "--reverse"],
+            input="\n".join(sandboxes),
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+
+        if result.returncode == 0 and result.stdout.strip():
+            return result.stdout.strip()
+    except Exception:
+        pass
+
+    return None
+
+
+def list_sandbox_names() -> list[str]:
+    """List all sandbox names by scanning WORKTREES_DIR.
+
+    Returns:
+        Sorted list of sandbox directory names.
+    """
+    worktrees_dir = get_worktrees_dir()
+    if not worktrees_dir.is_dir():
+        return []
+
+    try:
+        return sorted(entry.name for entry in worktrees_dir.iterdir() if entry.is_dir())
+    except OSError:
+        return []
+
+
+def uses_credential_isolation(container: str) -> bool:
+    """Check if a sandbox uses credential isolation.
+
+    Args:
+        container: Container name prefix.
+
+    Returns:
+        True if unified-proxy container exists.
+    """
+    try:
+        result = subprocess.run(
+            ["docker", "ps", "-a", "--format", "{{.Names}}"],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        if result.returncode == 0:
+            pattern = f"{container}-unified-proxy-"
+            for line in result.stdout.splitlines():
+                if line.strip().startswith(pattern):
+                    return True
+    except OSError:
+        pass
+    return False
+
+
+def proxy_cleanup(container: str, container_id: str) -> None:
+    """Best-effort proxy registration cleanup.
+
+    Saves/restores CONTAINER_NAME env var to avoid leaking state.
+
+    Args:
+        container: Container name prefix (e.g. ``sandbox-foo``).
+        container_id: Full dev container ID (e.g. ``sandbox-foo-dev-1``).
+    """
+    from foundry_sandbox.proxy import cleanup_proxy_registration
+
+    prev_container_name = os.environ.get("CONTAINER_NAME")
+    os.environ["CONTAINER_NAME"] = container
+    try:
+        cleanup_proxy_registration(container_id)
+    except (OSError, subprocess.SubprocessError):
+        pass
+    finally:
+        if prev_container_name is None:
+            os.environ.pop("CONTAINER_NAME", None)
+        else:
+            os.environ["CONTAINER_NAME"] = prev_container_name
+
+
+def strip_github_url(repo_url: str) -> str:
+    """Strip GitHub URL prefixes and .git suffix to get owner/repo spec.
+
+    Args:
+        repo_url: Full repository URL.
+
+    Returns:
+        Short ``owner/repo`` form.
+    """
+    spec = repo_url
+    spec = spec.removeprefix("https://github.com/")
+    spec = spec.removeprefix("http://github.com/")
+    spec = spec.removeprefix("git@github.com:")
+    if spec.endswith(".git"):
+        spec = spec[:-4]
+    return spec
+
+
+def apply_network_restrictions(container_id: str, network_mode: str) -> None:
+    """Apply network restrictions to a container.
+
+    Args:
+        container_id: Docker container ID.
+        network_mode: Network mode (``limited``, ``host-only``, ``none``).
+    """
+    if network_mode == "limited":
+        subprocess.run(
+            ["docker", "exec", container_id, "sudo", "/usr/local/bin/network-firewall.sh"],
+            check=False,
+        )
+    else:
+        subprocess.run(
+            ["docker", "exec", container_id, "sudo", "/usr/local/bin/network-mode", network_mode],
+            check=False,
+        )

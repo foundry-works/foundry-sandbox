@@ -1,0 +1,4 @@
+# file: /home/tyler/.sandboxes/worktrees/tyler-foundry-sandbox-20260209-0718/foundry_sandbox/image.py
+# hypothesis_version: 6.148.11
+
+['+00:00', '--format', 'Dockerfile', 'Z', 'docker', 'inspect', '{{.Created}}']

@@ -43,6 +43,26 @@ class SandboxPaths(NamedTuple):
 
 
 # ============================================================================
+# Path Safety
+# ============================================================================
+
+
+def _assert_safe_path_component(name: str) -> None:
+    """Reject names that could escape the intended directory.
+
+    Raises:
+        ValueError: If *name* is empty, contains ``/`` or ``\\``,
+            or equals ``.`` or ``..``.
+    """
+    if not name:
+        raise ValueError("Sandbox/preset name must not be empty")
+    if "/" in name or "\\" in name:
+        raise ValueError(f"Name must not contain path separators: {name!r}")
+    if name in (".", ".."):
+        raise ValueError(f"Name must not be '.' or '..': {name!r}")
+
+
+# ============================================================================
 # Path Resolution Functions
 # ============================================================================
 
@@ -56,6 +76,7 @@ def path_worktree(name: str) -> Path:
     Returns:
         Path to the worktree directory
     """
+    _assert_safe_path_component(name)
     return get_worktrees_dir() / name
 
 
@@ -68,6 +89,7 @@ def path_claude_config(name: str) -> Path:
     Returns:
         Path to the Claude config directory
     """
+    _assert_safe_path_component(name)
     return get_claude_configs_dir() / name
 
 
@@ -80,6 +102,7 @@ def path_claude_home(name: str) -> Path:
     Returns:
         Path to the Claude home directory (within Claude config)
     """
+    _assert_safe_path_component(name)
     return path_claude_config(name) / "claude"
 
 
@@ -92,6 +115,7 @@ def path_override_file(name: str) -> Path:
     Returns:
         Path to the override YAML file
     """
+    _assert_safe_path_component(name)
     return path_claude_config(name) / "docker-compose.override.yml"
 
 
@@ -104,6 +128,7 @@ def path_metadata_file(name: str) -> Path:
     Returns:
         Path to the metadata.json file
     """
+    _assert_safe_path_component(name)
     return path_claude_config(name) / "metadata.json"
 
 
@@ -116,6 +141,7 @@ def path_metadata_legacy_file(name: str) -> Path:
     Returns:
         Path to the metadata.env file (legacy format)
     """
+    _assert_safe_path_component(name)
     return path_claude_config(name) / "metadata.env"
 
 
@@ -128,6 +154,7 @@ def path_opencode_plugins_marker(name: str) -> Path:
     Returns:
         Path to the opencode-plugins.synced marker file
     """
+    _assert_safe_path_component(name)
     return path_claude_config(name) / "opencode-plugins.synced"
 
 
@@ -167,6 +194,7 @@ def path_preset_file(name: str) -> Path:
     Returns:
         Path to the preset JSON file
     """
+    _assert_safe_path_component(name)
     return path_presets_dir() / f"{name}.json"
 
 
@@ -187,6 +215,7 @@ def derive_sandbox_paths(name: str) -> SandboxPaths:
     Returns:
         SandboxPaths with all derived paths and container name
     """
+    _assert_safe_path_component(name)
     return SandboxPaths(
         worktree_path=path_worktree(name),
         container_name=f"sandbox-{name}",

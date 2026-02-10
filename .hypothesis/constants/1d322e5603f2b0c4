@@ -1,0 +1,4 @@
+# file: /home/tyler/.sandboxes/worktrees/tyler-foundry-sandbox-20260209-0718/foundry_sandbox/commands/prune.py
+# hypothesis_version: 6.148.11
+
+['--all', '--filter', '--force', '--format', '--json', '--networks', '--no-container', '-aq', '-f', '-q', '1', 'CONTAINER_NAME', 'Claude config', 'Prune', 'Remove this config?', 'Remove this network?', 'Remove this sandbox?', 'Worktree', '_proxy-egress', 'all_flag', 'branch', 'disconnect', 'docker', 'inspect', 'json_output', 'ls', 'name', 'network', 'no orphaned configs', 'no orphaned networks', 'no orphans found', 'no_container', 'orphaned_config', 'orphaned_network', 'ps', 'repo_url', 'rm', 'status=exited', 'type', '{{.Name}}']

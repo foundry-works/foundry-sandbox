@@ -7,6 +7,8 @@ do NOT require Docker, tmux, or a running sandbox.
 
 from __future__ import annotations
 
+import subprocess
+import sys
 from unittest.mock import patch
 
 import click.testing
@@ -40,13 +42,14 @@ class TestCLIGroup:
         assert "Usage" in result.output
 
     def test_all_migrated_commands_registered(self) -> None:
-        """All 16 migrated commands are registered on the CLI group."""
+        """All 16 migrated commands are available via the CLI group."""
         expected = {
             "attach", "build", "config", "destroy", "destroy-all",
             "help", "info", "list", "new", "preset", "prune",
             "refresh-credentials", "start", "status", "stop", "upgrade",
         }
-        registered = set(cli.commands.keys())
+        ctx = click.Context(cli)
+        registered = set(cli.list_commands(ctx))
         assert expected.issubset(registered), f"Missing: {expected - registered}"
 
 
@@ -97,13 +100,14 @@ class TestUnknownCommandValidation:
         assert result.exit_code != 0
 
     def test_all_commands_registered_no_shell_fallback(self) -> None:
-        """All expected commands are registered as Click subcommands (no shell fallback needed)."""
+        """All expected commands are available as Click subcommands (no shell fallback needed)."""
         required = {
             "new", "list", "attach", "start", "stop", "destroy",
             "build", "help", "status", "config", "prune", "info",
             "upgrade", "preset", "refresh-credentials", "destroy-all",
         }
-        registered = set(cli.commands.keys())
+        ctx = click.Context(cli)
+        registered = set(cli.list_commands(ctx))
         assert required.issubset(registered), f"Missing: {required - registered}"
 
 
@@ -244,3 +248,31 @@ class TestNonInteractiveFlag:
             assert "ni=False" in result.output
         finally:
             cli.commands.pop("_test_ni2", None)
+
+
+# ---------------------------------------------------------------------------
+# CLI smoke tests (subprocess-based)
+# ---------------------------------------------------------------------------
+
+
+class TestCLISmokeTest:
+    """Smoke tests that run the CLI as a subprocess."""
+
+    def test_module_invocation_help(self) -> None:
+        """``python3 -m foundry_sandbox.cli --help`` exits 0 and shows usage."""
+        result = subprocess.run(
+            [sys.executable, "-m", "foundry_sandbox.cli", "--help"],
+            capture_output=True,
+            text=True,
+        )
+        assert result.returncode == 0
+        assert "Usage" in result.stdout
+
+    def test_module_invocation_unknown_command(self) -> None:
+        """``python3 -m foundry_sandbox.cli nonexistent`` exits non-zero."""
+        result = subprocess.run(
+            [sys.executable, "-m", "foundry_sandbox.cli", "nonexistent"],
+            capture_output=True,
+            text=True,
+        )
+        assert result.returncode != 0

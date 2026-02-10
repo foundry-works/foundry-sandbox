@@ -1,0 +1,4 @@
+# file: /home/tyler/.sandboxes/worktrees/tyler-foundry-sandbox-20260209-0718/foundry_sandbox/foundry_plugin.py
+# hypothesis_version: 6.148.11
+
+[493, '*', '--delete', '--depth', '--ff-only', '-C', '-a', '-c', '-e', '-i', '-p', '-q', '-r', '-u', '.cache', '.claude-plugin', '.git', '/workspace', '1', '1.0.0', 'Bash', 'CLAUDE_PLUGINS_CACHE', 'PostToolUse', 'PreToolUse', 'Read', 'claude-foundry', 'claude-plugins', 'clone', 'command', 'cp', 'docker', 'exec', 'foundry-spec', 'git', 'haiku', 'hooks', 'hooks.json', 'matcher', 'mkdir', 'model', 'opus', 'plugin.json', 'pull', 'python3', 'rsync', 'settings.json', 'sh', 'skills', 'subagentModel', 'type', 'unknown', 'version']

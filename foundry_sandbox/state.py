@@ -22,6 +22,7 @@ from typing import Any
 
 from foundry_sandbox._bridge import bridge_main
 from foundry_sandbox.config import load_json, write_json
+from foundry_sandbox.constants import get_claude_configs_dir
 from foundry_sandbox.utils import flag_enabled as _flag_enabled
 from foundry_sandbox.models import SandboxMetadata
 from foundry_sandbox.paths import (
@@ -300,8 +301,7 @@ def list_sandboxes() -> list[dict[str, Any]]:
     Returns:
         List of dicts with 'name' and metadata fields for each sandbox.
     """
-    config_dir = path_claude_config("")  # get claude-config dir
-    # path_claude_config("") gives us the claude-config directory itself
+    config_dir = get_claude_configs_dir()
     if not config_dir.exists():
         return []
 

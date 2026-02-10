@@ -1,0 +1,4 @@
+# file: /workspace/foundry_sandbox/commands/upgrade.py
+# hypothesis_version: 6.151.5
+
+['--local', '--repo', '-c', 'bash', 'install.sh', 'use_local']

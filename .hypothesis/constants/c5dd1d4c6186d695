@@ -1,0 +1,4 @@
+# file: /workspace/unified-proxy/registry.py
+# hypothesis_version: 6.151.5
+
+[5.0, 86400, 'ContainerConfig', 'container_id', 'ip_address', 'last_seen', 'metadata', 'registered_at', 'ttl_seconds']

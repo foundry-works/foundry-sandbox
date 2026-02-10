@@ -27,10 +27,9 @@ from foundry_sandbox.constants import get_claude_configs_dir, get_worktrees_dir
 from foundry_sandbox.docker import container_is_running, remove_stubs_volume, remove_hmac_volume
 from foundry_sandbox.git_worktree import cleanup_sandbox_branch, remove_worktree
 from foundry_sandbox.paths import derive_sandbox_paths, safe_remove
-from foundry_sandbox.proxy import cleanup_proxy_registration
 from foundry_sandbox.state import load_sandbox_metadata
 from foundry_sandbox.utils import format_kv, log_warn
-from foundry_sandbox.commands._helpers import repo_url_to_bare_path as _repo_url_to_bare_path
+from foundry_sandbox.commands._helpers import proxy_cleanup as _proxy_cleanup, repo_url_to_bare_path as _repo_url_to_bare_path
 
 
 # ---------------------------------------------------------------------------
@@ -191,19 +190,8 @@ def prune(
                     branch, repo_url = _load_prune_metadata(name)
 
                     # Cleanup proxy registration (best effort)
-                    try:
-                        container_id = f"{container}-dev-1"
-                        prev_cn = os.environ.get("CONTAINER_NAME")
-                        os.environ["CONTAINER_NAME"] = container
-                        try:
-                            cleanup_proxy_registration(container_id)
-                        finally:
-                            if prev_cn is None:
-                                os.environ.pop("CONTAINER_NAME", None)
-                            else:
-                                os.environ["CONTAINER_NAME"] = prev_cn
-                    except (OSError, subprocess.SubprocessError):
-                        pass
+                    container_id = f"{container}-dev-1"
+                    _proxy_cleanup(container, container_id)
 
                     # Remove worktree
                     try:

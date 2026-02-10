@@ -8,6 +8,7 @@ of environment, cwd, stdout, stderr, and exit code.
 
 from __future__ import annotations
 
+import importlib
 import os
 import sys
 
@@ -37,11 +38,31 @@ ALIASES: dict[str, tuple[str, list[str]]] = {
 # ---------------------------------------------------------------------------
 
 
+_LAZY_COMMANDS: dict[str, tuple[str, str]] = {
+    "attach": ("foundry_sandbox.commands.attach", "attach"),
+    "build": ("foundry_sandbox.commands.build", "build"),
+    "config": ("foundry_sandbox.commands.config", "config"),
+    "destroy": ("foundry_sandbox.commands.destroy", "destroy"),
+    "destroy-all": ("foundry_sandbox.commands.destroy_all", "destroy_all"),
+    "help": ("foundry_sandbox.commands.help_cmd", "help_cmd"),
+    "info": ("foundry_sandbox.commands.info", "info"),
+    "list": ("foundry_sandbox.commands.list_cmd", "list_cmd"),
+    "new": ("foundry_sandbox.commands.new", "new"),
+    "preset": ("foundry_sandbox.commands.preset", "preset"),
+    "prune": ("foundry_sandbox.commands.prune", "prune"),
+    "refresh-credentials": ("foundry_sandbox.commands.refresh_creds", "refresh_creds"),
+    "start": ("foundry_sandbox.commands.start", "start"),
+    "status": ("foundry_sandbox.commands.status", "status"),
+    "stop": ("foundry_sandbox.commands.stop", "stop"),
+    "upgrade": ("foundry_sandbox.commands.upgrade", "upgrade"),
+}
+
+
 class CastGroup(click.Group):
-    """Custom Click group that supports alias resolution.
+    """Custom Click group that supports alias resolution and lazy loading.
 
     Behaviour:
-    * Registered subcommands are dispatched normally by Click.
+    * Command modules are imported on first access, not at import time.
     * Aliases listed in ``ALIASES`` are rewritten to their canonical form
       before dispatch.
     * Unknown commands produce an error message.
@@ -50,6 +71,30 @@ class CastGroup(click.Group):
     def format_usage(self, ctx: click.Context, formatter: click.HelpFormatter) -> None:
         """Write the usage line into the formatter."""
         super().format_usage(ctx, formatter)
+
+    def list_commands(self, ctx: click.Context) -> list[str]:
+        """Return all available command names (eager + lazy)."""
+        eager = set(self.commands or {})
+        return sorted(eager | _LAZY_COMMANDS.keys())
+
+    def get_command(self, ctx: click.Context, cmd_name: str) -> click.Command | None:
+        """Look up a command, importing lazily if needed."""
+        # Check eagerly-registered commands first
+        cmd = self.commands.get(cmd_name)
+        if cmd is not None:
+            return cmd
+
+        # Lazy import
+        entry = _LAZY_COMMANDS.get(cmd_name)
+        if entry is None:
+            return None
+
+        module_path, attr_name = entry
+        mod = importlib.import_module(module_path)
+        cmd = getattr(mod, attr_name)
+        # Cache so subsequent lookups skip the import
+        self.add_command(cmd, cmd_name)
+        return cmd
 
     # -----------------------------------------------------------------
     # Alias + fallback resolution
@@ -116,41 +161,7 @@ def cli(ctx: click.Context) -> None:
 # ---------------------------------------------------------------------------
 # Command Registration
 # ---------------------------------------------------------------------------
-# Migrated commands are imported and added here as they become available.
-
-from foundry_sandbox.commands.attach import attach  # noqa: E402
-from foundry_sandbox.commands.build import build  # noqa: E402
-from foundry_sandbox.commands.config import config  # noqa: E402
-from foundry_sandbox.commands.destroy import destroy  # noqa: E402
-from foundry_sandbox.commands.destroy_all import destroy_all  # noqa: E402
-from foundry_sandbox.commands.help_cmd import help_cmd  # noqa: E402
-from foundry_sandbox.commands.info import info  # noqa: E402
-from foundry_sandbox.commands.list_cmd import list_cmd  # noqa: E402
-from foundry_sandbox.commands.new import new  # noqa: E402
-from foundry_sandbox.commands.preset import preset  # noqa: E402
-from foundry_sandbox.commands.prune import prune  # noqa: E402
-from foundry_sandbox.commands.refresh_creds import refresh_creds  # noqa: E402
-from foundry_sandbox.commands.start import start  # noqa: E402
-from foundry_sandbox.commands.status import status  # noqa: E402
-from foundry_sandbox.commands.stop import stop  # noqa: E402
-from foundry_sandbox.commands.upgrade import upgrade  # noqa: E402
-
-cli.add_command(attach)
-cli.add_command(build)
-cli.add_command(config)
-cli.add_command(destroy)
-cli.add_command(destroy_all)
-cli.add_command(help_cmd)
-cli.add_command(info)
-cli.add_command(list_cmd)
-cli.add_command(new)
-cli.add_command(preset)
-cli.add_command(prune)
-cli.add_command(refresh_creds)
-cli.add_command(start)
-cli.add_command(status)
-cli.add_command(stop)
-cli.add_command(upgrade)
+# Commands are lazy-loaded via _LAZY_COMMANDS and CastGroup.get_command().
 
 
 # ---------------------------------------------------------------------------

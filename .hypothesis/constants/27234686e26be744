@@ -1,0 +1,4 @@
+# file: /workspace/foundry_sandbox/commands/refresh_creds.py
+# hypothesis_version: 6.151.5
+
+['--format', '--height=10', '--last', '--reverse', '-a', '-l', '-p', 'Available sandboxes:', 'No sandboxes found.', 'docker', 'fzf', 'name', 'ps', 'refresh-credentials', 'restart', 'unified-proxy', '{{.Names}}']

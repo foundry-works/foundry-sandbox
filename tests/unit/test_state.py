@@ -766,13 +766,23 @@ class TestSecureWrite:
     def test_creates_parent_directories(self, sandbox_home):
         """Secure write creates parent directories as needed."""
         write_sandbox_metadata(
-            "nested/path/sandbox",
+            "nested-path-sandbox",
             repo_url="https://github.com/test/repo.git",
             branch="main",
         )
 
-        metadata_path = sandbox_home / "claude-config" / "nested" / "path" / "sandbox" / "metadata.json"
+        metadata_path = sandbox_home / "claude-config" / "nested-path-sandbox" / "metadata.json"
         assert metadata_path.exists()
+
+    def test_rejects_path_traversal_in_name(self, sandbox_home):
+        """Sandbox names with path separators are rejected."""
+        import pytest as _pytest
+        with _pytest.raises(ValueError):
+            write_sandbox_metadata(
+                "nested/path/sandbox",
+                repo_url="https://github.com/test/repo.git",
+                branch="main",
+            )
 
     def test_sets_600_permissions(self, sandbox_home):
         """Secure write sets 600 permissions on file."""

@@ -1642,12 +1642,8 @@ sync_marketplace_manifests() {
     local container_id="$1"
     local plugins_dir="$2"
     local quiet="${3:-0}"
-    local stderr_redirect=""
-    if [ "$quiet" = "1" ]; then
-        stderr_redirect="2>/dev/null"
-    fi
-    eval docker exec -u "$CONTAINER_USER" -i "$container_id" python3 - \
-        "$plugins_dir" "$stderr_redirect" <<'PY'
+    local py_script
+    read -r -d '' py_script <<'PY' || true
 import json, os, sys
 
 plugins_dir = sys.argv[1]
@@ -1692,6 +1688,13 @@ if os.path.isfile(mkt_json):
             json.dump(cleaned, f, indent=2)
             f.write("\n")
 PY
+    if [ "$quiet" = "1" ]; then
+        printf '%s' "$py_script" | docker exec -u "$CONTAINER_USER" -i "$container_id" python3 - \
+            "$plugins_dir" 2>/dev/null
+    else
+        printf '%s' "$py_script" | docker exec -u "$CONTAINER_USER" -i "$container_id" python3 - \
+            "$plugins_dir"
+    fi
     # Commit synthesised manifests so they're visible via git tree reads.
     docker exec -u "$CONTAINER_USER" "$container_id" sh -c "
         cd '$CONTAINER_HOME/.claude/plugins/marketplaces/claude-plugins-official' &&

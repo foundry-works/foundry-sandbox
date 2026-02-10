@@ -27,10 +27,9 @@ from foundry_sandbox.constants import get_worktrees_dir
 from foundry_sandbox.docker import compose_down, remove_hmac_volume, remove_stubs_volume
 from foundry_sandbox.git_worktree import cleanup_sandbox_branch, remove_worktree
 from foundry_sandbox.paths import derive_sandbox_paths
-from foundry_sandbox.proxy import cleanup_proxy_registration
 from foundry_sandbox.state import load_sandbox_metadata
 from foundry_sandbox.utils import log_warn
-from foundry_sandbox.commands._helpers import repo_url_to_bare_path as _repo_url_to_bare_path, tmux_session_name as _tmux_session_name
+from foundry_sandbox.commands._helpers import list_sandbox_names as _list_sandbox_names, proxy_cleanup as _proxy_cleanup, repo_url_to_bare_path as _repo_url_to_bare_path, tmux_session_name as _tmux_session_name
 
 
 # ---------------------------------------------------------------------------
@@ -39,21 +38,8 @@ from foundry_sandbox.commands._helpers import repo_url_to_bare_path as _repo_url
 
 
 def _list_all_sandboxes() -> list[str]:
-    """List all sandbox names by scanning WORKTREES_DIR.
-
-    Returns:
-        List of sandbox names (directory basenames in WORKTREES_DIR).
-    """
-    worktrees_dir = get_worktrees_dir()
-    if not worktrees_dir.exists():
-        return []
-
-    sandboxes = []
-    for entry in worktrees_dir.iterdir():
-        if entry.is_dir():
-            sandboxes.append(entry.name)
-
-    return sorted(sandboxes)
+    """List all sandbox names by scanning WORKTREES_DIR."""
+    return _list_sandbox_names()
 
 
 def _remove_network(network_name: str) -> bool:
@@ -214,19 +200,8 @@ def destroy_all(keep_worktree: bool) -> None:
             pass
 
         # 2. Cleanup proxy registration (best effort)
-        try:
-            container_id = f"{container}-dev-1"
-            prev_container_name = os.environ.get("CONTAINER_NAME")
-            os.environ["CONTAINER_NAME"] = container
-            try:
-                cleanup_proxy_registration(container_id)
-            finally:
-                if prev_container_name is None:
-                    os.environ.pop("CONTAINER_NAME", None)
-                else:
-                    os.environ["CONTAINER_NAME"] = prev_container_name
-        except (OSError, subprocess.SubprocessError):
-            pass  # Proxy may not be running
+        container_id = f"{container}-dev-1"
+        _proxy_cleanup(container, container_id)
 
         # 3. Docker compose down (best effort)
         try:

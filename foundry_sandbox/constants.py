@@ -92,7 +92,6 @@ CONTAINER_READY_DELAY: float = 0.2
 
 PROXY_TIMEOUT: int = 30
 """Default timeout in seconds for proxy HTTP operations."""
-"""Path to SSH agent socket inside container."""
 
 CONTAINER_OPENCODE_PLUGIN_DIR: str = "/home/ubuntu/.config/opencode/plugins"
 """Default OpenCode plugins directory inside container."""

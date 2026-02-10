@@ -147,6 +147,9 @@ def ensure_repo_checkout(
     if not repo_url or not checkout_path:
         raise ValueError("repo_url and checkout_path are required")
 
+    if branch.startswith("-"):
+        raise ValueError(f"branch must not start with '-': {branch!r}")
+
     cp = Path(checkout_path)
     ensure_dir(cp.parent)
 
