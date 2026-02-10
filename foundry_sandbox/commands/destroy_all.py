@@ -16,7 +16,6 @@ Requires double confirmation:
 from __future__ import annotations
 
 import os
-import re
 import shutil
 import subprocess
 import sys
@@ -29,7 +28,7 @@ from foundry_sandbox.git_worktree import cleanup_sandbox_branch, remove_worktree
 from foundry_sandbox.paths import derive_sandbox_paths
 from foundry_sandbox.state import load_sandbox_metadata
 from foundry_sandbox.utils import log_warn
-from foundry_sandbox.commands._helpers import list_sandbox_names as _list_sandbox_names, proxy_cleanup as _proxy_cleanup, repo_url_to_bare_path as _repo_url_to_bare_path, tmux_session_name as _tmux_session_name
+from foundry_sandbox.commands._helpers import cleanup_orphaned_networks as _cleanup_orphaned_networks_shared, list_sandbox_names as _list_sandbox_names, proxy_cleanup as _proxy_cleanup, repo_url_to_bare_path as _repo_url_to_bare_path, tmux_session_name as _tmux_session_name
 
 
 # ---------------------------------------------------------------------------
@@ -78,37 +77,10 @@ def _remove_network(network_name: str) -> bool:
 def _cleanup_orphaned_networks() -> int:
     """Clean up orphaned sandbox networks matching the pattern.
 
-    Removes networks matching: sandbox-.*_(credential-isolation|proxy-egress)
-
     Returns:
         Count of orphaned networks cleaned up.
     """
-    try:
-        # List all docker networks
-        result = subprocess.run(
-            ["docker", "network", "ls", "--format", "{{.Name}}"],
-            stdout=subprocess.PIPE,
-            stderr=subprocess.DEVNULL,
-            check=False,
-            text=True,
-            timeout=TIMEOUT_DOCKER_QUERY,
-        )
-        if result.returncode != 0:
-            return 0
-
-        # Filter by pattern
-        pattern = re.compile(r'^sandbox-.*_(credential-isolation|proxy-egress)$')
-        orphaned_count = 0
-
-        for line in result.stdout.splitlines():
-            network_name = line.strip()
-            if network_name and pattern.match(network_name):
-                if _remove_network(network_name):
-                    orphaned_count += 1
-
-        return orphaned_count
-    except (OSError, subprocess.SubprocessError):
-        return 0
+    return len(_cleanup_orphaned_networks_shared(skip_confirm=True))
 
 
 # ---------------------------------------------------------------------------

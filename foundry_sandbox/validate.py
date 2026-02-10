@@ -194,7 +194,7 @@ _ORG_REPO_PATTERN = re.compile(r"^[A-Za-z0-9._-]+/[A-Za-z0-9._-]+(?:\.git)?$")
 _SSH_HOST_PATTERN = re.compile(r"^[A-Za-z0-9]([A-Za-z0-9._-]*[A-Za-z0-9])?$")
 
 # Sensitive filesystem prefixes that should not be cloned
-_SENSITIVE_PREFIXES = ("/etc", "/proc", "/sys", "/dev", "/var/run")
+_SENSITIVE_PREFIXES = ("/etc", "/proc", "/sys", "/dev", "/var/run", "/root", "/boot", "/var/lib/docker")
 
 
 def validate_git_url(url: str) -> tuple[bool, str]:

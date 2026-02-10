@@ -11,6 +11,8 @@ Pure data management with no Docker calls.
 
 from __future__ import annotations
 
+import contextlib
+import fcntl
 import json
 import os
 import shlex
@@ -79,22 +81,43 @@ def _secure_write(path: Path, content: str) -> None:
     """Write content to a file atomically with 600 permissions.
 
     Uses write-to-temp + os.replace() to avoid corrupted files on crash.
+    Acquires an exclusive file lock for the duration of the write.
     """
     import tempfile
 
     path.parent.mkdir(parents=True, exist_ok=True)
-    fd, tmp_path = tempfile.mkstemp(dir=str(path.parent), suffix=".tmp")
-    try:
-        with os.fdopen(fd, "w") as f:
-            f.write(content)
-        os.chmod(tmp_path, 0o600)
-        os.replace(tmp_path, path)
-    except BaseException:
+    with _state_lock(path):
+        fd, tmp_path = tempfile.mkstemp(dir=str(path.parent), suffix=".tmp")
         try:
-            os.unlink(tmp_path)
-        except OSError:
-            pass
-        raise
+            with os.fdopen(fd, "w") as f:
+                f.write(content)
+            os.chmod(tmp_path, 0o600)
+            os.replace(tmp_path, path)
+        except BaseException:
+            try:
+                os.unlink(tmp_path)
+            except OSError:
+                pass
+            raise
+
+
+@contextlib.contextmanager
+def _state_lock(path: Path, *, shared: bool = False):
+    """Acquire a file lock for *path* using a sidecar ``.lock`` file.
+
+    Args:
+        path: The file being protected.
+        shared: If ``True`` acquire a shared (read) lock; otherwise exclusive.
+    """
+    lock_path = path.with_suffix(path.suffix + ".lock")
+    lock_path.parent.mkdir(parents=True, exist_ok=True)
+    fd = os.open(str(lock_path), os.O_CREAT | os.O_RDWR, 0o600)
+    try:
+        fcntl.flock(fd, fcntl.LOCK_SH if shared else fcntl.LOCK_EX)
+        yield
+    finally:
+        fcntl.flock(fd, fcntl.LOCK_UN)
+        os.close(fd)
 
 
 # ============================================================================
@@ -238,7 +261,8 @@ def load_sandbox_metadata(name: str) -> dict[str, Any] | None:
     if json_path.exists():
         if not metadata_is_secure(json_path):
             return None
-        data = load_json(str(json_path))
+        with _state_lock(json_path, shared=True):
+            data = load_json(str(json_path))
         if data:
             # Auto-derive ssh_mode if missing
             if not data.get("ssh_mode"):
@@ -255,38 +279,44 @@ def load_sandbox_metadata(name: str) -> dict[str, Any] | None:
     if legacy_path.exists():
         if not metadata_is_secure(legacy_path):
             return None
-        try:
-            data = _parse_legacy_metadata(legacy_path)
-        except (OSError, ValueError):
-            return None
 
-        # Auto-derive ssh_mode
-        if not data.get("ssh_mode"):
-            data["ssh_mode"] = "always" if str(data.get("sync_ssh", "0")) == "1" else "disabled"
+        with _state_lock(json_path):
+            # Double-check: another process may have migrated while we waited
+            if json_path.exists():
+                return load_sandbox_metadata(name)
 
-        # Migrate to JSON format
-        write_sandbox_metadata(
-            name,
-            repo_url=data.get("repo_url", ""),
-            branch=data.get("branch", ""),
-            from_branch=data.get("from_branch", ""),
-            network_mode=data.get("network_mode", ""),
-            sync_ssh=int(data.get("sync_ssh", 0)),
-            ssh_mode=data.get("ssh_mode", ""),
-            working_dir=data.get("working_dir", ""),
-            sparse_checkout=bool(data.get("sparse_checkout")),
-            pip_requirements=data.get("pip_requirements", ""),
-            allow_pr=bool(data.get("allow_pr")),
-            enable_opencode=bool(data.get("enable_opencode")),
-            enable_zai=bool(data.get("enable_zai")),
-            mounts=data.get("mounts", []),
-            copies=data.get("copies", []),
-        )
-        # Remove legacy file after successful migration
-        try:
-            legacy_path.unlink()
-        except OSError:
-            pass
+            try:
+                data = _parse_legacy_metadata(legacy_path)
+            except (OSError, ValueError):
+                return None
+
+            # Auto-derive ssh_mode
+            if not data.get("ssh_mode"):
+                data["ssh_mode"] = "always" if str(data.get("sync_ssh", "0")) == "1" else "disabled"
+
+            # Migrate to JSON format
+            write_sandbox_metadata(
+                name,
+                repo_url=data.get("repo_url", ""),
+                branch=data.get("branch", ""),
+                from_branch=data.get("from_branch", ""),
+                network_mode=data.get("network_mode", ""),
+                sync_ssh=int(data.get("sync_ssh", 0)),
+                ssh_mode=data.get("ssh_mode", ""),
+                working_dir=data.get("working_dir", ""),
+                sparse_checkout=bool(data.get("sparse_checkout")),
+                pip_requirements=data.get("pip_requirements", ""),
+                allow_pr=bool(data.get("allow_pr")),
+                enable_opencode=bool(data.get("enable_opencode")),
+                enable_zai=bool(data.get("enable_zai")),
+                mounts=data.get("mounts", []),
+                copies=data.get("copies", []),
+            )
+            # Remove legacy file after successful migration
+            try:
+                legacy_path.unlink()
+            except OSError:
+                pass
 
         return data
 

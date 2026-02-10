@@ -276,6 +276,62 @@ def _generate_branch_name(repo_url: str, from_branch: str) -> str:
     return branch
 
 
+def _load_and_apply_defaults(
+    data: dict[str, object] | None,
+    label: str,
+    *,
+    explicit_params: set[str],
+    repo: str,
+    branch: str,
+    from_branch: str,
+    mounts: tuple[str, ...],
+    copies: tuple[str, ...],
+    network: str,
+    with_ssh: bool,
+    with_opencode: bool,
+    with_zai: bool,
+    wd: str,
+    sparse: bool,
+    pip_requirements: str,
+    allow_pr: bool,
+) -> NewDefaults:
+    """Load saved/preset data, validate it, echo a banner, and apply defaults.
+
+    Args:
+        data: Loaded JSON data (from last command or preset), or ``None``.
+        label: Human-readable label for error/banner (e.g. ``"last command"``).
+
+    Returns:
+        A :class:`NewDefaults` with merged values.
+
+    Raises:
+        SystemExit: If *data* is ``None``.
+    """
+    if not data:
+        log_error(f"No previous '{label}' found")
+        sys.exit(1)
+    click.echo()
+    click.echo(f"Repeating {label}")
+    click.echo()
+    return _apply_saved_new_defaults(
+        data,
+        explicit_params=explicit_params,
+        repo=repo,
+        branch=branch,
+        from_branch=from_branch,
+        mounts=mounts,
+        copies=copies,
+        network=network,
+        with_ssh=with_ssh,
+        with_opencode=with_opencode,
+        with_zai=with_zai,
+        wd=wd,
+        sparse=sparse,
+        pip_requirements=pip_requirements,
+        allow_pr=allow_pr,
+    )
+
+
 # ---------------------------------------------------------------------------
 # Command Implementation
 # ---------------------------------------------------------------------------
@@ -377,57 +433,17 @@ def new(
         pip_requirements = wizard_pip
         allow_pr = wizard_pr
 
-    # Handle --last flag
-    if last:
-        last_data = load_last_cast_new()
-        if not last_data:
-            log_error("No previous 'cast new' command found")
-            sys.exit(1)
-        click.echo()
-        click.echo("Repeating last command")
-        click.echo()
-        _defaults = _apply_saved_new_defaults(
-            last_data,
-            explicit_params=explicit_params,
-            repo=repo,
-            branch=branch,
-            from_branch=from_branch,
-            mounts=mounts,
-            copies=copies,
-            network=network,
-            with_ssh=with_ssh,
-            with_opencode=with_opencode,
-            with_zai=with_zai,
-            wd=wd,
-            sparse=sparse,
-            pip_requirements=pip_requirements,
-            allow_pr=allow_pr,
-        )
-        repo = _defaults.repo
-        branch = _defaults.branch
-        from_branch = _defaults.from_branch
-        mounts = _defaults.mounts
-        copies = _defaults.copies
-        network = _defaults.network
-        with_ssh = _defaults.with_ssh
-        with_opencode = _defaults.with_opencode
-        with_zai = _defaults.with_zai
-        wd = _defaults.wd
-        sparse = _defaults.sparse
-        pip_requirements = _defaults.pip_requirements
-        allow_pr = _defaults.allow_pr
-
-    # Handle --preset flag
-    if preset:
-        preset_data = load_cast_preset(preset)
-        if not preset_data:
-            log_error(f"Preset '{preset}' not found")
-            sys.exit(1)
-        click.echo()
-        click.echo(f"Using preset '{preset}'")
-        click.echo()
-        _defaults = _apply_saved_new_defaults(
-            preset_data,
+    # Handle --last / --preset flags
+    if last or preset:
+        if last:
+            saved_data = load_last_cast_new()
+            label = "cast new' command"
+        else:
+            saved_data = load_cast_preset(preset)
+            label = f"preset '{preset}'"
+        _defaults = _load_and_apply_defaults(
+            saved_data,
+            label,
             explicit_params=explicit_params,
             repo=repo,
             branch=branch,

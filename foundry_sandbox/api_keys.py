@@ -16,6 +16,7 @@ from pathlib import Path
 from typing import Any
 
 from foundry_sandbox._bridge import bridge_main
+from foundry_sandbox.constants import TIMEOUT_LOCAL_CMD
 from foundry_sandbox.utils import log_step, log_warn
 
 
@@ -216,9 +217,10 @@ def get_cli_status() -> list[str]:
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
                 check=False,
+                timeout=TIMEOUT_LOCAL_CMD,
             )
             gh_ok = result.returncode == 0
-        except OSError:
+        except (OSError, subprocess.SubprocessError):
             pass
     lines.append(f"GitHub CLI: {'configured' if gh_ok else 'not configured'}")
 
@@ -348,16 +350,18 @@ def export_gh_token() -> str:
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
                 check=False,
+                timeout=TIMEOUT_LOCAL_CMD,
             )
             if status.returncode == 0:
                 result = subprocess.run(
                     ["gh", "auth", "token"],
                     capture_output=True, text=True, check=False,
+                    timeout=TIMEOUT_LOCAL_CMD,
                 )
                 token = result.stdout.strip()
                 if token:
                     return token
-        except OSError:
+        except (OSError, subprocess.SubprocessError):
             pass
 
     return ""

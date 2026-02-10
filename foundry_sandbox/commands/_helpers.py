@@ -7,19 +7,22 @@ from __future__ import annotations
 
 import hashlib
 import os
+import re
 import shutil
 import subprocess
 from pathlib import Path
+from typing import Callable
 
 from foundry_sandbox.constants import (
     SANDBOX_NAME_MAX_LENGTH,
     TIMEOUT_DOCKER_EXEC,
+    TIMEOUT_DOCKER_NETWORK,
     TIMEOUT_DOCKER_QUERY,
     get_claude_configs_dir,
     get_repos_dir,
     get_worktrees_dir,
 )
-from foundry_sandbox.utils import log_debug, sanitize_ref_component
+from foundry_sandbox.utils import log_debug, log_warn, sanitize_ref_component
 from foundry_sandbox.validate import validate_existing_sandbox_name
 
 
@@ -363,3 +366,150 @@ def apply_network_restrictions(container_id: str, network_mode: str) -> None:
             check=False,
             timeout=TIMEOUT_DOCKER_EXEC,
         )
+
+
+# ---------------------------------------------------------------------------
+# Orphaned network cleanup (shared by destroy_all.py and prune.py)
+# ---------------------------------------------------------------------------
+
+_NETWORK_PATTERN = re.compile(r"^sandbox-.*_(credential-isolation|proxy-egress)$")
+
+
+def cleanup_orphaned_networks(
+    *,
+    skip_confirm: bool = True,
+    confirm_fn: Callable[[str], bool] | None = None,
+    check_running: bool = False,
+) -> list[str]:
+    """Remove orphaned sandbox Docker networks.
+
+    Args:
+        skip_confirm: If ``True`` remove without prompting.
+        confirm_fn: Called with the network name; return ``True`` to proceed.
+            Ignored when *skip_confirm* is ``True``.
+        check_running: If ``True``, skip networks whose sandbox still has
+            running containers.
+
+    Returns:
+        List of network names that were successfully removed.
+    """
+    removed: list[str] = []
+    try:
+        result = subprocess.run(
+            ["docker", "network", "ls", "--format", "{{.Name}}"],
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=TIMEOUT_DOCKER_QUERY,
+        )
+        if result.returncode != 0:
+            return removed
+
+        for line in result.stdout.splitlines():
+            network_name = line.strip()
+            if not network_name or not _NETWORK_PATTERN.match(network_name):
+                continue
+
+            # Optionally check for running containers
+            if check_running:
+                sandbox_name = network_name
+                if sandbox_name.endswith("_credential-isolation"):
+                    sandbox_name = sandbox_name[: -len("_credential-isolation")]
+                elif sandbox_name.endswith("_proxy-egress"):
+                    sandbox_name = sandbox_name[: -len("_proxy-egress")]
+                try:
+                    ps_result = subprocess.run(
+                        ["docker", "ps", "-q", "--filter", f"name=^{sandbox_name}-"],
+                        capture_output=True,
+                        text=True,
+                        check=False,
+                        timeout=TIMEOUT_DOCKER_QUERY,
+                    )
+                    if ps_result.stdout.strip():
+                        continue  # Still has running containers
+                except (OSError, subprocess.SubprocessError):
+                    continue  # Fail-safe: skip if we can't check
+
+            # Prompt
+            if not skip_confirm:
+                if confirm_fn and not confirm_fn(network_name):
+                    continue
+
+            # Disconnect dangling endpoints
+            try:
+                inspect_result = subprocess.run(
+                    [
+                        "docker", "network", "inspect",
+                        "--format", "{{range .Containers}}{{.Name}} {{end}}",
+                        network_name,
+                    ],
+                    capture_output=True,
+                    text=True,
+                    check=False,
+                    timeout=TIMEOUT_DOCKER_NETWORK,
+                )
+                if inspect_result.returncode == 0:
+                    for endpoint in inspect_result.stdout.strip().split():
+                        if endpoint:
+                            subprocess.run(
+                                ["docker", "network", "disconnect", "-f", network_name, endpoint],
+                                stdout=subprocess.DEVNULL,
+                                stderr=subprocess.DEVNULL,
+                                check=False,
+                                timeout=TIMEOUT_DOCKER_NETWORK,
+                            )
+            except (OSError, subprocess.SubprocessError):
+                pass
+
+            # Remove stopped containers referencing this sandbox
+            if check_running:
+                sandbox_name_for_rm = network_name
+                if sandbox_name_for_rm.endswith("_credential-isolation"):
+                    sandbox_name_for_rm = sandbox_name_for_rm[: -len("_credential-isolation")]
+                elif sandbox_name_for_rm.endswith("_proxy-egress"):
+                    sandbox_name_for_rm = sandbox_name_for_rm[: -len("_proxy-egress")]
+                try:
+                    stopped_result = subprocess.run(
+                        [
+                            "docker", "ps", "-aq",
+                            "--filter", "status=exited",
+                            "--filter", f"name=^{sandbox_name_for_rm}-",
+                        ],
+                        capture_output=True,
+                        text=True,
+                        check=False,
+                        timeout=TIMEOUT_DOCKER_QUERY,
+                    )
+                    for stopped_id in stopped_result.stdout.splitlines():
+                        stopped_id = stopped_id.strip()
+                        if stopped_id:
+                            subprocess.run(
+                                ["docker", "rm", stopped_id],
+                                stdout=subprocess.DEVNULL,
+                                stderr=subprocess.DEVNULL,
+                                check=False,
+                                timeout=TIMEOUT_DOCKER_QUERY,
+                            )
+                except (OSError, subprocess.SubprocessError):
+                    pass
+
+            # Remove the network
+            try:
+                rm_result = subprocess.run(
+                    ["docker", "network", "rm", network_name],
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                    check=False,
+                    timeout=TIMEOUT_DOCKER_NETWORK,
+                )
+                if rm_result.returncode == 0:
+                    removed.append(network_name)
+                else:
+                    log_warn(f"Failed to remove network: {network_name}")
+            except (OSError, subprocess.SubprocessError):
+                log_warn(f"Failed to remove network: {network_name}")
+
+    except (OSError, subprocess.SubprocessError):
+        pass  # Docker may not be available
+
+    return removed
