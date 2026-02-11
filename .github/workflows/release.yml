@@ -5,8 +5,26 @@ on:
     tags:
       - 'v*'
 
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
+  tests:
+    uses: ./.github/workflows/test.yml
+
+  orchestration:
+    uses: ./.github/workflows/orchestration-tests.yml
+
+  performance:
+    uses: ./.github/workflows/performance-tests.yml
+
   release:
+    needs: [tests, orchestration, performance]
+    if: |
+      always() &&
+      needs.tests.result == 'success' &&
+      needs.orchestration.result == 'success'
     runs-on: ubuntu-latest
     permissions:
       contents: write
