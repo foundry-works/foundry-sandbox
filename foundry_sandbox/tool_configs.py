@@ -28,6 +28,15 @@ from foundry_sandbox.paths import ensure_dir, path_opencode_plugins_marker
 from foundry_sandbox.utils import log_debug, log_info, log_step, log_warn
 
 
+# Directory containing extracted Python scripts for in-container execution
+_SCRIPT_DIR = Path(__file__).resolve().parent.parent / "lib" / "python"
+
+
+def _read_script(name: str) -> str:
+    """Read a Python script from lib/python/ for in-container execution."""
+    return (_SCRIPT_DIR / name).read_text()
+
+
 # ============================================================================
 # Helper Functions
 # ============================================================================
@@ -107,52 +116,7 @@ def ensure_claude_onboarding(container_id: str, *, quiet: bool = False) -> None:
         container_id: Container ID
         quiet: If True, suppress output
     """
-    script = """import json
-import os
-
-paths = [
-    "/home/ubuntu/.claude.json",
-    "/home/ubuntu/.claude/.claude.json",
-]
-
-for path in paths:
-    data = {}
-    if os.path.exists(path):
-        try:
-            with open(path, "r") as f:
-                data = json.load(f)
-        except json.JSONDecodeError:
-            data = {}
-
-    if not isinstance(data, dict):
-        data = {}
-
-    changed = False
-    if data.get("hasCompletedOnboarding") is not True:
-        data["hasCompletedOnboarding"] = True
-        changed = True
-    if data.get("githubRepoPaths") != {}:
-        data["githubRepoPaths"] = {}
-        changed = True
-    if data.get("projects") != {}:
-        data["projects"] = {}
-        changed = True
-    if data.get("skillUsage") != {}:
-        data["skillUsage"] = {}
-        changed = True
-    if data.get("autoUpdates") is not False:
-        data["autoUpdates"] = False
-        changed = True
-    if data.get("autoCompactEnabled") is not False:
-        data["autoCompactEnabled"] = False
-        changed = True
-    if changed or not os.path.exists(path):
-        os.makedirs(os.path.dirname(path), exist_ok=True)
-        with open(path, "w") as f:
-            json.dump(data, f, indent=2)
-            f.write("\\n")
-"""
-    _docker_exec_python(container_id, script, quiet=quiet)
+    _docker_exec_python(container_id, _read_script("ensure_claude_onboarding.py"), quiet=quiet)
 
 
 def ensure_claude_statusline(container_id: str, *, quiet: bool = False) -> None:
@@ -201,56 +165,14 @@ def ensure_claude_statusline(container_id: str, *, quiet: bool = False) -> None:
                 return  # Already using bundled binary
 
         # Set statusLine configuration to use bundled binary
-        script = """import json
-import os
-
-path = "/home/ubuntu/.claude/settings.json"
-os.makedirs(os.path.dirname(path), exist_ok=True)
-
-if os.path.exists(path):
-    try:
-        with open(path, "r") as f:
-            data = json.load(f)
-    except json.JSONDecodeError:
-        data = {}
-else:
-    data = {}
-
-# Always set to bundled binary (replaces any network-dependent commands like npx)
-data["statusLine"] = {
-    "type": "command",
-    "command": "claude-statusline",
-    "padding": 0
-}
-with open(path, "w") as f:
-    json.dump(data, f, indent=2)
-    f.write("\\n")
-"""
+        script = '_ACTION = "set"\n' + _read_script("ensure_claude_statusline.py")
         _docker_exec_python(container_id, script, quiet=quiet)
     else:
         # Binary missing - remove config if present
         if not statusline_configured:
             return  # Not configured, nothing to do
 
-        script = """import json
-import os
-
-path = "/home/ubuntu/.claude/settings.json"
-if not os.path.exists(path):
-    raise SystemExit(0)
-
-try:
-    with open(path, "r") as f:
-        data = json.load(f)
-except json.JSONDecodeError:
-    data = {}
-
-if "statusLine" in data:
-    data.pop("statusLine", None)
-    with open(path, "w") as f:
-        json.dump(data, f, indent=2)
-        f.write("\\n")
-"""
+        script = '_ACTION = "remove"\n' + _read_script("ensure_claude_statusline.py")
         _docker_exec_python(container_id, script, quiet=quiet)
         if not quiet:
             log_warn(
@@ -356,123 +278,8 @@ def ensure_codex_config(container_id: str, *, quiet: bool = False) -> None:
     # Pass SANDBOX_ENABLE_TAVILY to container
     enable_tavily = os.environ.get("SANDBOX_ENABLE_TAVILY", "0")
 
-    script = """import os
-import re
+    script = _read_script("ensure_codex_config.py")
 
-try:
-    import tomllib
-except ModuleNotFoundError:
-    tomllib = None
-
-path = "/home/ubuntu/.codex/config.toml"
-os.makedirs(os.path.dirname(path), exist_ok=True)
-
-default_approval_policy_line = 'approval_policy = "on-failure"'
-default_sandbox_mode_line = 'sandbox_mode = "danger-full-access"'
-default_update_line = "check_for_update_on_startup = false"
-default_analytics_lines = ["[analytics]", "enabled = false"]
-default_tavily_mcp_lines = ["[mcp_servers.tavily-mcp]", 'command = "tavily-mcp"', "args = []"]
-
-# Only include tavily-mcp if Tavily is enabled (API key available on host)
-include_tavily = os.environ.get("SANDBOX_ENABLE_TAVILY", "0") == "1"
-
-if not os.path.exists(path):
-    with open(path, "w") as f:
-        root_lines = [
-            default_approval_policy_line,
-            default_sandbox_mode_line,
-            default_update_line,
-        ]
-        content = "\\n".join(root_lines) + "\\n\\n" + "\\n".join(default_analytics_lines)
-        if include_tavily:
-            content += "\\n\\n" + "\\n".join(default_tavily_mcp_lines)
-        f.write(content + "\\n")
-    raise SystemExit(0)
-
-with open(path, "r") as f:
-    text = f.read()
-
-data = {}
-if tomllib is not None:
-    try:
-        data = tomllib.loads(text)
-    except tomllib.TOMLDecodeError:
-        data = {}
-
-missing_update = "check_for_update_on_startup" not in data
-if missing_update:
-    if re.search(r"(?m)^\\s*check_for_update_on_startup\\s*=", text):
-        missing_update = False
-missing_approval_policy = "approval_policy" not in data
-if missing_approval_policy:
-    if re.search(r"(?m)^\\s*approval_policy\\s*=", text):
-        missing_approval_policy = False
-missing_sandbox_mode = "sandbox_mode" not in data
-if missing_sandbox_mode:
-    if re.search(r"(?m)^\\s*sandbox_mode\\s*=", text):
-        missing_sandbox_mode = False
-analytics = data.get("analytics") if isinstance(data, dict) else None
-missing_analytics_enabled = not (isinstance(analytics, dict) and "enabled" in analytics)
-
-# Check if tavily-mcp MCP server is configured (only if API key is available)
-mcp_servers = data.get("mcp_servers") if isinstance(data, dict) else None
-missing_tavily_mcp = False
-if include_tavily:
-    missing_tavily_mcp = not (isinstance(mcp_servers, dict) and "tavily-mcp" in mcp_servers)
-    if missing_tavily_mcp:
-        # Also check raw text for section header
-        if re.search(r"(?m)^\\s*\\[mcp_servers\\.tavily-mcp\\]", text):
-            missing_tavily_mcp = False
-
-inline_changed = False
-if missing_analytics_enabled:
-    inline_re = re.compile(r"(?m)^(\\s*analytics\\s*=\\s*\\{)([^}]*)\\}(\\s*(#.*)?)$")
-    match = inline_re.search(text)
-    if match:
-        inner = match.group(2)
-        if not re.search(r"\\benabled\\s*=", inner):
-            inner_clean = inner.strip()
-            if inner_clean:
-                new_inner = inner_clean + ", enabled = false"
-            else:
-                new_inner = "enabled = false"
-            new_line = match.group(1) + new_inner + "}" + match.group(3)
-            text = text[:match.start()] + new_line + text[match.end():]
-            inline_changed = True
-
-prepend_lines = []
-append_lines = []
-
-# Root-level settings must be prepended to avoid ending up under a section header
-if missing_approval_policy:
-    prepend_lines.append(default_approval_policy_line)
-if missing_sandbox_mode:
-    prepend_lines.append(default_sandbox_mode_line)
-if missing_update:
-    prepend_lines.append(default_update_line)
-
-if missing_analytics_enabled and not inline_changed:
-    append_lines.append("")
-    append_lines.extend(default_analytics_lines)
-
-if missing_tavily_mcp:
-    append_lines.append("")
-    append_lines.extend(default_tavily_mcp_lines)
-
-changed = inline_changed or bool(prepend_lines) or bool(append_lines)
-if changed:
-    if prepend_lines:
-        prepend_text = "\\n".join(prepend_lines) + "\\n\\n"
-        text = prepend_text + text
-    if append_lines:
-        if text and not text.endswith("\\n"):
-            text += "\\n"
-        text += "\\n".join(append_lines).rstrip() + "\\n"
-    with open(path, "w") as f:
-        f.write(text)
-"""
-
-    # Run with SANDBOX_ENABLE_TAVILY environment variable
     cmd = [
         "docker", "exec",
         "-u", CONTAINER_USER,
@@ -514,78 +321,7 @@ def ensure_gemini_settings(container_id: str, *, quiet: bool = False) -> None:
 
     enable_tavily = os.environ.get("SANDBOX_ENABLE_TAVILY", "0")
 
-    script = """import json
-import os
-
-path = "/home/ubuntu/.gemini/settings.json"
-os.makedirs(os.path.dirname(path), exist_ok=True)
-
-data = {}
-if os.path.exists(path):
-    try:
-        with open(path, "r") as f:
-            data = json.load(f)
-    except json.JSONDecodeError:
-        data = {}
-
-if not isinstance(data, dict):
-    data = {}
-
-changed = False
-
-general = data.get("general")
-if not isinstance(general, dict):
-    general = {}
-if "disableAutoUpdate" not in general:
-    general["disableAutoUpdate"] = True
-    changed = True
-if "disableUpdateNag" not in general:
-    general["disableUpdateNag"] = True
-    changed = True
-if "previewFeatures" not in general:
-    general["previewFeatures"] = True
-    changed = True
-if general:
-    data["general"] = general
-
-telemetry = data.get("telemetry")
-if not isinstance(telemetry, dict):
-    telemetry = {}
-if "enabled" not in telemetry:
-    telemetry["enabled"] = False
-    changed = True
-if telemetry:
-    data["telemetry"] = telemetry
-
-privacy = data.get("privacy")
-if not isinstance(privacy, dict):
-    privacy = {}
-if "usageStatisticsEnabled" not in privacy:
-    privacy["usageStatisticsEnabled"] = False
-    changed = True
-if privacy:
-    data["privacy"] = privacy
-
-# Add tavily-mcp to mcpServers (only if Tavily is enabled - API key on host)
-enable_tavily = os.environ.get("SANDBOX_ENABLE_TAVILY", "0") == "1"
-if enable_tavily:
-    mcp_servers = data.get("mcpServers")
-    if not isinstance(mcp_servers, dict):
-        mcp_servers = {}
-    if "tavily-mcp" not in mcp_servers:
-        mcp_servers["tavily-mcp"] = {
-            "command": "tavily-mcp",
-            "args": []
-        }
-        changed = True
-    if mcp_servers:
-        data["mcpServers"] = mcp_servers
-
-if changed or not os.path.exists(path):
-    with open(path, "w") as f:
-        json.dump(data, f, indent=2)
-        f.write("\\n")
-"""
+    script = _read_script("ensure_gemini_settings.py")
 
     cmd = [
         "docker", "exec",
@@ -622,36 +358,7 @@ def ensure_opencode_settings(container_id: str, *, quiet: bool = False) -> None:
     if not quiet:
         log_step("OpenCode: setting defaults (no autoupdate)")
 
-    script = """import json
-import os
-
-config_path = "/home/ubuntu/.config/opencode/opencode.json"
-os.makedirs(os.path.dirname(config_path), exist_ok=True)
-
-def load_json(path):
-    try:
-        with open(path, "r") as f:
-            return json.load(f)
-    except (FileNotFoundError, json.JSONDecodeError):
-        return {}
-
-data = load_json(config_path)
-if not isinstance(data, dict):
-    data = {}
-
-changed = False
-
-# Disable autoupdate (can be "on", "off", or "notify")
-if data.get("autoupdate") != "off":
-    data["autoupdate"] = "off"
-    changed = True
-
-if changed or not os.path.exists(config_path):
-    with open(config_path, "w") as f:
-        json.dump(data, f, indent=2)
-        f.write("\\n")
-"""
-    _docker_exec_python(container_id, script, quiet=quiet)
+    _docker_exec_python(container_id, _read_script("ensure_opencode_settings.py"), quiet=quiet)
 
 
 def ensure_opencode_default_model(container_id: str, *, quiet: bool = False) -> None:
@@ -668,33 +375,7 @@ def ensure_opencode_default_model(container_id: str, *, quiet: bool = False) -> 
     if not default_model:
         return
 
-    script = """import json
-import os
-
-config_path = "/home/ubuntu/.config/opencode/opencode.json"
-default_model = os.environ.get("SANDBOX_OPENCODE_DEFAULT_MODEL", "").strip()
-if not default_model:
-    raise SystemExit(0)
-
-def load_json(path):
-    try:
-        with open(path, "r") as f:
-            return json.load(f)
-    except (FileNotFoundError, json.JSONDecodeError):
-        return {}
-
-data = load_json(config_path)
-if not isinstance(data, dict):
-    data = {}
-
-model = data.get("model")
-if not model:
-    data["model"] = default_model
-    os.makedirs(os.path.dirname(config_path), exist_ok=True)
-    with open(config_path, "w") as f:
-        json.dump(data, f, indent=2)
-        f.write("\\n")
-"""
+    script = _read_script("ensure_opencode_default_model.py")
 
     cmd = [
         "docker", "exec",
@@ -728,40 +409,7 @@ def ensure_opencode_tavily_mcp(container_id: str, *, quiet: bool = False) -> Non
     if os.environ.get("SANDBOX_ENABLE_TAVILY", "0") != "1":
         return
 
-    script = """import json
-import os
-
-config_path = "/home/ubuntu/.config/opencode/opencode.json"
-
-def load_json(path):
-    try:
-        with open(path, "r") as f:
-            return json.load(f)
-    except (FileNotFoundError, json.JSONDecodeError):
-        return {}
-
-data = load_json(config_path)
-if not isinstance(data, dict):
-    data = {}
-
-# Ensure mcp section exists and is a dict
-mcp = data.get("mcp")
-if not isinstance(mcp, dict):
-    mcp = {}
-    data["mcp"] = mcp
-
-# Add tavily-mcp if not already configured
-if "tavily-mcp" not in mcp:
-    mcp["tavily-mcp"] = {
-        "command": ["tavily-mcp"]
-    }
-
-    os.makedirs(os.path.dirname(config_path), exist_ok=True)
-    with open(config_path, "w") as f:
-        json.dump(data, f, indent=2)
-        f.write("\\n")
-"""
-    _docker_exec_python(container_id, script, quiet=quiet)
+    _docker_exec_python(container_id, _read_script("ensure_opencode_tavily.py"), quiet=quiet)
 
 
 def sync_opencode_foundry(container_id: str, *, quiet: bool = False) -> None:
@@ -801,121 +449,7 @@ def prefetch_opencode_npm_plugins(container_id: str, *, quiet: bool = False) -> 
     if not quiet:
         log_info("Prefetching OpenCode npm plugins...")
 
-    script = """import json
-import os
-import shutil
-import subprocess
-import sys
-
-config_path = "/home/ubuntu/.config/opencode/opencode.json"
-cache_dir = "/home/ubuntu/.cache/opencode"
-
-def load_json(path):
-    try:
-        with open(path, "r") as f:
-            return json.load(f)
-    except (FileNotFoundError, json.JSONDecodeError):
-        return {}
-
-def is_local_plugin(plugin):
-    if isinstance(plugin, str):
-        return plugin.startswith(("/", "./", "../", "~/"))
-    if isinstance(plugin, dict):
-        path = plugin.get("path") or plugin.get("file") or plugin.get("src")
-        if isinstance(path, str):
-            return path.startswith(("/", "./", "../", "~/"))
-    return False
-
-def plugin_spec(plugin):
-    if isinstance(plugin, str):
-        return plugin
-    if isinstance(plugin, dict):
-        for key in ("name", "package", "npm", "module"):
-            value = plugin.get(key)
-            if isinstance(value, str):
-                version = plugin.get("version")
-                if isinstance(version, str) and version:
-                    return f"{value}@{version}"
-                return value
-    return None
-
-def split_spec(spec):
-    if spec.startswith("@"):
-        if "@" in spec[1:]:
-            name, _, version = spec.rpartition("@")
-            return name, version
-        return spec, ""
-    if "@" in spec:
-        name, version = spec.split("@", 1)
-        return name, version
-    return spec, ""
-
-config = load_json(config_path)
-plugins = config.get("plugin")
-if not isinstance(plugins, list):
-    raise SystemExit(0)
-
-deps = {}
-for plugin in plugins:
-    if is_local_plugin(plugin):
-        continue
-    spec = plugin_spec(plugin)
-    if not spec:
-        continue
-    name, version = split_spec(spec)
-    if not name:
-        continue
-    deps[name] = version or "latest"
-
-if not deps:
-    raise SystemExit(0)
-
-os.makedirs(cache_dir, exist_ok=True)
-pkg_path = os.path.join(cache_dir, "package.json")
-existing = load_json(pkg_path)
-existing_deps = existing.get("dependencies") if isinstance(existing, dict) else {}
-if not isinstance(existing_deps, dict):
-    existing_deps = {}
-
-changed = False
-for name, version in deps.items():
-    if existing_deps.get(name) != version:
-        existing_deps[name] = version
-        changed = True
-
-if changed or not os.path.exists(pkg_path):
-    with open(pkg_path, "w") as f:
-        json.dump({"dependencies": existing_deps}, f, indent=2)
-        f.write("\\n")
-
-node_modules = os.path.join(cache_dir, "node_modules")
-all_installed = True
-for name in deps:
-    parts = name.split("/")
-    path = os.path.join(node_modules, *parts)
-    if not os.path.isdir(path):
-        all_installed = False
-        break
-
-if all_installed:
-    raise SystemExit(0)
-
-installer = None
-if shutil.which("bun"):
-    installer = ["bun", "install"]
-elif shutil.which("npm"):
-    installer = ["npm", "install", "--no-fund", "--no-audit"]
-
-if not installer:
-    print("OpenCode plugin prefetch skipped: bun/npm not available", file=sys.stderr)
-    raise SystemExit(0)
-
-try:
-    subprocess.check_call(installer, cwd=cache_dir)
-except Exception as exc:
-    print(f"OpenCode plugin prefetch failed: {exc}", file=sys.stderr)
-    sys.exit(1)
-"""
+    script = _read_script("prefetch_opencode_plugins.py")
 
     result = subprocess.run(
         ["docker", "exec", "-u", CONTAINER_USER, "-i", container_id, "python3", "-"],

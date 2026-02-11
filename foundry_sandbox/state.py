@@ -77,28 +77,38 @@ def metadata_is_secure(path: str | Path) -> bool:
     return True
 
 
+def _secure_write_unlocked(path: Path, content: str) -> None:
+    """Write content atomically with 600 permissions (caller holds lock).
+
+    Uses write-to-temp + os.replace() to avoid corrupted files on crash.
+    The caller MUST already hold an exclusive lock on *path* via _state_lock().
+    """
+    import tempfile
+
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd, tmp_path = tempfile.mkstemp(dir=str(path.parent), suffix=".tmp")
+    try:
+        with os.fdopen(fd, "w") as f:
+            f.write(content)
+        os.chmod(tmp_path, 0o600)
+        os.replace(tmp_path, path)
+    except Exception:
+        try:
+            os.unlink(tmp_path)
+        except OSError:
+            pass
+        raise
+
+
 def _secure_write(path: Path, content: str) -> None:
     """Write content to a file atomically with 600 permissions.
 
     Uses write-to-temp + os.replace() to avoid corrupted files on crash.
     Acquires an exclusive file lock for the duration of the write.
     """
-    import tempfile
-
     path.parent.mkdir(parents=True, exist_ok=True)
     with _state_lock(path):
-        fd, tmp_path = tempfile.mkstemp(dir=str(path.parent), suffix=".tmp")
-        try:
-            with os.fdopen(fd, "w") as f:
-                f.write(content)
-            os.chmod(tmp_path, 0o600)
-            os.replace(tmp_path, path)
-        except BaseException:
-            try:
-                os.unlink(tmp_path)
-            except OSError:
-                pass
-            raise
+        _secure_write_unlocked(path, content)
 
 
 @contextlib.contextmanager
@@ -294,9 +304,9 @@ def load_sandbox_metadata(name: str) -> dict[str, Any] | None:
             if not data.get("ssh_mode"):
                 data["ssh_mode"] = "always" if str(data.get("sync_ssh", "0")) == "1" else "disabled"
 
-            # Migrate to JSON format
-            write_sandbox_metadata(
-                name,
+            # Migrate to JSON format (use _secure_write_unlocked to avoid
+            # deadlock — we already hold the exclusive lock on json_path)
+            model = SandboxMetadata(
                 repo_url=data.get("repo_url", ""),
                 branch=data.get("branch", ""),
                 from_branch=data.get("from_branch", ""),
@@ -312,6 +322,8 @@ def load_sandbox_metadata(name: str) -> dict[str, Any] | None:
                 mounts=data.get("mounts", []),
                 copies=data.get("copies", []),
             )
+            content = json.dumps(model.model_dump()) + "\n"
+            _secure_write_unlocked(json_path, content)
             # Remove legacy file after successful migration
             try:
                 legacy_path.unlink()

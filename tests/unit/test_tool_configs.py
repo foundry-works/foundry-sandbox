@@ -4,26 +4,24 @@ Tests configuration provisioning for Claude, Codex, Gemini, OpenCode, and gh
 inside Docker containers via foundry_sandbox.tool_configs.
 
 Each configure_* wrapper function delegates to ensure_* functions that execute
-inline Python scripts inside containers via docker exec. Tests verify that:
-- subprocess.run is called with docker exec commands
-- The correct container ID is targeted
-- Inline scripts reference expected paths and config keys
-- Functions are idempotent (can be called multiple times)
-
-Paths referenced in assertions are drawn from foundry_sandbox.constants:
-  CONTAINER_HOME = /home/ubuntu
-  CONTAINER_USER = ubuntu
+Python scripts (from lib/python/) inside containers via docker exec. Tests verify:
+- Commands are structured as docker exec with correct user and container
+- Script content references expected config paths and keys
+- Errors propagate correctly
+- Functions are idempotent
+- Extracted script files are valid Python
 """
 from __future__ import annotations
 
-import json
 import subprocess
-from unittest.mock import MagicMock, call, patch, ANY
+from pathlib import Path
+from unittest.mock import MagicMock, patch
 
 import pytest
 
 import foundry_sandbox.tool_configs as tool_configs_module
 from foundry_sandbox.tool_configs import (
+    _SCRIPT_DIR,
     configure_claude,
     configure_codex,
     configure_gemini,
@@ -49,51 +47,77 @@ def _make_completed(returncode: int = 0, stdout: str = "", stderr: str = ""):
     return cp
 
 
-def _flatten_calls(mock_run):
-    """Return a list of flattened arg-string lists from mock_run calls.
+def _get_calls(mock_run):
+    """Return (cmd, stdin) pairs from mock_run call history.
 
-    Each entry is the full positional argument list passed to subprocess.run
-    so callers can search for specific substrings.
+    Extracts the command list (first positional arg) and stdin input string
+    from each subprocess.run invocation for structured assertions.
     """
     result = []
     for c in mock_run.call_args_list:
-        args = c.args[0] if c.args else c.kwargs.get("args", [])
-        if isinstance(args, (list, tuple)):
-            result.append([str(a) for a in args])
-        else:
-            result.append([str(args)])
+        cmd = c.args[0] if c.args else c.kwargs.get("args", [])
+        stdin = c.kwargs.get("input", "") or ""
+        result.append((cmd, stdin))
     return result
 
 
-def _calls_contain(mock_run, *fragments: str) -> list[list[str]]:
-    """Return all subprocess.run calls whose flattened args contain every fragment."""
-    matches = []
-    for arg_list in _flatten_calls(mock_run):
-        joined = " ".join(arg_list)
-        if all(f in joined for f in fragments):
-            matches.append(arg_list)
-    return matches
+# ============================================================================
+# Script file validity
+# ============================================================================
 
 
-def _stdin_contains(mock_run, *fragments: str) -> list[str]:
-    """Return all subprocess.run calls whose stdin input contains every fragment."""
-    matches = []
-    for c in mock_run.call_args_list:
-        stdin_data = c.kwargs.get("input", "") or ""
-        if isinstance(stdin_data, str) and all(f in stdin_data for f in fragments):
-            matches.append(stdin_data)
-    return matches
+class TestExtractedScriptValidity:
+    """Verify that extracted Python scripts in lib/python/ are valid syntax."""
 
+    @pytest.mark.parametrize("script_name", [
+        "ensure_claude_onboarding.py",
+        "ensure_codex_config.py",
+        "ensure_gemini_settings.py",
+        "ensure_opencode_settings.py",
+        "ensure_opencode_default_model.py",
+        "ensure_opencode_tavily.py",
+        "prefetch_opencode_plugins.py",
+    ])
+    def test_script_compiles(self, script_name):
+        """Each extracted script should be valid Python syntax."""
+        script_path = _SCRIPT_DIR / script_name
+        assert script_path.exists(), f"Script not found: {script_path}"
+        source = script_path.read_text()
+        compile(source, str(script_path), "exec")
 
-def _any_call_references(mock_run, *fragments: str) -> bool:
-    """Check if any subprocess.run call references all fragments in args or stdin."""
-    # Check in args
-    if _calls_contain(mock_run, *fragments):
-        return True
-    # Check in stdin
-    if _stdin_contains(mock_run, *fragments):
-        return True
-    return False
+    def test_statusline_script_compiles_with_action(self):
+        """Statusline script requires _ACTION variable; compiles with it prepended."""
+        script_path = _SCRIPT_DIR / "ensure_claude_statusline.py"
+        source = script_path.read_text()
+        for action in ("set", "remove"):
+            compile(f'_ACTION = "{action}"\n' + source, str(script_path), "exec")
+
+    def test_onboarding_script_references_expected_keys(self):
+        """Onboarding script should set known config keys."""
+        source = (_SCRIPT_DIR / "ensure_claude_onboarding.py").read_text()
+        for key in ("hasCompletedOnboarding", "autoUpdates", "autoCompactEnabled"):
+            assert key in source, f"Expected key {key!r} in onboarding script"
+
+    def test_codex_script_references_config_path(self):
+        """Codex script should reference ~/.codex/config.toml."""
+        source = (_SCRIPT_DIR / "ensure_codex_config.py").read_text()
+        assert "config.toml" in source
+        assert "check_for_update_on_startup" in source
+
+    def test_gemini_script_references_expected_keys(self):
+        """Gemini script should reference auto-update and telemetry settings."""
+        source = (_SCRIPT_DIR / "ensure_gemini_settings.py").read_text()
+        assert "disableAutoUpdate" in source
+        assert "telemetry" in source
+
+    def test_opencode_script_references_autoupdate(self):
+        """OpenCode settings script should disable autoupdate."""
+        source = (_SCRIPT_DIR / "ensure_opencode_settings.py").read_text()
+        assert "autoupdate" in source
+
+    def test_script_dir_exists(self):
+        """The _SCRIPT_DIR should point to an existing directory."""
+        assert _SCRIPT_DIR.is_dir(), f"Script dir not found: {_SCRIPT_DIR}"
 
 
 # ============================================================================
@@ -105,65 +129,58 @@ class TestConfigureClaude:
     """Tests for configure_claude."""
 
     @patch("foundry_sandbox.tool_configs.subprocess.run")
-    def test_references_claude_directory(self, mock_run):
-        """References /home/ubuntu/.claude directory inside container."""
+    def test_docker_exec_command_structure(self, mock_run):
+        """Commands should be docker exec targeting the correct container as ubuntu."""
         mock_run.return_value = _make_completed()
 
         configure_claude(CONTAINER_ID)
 
-        assert _any_call_references(mock_run, ".claude"), (
-            "Expected at least one call referencing .claude directory"
+        calls = _get_calls(mock_run)
+        assert len(calls) >= 2, "Expected at least 2 calls (onboarding + statusline check)"
+        for cmd, _stdin in calls:
+            assert cmd[0:2] == ["docker", "exec"], f"Expected docker exec, got: {cmd[:2]}"
+            assert CONTAINER_ID in cmd, f"Container ID not in command: {cmd}"
+
+    @patch("foundry_sandbox.tool_configs.subprocess.run")
+    def test_onboarding_script_sent_as_stdin(self, mock_run):
+        """Onboarding script content should be passed via stdin."""
+        mock_run.return_value = _make_completed()
+
+        configure_claude(CONTAINER_ID)
+
+        calls = _get_calls(mock_run)
+        # First call is onboarding (docker exec python3 with stdin)
+        cmd, stdin = calls[0]
+        assert "python3" in cmd, f"Expected python3 in command: {cmd}"
+        assert "hasCompletedOnboarding" in stdin
+        assert "/home/ubuntu/.claude.json" in stdin
+
+    @patch("foundry_sandbox.tool_configs.subprocess.run")
+    def test_statusline_check_references_settings(self, mock_run):
+        """Statusline detection should check for settings.json in container."""
+        mock_run.return_value = _make_completed()
+
+        configure_claude(CONTAINER_ID)
+
+        calls = _get_calls(mock_run)
+        # Second call is statusline binary check (sh -c)
+        all_args = " ".join(str(a) for cmd, _ in calls for a in cmd)
+        assert "settings.json" in all_args or any(
+            "settings.json" in stdin for _, stdin in calls
         )
 
     @patch("foundry_sandbox.tool_configs.subprocess.run")
-    def test_uses_docker_exec(self, mock_run):
-        """All commands should be executed via docker exec."""
+    def test_runs_as_container_user(self, mock_run):
+        """Docker exec should specify -u ubuntu."""
         mock_run.return_value = _make_completed()
 
         configure_claude(CONTAINER_ID)
 
-        assert mock_run.called
-        for arg_list in _flatten_calls(mock_run):
-            joined = " ".join(arg_list)
-            assert "docker" in joined, (
-                f"Expected docker command, got: {joined}"
-            )
-
-    @patch("foundry_sandbox.tool_configs.subprocess.run")
-    def test_targets_correct_container(self, mock_run):
-        """Docker exec commands should target the given container ID."""
-        mock_run.return_value = _make_completed()
-
-        configure_claude(CONTAINER_ID)
-
-        docker_exec_calls = _calls_contain(mock_run, "docker", "exec")
-        assert len(docker_exec_calls) >= 1
-        for arg_list in docker_exec_calls:
-            assert CONTAINER_ID in arg_list, (
-                f"Container ID {CONTAINER_ID!r} not found in: {arg_list}"
-            )
-
-    @patch("foundry_sandbox.tool_configs.subprocess.run")
-    def test_references_settings_json(self, mock_run):
-        """Should reference settings.json in args or inline script."""
-        mock_run.return_value = _make_completed()
-
-        configure_claude(CONTAINER_ID)
-
-        assert _any_call_references(mock_run, "settings.json"), (
-            "Expected at least one call referencing settings.json"
-        )
-
-    @patch("foundry_sandbox.tool_configs.subprocess.run")
-    def test_inline_script_references_onboarding(self, mock_run):
-        """Inline Python script should set onboarding flags."""
-        mock_run.return_value = _make_completed()
-
-        configure_claude(CONTAINER_ID)
-
-        assert _any_call_references(mock_run, "hasCompletedOnboarding"), (
-            "Expected inline script to reference hasCompletedOnboarding"
-        )
+        calls = _get_calls(mock_run)
+        cmd, _ = calls[0]
+        assert "-u" in cmd
+        u_idx = cmd.index("-u")
+        assert cmd[u_idx + 1] == "ubuntu"
 
     @patch("foundry_sandbox.tool_configs.subprocess.run")
     def test_subprocess_error_propagates(self, mock_run):
@@ -175,12 +192,11 @@ class TestConfigureClaude:
 
     @patch("foundry_sandbox.tool_configs.subprocess.run")
     def test_calls_both_onboarding_and_statusline(self, mock_run):
-        """configure_claude should call both ensure_claude_onboarding and ensure_claude_statusline."""
+        """configure_claude delegates to both ensure_claude_onboarding and ensure_claude_statusline."""
         mock_run.return_value = _make_completed()
 
         configure_claude(CONTAINER_ID)
 
-        # Should have at least 2 calls (onboarding + statusline check)
         assert mock_run.call_count >= 2
 
 
@@ -193,57 +209,42 @@ class TestConfigureCodex:
     """Tests for configure_codex."""
 
     @patch("foundry_sandbox.tool_configs.subprocess.run")
-    def test_references_codex_directory(self, mock_run):
-        """References /home/ubuntu/.codex in args or inline script."""
+    def test_docker_exec_command_structure(self, mock_run):
+        """Commands should be docker exec targeting the correct container."""
         mock_run.return_value = _make_completed()
 
         configure_codex(CONTAINER_ID)
 
-        assert _any_call_references(mock_run, ".codex"), (
-            "Expected at least one call referencing .codex directory"
-        )
+        calls = _get_calls(mock_run)
+        assert len(calls) >= 1
+        cmd, stdin = calls[0]
+        assert cmd[0:2] == ["docker", "exec"]
+        assert CONTAINER_ID in cmd
+        assert "-u" in cmd
 
     @patch("foundry_sandbox.tool_configs.subprocess.run")
-    def test_uses_docker_exec(self, mock_run):
-        """All commands should be executed via docker exec."""
+    def test_script_references_codex_config(self, mock_run):
+        """Script sent to container should reference codex config path and settings."""
         mock_run.return_value = _make_completed()
 
         configure_codex(CONTAINER_ID)
 
-        assert mock_run.called
-        docker_exec_calls = _calls_contain(mock_run, "docker", "exec")
-        assert len(docker_exec_calls) >= 1
+        calls = _get_calls(mock_run)
+        cmd, stdin = calls[0]
+        assert "python3" in cmd
+        assert "/home/ubuntu/.codex" in stdin or "config.toml" in stdin
+        assert "check_for_update_on_startup" in stdin
 
     @patch("foundry_sandbox.tool_configs.subprocess.run")
-    def test_targets_correct_container(self, mock_run):
-        """Docker exec commands should target the given container ID."""
+    def test_passes_tavily_env_var(self, mock_run):
+        """Should pass SANDBOX_ENABLE_TAVILY environment variable."""
         mock_run.return_value = _make_completed()
 
         configure_codex(CONTAINER_ID)
 
-        docker_exec_calls = _calls_contain(mock_run, "docker", "exec")
-        for arg_list in docker_exec_calls:
-            assert CONTAINER_ID in arg_list
-
-    @patch("foundry_sandbox.tool_configs.subprocess.run")
-    def test_references_config_toml(self, mock_run):
-        """Should reference config.toml in args or inline script."""
-        mock_run.return_value = _make_completed()
-
-        configure_codex(CONTAINER_ID)
-
-        assert _any_call_references(mock_run, "config.toml"), (
-            "Expected at least one call referencing config.toml"
-        )
-
-    @patch("foundry_sandbox.tool_configs.subprocess.run")
-    def test_disables_auto_update(self, mock_run):
-        """Codex config should disable update checks by default."""
-        mock_run.return_value = _make_completed()
-
-        configure_codex(CONTAINER_ID)
-
-        assert _any_call_references(mock_run, "check_for_update_on_startup")
+        calls = _get_calls(mock_run)
+        cmd, _ = calls[0]
+        assert any("SANDBOX_ENABLE_TAVILY" in str(a) for a in cmd)
 
     @patch("foundry_sandbox.tool_configs.subprocess.run")
     def test_subprocess_error_propagates(self, mock_run):
@@ -263,64 +264,42 @@ class TestConfigureGemini:
     """Tests for configure_gemini."""
 
     @patch("foundry_sandbox.tool_configs.subprocess.run")
-    def test_references_gemini_directory(self, mock_run):
-        """References /home/ubuntu/.gemini in args or inline script."""
+    def test_docker_exec_command_structure(self, mock_run):
+        """Commands should be docker exec targeting the correct container."""
         mock_run.return_value = _make_completed()
 
         configure_gemini(CONTAINER_ID)
 
-        assert _any_call_references(mock_run, ".gemini"), (
-            "Expected at least one call referencing .gemini directory"
-        )
+        calls = _get_calls(mock_run)
+        assert len(calls) >= 1
+        cmd, stdin = calls[0]
+        assert cmd[0:2] == ["docker", "exec"]
+        assert CONTAINER_ID in cmd
 
     @patch("foundry_sandbox.tool_configs.subprocess.run")
-    def test_uses_docker_exec(self, mock_run):
-        """All commands should be executed via docker exec."""
+    def test_script_references_gemini_settings(self, mock_run):
+        """Script should reference gemini settings path and expected keys."""
         mock_run.return_value = _make_completed()
 
         configure_gemini(CONTAINER_ID)
 
-        assert mock_run.called
-        docker_exec_calls = _calls_contain(mock_run, "docker", "exec")
-        assert len(docker_exec_calls) >= 1
+        calls = _get_calls(mock_run)
+        cmd, stdin = calls[0]
+        assert "python3" in cmd
+        assert "/home/ubuntu/.gemini" in stdin or "settings.json" in stdin
+        assert "disableAutoUpdate" in stdin
+        assert "telemetry" in stdin
 
     @patch("foundry_sandbox.tool_configs.subprocess.run")
-    def test_targets_correct_container(self, mock_run):
-        """Docker exec commands should target the given container ID."""
+    def test_passes_tavily_env_var(self, mock_run):
+        """Should pass SANDBOX_ENABLE_TAVILY environment variable."""
         mock_run.return_value = _make_completed()
 
         configure_gemini(CONTAINER_ID)
 
-        docker_exec_calls = _calls_contain(mock_run, "docker", "exec")
-        for arg_list in docker_exec_calls:
-            assert CONTAINER_ID in arg_list
-
-    @patch("foundry_sandbox.tool_configs.subprocess.run")
-    def test_references_settings_json(self, mock_run):
-        """Should reference settings.json in args or inline script."""
-        mock_run.return_value = _make_completed()
-
-        configure_gemini(CONTAINER_ID)
-
-        assert _any_call_references(mock_run, "settings.json")
-
-    @patch("foundry_sandbox.tool_configs.subprocess.run")
-    def test_disables_auto_update(self, mock_run):
-        """Gemini settings should disable auto-update by default."""
-        mock_run.return_value = _make_completed()
-
-        configure_gemini(CONTAINER_ID)
-
-        assert _any_call_references(mock_run, "disableAutoUpdate")
-
-    @patch("foundry_sandbox.tool_configs.subprocess.run")
-    def test_disables_telemetry(self, mock_run):
-        """Gemini settings should disable telemetry by default."""
-        mock_run.return_value = _make_completed()
-
-        configure_gemini(CONTAINER_ID)
-
-        assert _any_call_references(mock_run, "telemetry")
+        calls = _get_calls(mock_run)
+        cmd, _ = calls[0]
+        assert any("SANDBOX_ENABLE_TAVILY" in str(a) for a in cmd)
 
     @patch("foundry_sandbox.tool_configs.subprocess.run")
     def test_subprocess_error_propagates(self, mock_run):
@@ -340,55 +319,30 @@ class TestConfigureOpenCode:
     """Tests for configure_opencode."""
 
     @patch("foundry_sandbox.tool_configs.subprocess.run")
-    def test_references_opencode_directory(self, mock_run):
-        """References /home/ubuntu/.config/opencode in args or inline script."""
+    def test_docker_exec_command_structure(self, mock_run):
+        """Commands should be docker exec targeting the correct container."""
         mock_run.return_value = _make_completed()
 
         configure_opencode(CONTAINER_ID)
 
-        assert _any_call_references(mock_run, "opencode"), (
-            "Expected at least one call referencing opencode config directory"
-        )
+        calls = _get_calls(mock_run)
+        assert len(calls) >= 1
+        for cmd, _stdin in calls:
+            assert cmd[0:2] == ["docker", "exec"]
+            assert CONTAINER_ID in cmd
 
     @patch("foundry_sandbox.tool_configs.subprocess.run")
-    def test_uses_docker_exec(self, mock_run):
-        """All commands should be executed via docker exec."""
+    def test_script_references_opencode_config(self, mock_run):
+        """Script should reference opencode config path and autoupdate setting."""
         mock_run.return_value = _make_completed()
 
         configure_opencode(CONTAINER_ID)
 
-        assert mock_run.called
-        docker_exec_calls = _calls_contain(mock_run, "docker", "exec")
-        assert len(docker_exec_calls) >= 1
-
-    @patch("foundry_sandbox.tool_configs.subprocess.run")
-    def test_targets_correct_container(self, mock_run):
-        """Docker exec commands should target the given container ID."""
-        mock_run.return_value = _make_completed()
-
-        configure_opencode(CONTAINER_ID)
-
-        docker_exec_calls = _calls_contain(mock_run, "docker", "exec")
-        for arg_list in docker_exec_calls:
-            assert CONTAINER_ID in arg_list
-
-    @patch("foundry_sandbox.tool_configs.subprocess.run")
-    def test_references_opencode_json(self, mock_run):
-        """Should reference opencode.json config in args or inline script."""
-        mock_run.return_value = _make_completed()
-
-        configure_opencode(CONTAINER_ID)
-
-        assert _any_call_references(mock_run, "opencode.json")
-
-    @patch("foundry_sandbox.tool_configs.subprocess.run")
-    def test_disables_autoupdate(self, mock_run):
-        """OpenCode config should set autoupdate to off."""
-        mock_run.return_value = _make_completed()
-
-        configure_opencode(CONTAINER_ID)
-
-        assert _any_call_references(mock_run, "autoupdate")
+        calls = _get_calls(mock_run)
+        cmd, stdin = calls[0]
+        assert "python3" in cmd
+        assert "/home/ubuntu/.config/opencode" in stdin or "opencode.json" in stdin
+        assert "autoupdate" in stdin
 
     @patch("foundry_sandbox.tool_configs.subprocess.run")
     def test_subprocess_error_propagates(self, mock_run):
@@ -408,38 +362,17 @@ class TestConfigureGh:
     """Tests for configure_gh."""
 
     @patch("foundry_sandbox.tool_configs.subprocess.run")
-    def test_references_gh_config(self, mock_run):
-        """References .config/gh or git config in args or inline script."""
+    def test_docker_exec_command_structure(self, mock_run):
+        """Commands should be docker exec targeting the correct container."""
         mock_run.return_value = _make_completed()
 
         configure_gh(CONTAINER_ID)
 
-        # configure_gh calls ensure_github_https_git which does git config operations
-        assert _any_call_references(mock_run, "git", "config"), (
-            "Expected at least one call referencing git config"
-        )
-
-    @patch("foundry_sandbox.tool_configs.subprocess.run")
-    def test_uses_docker_exec(self, mock_run):
-        """All commands should be executed via docker exec."""
-        mock_run.return_value = _make_completed()
-
-        configure_gh(CONTAINER_ID)
-
-        assert mock_run.called
-        docker_exec_calls = _calls_contain(mock_run, "docker", "exec")
-        assert len(docker_exec_calls) >= 1
-
-    @patch("foundry_sandbox.tool_configs.subprocess.run")
-    def test_targets_correct_container(self, mock_run):
-        """Docker exec commands should target the given container ID."""
-        mock_run.return_value = _make_completed()
-
-        configure_gh(CONTAINER_ID)
-
-        docker_exec_calls = _calls_contain(mock_run, "docker", "exec")
-        for arg_list in docker_exec_calls:
-            assert CONTAINER_ID in arg_list
+        calls = _get_calls(mock_run)
+        assert len(calls) >= 1
+        for cmd, _stdin in calls:
+            assert cmd[0:2] == ["docker", "exec"]
+            assert CONTAINER_ID in cmd
 
     @patch("foundry_sandbox.tool_configs.subprocess.run")
     def test_forces_https_for_github(self, mock_run):
@@ -448,9 +381,13 @@ class TestConfigureGh:
 
         configure_gh(CONTAINER_ID)
 
-        assert _any_call_references(mock_run, "https://github.com/"), (
-            "Expected HTTPS insteadOf configuration for github.com"
-        )
+        calls = _get_calls(mock_run)
+        # First call is the git config shell command
+        cmd, _ = calls[0]
+        assert "sh" in cmd
+        shell_cmd = cmd[-1]  # last arg is the shell command string
+        assert "https://github.com/" in shell_cmd
+        assert "git config" in shell_cmd
 
     @patch("foundry_sandbox.tool_configs.subprocess.run")
     def test_skips_https_when_ssh_enabled(self, mock_run):
@@ -459,7 +396,6 @@ class TestConfigureGh:
 
         configure_gh(CONTAINER_ID, enable_ssh=True)
 
-        # When SSH is enabled, no git config calls should be made
         assert not mock_run.called
 
     @patch("foundry_sandbox.tool_configs.subprocess.run")
@@ -472,155 +408,34 @@ class TestConfigureGh:
 
 
 # ============================================================================
-# Cross-cutting concerns
+# Idempotency
 # ============================================================================
 
 
-class TestContainerUserOwnership:
-    """Tests verifying that config commands run as the container user."""
-
-    @patch("foundry_sandbox.tool_configs.subprocess.run")
-    def test_claude_uses_container_user(self, mock_run):
-        """Claude config commands should run as ubuntu user."""
-        mock_run.return_value = _make_completed()
-
-        configure_claude(CONTAINER_ID)
-
-        # At least one docker exec call should specify -u ubuntu
-        user_calls = _calls_contain(mock_run, "docker", "exec", "ubuntu")
-        assert len(user_calls) >= 1 or mock_run.called
-
-    @patch("foundry_sandbox.tool_configs.subprocess.run")
-    def test_gemini_uses_container_user(self, mock_run):
-        """Gemini config commands should run as ubuntu user."""
-        mock_run.return_value = _make_completed()
-
-        configure_gemini(CONTAINER_ID)
-
-        assert mock_run.called
-
-    @patch("foundry_sandbox.tool_configs.subprocess.run")
-    def test_opencode_uses_container_user(self, mock_run):
-        """OpenCode config commands should run as ubuntu user."""
-        mock_run.return_value = _make_completed()
-
-        configure_opencode(CONTAINER_ID)
-
-        assert mock_run.called
-
-
-class TestContainerPaths:
-    """Tests verifying that correct container paths are used."""
-
-    @patch("foundry_sandbox.tool_configs.subprocess.run")
-    def test_claude_uses_home_ubuntu_path(self, mock_run):
-        """Claude config should reference /home/ubuntu/.claude."""
-        mock_run.return_value = _make_completed()
-
-        configure_claude(CONTAINER_ID)
-
-        assert _any_call_references(mock_run, "/home/ubuntu/.claude"), (
-            "Expected at least one call referencing /home/ubuntu/.claude"
-        )
-
-    @patch("foundry_sandbox.tool_configs.subprocess.run")
-    def test_gemini_uses_home_ubuntu_path(self, mock_run):
-        """Gemini config should reference /home/ubuntu/.gemini."""
-        mock_run.return_value = _make_completed()
-
-        configure_gemini(CONTAINER_ID)
-
-        assert _any_call_references(mock_run, "/home/ubuntu/.gemini"), (
-            "Expected at least one call referencing /home/ubuntu/.gemini"
-        )
-
-    @patch("foundry_sandbox.tool_configs.subprocess.run")
-    def test_opencode_uses_config_path(self, mock_run):
-        """OpenCode config should reference /home/ubuntu/.config/opencode."""
-        mock_run.return_value = _make_completed()
-
-        configure_opencode(CONTAINER_ID)
-
-        assert _any_call_references(mock_run, "/home/ubuntu/.config/opencode"), (
-            "Expected at least one call referencing /home/ubuntu/.config/opencode"
-        )
-
-    @patch("foundry_sandbox.tool_configs.subprocess.run")
-    def test_gh_uses_git_config(self, mock_run):
-        """gh config should reference github.com via git config."""
-        mock_run.return_value = _make_completed()
-
-        configure_gh(CONTAINER_ID)
-
-        assert _any_call_references(mock_run, "github.com"), (
-            "Expected at least one call referencing github.com"
-        )
-
-    @patch("foundry_sandbox.tool_configs.subprocess.run")
-    def test_codex_uses_home_ubuntu_path(self, mock_run):
-        """Codex config should reference /home/ubuntu/.codex."""
-        mock_run.return_value = _make_completed()
-
-        configure_codex(CONTAINER_ID)
-
-        assert _any_call_references(mock_run, "/home/ubuntu/.codex"), (
-            "Expected at least one call referencing /home/ubuntu/.codex"
-        )
-
-
 class TestIdempotency:
-    """Tests verifying that configure_* functions can be called multiple times."""
+    """Verify that configure_* functions can be called multiple times without error."""
 
+    @pytest.mark.parametrize("configure_fn", [
+        configure_claude,
+        configure_codex,
+        configure_gemini,
+        configure_gh,
+        configure_opencode,
+    ])
     @patch("foundry_sandbox.tool_configs.subprocess.run")
-    def test_claude_idempotent(self, mock_run):
-        """Calling configure_claude twice should not raise."""
+    def test_idempotent(self, mock_run, configure_fn):
+        """Calling any configure_* function twice should not raise."""
         mock_run.return_value = _make_completed()
 
-        configure_claude(CONTAINER_ID)
-        configure_claude(CONTAINER_ID)
-
-        # Should succeed without error
-        assert mock_run.call_count >= 2
-
-    @patch("foundry_sandbox.tool_configs.subprocess.run")
-    def test_gemini_idempotent(self, mock_run):
-        """Calling configure_gemini twice should not raise."""
-        mock_run.return_value = _make_completed()
-
-        configure_gemini(CONTAINER_ID)
-        configure_gemini(CONTAINER_ID)
+        configure_fn(CONTAINER_ID)
+        configure_fn(CONTAINER_ID)
 
         assert mock_run.call_count >= 2
 
-    @patch("foundry_sandbox.tool_configs.subprocess.run")
-    def test_opencode_idempotent(self, mock_run):
-        """Calling configure_opencode twice should not raise."""
-        mock_run.return_value = _make_completed()
 
-        configure_opencode(CONTAINER_ID)
-        configure_opencode(CONTAINER_ID)
-
-        assert mock_run.call_count >= 2
-
-    @patch("foundry_sandbox.tool_configs.subprocess.run")
-    def test_gh_idempotent(self, mock_run):
-        """Calling configure_gh twice should not raise."""
-        mock_run.return_value = _make_completed()
-
-        configure_gh(CONTAINER_ID)
-        configure_gh(CONTAINER_ID)
-
-        assert mock_run.call_count >= 2
-
-    @patch("foundry_sandbox.tool_configs.subprocess.run")
-    def test_codex_idempotent(self, mock_run):
-        """Calling configure_codex twice should not raise."""
-        mock_run.return_value = _make_completed()
-
-        configure_codex(CONTAINER_ID)
-        configure_codex(CONTAINER_ID)
-
-        assert mock_run.call_count >= 2
+# ============================================================================
+# OpenCode local plugin sync
+# ============================================================================
 
 
 class TestOpenCodeLocalPluginSync:

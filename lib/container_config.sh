@@ -88,7 +88,7 @@ prepopulate_foundry_global() {
     local plugin_json="$foundry_cache/.claude-plugin/plugin.json"
     local version="unknown"
     if [ -f "$plugin_json" ]; then
-        version=$(python3 -c "import json; print(json.load(open('$plugin_json'))['version'])" 2>/dev/null || echo "unknown")
+        version=$(python3 -c "import json,sys; print(json.load(open(sys.argv[1]))['version'])" "$plugin_json" 2>/dev/null || echo "unknown")
     fi
 
     # Copy skills to ~/.claude/skills/
@@ -1147,12 +1147,12 @@ ensure_claude_statusline() {
     fi
 
     local binary_exists=0
-    if $run_fn docker exec "$container_id" sh -c "command -v claude-statusline >/dev/null 2>&1 || [ -x $CONTAINER_HOME/.local/bin/claude-statusline ]"; then
+    if $run_fn docker exec "$container_id" sh -c "command -v claude-statusline >/dev/null 2>&1 || [ -x \"$CONTAINER_HOME\"/.local/bin/claude-statusline ]"; then
         binary_exists=1
     fi
 
     local statusline_configured=0
-    if $run_fn docker exec "$container_id" sh -c "test -f $CONTAINER_HOME/.claude/settings.json && grep -q '\"statusLine\"' $CONTAINER_HOME/.claude/settings.json"; then
+    if $run_fn docker exec "$container_id" sh -c "test -f \"$CONTAINER_HOME\"/.claude/settings.json && grep -q '\"statusLine\"' \"$CONTAINER_HOME\"/.claude/settings.json"; then
         statusline_configured=1
     fi
 
@@ -1161,7 +1161,7 @@ ensure_claude_statusline() {
         if [ "$statusline_configured" = "1" ]; then
             # Check if the current command uses the bundled binary
             local uses_bundled=0
-            if $run_fn docker exec "$container_id" sh -c "grep -q '\"command\": \"claude-statusline\"' $CONTAINER_HOME/.claude/settings.json 2>/dev/null"; then
+            if $run_fn docker exec "$container_id" sh -c "grep -q '\"command\": \"claude-statusline\"' \"$CONTAINER_HOME\"/.claude/settings.json 2>/dev/null"; then
                 uses_bundled=1
             fi
             if [ "$uses_bundled" = "1" ]; then
@@ -1809,7 +1809,12 @@ copy_configs_to_container() {
             file_exists ~/.ssh/known_hosts && copy_file_to_container "$container_id" ~/.ssh/known_hosts "$CONTAINER_HOME/.ssh/known_hosts"
             file_exists ~/.ssh/config && copy_file_to_container "$container_id" ~/.ssh/config "$CONTAINER_HOME/.ssh/config"
             docker exec -u "$CONTAINER_USER" "$container_id" sh -c "if [ -f /etc/skel/.ssh/known_hosts ]; then touch '$CONTAINER_HOME/.ssh/known_hosts'; cat /etc/skel/.ssh/known_hosts >> '$CONTAINER_HOME/.ssh/known_hosts'; fi" 2>/dev/null || true
-            docker exec -u "$CONTAINER_USER" "$container_id" sh -c "touch '$CONTAINER_HOME/.ssh/config'; if ! grep -q '^Host github.com' '$CONTAINER_HOME/.ssh/config'; then printf '\nHost github.com\n  IdentityAgent %s\n  IdentitiesOnly no\n' '$SSH_AGENT_CONTAINER_SOCK' >> '$CONTAINER_HOME/.ssh/config'; fi" 2>/dev/null || true
+            docker exec -u "$CONTAINER_USER" "$container_id" sh -c "
+    touch \"$CONTAINER_HOME/.ssh/config\"
+    if ! grep -q '^Host github.com' \"$CONTAINER_HOME/.ssh/config\"; then
+        printf '\nHost github.com\n  IdentityAgent %s\n  IdentitiesOnly no\n' \"$SSH_AGENT_CONTAINER_SOCK\" >> \"$CONTAINER_HOME/.ssh/config\"
+    fi
+" 2>/dev/null || true
         else
             log_warn "SSH agent not detected; skipping SSH key copy (agent-only mode)."
         fi
@@ -1834,19 +1839,19 @@ copy_configs_to_container() {
 
     log_debug "Fixing ownership..."
     run_cmd docker exec "$container_id" sh -c "
-        chown -R $CONTAINER_USER:$CONTAINER_USER \
-            $CONTAINER_HOME/.claude \
-            $CONTAINER_HOME/.config \
-            $CONTAINER_HOME/.gemini \
-            $CONTAINER_HOME/.codex \
-            $CONTAINER_HOME/.ssh \
-            $CONTAINER_HOME/.sandboxes \
-            $CONTAINER_HOME/.local/share/opencode \
+        chown -R \"$CONTAINER_USER:$CONTAINER_USER\" \
+            \"$CONTAINER_HOME/.claude\" \
+            \"$CONTAINER_HOME/.config\" \
+            \"$CONTAINER_HOME/.gemini\" \
+            \"$CONTAINER_HOME/.codex\" \
+            \"$CONTAINER_HOME/.ssh\" \
+            \"$CONTAINER_HOME/.sandboxes\" \
+            \"$CONTAINER_HOME/.local/share/opencode\" \
             2>/dev/null
-        chown $CONTAINER_USER:$CONTAINER_USER $CONTAINER_HOME/.gitconfig 2>/dev/null
-        chmod 700 $CONTAINER_HOME/.ssh 2>/dev/null
-        find $CONTAINER_HOME/.ssh -type d -exec chmod 700 {} + 2>/dev/null || true
-        find $CONTAINER_HOME/.ssh -type f -exec chmod 600 {} + 2>/dev/null || true
+        chown \"$CONTAINER_USER:$CONTAINER_USER\" \"$CONTAINER_HOME/.gitconfig\" 2>/dev/null
+        chmod 700 \"$CONTAINER_HOME/.ssh\" 2>/dev/null
+        find \"$CONTAINER_HOME/.ssh\" -type d -exec chmod 700 {} + 2>/dev/null || true
+        find \"$CONTAINER_HOME/.ssh\" -type f -exec chmod 600 {} + 2>/dev/null || true
     " || true
 
     ensure_github_https_git "$container_id" "0" "$enable_ssh"

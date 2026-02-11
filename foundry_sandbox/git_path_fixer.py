@@ -173,5 +173,5 @@ def detect_nested_git_repos(container_id: str, workspace_path: str = "/workspace
         return paths
 
     except Exception:
-        log_debug("Failed to detect nested git repos")
+        log_warn("Failed to detect nested git repos")
         return []

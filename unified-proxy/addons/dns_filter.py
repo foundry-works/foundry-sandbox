@@ -275,7 +275,7 @@ class DNSFilterAddon:
                         if isinstance(value, int) and value == query_type:
                             return attr
         except Exception:
-            pass
+            logger.debug("Failed to resolve DNS query type name")
 
         # Fall back to our mapping
         return type_names.get(query_type, str(query_type))

@@ -529,7 +529,7 @@ def create_git_api(
                 if config:
                     return config.metadata
         except Exception:
-            logger.debug(
+            logger.warning(
                 "Could not load metadata for sandbox %s", sandbox_id
             )
         return None

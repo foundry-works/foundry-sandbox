@@ -258,7 +258,7 @@ def proxy_wait_ready(
             log_debug(f"Proxy not ready yet: {type(exc).__name__}")
         except Exception as exc:
             # Structural errors (KeyError, TypeError, etc.) — log and break early
-            log_debug(f"Unexpected error during proxy health check: {type(exc).__name__}: {exc}")
+            log_warn(f"Unexpected error during proxy health check: {type(exc).__name__}: {exc}")
             break
 
         # Calculate sleep time for this iteration
