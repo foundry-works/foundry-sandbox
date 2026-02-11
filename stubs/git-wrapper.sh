@@ -362,9 +362,9 @@ STDOUT_B64=$(echo "$RESPONSE" | jq -r '.stdout_b64 // ""' 2>/dev/null || true)
 
 # Fall back to stdout_b64 when stdout is empty
 if [[ -z "$STDOUT" && -n "$STDOUT_B64" ]]; then
-    STDOUT=$(printf '%s' "$STDOUT_B64" | python3 - <<'PY' 2>/dev/null || true
-import base64, sys
-data = sys.stdin.read().strip()
+    STDOUT=$(STDOUT_B64="$STDOUT_B64" python3 <<'PY' 2>/dev/null || true
+import base64, sys, os
+data = os.environ.get("STDOUT_B64", "").strip()
 try:
     decoded = base64.b64decode(data)
     sys.stdout.write(decoded.decode("utf-8", errors="replace"))
