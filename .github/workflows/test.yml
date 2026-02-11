@@ -21,40 +21,24 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python-version }}
+          cache: pip
 
       - name: Install dependencies
         run: |
           pip install -e ".[dev,test-orchestration]"
 
       - name: Run unit tests
-        run: pytest tests/unit/ -v --tb=short --cov=foundry_sandbox --cov-report=term-missing --cov-fail-under=60
-
-  security-unit:
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    strategy:
-      fail-fast: false
-      matrix:
-        python-version: ["3.10", "3.12"]
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Set up Python ${{ matrix.python-version }}
-        uses: actions/setup-python@v5
-        with:
-          python-version: ${{ matrix.python-version }}
-
-      - name: Install dependencies
-        run: |
-          pip install -e ".[dev,test-orchestration]"
-
-      - name: Run security-critical unit tests
         run: >
-          pytest -v --tb=short
-          tests/unit/test_policy_engine.py
-          tests/unit/test_credential_injector.py
-          tests/unit/test_dns_filter.py
-          tests/unit/test_container_identity.py
+          pytest tests/unit/ -v --tb=short
+          --cov=foundry_sandbox --cov-report=term-missing --cov-fail-under=60
+          --junitxml=junit-unit.xml
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: unit-results-py${{ matrix.python-version }}
+          path: junit-unit.xml
 
   integration:
     runs-on: ubuntu-latest
@@ -70,13 +54,24 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python-version }}
+          cache: pip
 
       - name: Install dependencies
         run: |
           pip install -e ".[dev,test-orchestration,test-proxy]"
 
       - name: Run integration tests
-        run: pytest tests/integration/ -v --tb=short --cov=foundry_sandbox --cov-report=term-missing
+        run: >
+          pytest tests/integration/ -v --tb=short
+          --cov=foundry_sandbox --cov-report=term-missing --cov-fail-under=30
+          --junitxml=junit-integration.xml
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: integration-results-py${{ matrix.python-version }}
+          path: junit-integration.xml
 
   lint:
     runs-on: ubuntu-latest
@@ -92,6 +87,7 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python-version }}
+          cache: pip
 
       - name: Install dependencies
         run: pip install -e ".[dev]"
@@ -100,8 +96,14 @@ jobs:
         run: mypy --strict foundry_sandbox/
 
       - name: Run ruff
-        if: matrix.python-version == '3.12'
         run: ruff check .
+
+      - name: Run shellcheck
+        if: matrix.python-version == '3.12'
+        continue-on-error: true
+        run: |
+          sudo apt-get install -y -qq shellcheck 2>/dev/null
+          shellcheck sandbox.sh entrypoint.sh entrypoint-root.sh stubs/git-wrapper.sh tests/run.sh
 
   unified-proxy:
     runs-on: ubuntu-latest
@@ -117,10 +119,21 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python-version }}
+          cache: pip
 
       - name: Install dependencies
         run: |
           pip install -e ".[dev,test-proxy]"
 
       - name: Run unified-proxy tests
-        run: pytest unified-proxy/tests/ -v --tb=short --cov=unified-proxy --cov-report=term-missing
+        run: >
+          pytest unified-proxy/tests/ -v --tb=short
+          --cov=unified-proxy --cov-report=term-missing --cov-fail-under=30
+          --junitxml=junit-proxy.xml
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: proxy-results-py${{ matrix.python-version }}
+          path: junit-proxy.xml

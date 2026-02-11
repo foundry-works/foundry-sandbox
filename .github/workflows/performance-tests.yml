@@ -23,9 +23,19 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: "3.12"
+          cache: pip
 
       - name: Install dependencies
         run: pip install -e ".[dev,test-orchestration]"
 
       - name: Run performance tests
-        run: pytest tests/performance/ -v --tb=short -m ''
+        run: >
+          pytest tests/performance/ -v --tb=short -m ''
+          --junitxml=junit-performance.xml
+
+      - name: Upload performance results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: performance-results
+          path: junit-performance.xml

@@ -20,10 +20,11 @@ jobs:
     uses: ./.github/workflows/performance-tests.yml
 
   release:
-    needs: [tests, orchestration]
+    needs: [tests, orchestration, performance]
     if: |
       needs.tests.result == 'success' &&
-      needs.orchestration.result == 'success'
+      needs.orchestration.result == 'success' &&
+      needs.performance.result == 'success'
     runs-on: ubuntu-latest
     permissions:
       contents: write

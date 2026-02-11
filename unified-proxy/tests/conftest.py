@@ -2,6 +2,9 @@
 Pytest configuration for unified-proxy tests.
 
 Sets up the Python path and module mocking before imports.
+
+Set MITMPROXY_NO_MOCK=1 to skip mock installation (used by the proxy
+drift check workflow to test against real mitmproxy).
 """
 
 import os
@@ -17,9 +20,11 @@ root_tests_dir = os.path.normpath(os.path.join(unified_proxy_dir, os.pardir, "te
 if root_tests_dir not in sys.path:
     sys.path.insert(0, root_tests_dir)
 
-# Block problematic imports before any test modules load
-# This prevents mitmproxy import chain issues
-from mocks import install_mitmproxy_mocks  # noqa: E402
+_SKIP_MOCKS = os.environ.get("MITMPROXY_NO_MOCK") == "1"
 
-if "mitmproxy" not in sys.modules:
+if not _SKIP_MOCKS and "mitmproxy" not in sys.modules:
+    # Block problematic imports before any test modules load
+    # This prevents mitmproxy import chain issues
+    from mocks import install_mitmproxy_mocks  # noqa: E402
+
     install_mitmproxy_mocks()
