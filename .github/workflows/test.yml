@@ -107,7 +107,7 @@ jobs:
           shellcheck -e SC2034 uninstall.sh
           shellcheck -e SC2163 safety/credential-redaction.sh
           shellcheck -e SC2015 safety/network-firewall.sh
-          shellcheck -e SC2317,SC2034,SC2088 tests/test-pip-requirements.sh
+          shellcheck -e SC1091,SC2317,SC2034,SC2088 tests/test-pip-requirements.sh
 
   unified-proxy:
     runs-on: ubuntu-latest
