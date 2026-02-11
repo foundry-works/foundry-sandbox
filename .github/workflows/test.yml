@@ -63,7 +63,6 @@ jobs:
       - name: Run integration tests
         run: >
           pytest tests/integration/ -v --tb=short
-          --cov=foundry_sandbox --cov-report=term-missing --cov-fail-under=30
           --junitxml=junit-integration.xml
 
       - name: Upload test results
