@@ -18,7 +18,7 @@ import subprocess
 import sys
 
 import pytest
-from hypothesis import given, settings, HealthCheck
+from hypothesis import given, settings
 import hypothesis.strategies as st
 
 # ---------------------------------------------------------------------------
@@ -136,8 +136,7 @@ class TestGitValidationFuzzing:
 
     @settings(
         derandomize=True,
-        max_examples=200,
-        suppress_health_check=[HealthCheck.too_slow],
+        max_examples=500,
     )
     @given(argv=argv_tokens)
     def test_git_validation_no_crash(self, argv):
@@ -154,8 +153,7 @@ class TestGitValidationFuzzing:
 
     @settings(
         derandomize=True,
-        max_examples=200,
-        suppress_health_check=[HealthCheck.too_slow],
+        max_examples=500,
     )
     @given(argv=argv_tokens)
     def test_git_validation_with_extra_allowed_no_crash(self, argv):
@@ -266,8 +264,7 @@ class TestPolicyEvaluationFuzzing:
 
     @settings(
         derandomize=True,
-        max_examples=200,
-        suppress_health_check=[HealthCheck.too_slow],
+        max_examples=500,
     )
     @given(
         refname=refname_strategy,
@@ -292,8 +289,7 @@ class TestPolicyEvaluationFuzzing:
 
     @settings(
         derandomize=True,
-        max_examples=200,
-        suppress_health_check=[HealthCheck.too_slow],
+        max_examples=500,
     )
     @given(
         refname=refname_strategy,
@@ -334,8 +330,7 @@ class TestSandboxNameFuzzing:
 
     @settings(
         derandomize=True,
-        max_examples=200,
-        suppress_health_check=[HealthCheck.too_slow],
+        max_examples=500,
     )
     @given(name=sandbox_name_strategy)
     def test_name_validation_no_crash(self, name):
@@ -355,8 +350,7 @@ class TestSandboxNameFuzzing:
 
     @settings(
         derandomize=True,
-        max_examples=200,
-        suppress_health_check=[HealthCheck.too_slow],
+        max_examples=500,
     )
     @given(name=st.just(""))
     def test_name_validation_empty_always_rejected(self, name):
@@ -391,8 +385,7 @@ class TestUrlValidationFuzzing:
 
     @settings(
         derandomize=True,
-        max_examples=200,
-        suppress_health_check=[HealthCheck.too_slow],
+        max_examples=500,
     )
     @given(url=url_strategy)
     def test_url_validation_no_crash(self, url):
@@ -411,8 +404,7 @@ class TestUrlValidationFuzzing:
 
     @settings(
         derandomize=True,
-        max_examples=200,
-        suppress_health_check=[HealthCheck.too_slow],
+        max_examples=500,
     )
     @given(
         user=st.text(min_size=1, max_size=20),
@@ -455,8 +447,7 @@ class TestMountPathFuzzing:
 
     @settings(
         derandomize=True,
-        max_examples=200,
-        suppress_health_check=[HealthCheck.too_slow],
+        max_examples=500,
     )
     @given(path=st.text(min_size=0, max_size=300))
     def test_mount_path_no_crash(self, path):
@@ -479,8 +470,7 @@ class TestKeyFormatFuzzing:
 
     @settings(
         derandomize=True,
-        max_examples=200,
-        suppress_health_check=[HealthCheck.too_slow],
+        max_examples=500,
     )
     @given(key=key_strategy)
     def test_zai_key_no_crash(self, key):
@@ -525,8 +515,7 @@ class TestKeyFormatFuzzing:
 
     @settings(
         derandomize=True,
-        max_examples=200,
-        suppress_health_check=[HealthCheck.too_slow],
+        max_examples=500,
     )
     @given(key=key_strategy)
     def test_ai_key_no_crash(self, key):
@@ -558,8 +547,7 @@ class TestStateMetadataFuzzing:
 
     @settings(
         derandomize=True,
-        max_examples=200,
-        suppress_health_check=[HealthCheck.too_slow],
+        max_examples=500,
     )
     @given(
         name=st.text(min_size=1, max_size=50, alphabet=st.characters(min_codepoint=48, max_codepoint=122)),
@@ -611,8 +599,7 @@ class TestStateMetadataFuzzing:
 
     @settings(
         derandomize=True,
-        max_examples=200,
-        suppress_health_check=[HealthCheck.too_slow],
+        max_examples=500,
     )
     @given(content=st.text(min_size=0, max_size=500))
     def test_legacy_parse_no_crash(self, content):
@@ -681,8 +668,7 @@ class TestGitPathFuzzing:
 
     @settings(
         derandomize=True,
-        max_examples=200,
-        suppress_health_check=[HealthCheck.too_slow],
+        max_examples=500,
     )
     @given(path=traversal_paths)
     def test_configure_sparse_checkout_traversal_no_crash(self, path):
@@ -727,8 +713,7 @@ class TestGitPathFuzzing:
 
     @settings(
         derandomize=True,
-        max_examples=200,
-        suppress_health_check=[HealthCheck.too_slow],
+        max_examples=500,
     )
     @given(path=traversal_paths)
     def test_create_worktree_traversal_no_crash(self, path):
@@ -813,8 +798,7 @@ class TestWorktreeNameFuzzing:
 
     @settings(
         derandomize=True,
-        max_examples=200,
-        suppress_health_check=[HealthCheck.too_slow],
+        max_examples=500,
     )
     @given(name=shell_metachar_names)
     def test_create_worktree_metachar_no_crash(self, name):
@@ -847,8 +831,7 @@ class TestWorktreeNameFuzzing:
 
     @settings(
         derandomize=True,
-        max_examples=200,
-        suppress_health_check=[HealthCheck.too_slow],
+        max_examples=500,
     )
     @given(name=shell_metachar_names)
     def test_create_worktree_metachar_no_shell_injection(self, name):
@@ -950,8 +933,7 @@ class TestBranchNameFuzzing:
 
     @settings(
         derandomize=True,
-        max_examples=200,
-        suppress_health_check=[HealthCheck.too_slow],
+        max_examples=500,
     )
     @given(name=dangerous_branch_names)
     def test_is_allowed_branch_name_no_crash(self, name):
@@ -975,8 +957,7 @@ class TestBranchNameFuzzing:
 
     @settings(
         derandomize=True,
-        max_examples=200,
-        suppress_health_check=[HealthCheck.too_slow],
+        max_examples=500,
     )
     @given(name=dangerous_branch_names)
     def test_is_allowed_ref_no_crash(self, name):
@@ -1000,8 +981,7 @@ class TestBranchNameFuzzing:
 
     @settings(
         derandomize=True,
-        max_examples=200,
-        suppress_health_check=[HealthCheck.too_slow],
+        max_examples=500,
     )
     @given(name=dangerous_branch_names)
     def test_cleanup_sandbox_branch_no_crash(self, name):
@@ -1032,8 +1012,7 @@ class TestBranchNameFuzzing:
 
     @settings(
         derandomize=True,
-        max_examples=200,
-        suppress_health_check=[HealthCheck.too_slow],
+        max_examples=500,
     )
     @given(name=dangerous_branch_names)
     def test_validate_branch_isolation_no_crash(self, name):

@@ -27,7 +27,7 @@ PACKAGE_DIR = Path(__file__).resolve().parents[2] / "foundry_sandbox"
 # Layer definitions: module name -> allowed foundry_sandbox imports.
 # Module names are relative to foundry_sandbox (e.g., "constants" for foundry_sandbox.constants).
 
-BASE_MODULES = {"constants", "errors", "utils", "models", "__init__"}
+BASE_MODULES = {"atomic_io", "constants", "errors", "utils", "models", "__init__"}
 
 MID_MODULES = {"paths", "config"}
 

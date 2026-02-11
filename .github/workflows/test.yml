@@ -63,7 +63,7 @@ jobs:
       - name: Run integration tests
         run: >
           pytest tests/integration/ -v --tb=short
-          --cov=foundry_sandbox --cov-report=term-missing
+          --cov=foundry_sandbox --cov-report=term-missing --cov-fail-under=40
           --junitxml=junit-integration.xml
 
       - name: Upload test results
@@ -102,7 +102,9 @@ jobs:
         if: matrix.python-version == '3.12'
         run: |
           sudo apt-get install -y -qq shellcheck 2>/dev/null
-          shellcheck sandbox.sh entrypoint.sh entrypoint-root.sh stubs/git-wrapper.sh tests/run.sh
+          shellcheck sandbox.sh entrypoint.sh entrypoint-root.sh stubs/git-wrapper.sh tests/run.sh \
+            safety/credential-redaction.sh safety/network-firewall.sh unified-proxy/entrypoint.sh \
+            install.sh uninstall.sh tests/test-pip-requirements.sh
 
   unified-proxy:
     runs-on: ubuntu-latest
@@ -127,7 +129,7 @@ jobs:
       - name: Run unified-proxy tests
         run: >
           pytest unified-proxy/tests/ -v --tb=short
-          --cov=unified-proxy --cov-report=term-missing --cov-fail-under=30
+          --cov=unified-proxy --cov-report=term-missing --cov-fail-under=50
           --junitxml=junit-proxy.xml
 
       - name: Upload test results

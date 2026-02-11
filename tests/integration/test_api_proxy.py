@@ -179,8 +179,8 @@ class TestRateLimiting:
             # First 2 should pass (capacity=2), rest should be 429
             passed = [r for r in responses if r is None]
             blocked = [r for r in responses if r is not None and r.status_code == 429]
-            assert len(passed) >= 1, "At least one request should pass"
-            assert len(blocked) >= 1, "At least one request should be rate limited"
+            assert len(passed) == 2, f"Expected 2 requests to pass (capacity=2), got {len(passed)}"
+            assert len(blocked) == 3, f"Expected 3 requests blocked (5 total - 2 capacity), got {len(blocked)}"
 
 
 class TestCircuitBreaker:
