@@ -5,18 +5,25 @@ It provides functions for:
   - Resolving sandbox paths (worktrees, configs, metadata)
   - Deriving all related paths for a named sandbox
   - Directory and path management (ensure_dir, safe_remove)
+  - Repository URL → bare-path conversion
+  - Sandbox name generation
 """
 
 from __future__ import annotations
 
+import hashlib
+import os
 from pathlib import Path
 from typing import NamedTuple
 
 from foundry_sandbox.constants import (
+    SANDBOX_NAME_MAX_LENGTH,
     get_claude_configs_dir,
+    get_repos_dir,
     get_sandbox_home,
     get_worktrees_dir,
 )
+from foundry_sandbox.utils import sanitize_ref_component
 
 
 # ============================================================================
@@ -291,3 +298,126 @@ def safe_remove(path: str | Path) -> None:
         _rmtree_no_follow_symlinks(p)
     else:
         p.unlink()
+
+
+# ============================================================================
+# Repository & Sandbox Name Helpers (moved from commands/_helpers.py)
+# ============================================================================
+
+
+def repo_url_to_bare_path(repo_url: str) -> str:
+    """Convert a repository URL to its bare-clone path under REPOS_DIR.
+
+    Handles https://, http://, git@, and local filesystem paths.
+
+    Args:
+        repo_url: Repository URL or local path.
+
+    Returns:
+        Absolute path string to the bare repository.
+    """
+    repos_dir = str(get_repos_dir())
+
+    if not repo_url:
+        return f"{repos_dir}/unknown.git"
+
+    # Local filesystem path
+    if repo_url.startswith(("~/", "/", "./", "../")):
+        expanded = repo_url
+        if expanded.startswith("~/"):
+            expanded = str(Path.home()) + expanded[1:]
+        p = Path(expanded)
+        if p.exists():
+            try:
+                expanded = str(p.resolve())
+            except OSError:
+                pass
+        stripped = expanded.lstrip("/")
+        return f"{repos_dir}/local/{stripped}.git"
+
+    # HTTPS, HTTP, or git@ URL
+    path = repo_url
+    path = path.removeprefix("https://")
+    path = path.removeprefix("http://")
+    path = path.removeprefix("git@")
+    path = path.replace(":", "/", 1) if ":" in path else path
+    if path.endswith(".git"):
+        path = path[:-4]
+    return f"{repos_dir}/{path}.git"
+
+
+def sandbox_name(bare_path: str, branch: str) -> str:
+    """Generate a sandbox name from bare repo path and branch.
+
+    Args:
+        bare_path: Path to bare repository.
+        branch: Branch name.
+
+    Returns:
+        Sanitised sandbox name.
+    """
+    repo = Path(bare_path).name
+    if repo.endswith(".git"):
+        repo = repo[:-4]
+    repo = sanitize_ref_component(repo) or "repo"
+    branch_part = sanitize_ref_component(branch) or "branch"
+    name = f"{repo}-{branch_part}".lower()
+    if len(name) > SANDBOX_NAME_MAX_LENGTH:
+        digest = hashlib.sha256(name.encode("utf-8")).hexdigest()[:8]
+        name = f"{name[:SANDBOX_NAME_MAX_LENGTH - 9]}-{digest}"
+    return name
+
+
+def find_next_sandbox_name(base_name: str) -> str:
+    """Find next available sandbox name by appending a numeric suffix.
+
+    Args:
+        base_name: Desired sandbox name.
+
+    Returns:
+        *base_name* if available, otherwise *base_name*-N.
+    """
+    worktrees = get_worktrees_dir()
+    configs = get_claude_configs_dir()
+
+    def _taken(candidate: str) -> bool:
+        return (worktrees / candidate).exists() or (configs / candidate).exists()
+
+    if not _taken(base_name):
+        return base_name
+
+    for i in range(2, 10_000):
+        candidate = f"{base_name}-{i}"
+        if not _taken(candidate):
+            return candidate
+    return f"{base_name}-{os.getpid()}"
+
+
+def strip_github_url(repo_url: str) -> str:
+    """Strip GitHub URL prefixes and .git suffix to get owner/repo spec.
+
+    Args:
+        repo_url: Full repository URL.
+
+    Returns:
+        Short ``owner/repo`` form.
+    """
+    spec = repo_url
+    spec = spec.removeprefix("https://github.com/")
+    spec = spec.removeprefix("http://github.com/")
+    spec = spec.removeprefix("git@github.com:")
+    if spec.endswith(".git"):
+        spec = spec[:-4]
+    return spec
+
+
+def resolve_ssh_agent_sock() -> str:
+    """Find SSH agent socket from environment.
+
+    Returns:
+        Socket path if it exists, empty string otherwise.
+    """
+    sock = os.environ.get("SSH_AUTH_SOCK", "")
+    if not sock:
+        return ""
+    return sock if Path(sock).exists() else ""

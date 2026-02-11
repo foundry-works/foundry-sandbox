@@ -28,7 +28,7 @@ PACKAGE_DIR = Path(__file__).resolve().parents[2] / "foundry_sandbox"
 # Layer definitions: module name -> allowed foundry_sandbox imports.
 # Module names are relative to foundry_sandbox (e.g., "constants" for foundry_sandbox.constants).
 
-BASE_MODULES = {"constants", "utils", "models", "__init__"}
+BASE_MODULES = {"constants", "errors", "utils", "models", "__init__"}
 
 MID_MODULES = {"paths", "config"}
 
@@ -37,7 +37,8 @@ BRIDGE_CALLABLE_MODULES = {
     "claude_settings", "opencode_sync", "config", "state", "docker", "validate", "api_keys",
     "compose", "container_configurator", "container_io", "container_setup",
     "credential_setup", "foundry_plugin", "git", "git_path_fixer", "git_worktree",
-    "image", "network", "permissions", "proxy", "stub_manager", "tmux", "tool_configs",
+    "image", "network", "permissions", "proxy", "settings_merge", "stub_manager",
+    "tmux", "tool_configs",
 }
 
 # Top-layer modules: unrestricted imports (CLI entrypoints, UI, compatibility shims).

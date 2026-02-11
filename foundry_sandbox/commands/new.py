@@ -37,13 +37,13 @@ from pathlib import Path
 import click
 from click.core import ParameterSource
 
-from foundry_sandbox.commands._helpers import (
+from foundry_sandbox.paths import (
     find_next_sandbox_name,
-    flag_enabled as _saved_flag_enabled,
     repo_url_to_bare_path,
     resolve_ssh_agent_sock,
     sandbox_name as _helpers_sandbox_name,
 )
+from foundry_sandbox.utils import flag_enabled as _saved_flag_enabled
 from foundry_sandbox.commands.new_setup import _SetupError, _new_setup, _rollback_new
 from foundry_sandbox.commands.new_wizard import _guided_new
 from foundry_sandbox.utils import sanitize_ref_component
@@ -53,7 +53,7 @@ from foundry_sandbox.image import check_image_freshness
 from foundry_sandbox.paths import derive_sandbox_paths
 from foundry_sandbox.state import save_last_cast_new, save_cast_preset, load_last_cast_new, load_cast_preset, save_last_attach
 from foundry_sandbox import tmux
-from foundry_sandbox.utils import log_debug, log_error, log_info, log_section, log_warn
+from foundry_sandbox.utils import environment_scope, log_debug, log_error, log_info, log_section, log_warn
 from foundry_sandbox.validate import check_docker_network_capacity, validate_git_url, validate_mount_path, validate_sandbox_name
 
 
@@ -362,7 +362,7 @@ def _validate_preconditions(
             sys.exit(1)
 
     for copy_spec in copies:
-        src = copy_spec.split(":")[0]
+        src, _, _ = copy_spec.partition(":")
         if not os.path.exists(src):
             log_error(f"Copy source does not exist: {src}")
             sys.exit(1)
@@ -749,7 +749,7 @@ def new(
     # Validate mount paths
     if not allow_dangerous_mount:
         for mount in mounts:
-            src = mount.split(":")[0]
+            src, _, _ = mount.partition(":")
             ok, msg = validate_mount_path(src)
             if not ok:
                 log_error(msg)
@@ -772,15 +772,16 @@ def new(
         else:
             log_warn("ZAI requested but ZHIPU_API_KEY not set; skipping ZAI setup.")
 
-    # Save and restore environment around mutations (matches start.py pattern)
-    _saved_env = dict(os.environ)
-    try:
-        os.environ["SANDBOX_ENABLE_OPENCODE"] = enable_opencode_flag
-        os.environ["SANDBOX_ENABLE_ZAI"] = enable_zai_flag
+    # Build scoped env updates
+    _scope_env: dict[str, str] = {
+        "SANDBOX_ENABLE_OPENCODE": enable_opencode_flag,
+        "SANDBOX_ENABLE_ZAI": enable_zai_flag,
+    }
+    if enable_zai_flag != "1":
+        _scope_env["ZHIPU_API_KEY"] = ""
 
-        if enable_zai_flag != "1":
-            os.environ["ZHIPU_API_KEY"] = ""
-
+    # Save and restore environment around mutations
+    with environment_scope(_scope_env):
         # Start creation
         click.echo()
         click.echo(f"Setting up your sandbox: {name}")
@@ -864,6 +865,3 @@ def new(
         _handle_new_ide_and_attach(
             name, str(worktree_path), container, wd, no_ide, with_ide, ide_only,
         )
-    finally:
-        os.environ.clear()
-        os.environ.update(_saved_env)

@@ -648,5 +648,170 @@ class TestCopyConfigsStructure:
         assert "enable_ssh" in sig.parameters
 
 
+# ---------------------------------------------------------------------------
+# TestMergeClaudeSettingsSafeTempFile
+# ---------------------------------------------------------------------------
+
+
+class TestMergeClaudeSettingsSafeTempFile:
+    """Temp file for _merge_claude_settings_safe must NOT be in /tmp."""
+
+    def test_temp_file_not_in_tmp(self, tmp_path):
+        """Temp file should be created in the parent dir of host_settings, not /tmp."""
+        from foundry_sandbox.credential_setup import _merge_claude_settings_safe
+
+        settings_dir = tmp_path / ".claude"
+        settings_dir.mkdir()
+        host_settings = settings_dir / "settings.json"
+        host_settings.write_text(json.dumps({"theme": "dark", "env": {"KEY": "val"}}))
+
+        created_temps = []
+        original_mkstemp = __import__("tempfile").mkstemp
+
+        def tracking_mkstemp(dir=None, suffix="", prefix="tmp"):
+            result = original_mkstemp(dir=dir, suffix=suffix, prefix=prefix)
+            created_temps.append((result[1], dir))
+            return result
+
+        with patch("tempfile.mkstemp", side_effect=tracking_mkstemp), \
+             patch("foundry_sandbox.settings_merge.merge_claude_settings_in_container", return_value=True):
+            _merge_claude_settings_safe("container-123", str(host_settings))
+
+        assert len(created_temps) >= 1, "mkstemp should have been called"
+        for tmp_file, tmp_dir in created_temps:
+            assert tmp_dir is not None, "mkstemp must specify dir= parameter"
+            # Verify temp file is in settings parent dir, not the system default
+            assert tmp_dir == str(settings_dir), \
+                f"Temp file should be in {settings_dir}, got {tmp_dir}"
+
+    def test_temp_file_in_parent_of_host_settings(self, tmp_path):
+        """Temp file dir should match Path(host_settings).parent."""
+        from foundry_sandbox.credential_setup import _merge_claude_settings_safe
+
+        settings_dir = tmp_path / ".claude"
+        settings_dir.mkdir()
+        host_settings = settings_dir / "settings.json"
+        host_settings.write_text(json.dumps({"theme": "dark"}))
+
+        dirs_used = []
+        original_mkstemp = __import__("tempfile").mkstemp
+
+        def capture_mkstemp(dir=None, suffix="", prefix="tmp"):
+            dirs_used.append(dir)
+            return original_mkstemp(dir=dir, suffix=suffix, prefix=prefix)
+
+        with patch("tempfile.mkstemp", side_effect=capture_mkstemp), \
+             patch("foundry_sandbox.credential_setup._merge_claude_settings_in_container", return_value=True):
+            _merge_claude_settings_safe("container-123", str(host_settings))
+
+        assert dirs_used, "mkstemp should have been called"
+        assert dirs_used[0] == str(settings_dir)
+
+    def test_temp_file_cleanup_on_success(self, tmp_path):
+        """Temp file should be removed after successful merge."""
+        from foundry_sandbox.credential_setup import _merge_claude_settings_safe
+
+        settings_dir = tmp_path / ".claude"
+        settings_dir.mkdir()
+        host_settings = settings_dir / "settings.json"
+        host_settings.write_text(json.dumps({"theme": "dark"}))
+
+        with patch("foundry_sandbox.settings_merge.merge_claude_settings_in_container", return_value=True):
+            _merge_claude_settings_safe("container-123", str(host_settings))
+
+        # No stale temp files should remain
+        temp_files = list(settings_dir.glob("settings-safe-*"))
+        assert len(temp_files) == 0, f"Stale temp files found: {temp_files}"
+
+    def test_temp_file_cleanup_on_failure(self, tmp_path):
+        """Temp file should be removed even if merge fails."""
+        from foundry_sandbox.credential_setup import _merge_claude_settings_safe
+
+        settings_dir = tmp_path / ".claude"
+        settings_dir.mkdir()
+        host_settings = settings_dir / "settings.json"
+        host_settings.write_text(json.dumps({"theme": "dark"}))
+
+        with patch(
+            "foundry_sandbox.settings_merge.merge_claude_settings_in_container",
+            side_effect=RuntimeError("merge failed"),
+        ):
+            with pytest.raises(RuntimeError):
+                _merge_claude_settings_safe("container-123", str(host_settings))
+
+        temp_files = list(settings_dir.glob("settings-safe-*"))
+        assert len(temp_files) == 0, f"Stale temp files found after failure: {temp_files}"
+
+    def test_credential_keys_stripped(self, tmp_path):
+        """Keys env, mcpServers, oauthTokens, apiKey must be stripped."""
+        from foundry_sandbox.credential_setup import _merge_claude_settings_safe
+
+        settings_dir = tmp_path / ".claude"
+        settings_dir.mkdir()
+        host_settings = settings_dir / "settings.json"
+        host_settings.write_text(json.dumps({
+            "theme": "dark",
+            "env": {"ANTHROPIC_API_KEY": "sk-secret"},
+            "mcpServers": {"server1": {"url": "http://localhost"}},
+            "oauthTokens": {"token": "abc123"},
+            "apiKey": "sk-ant-12345",
+        }))
+
+        written_data = {}
+
+        def capture_merge(container_id, settings_path):
+            with open(settings_path) as f:
+                written_data.update(json.load(f))
+            return True
+
+        with patch(
+            "foundry_sandbox.settings_merge.merge_claude_settings_in_container",
+            side_effect=capture_merge,
+        ):
+            _merge_claude_settings_safe("container-123", str(host_settings))
+
+        assert "env" not in written_data
+        assert "mcpServers" not in written_data
+        assert "oauthTokens" not in written_data
+        assert "apiKey" not in written_data
+        assert written_data["theme"] == "dark"
+
+
+# ---------------------------------------------------------------------------
+# TestMergeSettingsSilentFailure
+# ---------------------------------------------------------------------------
+
+
+class TestMergeSettingsSilentFailure:
+    """_merge_claude_settings_in_container must return False on subprocess failure."""
+
+    @patch("foundry_sandbox.settings_merge.subprocess.run")
+    @patch("foundry_sandbox.settings_merge.copy_file_to_container")
+    def test_returns_false_on_nonzero_exit(self, mock_cpf, mock_run):
+        """merge returns False when docker exec fails."""
+        from foundry_sandbox.credential_setup import _merge_claude_settings_in_container
+
+        # First call: docker exec merge fails
+        # Second call: cleanup rm
+        mock_run.side_effect = [
+            _completed(returncode=1, stderr="merge error"),
+            _completed(),  # cleanup rm
+        ]
+
+        result = _merge_claude_settings_in_container("container-123", "/host/settings.json")
+        assert result is False
+
+    @patch("foundry_sandbox.settings_merge.subprocess.run")
+    @patch("foundry_sandbox.settings_merge.copy_file_to_container")
+    def test_returns_true_on_success(self, mock_cpf, mock_run):
+        """merge returns True when docker exec succeeds."""
+        from foundry_sandbox.credential_setup import _merge_claude_settings_in_container
+
+        mock_run.return_value = _completed(returncode=0)
+
+        result = _merge_claude_settings_in_container("container-123", "/host/settings.json")
+        assert result is True
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])

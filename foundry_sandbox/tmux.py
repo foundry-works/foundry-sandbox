@@ -14,6 +14,20 @@ from foundry_sandbox.constants import CONTAINER_USER, TIMEOUT_LOCAL_CMD
 from foundry_sandbox.utils import log_info
 
 
+def tmux_session_name(name: str) -> str:
+    """Return the tmux session name for a sandbox.
+
+    Currently just returns the sandbox name as-is.
+
+    Args:
+        name: Sandbox name.
+
+    Returns:
+        Tmux session name.
+    """
+    return name
+
+
 def session_exists(session: str) -> bool:
     """Check if a tmux session exists.
 

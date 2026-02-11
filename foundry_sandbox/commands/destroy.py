@@ -22,14 +22,14 @@ import sys
 
 import click
 
-from foundry_sandbox.constants import TIMEOUT_DOCKER_NETWORK, TIMEOUT_LOCAL_CMD
-from foundry_sandbox.docker import compose_down, remove_hmac_volume, remove_stubs_volume
+from foundry_sandbox.constants import TIMEOUT_LOCAL_CMD
+from foundry_sandbox.docker import compose_down, proxy_cleanup as _proxy_cleanup, remove_hmac_volume, remove_sandbox_networks, remove_stubs_volume
 from foundry_sandbox.git_worktree import cleanup_sandbox_branch, remove_worktree
-from foundry_sandbox.paths import derive_sandbox_paths
+from foundry_sandbox.paths import derive_sandbox_paths, repo_url_to_bare_path as _repo_url_to_bare_path
 from foundry_sandbox.state import load_sandbox_metadata
+from foundry_sandbox.tmux import tmux_session_name as _tmux_session_name
 from foundry_sandbox.utils import log_info, log_warn
 from foundry_sandbox.validate import validate_existing_sandbox_name
-from foundry_sandbox.commands._helpers import proxy_cleanup as _proxy_cleanup, repo_url_to_bare_path as _repo_url_to_bare_path, tmux_session_name as _tmux_session_name
 
 
 # ---------------------------------------------------------------------------
@@ -138,26 +138,7 @@ def destroy(name: str, keep_worktree: bool, force: bool, yes: bool) -> None:
     # ------------------------------------------------------------------
     # 6. Remove credential isolation networks
     # ------------------------------------------------------------------
-    for network_suffix in ("credential-isolation", "proxy-egress"):
-        network_name = f"{container}_{network_suffix}"
-        try:
-            inspect_result = subprocess.run(
-                ["docker", "network", "inspect", network_name],
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-                check=False,
-                timeout=TIMEOUT_DOCKER_NETWORK,
-            )
-            if inspect_result.returncode == 0:
-                subprocess.run(
-                    ["docker", "network", "rm", network_name],
-                    stdout=subprocess.DEVNULL,
-                    stderr=subprocess.DEVNULL,
-                    check=False,
-                    timeout=TIMEOUT_DOCKER_NETWORK,
-                )
-        except (OSError, subprocess.SubprocessError):
-            pass
+    remove_sandbox_networks(container)
 
     # ------------------------------------------------------------------
     # 7. Load metadata BEFORE deleting config dir (needed for branch cleanup)

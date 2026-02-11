@@ -17,6 +17,7 @@ Environment Variables:
 
 from __future__ import annotations
 
+import ipaddress
 import json
 import os
 import subprocess
@@ -24,6 +25,7 @@ import time
 from typing import Any, Callable
 
 from foundry_sandbox.constants import PROXY_TIMEOUT
+from foundry_sandbox.errors import ProxyError
 from foundry_sandbox.utils import log_debug, log_error, log_info, log_warn
 
 # Constants
@@ -69,7 +71,7 @@ def proxy_curl(
         If include_status_code=True: {"body": <json>, "http_code": <int>}
 
     Raises:
-        RuntimeError: If curl command fails or JSON parsing fails
+        ProxyError: If curl command fails or JSON parsing fails
     """
     # Determine transport mode
     proxy_url = os.environ.get("PROXY_URL", "")
@@ -102,7 +104,7 @@ def proxy_curl(
             # Mode 3: Docker exec fallback
             proxy_container = proxy_container_name()
             if not proxy_container:
-                raise RuntimeError("proxy_curl: PROXY_CONTAINER_NAME or CONTAINER_NAME required")
+                raise ProxyError("proxy_curl: PROXY_CONTAINER_NAME or CONTAINER_NAME required")
 
             cmd = ["docker", "exec", proxy_container, "curl", "-s",
                    "--unix-socket", INTERNAL_SOCKET_PATH, "-X", method]
@@ -115,7 +117,7 @@ def proxy_curl(
             result = subprocess.run(cmd, capture_output=True, text=True, check=False, timeout=PROXY_TIMEOUT)
 
         if result.returncode != 0:
-            raise RuntimeError(f"curl failed with exit code {result.returncode}: {result.stderr}")
+            raise ProxyError(f"curl failed with exit code {result.returncode}: {result.stderr}")
 
         output = result.stdout
 
@@ -123,7 +125,7 @@ def proxy_curl(
             # Parse HTTP code from last line
             lines = output.strip().split("\n")
             if len(lines) < 2:
-                raise RuntimeError("Unexpected curl output format (missing HTTP code)")
+                raise ProxyError("Unexpected curl output format (missing HTTP code)")
             http_code = int(lines[-1])
             body_text = "\n".join(lines[:-1])
             # Parse JSON body
@@ -137,9 +139,9 @@ def proxy_curl(
             return json.loads(output) if output else {}
 
     except subprocess.TimeoutExpired as e:
-        raise RuntimeError(f"curl timed out after 30s: {e}")
+        raise ProxyError(f"curl timed out after 30s: {e}")
     except json.JSONDecodeError as e:
-        raise RuntimeError(f"Failed to parse JSON response: {e}")
+        raise ProxyError(f"Failed to parse JSON response: {e}")
 
 
 def proxy_register(
@@ -160,10 +162,15 @@ def proxy_register(
         JSON response string on success
 
     Raises:
-        RuntimeError: If registration fails
+        ProxyError: If registration fails
     """
     if not container_id or not ip_address:
-        raise RuntimeError("proxy_register: container_id and ip_address required")
+        raise ProxyError("proxy_register: container_id and ip_address required")
+
+    try:
+        ipaddress.ip_address(ip_address)
+    except ValueError as exc:
+        raise ProxyError(f"proxy_register: invalid IP address {ip_address!r}: {exc}") from exc
 
     # Build request body
     body: dict[str, Any] = {
@@ -176,7 +183,7 @@ def proxy_register(
 
     try:
         response = proxy_curl("POST", "/internal/containers", body)
-    except RuntimeError as e:
+    except ProxyError as e:
         log_error(f"proxy_register: curl error: {e}")
         raise
 
@@ -189,7 +196,7 @@ def proxy_register(
     # Extract error message
     error_msg = response.get("message", response.get("error", "Unknown error"))
     log_error(f"proxy_register: Failed to register container: {error_msg}")
-    raise RuntimeError(f"Registration failed: {error_msg}")
+    raise ProxyError(f"Registration failed: {error_msg}")
 
 
 def proxy_unregister(container_id: str) -> int:
@@ -218,7 +225,7 @@ def proxy_unregister(container_id: str) -> int:
             error_msg = body.get("message", body.get("error", "Unknown error"))
             log_warn(f"proxy_unregister: Unexpected response ({http_code}): {error_msg}")
 
-    except (OSError, RuntimeError, subprocess.SubprocessError, ValueError, KeyError) as e:
+    except (OSError, ProxyError, subprocess.SubprocessError, ValueError, KeyError) as e:
         log_warn(f"proxy_unregister: error (may be expected if proxy stopped): {e}")
 
     return 0
@@ -228,31 +235,37 @@ def proxy_wait_ready(
     timeout: int = 30,
     *,
     _sleep: Callable[[float], None] = time.sleep,
+    _clock: Callable[[], float] = time.monotonic,
 ) -> bool:
     """Wait for proxy to be ready with exponential backoff.
 
     Args:
         timeout: Maximum time to wait in seconds (default: 30)
         _sleep: Sleep function for testing (default: time.sleep)
+        _clock: Monotonic clock for testing (default: time.monotonic)
 
     Returns:
         True if proxy is healthy within timeout, False otherwise
     """
-    elapsed = 0
+    start = _clock()
     delay = 1
     max_delay = 8
 
     log_debug(f"Waiting for proxy to be ready (timeout: {timeout}s)...")
 
-    while elapsed < timeout:
+    while True:
+        elapsed = _clock() - start
+        if elapsed >= timeout:
+            break
+
         try:
             result = proxy_curl("GET", "/internal/health", include_status_code=True)
             if result["http_code"] == 200:
                 body = result["body"]
                 if body.get("status") == "healthy":
-                    log_debug(f"Proxy is ready (took {elapsed}s)")
+                    log_debug(f"Proxy is ready (took {elapsed:.1f}s)")
                     return True
-        except (RuntimeError, OSError, subprocess.TimeoutExpired) as exc:
+        except (ProxyError, OSError, subprocess.TimeoutExpired) as exc:
             # Expected transient errors while proxy starts up
             log_debug(f"Proxy not ready yet: {type(exc).__name__}")
         except Exception as exc:
@@ -262,12 +275,10 @@ def proxy_wait_ready(
 
         # Calculate sleep time for this iteration
         remaining = timeout - elapsed
-        if delay > remaining:
-            delay = remaining
+        sleep_time = min(delay, remaining)
 
-        if delay > 0:
-            _sleep(delay)
-            elapsed += delay
+        if sleep_time > 0:
+            _sleep(sleep_time)
 
         # Exponential backoff: 1, 2, 4, 8, 8, 8... seconds
         if delay < max_delay:
@@ -326,13 +337,13 @@ def setup_proxy_registration(
         metadata: Optional metadata dict
 
     Raises:
-        RuntimeError: If setup fails (fails sandbox start)
+        ProxyError: If setup fails (fails sandbox start)
     """
     log_debug(f"Setting up proxy registration for container {container_id}...")
 
     # Wait for proxy to be ready (with 30s timeout)
     if not proxy_wait_ready(30):
-        raise RuntimeError("Proxy is not ready")
+        raise ProxyError("Proxy is not ready")
 
     # Get container IP on credential-isolation network
     container_ip = proxy_get_container_ip(container_id, DEFAULT_NETWORK)
@@ -349,7 +360,7 @@ def setup_proxy_registration(
         log_error("  1. Verify container is connected to credential-isolation network")
         log_error("  2. Check docker-compose.credential-isolation.yml network configuration")
         log_error("  3. Try: docker network inspect credential-isolation")
-        raise RuntimeError("Could not determine container IP address")
+        raise ProxyError("Could not determine container IP address")
 
     log_debug(f"Container IP: {container_ip}")
 

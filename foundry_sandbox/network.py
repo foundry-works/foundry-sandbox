@@ -17,6 +17,7 @@ import tempfile
 from pathlib import Path
 from typing import Callable, Optional
 
+from foundry_sandbox.atomic_io import file_lock, atomic_write_unlocked
 from foundry_sandbox.constants import SSH_AGENT_CONTAINER_SOCK
 from foundry_sandbox.utils import log_warn
 
@@ -77,20 +78,15 @@ def ensure_override_header(override_file: str) -> None:
     """
     path = Path(override_file)
 
-    if not path.exists():
-        # Create new file with header (with trailing newline to match shell heredoc)
-        with open(override_file, "w") as f:
-            f.write("services:\n  dev:\n")
-    else:
-        # Check if header exists
-        with open(override_file, "r") as f:
-            content = f.read()
+    with file_lock(path):
+        if not path.exists():
+            atomic_write_unlocked(path, "services:\n  dev:\n")
+        else:
+            with open(override_file, "r") as f:
+                content = f.read()
 
-        if not content.startswith("services:"):
-            # File exists but missing header - prepend it
-            with open(override_file, "w") as f:
-                f.write("services:\n  dev:\n")
-                f.write(content)
+            if not content.startswith("services:"):
+                atomic_write_unlocked(path, "services:\n  dev:\n" + content)
 
 
 def _strip_yaml_blocks(
@@ -115,57 +111,57 @@ def _strip_yaml_blocks(
     if not path.exists():
         return
 
-    with open(override_file, "r") as f:
-        lines = f.readlines()
+    with file_lock(path):
+        with open(override_file, "r") as f:
+            lines = f.readlines()
 
-    result: list[str] = []
-    current_block: str | None = None
-    block_header = ""
-    block_items: list[str] = []
+        result: list[str] = []
+        current_block: str | None = None
+        block_header = ""
+        block_items: list[str] = []
 
-    def _flush() -> None:
-        nonlocal current_block, block_items
-        if current_block is not None and block_items:
-            result.append(block_header)
-            result.extend(block_items)
-        current_block = None
-        block_items = []
-
-    for line in lines:
-        stripped = line.rstrip()
-
-        # Detect a tracked block header (4-space indent)
-        matched = None
-        for name in block_filters:
-            if stripped == f"    {name}:":
-                matched = name
-                break
-
-        if matched is not None:
-            _flush()
-            current_block = matched
-            block_header = line
+        def _flush() -> None:
+            nonlocal current_block, block_items
+            if current_block is not None and block_items:
+                result.append(block_header)
+                result.extend(block_items)
+            current_block = None
             block_items = []
-            continue
 
-        # Inside a tracked block — filter list items
-        if current_block is not None:
-            if stripped.startswith("      -"):
-                if block_filters[current_block](stripped):
-                    continue  # drop this item
-                block_items.append(line)
-                continue
-            else:
+        for line in lines:
+            stripped = line.rstrip()
+
+            # Detect a tracked block header (4-space indent)
+            matched = None
+            for name in block_filters:
+                if stripped == f"    {name}:":
+                    matched = name
+                    break
+
+            if matched is not None:
                 _flush()
-                # fall through to append as a regular line
+                current_block = matched
+                block_header = line
+                block_items = []
+                continue
 
-        result.append(line)
+            # Inside a tracked block — filter list items
+            if current_block is not None:
+                if stripped.startswith("      -"):
+                    if block_filters[current_block](stripped):
+                        continue  # drop this item
+                    block_items.append(line)
+                    continue
+                else:
+                    _flush()
+                    # fall through to append as a regular line
 
-    # File may end while still inside a block
-    _flush()
+            result.append(line)
 
-    with open(override_file, "w") as f:
-        f.writelines(result)
+        # File may end while still inside a block
+        _flush()
+
+        atomic_write_unlocked(path, "".join(result))
 
 
 def strip_network_config(override_file: str) -> None:
@@ -237,56 +233,57 @@ def append_override_list_item(override_file: str, key: str, item: str) -> None:
         key: The YAML list key (e.g., 'volumes', 'environment').
         item: The item to append (without '- ' prefix).
     """
-    with open(override_file, "r") as f:
-        lines = f.readlines()
+    path = Path(override_file)
 
-    result = []
-    inserted = False
-    in_list = False
-    key_pattern = f"    {key}:"
+    with file_lock(path):
+        with open(override_file, "r") as f:
+            lines = f.readlines()
 
-    i = 0
-    while i < len(lines):
-        line = lines[i]
-        stripped = line.rstrip()
+        result = []
+        inserted = False
+        in_list = False
+        key_pattern = f"    {key}:"
 
-        # Check if this is our key
-        if stripped == key_pattern:
-            in_list = True
-            result.append(line)
-            i += 1
-            continue
+        i = 0
+        while i < len(lines):
+            line = lines[i]
+            stripped = line.rstrip()
 
-        # If we're in the list, look for the end of list items
-        if in_list:
-            if stripped.startswith("      -"):
-                # Still in list, keep the item
+            # Check if this is our key
+            if stripped == key_pattern:
+                in_list = True
                 result.append(line)
                 i += 1
                 continue
-            else:
-                # End of list - insert our item before this line
-                result.append(f"      - {item}\n")
-                inserted = True
-                in_list = False
-                # Continue processing this line
 
-        result.append(line)
-        i += 1
+            # If we're in the list, look for the end of list items
+            if in_list:
+                if stripped.startswith("      -"):
+                    # Still in list, keep the item
+                    result.append(line)
+                    i += 1
+                    continue
+                else:
+                    # End of list - insert our item before this line
+                    result.append(f"      - {item}\n")
+                    inserted = True
+                    in_list = False
+                    # Continue processing this line
 
-    # If we reached end of file while in list, append there
-    if in_list and not inserted:
-        result.append(f"      - {item}\n")
-        inserted = True
+            result.append(line)
+            i += 1
 
-    # If key was never found, append it at the end
-    if not inserted:
-        result.append(f"    {key}:\n")
-        result.append(f"      - {item}\n")
+        # If we reached end of file while in list, append there
+        if in_list and not inserted:
+            result.append(f"      - {item}\n")
+            inserted = True
 
-    # Write back
-    with open(override_file, "w") as f:
-        f.writelines(result)
+        # If key was never found, append it at the end
+        if not inserted:
+            result.append(f"    {key}:\n")
+            result.append(f"      - {item}\n")
+
+        atomic_write_unlocked(path, "".join(result))
 
 
 def detect_host_timezone() -> Optional[str]:

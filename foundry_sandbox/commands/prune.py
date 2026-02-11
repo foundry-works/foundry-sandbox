@@ -28,7 +28,8 @@ from foundry_sandbox.git_worktree import cleanup_sandbox_branch, remove_worktree
 from foundry_sandbox.paths import derive_sandbox_paths, safe_remove
 from foundry_sandbox.state import load_sandbox_metadata
 from foundry_sandbox.utils import format_kv, log_warn
-from foundry_sandbox.commands._helpers import cleanup_orphaned_networks as _cleanup_orphaned_networks, proxy_cleanup as _proxy_cleanup, repo_url_to_bare_path as _repo_url_to_bare_path
+from foundry_sandbox.docker import cleanup_orphaned_networks as _cleanup_orphaned_networks, proxy_cleanup as _proxy_cleanup
+from foundry_sandbox.paths import repo_url_to_bare_path as _repo_url_to_bare_path
 
 
 # ---------------------------------------------------------------------------

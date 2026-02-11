@@ -22,13 +22,14 @@ import sys
 
 import click
 
-from foundry_sandbox.constants import TIMEOUT_DOCKER_NETWORK, TIMEOUT_DOCKER_QUERY, TIMEOUT_LOCAL_CMD, get_worktrees_dir
-from foundry_sandbox.docker import compose_down, remove_hmac_volume, remove_stubs_volume
+from foundry_sandbox.constants import TIMEOUT_LOCAL_CMD, get_worktrees_dir
+from foundry_sandbox.docker import cleanup_orphaned_networks as _cleanup_orphaned_networks_shared, compose_down, proxy_cleanup as _proxy_cleanup, remove_hmac_volume, remove_sandbox_networks, remove_stubs_volume
 from foundry_sandbox.git_worktree import cleanup_sandbox_branch, remove_worktree
-from foundry_sandbox.paths import derive_sandbox_paths
+from foundry_sandbox.paths import derive_sandbox_paths, repo_url_to_bare_path as _repo_url_to_bare_path
 from foundry_sandbox.state import load_sandbox_metadata
+from foundry_sandbox.tmux import tmux_session_name as _tmux_session_name
 from foundry_sandbox.utils import log_warn
-from foundry_sandbox.commands._helpers import cleanup_orphaned_networks as _cleanup_orphaned_networks_shared, list_sandbox_names as _list_sandbox_names, proxy_cleanup as _proxy_cleanup, repo_url_to_bare_path as _repo_url_to_bare_path, tmux_session_name as _tmux_session_name
+from foundry_sandbox.commands._helpers import list_sandbox_names as _list_sandbox_names
 
 
 # ---------------------------------------------------------------------------
@@ -39,39 +40,6 @@ from foundry_sandbox.commands._helpers import cleanup_orphaned_networks as _clea
 def _list_all_sandboxes() -> list[str]:
     """List all sandbox names by scanning WORKTREES_DIR."""
     return _list_sandbox_names()
-
-
-def _remove_network(network_name: str) -> bool:
-    """Remove a Docker network if it exists.
-
-    Args:
-        network_name: Name of the network to remove.
-
-    Returns:
-        True if network was removed, False otherwise.
-    """
-    try:
-        # Check if network exists
-        inspect_result = subprocess.run(
-            ["docker", "network", "inspect", network_name],
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-            check=False,
-            timeout=TIMEOUT_DOCKER_NETWORK,
-        )
-        if inspect_result.returncode == 0:
-            # Network exists, try to remove it
-            rm_result = subprocess.run(
-                ["docker", "network", "rm", network_name],
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-                check=False,
-                timeout=TIMEOUT_DOCKER_NETWORK,
-            )
-            return rm_result.returncode == 0
-    except (OSError, subprocess.SubprocessError):
-        pass
-    return False
 
 
 def _cleanup_orphaned_networks() -> int:
@@ -204,9 +172,7 @@ def destroy_all(keep_worktree: bool) -> None:
             pass
 
         # 6. Remove credential isolation networks for this sandbox
-        for network_suffix in ("credential-isolation", "proxy-egress"):
-            network_name = f"{container}_{network_suffix}"
-            _remove_network(network_name)
+        remove_sandbox_networks(container)
 
         # 7. Load metadata BEFORE deleting config dir (needed for branch cleanup)
         destroy_branch = ""

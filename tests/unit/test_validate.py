@@ -457,7 +457,7 @@ class TestCredentialPlaceholders:
 
         # Mock Gemini settings file
         with patch.object(Path, "is_file", return_value=False):
-            env = docker.setup_credential_placeholders()
+            env = docker.setup_credential_placeholders().to_env_dict()
 
             assert env["SANDBOX_ANTHROPIC_API_KEY"] == ""
             assert env["SANDBOX_CLAUDE_OAUTH"].startswith("CRED_PROXY_")
@@ -473,7 +473,7 @@ class TestCredentialPlaceholders:
         monkeypatch.setenv("SANDBOX_ENABLE_OPENCODE", "0")
 
         with patch.object(Path, "is_file", return_value=False):
-            env = docker.setup_credential_placeholders()
+            env = docker.setup_credential_placeholders().to_env_dict()
 
             assert env["SANDBOX_ANTHROPIC_API_KEY"].startswith("CRED_PROXY_")
             assert env["SANDBOX_CLAUDE_OAUTH"] == ""
@@ -485,7 +485,7 @@ class TestCredentialPlaceholders:
         monkeypatch.delenv("TAVILY_API_KEY", raising=False)
 
         with patch.object(Path, "is_file", return_value=False):
-            env = docker.setup_credential_placeholders()
+            env = docker.setup_credential_placeholders().to_env_dict()
 
             assert env["SANDBOX_ZHIPU_API_KEY"].startswith("CRED_PROXY_")
 
@@ -496,7 +496,7 @@ class TestCredentialPlaceholders:
         monkeypatch.delenv("TAVILY_API_KEY", raising=False)
 
         with patch.object(Path, "is_file", return_value=False):
-            env = docker.setup_credential_placeholders()
+            env = docker.setup_credential_placeholders().to_env_dict()
 
             assert env["SANDBOX_ZHIPU_API_KEY"] == ""
 
@@ -507,7 +507,7 @@ class TestCredentialPlaceholders:
         monkeypatch.setenv("SANDBOX_ENABLE_OPENCODE", "0")
 
         with patch.object(Path, "is_file", return_value=False):
-            env = docker.setup_credential_placeholders()
+            env = docker.setup_credential_placeholders().to_env_dict()
 
             assert env["SANDBOX_ENABLE_TAVILY"] == "1"
 
@@ -519,11 +519,10 @@ class TestCredentialPlaceholders:
 
         with patch("foundry_sandbox.docker.Path.home") as mock_home:
             mock_home.return_value = Path("/fake/home")
-            with patch("foundry_sandbox.docker.Path.is_file", return_value=True):
-                m = mock_open(read_data='{"selectedType": "oauth-personal"}')
-                with patch("builtins.open", m):
-                    env = docker.setup_credential_placeholders()
-                    assert env["SANDBOX_GEMINI_API_KEY"] == ""
+            m = mock_open(read_data='{"selectedType": "oauth-personal"}')
+            with patch("builtins.open", m):
+                env = docker.setup_credential_placeholders().to_env_dict()
+                assert env["SANDBOX_GEMINI_API_KEY"] == ""
 
 
 class TestComposeCommand:

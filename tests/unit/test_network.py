@@ -18,6 +18,7 @@ from unittest.mock import Mock, patch, MagicMock
 import pytest
 
 from foundry_sandbox import network, proxy
+from foundry_sandbox.errors import ProxyError
 
 
 # ============================================================================
@@ -640,6 +641,88 @@ class TestDetectHostTimezone:
 
 
 # ============================================================================
+# Atomicity & Locking Tests
+# ============================================================================
+
+
+class TestNetworkAtomicWrites:
+    """Verify that network override functions use file_lock and atomic_write_unlocked."""
+
+    def test_strip_yaml_blocks_uses_file_lock(self, tmp_path):
+        """_strip_yaml_blocks should acquire file_lock."""
+        f = tmp_path / "override.yml"
+        f.write_text("services:\n  dev:\n    cap_add:\n      - NET_ADMIN\n")
+
+        with patch("foundry_sandbox.network.file_lock") as mock_lock:
+            mock_lock.return_value.__enter__ = Mock(return_value=None)
+            mock_lock.return_value.__exit__ = Mock(return_value=False)
+            network._strip_yaml_blocks(str(f), {
+                "cap_add": lambda line: "NET_ADMIN" in line,
+            })
+            mock_lock.assert_called_once()
+
+    def test_append_override_list_item_uses_file_lock(self, tmp_path):
+        """append_override_list_item should acquire file_lock."""
+        f = tmp_path / "override.yml"
+        f.write_text("services:\n  dev:\n")
+
+        with patch("foundry_sandbox.network.file_lock") as mock_lock:
+            mock_lock.return_value.__enter__ = Mock(return_value=None)
+            mock_lock.return_value.__exit__ = Mock(return_value=False)
+            network.append_override_list_item(str(f), "volumes", '"/data:/data"')
+            mock_lock.assert_called_once()
+
+    def test_ensure_override_header_uses_file_lock(self, tmp_path):
+        """ensure_override_header should acquire file_lock."""
+        f = tmp_path / "override.yml"
+
+        with patch("foundry_sandbox.network.file_lock") as mock_lock:
+            mock_lock.return_value.__enter__ = Mock(return_value=None)
+            mock_lock.return_value.__exit__ = Mock(return_value=False)
+            network.ensure_override_header(str(f))
+            mock_lock.assert_called_once()
+
+    def test_strip_yaml_blocks_uses_atomic_write(self, tmp_path):
+        """_strip_yaml_blocks should use atomic_write_unlocked for write-back."""
+        f = tmp_path / "override.yml"
+        f.write_text("services:\n  dev:\n    cap_add:\n      - NET_ADMIN\n")
+
+        with patch("foundry_sandbox.network.atomic_write_unlocked") as mock_aw:
+            network._strip_yaml_blocks(str(f), {
+                "cap_add": lambda line: "NET_ADMIN" in line,
+            })
+            mock_aw.assert_called_once()
+
+    def test_written_files_have_0600_permissions(self, tmp_path):
+        """Files written by network functions should have 0o600 permissions."""
+        import stat
+
+        f = tmp_path / "override.yml"
+        f.write_text("services:\n  dev:\n    cap_add:\n      - NET_ADMIN\n")
+
+        network._strip_yaml_blocks(str(f), {
+            "cap_add": lambda line: "NET_ADMIN" in line,
+        })
+
+        mode = f.stat().st_mode & 0o777
+        assert mode == 0o600
+
+    def test_original_preserved_on_write_error(self, tmp_path):
+        """Original file should survive if atomic write fails."""
+        f = tmp_path / "override.yml"
+        original = "services:\n  dev:\n    cap_add:\n      - NET_ADMIN\n"
+        f.write_text(original)
+
+        with patch("foundry_sandbox.network.atomic_write_unlocked", side_effect=OSError("disk full")):
+            with pytest.raises(OSError):
+                network._strip_yaml_blocks(str(f), {
+                    "cap_add": lambda line: "NET_ADMIN" in line,
+                })
+
+        assert f.read_text() == original
+
+
+# ============================================================================
 # proxy.py Tests
 # ============================================================================
 
@@ -727,24 +810,24 @@ class TestProxyCurl:
 
     @patch("foundry_sandbox.proxy.proxy_container_name")
     def test_no_transport_raises(self, mock_name, monkeypatch):
-        """No proxy transport available should raise RuntimeError."""
+        """No proxy transport available should raise ProxyError."""
         monkeypatch.delenv("PROXY_URL", raising=False)
         monkeypatch.delenv("PROXY_SOCKET_PATH", raising=False)
         mock_name.return_value = ""
 
-        with pytest.raises(RuntimeError, match="PROXY_CONTAINER_NAME or CONTAINER_NAME required"):
+        with pytest.raises(ProxyError, match="PROXY_CONTAINER_NAME or CONTAINER_NAME required"):
             proxy.proxy_curl("GET", "/internal/health")
 
     @patch("foundry_sandbox.proxy.subprocess.run")
     def test_curl_failure_raises(self, mock_run, monkeypatch):
-        """Curl failure should raise RuntimeError."""
+        """Curl failure should raise ProxyError."""
         monkeypatch.setenv("PROXY_URL", "http://localhost:8080")
 
         mock_run.return_value = Mock(
             returncode=7, stdout="", stderr="Connection refused"
         )
 
-        with pytest.raises(RuntimeError, match="curl failed"):
+        with pytest.raises(ProxyError, match="curl failed"):
             proxy.proxy_curl("GET", "/internal/health")
 
     @patch("foundry_sandbox.proxy.subprocess.run")
@@ -786,10 +869,10 @@ class TestProxyRegister:
 
     def test_empty_args_raises(self):
         """Empty container_id or ip_address should raise."""
-        with pytest.raises(RuntimeError, match="required"):
+        with pytest.raises(ProxyError, match="required"):
             proxy.proxy_register("", "10.0.0.1")
 
-        with pytest.raises(RuntimeError, match="required"):
+        with pytest.raises(ProxyError, match="required"):
             proxy.proxy_register("abc123", "")
 
     @patch("foundry_sandbox.proxy.proxy_curl")
@@ -818,10 +901,10 @@ class TestProxyRegister:
 
     @patch("foundry_sandbox.proxy.proxy_curl")
     def test_registration_failure_raises(self, mock_curl):
-        """Failed registration should raise RuntimeError."""
+        """Failed registration should raise ProxyError."""
         mock_curl.return_value = {"status": "error", "message": "IP conflict"}
 
-        with pytest.raises(RuntimeError, match="IP conflict"):
+        with pytest.raises(ProxyError, match="IP conflict"):
             proxy.proxy_register("abc", "10.0.0.1")
 
 
@@ -849,7 +932,7 @@ class TestProxyUnregister:
     @patch("foundry_sandbox.proxy.proxy_curl")
     def test_curl_error_returns_zero(self, mock_curl):
         """Curl error should return 0 (never block destroy)."""
-        mock_curl.side_effect = RuntimeError("connection refused")
+        mock_curl.side_effect = ProxyError("connection refused")
 
         assert proxy.proxy_unregister("abc123") == 0
 
@@ -873,8 +956,8 @@ class TestProxyWaitReady:
     def test_ready_after_retries(self, mock_curl):
         """Proxy becoming healthy after retries should return True."""
         mock_curl.side_effect = [
-            RuntimeError("connection refused"),
-            RuntimeError("connection refused"),
+            ProxyError("connection refused"),
+            ProxyError("connection refused"),
             {"body": {"status": "healthy"}, "http_code": 200},
         ]
         sleep_calls = []
@@ -889,7 +972,7 @@ class TestProxyWaitReady:
     @patch("foundry_sandbox.proxy.proxy_curl")
     def test_timeout_returns_false(self, mock_curl):
         """Timeout should return False."""
-        mock_curl.side_effect = RuntimeError("connection refused")
+        mock_curl.side_effect = ProxyError("connection refused")
         total_slept = [0]
 
         def fake_sleep(d):
@@ -967,20 +1050,20 @@ class TestSetupProxyRegistration:
 
     @patch("foundry_sandbox.proxy.proxy_wait_ready")
     def test_proxy_not_ready_raises(self, mock_wait):
-        """Proxy not ready should raise RuntimeError."""
+        """Proxy not ready should raise ProxyError."""
         mock_wait.return_value = False
 
-        with pytest.raises(RuntimeError, match="not ready"):
+        with pytest.raises(ProxyError, match="not ready"):
             proxy.setup_proxy_registration("abc123")
 
     @patch("foundry_sandbox.proxy.proxy_get_container_ip")
     @patch("foundry_sandbox.proxy.proxy_wait_ready")
     def test_no_ip_raises(self, mock_wait, mock_ip):
-        """No container IP found should raise RuntimeError."""
+        """No container IP found should raise ProxyError."""
         mock_wait.return_value = True
         mock_ip.return_value = ""
 
-        with pytest.raises(RuntimeError, match="Could not determine container IP"):
+        with pytest.raises(ProxyError, match="Could not determine container IP"):
             proxy.setup_proxy_registration("abc123")
 
     @patch("foundry_sandbox.proxy.proxy_register")
@@ -1040,6 +1123,6 @@ class TestProxyIsRegistered:
     @patch("foundry_sandbox.proxy.proxy_curl")
     def test_error_returns_false(self, mock_curl):
         """Error should return False."""
-        mock_curl.side_effect = RuntimeError("connection error")
+        mock_curl.side_effect = ProxyError("connection error")
 
         assert proxy.proxy_is_registered("abc123") is False

@@ -59,82 +59,19 @@ def _audit_credential_op(operation: str, container_id: str, target: str, *, succ
 def _merge_claude_settings_in_container(container_id: str, host_settings: str) -> bool:
     """Merge host Claude settings into container settings via docker exec.
 
-    Matches the shell merge_claude_settings() in lib/container_config.sh:
-    1. Copy host settings to temp location inside container
-    2. Run merge inside container (preserves hooks, model from container defaults)
-    3. Clean up temp file
-
-    Returns True if the merge succeeded, False on failure.
+    Delegates to settings_merge.merge_claude_settings_in_container.
     """
-    temp_host = "/tmp/host-settings.json"
-    container_settings = f"{CONTAINER_HOME}/.claude/settings.json"
-
-    try:
-        copy_file_to_container(container_id, host_settings, temp_host)
-    except (OSError, subprocess.CalledProcessError) as exc:
-        log_warn(f"Failed to copy host settings for merge: {exc}")
-        return False
-
-    subprocess.run(
-        [
-            "docker", "exec", "-u", CONTAINER_USER, container_id,
-            "python3", "-m", "foundry_sandbox.claude_settings",
-            "merge", container_settings, temp_host,
-        ],
-        check=False,
-        capture_output=True,
-        timeout=TIMEOUT_DOCKER_EXEC,
-    )
-
-    # Clean up temp file
-    subprocess.run(
-        ["docker", "exec", container_id, "rm", "-f", temp_host],
-        check=False,
-        capture_output=True,
-        timeout=TIMEOUT_DOCKER_EXEC,
-    )
-    return True
+    from foundry_sandbox.settings_merge import merge_claude_settings_in_container
+    return merge_claude_settings_in_container(container_id, host_settings)
 
 
 def _merge_claude_settings_safe(container_id: str, host_settings: str) -> bool:
     """Merge host Claude settings into container, stripping credential-bearing keys.
 
-    Used when credential isolation is enabled to prevent real API keys or
-    tokens embedded in settings.json from leaking into the sandbox.
-
-    Keys stripped: env (may contain API keys), mcpServers (may embed tokens),
-    oauthTokens, apiKey.
+    Delegates to settings_merge.merge_claude_settings_safe.
     """
-    import json as _json
-    import os as _os
-    import tempfile as _tempfile
-
-    try:
-        with open(host_settings) as f:
-            data = _json.load(f)
-    except (OSError, _json.JSONDecodeError) as exc:
-        log_warn(f"Failed to read host settings for safe merge: {exc}")
-        return False
-
-    # Strip keys that commonly carry credentials
-    for key in ("env", "mcpServers", "oauthTokens", "apiKey"):
-        data.pop(key, None)
-
-    # Write sanitised copy to temp file, then merge normally
-    tmp_path: str | None = None
-    try:
-        with _tempfile.NamedTemporaryFile(
-            mode="w", suffix=".json", delete=False, prefix="settings-safe-"
-        ) as tmp:
-            _json.dump(data, tmp, indent=2)
-            tmp_path = tmp.name
-        return _merge_claude_settings_in_container(container_id, tmp_path)
-    finally:
-        if tmp_path is not None:
-            try:
-                _os.unlink(tmp_path)
-            except OSError:
-                pass
+    from foundry_sandbox.settings_merge import merge_claude_settings_safe
+    return merge_claude_settings_safe(container_id, host_settings)
 
 
 def _file_exists(path: str) -> bool:

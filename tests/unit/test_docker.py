@@ -86,7 +86,8 @@ class TestSetupCredentialPlaceholders:
         monkeypatch.delenv("TAVILY_API_KEY", raising=False)
 
         with patch("pathlib.Path.is_file", return_value=False):
-            env = setup_credential_placeholders()
+            creds = setup_credential_placeholders()
+            env = creds.to_env_dict()
 
         assert env["SANDBOX_ANTHROPIC_API_KEY"] == ""
         assert env["SANDBOX_CLAUDE_OAUTH"].startswith("CRED_PROXY_")
@@ -97,7 +98,7 @@ class TestSetupCredentialPlaceholders:
         monkeypatch.delenv("TAVILY_API_KEY", raising=False)
 
         with patch("pathlib.Path.is_file", return_value=False):
-            env = setup_credential_placeholders()
+            env = setup_credential_placeholders().to_env_dict()
 
         assert env["SANDBOX_ANTHROPIC_API_KEY"].startswith("CRED_PROXY_")
         assert env["SANDBOX_CLAUDE_OAUTH"] == ""
@@ -108,7 +109,7 @@ class TestSetupCredentialPlaceholders:
         monkeypatch.delenv("TAVILY_API_KEY", raising=False)
 
         with patch("pathlib.Path.is_file", return_value=False):
-            env = setup_credential_placeholders()
+            env = setup_credential_placeholders().to_env_dict()
 
         assert env["SANDBOX_ZHIPU_API_KEY"].startswith("CRED_PROXY_")
 
@@ -118,7 +119,7 @@ class TestSetupCredentialPlaceholders:
         monkeypatch.delenv("TAVILY_API_KEY", raising=False)
 
         with patch("pathlib.Path.is_file", return_value=False):
-            env = setup_credential_placeholders()
+            env = setup_credential_placeholders().to_env_dict()
 
         assert env["SANDBOX_ZHIPU_API_KEY"] == ""
 
@@ -128,7 +129,7 @@ class TestSetupCredentialPlaceholders:
         monkeypatch.setenv("TAVILY_API_KEY", "tvly-xxx")
 
         with patch("pathlib.Path.is_file", return_value=False):
-            env = setup_credential_placeholders()
+            env = setup_credential_placeholders().to_env_dict()
 
         assert env["SANDBOX_ENABLE_TAVILY"] == "1"
 
@@ -138,7 +139,7 @@ class TestSetupCredentialPlaceholders:
         monkeypatch.delenv("TAVILY_API_KEY", raising=False)
 
         with patch("pathlib.Path.is_file", return_value=False):
-            env = setup_credential_placeholders()
+            env = setup_credential_placeholders().to_env_dict()
 
         assert env["SANDBOX_ENABLE_TAVILY"] == "0"
 
@@ -149,8 +150,8 @@ class TestSetupCredentialPlaceholders:
         monkeypatch.delenv("TAVILY_API_KEY", raising=False)
 
         with patch("pathlib.Path.is_file", return_value=False):
-            env1 = setup_credential_placeholders()
-            env2 = setup_credential_placeholders()
+            env1 = setup_credential_placeholders().to_env_dict()
+            env2 = setup_credential_placeholders().to_env_dict()
 
         assert env1["SANDBOX_ANTHROPIC_API_KEY"] != env2["SANDBOX_ANTHROPIC_API_KEY"]
 
@@ -165,7 +166,7 @@ class TestSetupCredentialPlaceholders:
         settings.write_text('{"selectedType": "oauth-personal"}')
 
         with patch("pathlib.Path.home", return_value=tmp_path):
-            env = setup_credential_placeholders()
+            env = setup_credential_placeholders().to_env_dict()
 
         assert env["SANDBOX_GEMINI_API_KEY"] == ""
 
@@ -180,8 +181,22 @@ class TestSetupCredentialPlaceholders:
         settings.write_text('{"selectedType": "api-key"}')
 
         with patch("pathlib.Path.home", return_value=tmp_path):
-            env = setup_credential_placeholders()
+            env = setup_credential_placeholders().to_env_dict()
 
+        assert env["SANDBOX_GEMINI_API_KEY"].startswith("CRED_PROXY_")
+
+    def test_toctou_no_is_file_guard(self, monkeypatch, tmp_path):
+        """Gemini settings read does not use .is_file() guard (TOCTOU fix)."""
+        monkeypatch.delenv("CLAUDE_CODE_OAUTH_TOKEN", raising=False)
+        monkeypatch.delenv("SANDBOX_ENABLE_OPENCODE", raising=False)
+        monkeypatch.delenv("TAVILY_API_KEY", raising=False)
+
+        # No .gemini directory — should still work via OSError catch
+        with patch("pathlib.Path.home", return_value=tmp_path):
+            creds = setup_credential_placeholders()
+            env = creds.to_env_dict()
+
+        # Should get a placeholder (not fail) when file doesn't exist
         assert env["SANDBOX_GEMINI_API_KEY"].startswith("CRED_PROXY_")
 
 

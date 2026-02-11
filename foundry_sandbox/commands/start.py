@@ -21,6 +21,7 @@ Migrated from commands/start.sh. Performs the following sequence:
 
 from __future__ import annotations
 
+import getpass
 import json
 import os
 import subprocess
@@ -31,13 +32,12 @@ from pathlib import Path
 import click
 
 from foundry_sandbox import api_keys
-from foundry_sandbox.commands._helpers import (
+from foundry_sandbox.docker import (
     apply_network_restrictions as _apply_network_restrictions_shared,
-    flag_enabled as _flag_enabled,
-    generate_sandbox_id,
-    resolve_ssh_agent_sock,
     uses_credential_isolation as _uses_credential_isolation_shared,
 )
+from foundry_sandbox.paths import resolve_ssh_agent_sock
+from foundry_sandbox.utils import flag_enabled as _flag_enabled, generate_sandbox_id
 from foundry_sandbox.constants import get_repos_dir, TIMEOUT_DOCKER_QUERY
 from foundry_sandbox.container_setup import install_pip_requirements
 from foundry_sandbox.credential_setup import copy_configs_to_container
@@ -60,7 +60,7 @@ from foundry_sandbox.network import (
 from foundry_sandbox.paths import derive_sandbox_paths, ensure_dir, path_claude_home
 from foundry_sandbox.proxy import setup_proxy_registration
 from foundry_sandbox.state import load_sandbox_metadata
-from foundry_sandbox.utils import log_error, log_info, log_step, log_warn
+from foundry_sandbox.utils import environment_scope, log_error, log_info, log_step, log_warn
 from foundry_sandbox.validate import validate_existing_sandbox_name
 
 
@@ -302,7 +302,7 @@ def _register_proxy(
 
     proxy_container = f"{container}-unified-proxy-1"
     os.environ["PROXY_CONTAINER_NAME"] = proxy_container
-    username = os.environ.get("USER", "ubuntu")
+    username = os.environ.get("USER") or getpass.getuser()
     fix_proxy_worktree_paths(proxy_container, username)
 
     repo_url = _string_value(metadata.get("repo_url", ""))
@@ -317,15 +317,16 @@ def _register_proxy(
     from_branch = _string_value(metadata.get("from_branch", ""))
     allow_pr = _flag_enabled(metadata.get("allow_pr", False))
 
-    registration_metadata = {
-        "repo": repo_spec,
-        "allow_pr": allow_pr,
-        "sandbox_branch": sandbox_branch,
-        "from_branch": from_branch,
-    }
+    from foundry_sandbox.models import ProxyRegistration
+    registration = ProxyRegistration(
+        repo=repo_spec,
+        allow_pr=allow_pr,
+        sandbox_branch=sandbox_branch,
+        from_branch=from_branch,
+    )
 
     try:
-        setup_proxy_registration(container_id, registration_metadata)
+        setup_proxy_registration(container_id, registration.model_dump())
     except (OSError, subprocess.SubprocessError, RuntimeError, json.JSONDecodeError) as e:
         log_error(f"Failed to register container with unified-proxy: {e}")
         sys.exit(1)
@@ -432,10 +433,7 @@ def start(ctx: click.Context, name: str) -> None:
         cmd_env["SANDBOX_ID"] = ""
 
     # Apply scoped env vars and restore original environment on exit.
-    # All os.environ mutations below are cleaned up in the finally block.
-    _saved_env = dict(os.environ)
-    os.environ.update(cmd_env)
-    try:
+    with environment_scope(cmd_env):
         uses_isolation = _uses_credential_isolation(container)
 
         # --------------------------------------------------------------
@@ -507,6 +505,3 @@ def start(ctx: click.Context, name: str) -> None:
         # 12. Finalize container: configs, pip, network
         # --------------------------------------------------------------
         _finalize_container(container_id, metadata, enable_ssh, isolate_credentials)
-    finally:
-        os.environ.clear()
-        os.environ.update(_saved_env)

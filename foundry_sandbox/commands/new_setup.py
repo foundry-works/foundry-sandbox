@@ -6,17 +6,16 @@ cleanup (_rollback_new) extracted from new.py for maintainability.
 
 from __future__ import annotations
 
+import getpass
 import os
 from datetime import datetime
 from pathlib import Path
 
 import click
 
-from foundry_sandbox.commands._helpers import (
-    apply_network_restrictions,
-    generate_sandbox_id,
-    strip_github_url,
-)
+from foundry_sandbox.docker import apply_network_restrictions
+from foundry_sandbox.paths import strip_github_url
+from foundry_sandbox.utils import generate_sandbox_id
 from foundry_sandbox.api_keys import export_gh_token, show_cli_status
 from foundry_sandbox.constants import get_repos_dir
 from foundry_sandbox.container_io import copy_dir_to_container, copy_file_to_container
@@ -38,10 +37,11 @@ from foundry_sandbox.permissions import install_workspace_permissions
 from foundry_sandbox.proxy import setup_proxy_registration
 from foundry_sandbox.state import write_sandbox_metadata
 from foundry_sandbox.validate import validate_git_remotes
+from foundry_sandbox.errors import SetupError
 from foundry_sandbox.utils import log_section, log_step, log_warn
 
 
-class _SetupError(Exception):
+class _SetupError(SetupError):
     """Raised by ``_new_setup`` to signal a failure that should trigger rollback."""
 
 
@@ -58,8 +58,7 @@ def _rollback_new(
     is not left with orphaned state.
     """
     import shutil
-    import subprocess as _sp
-    from foundry_sandbox.docker import compose_down, remove_stubs_volume, remove_hmac_volume
+    from foundry_sandbox.docker import compose_down, remove_sandbox_networks, remove_stubs_volume, remove_hmac_volume
     from foundry_sandbox.git_worktree import remove_worktree
 
     # 1. Stop and remove containers
@@ -75,15 +74,7 @@ def _rollback_new(
         log_warn(f"Rollback: failed to stop containers: {exc}")
 
     # 2. Remove Docker networks (best-effort)
-    for suffix in ("credential-isolation", "proxy-egress"):
-        try:
-            _sp.run(
-                ["docker", "network", "rm", f"{container}_{suffix}"],
-                stdout=_sp.DEVNULL, stderr=_sp.DEVNULL,
-                check=False, timeout=30,
-            )
-        except Exception as exc:
-            log_warn(f"Rollback: failed to remove network {container}_{suffix}: {exc}")
+    remove_sandbox_networks(container)
 
     # 3. Remove stubs and HMAC volumes (best-effort)
     try:
@@ -290,21 +281,22 @@ def _new_setup(
         # Fix proxy worktree paths
         proxy_container = f"{container}-unified-proxy-1"
         os.environ["PROXY_CONTAINER_NAME"] = proxy_container
-        username = os.environ.get("USER", "ubuntu")
+        username = os.environ.get("USER") or getpass.getuser()
         fix_proxy_worktree_paths(proxy_container, username)
 
         # Extract repo spec
         repo_spec = strip_github_url(repo_url)
 
-        metadata_json = {
-            "repo": repo_spec,
-            "allow_pr": allow_pr,
-            "sandbox_branch": branch,
-            "from_branch": from_branch or "",
-        }
+        from foundry_sandbox.models import ProxyRegistration
+        registration = ProxyRegistration(
+            repo=repo_spec,
+            allow_pr=allow_pr,
+            sandbox_branch=branch,
+            from_branch=from_branch or "",
+        )
 
         try:
-            setup_proxy_registration(container_id, metadata_json)
+            setup_proxy_registration(container_id, registration.model_dump())
         except Exception as e:
             raise _SetupError(
                 f"Failed to register container with unified-proxy: {e}\n"

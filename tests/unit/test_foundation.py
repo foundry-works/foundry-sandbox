@@ -554,5 +554,59 @@ class TestJsonArrayFromLines:
         assert len(lines) == 2
 
 
+# ============================================================================
+# EnvironmentScope Tests
+# ============================================================================
+
+
+class TestEnvironmentScope:
+    """Tests for environment_scope context manager."""
+
+    def test_restores_on_normal_exit(self, monkeypatch):
+        from foundry_sandbox.utils import environment_scope
+
+        monkeypatch.setenv("ES_TEST_KEY", "original")
+        with environment_scope({"ES_TEST_KEY": "modified"}):
+            assert os.environ["ES_TEST_KEY"] == "modified"
+        assert os.environ["ES_TEST_KEY"] == "original"
+
+    def test_restores_on_exception(self, monkeypatch):
+        from foundry_sandbox.utils import environment_scope
+
+        monkeypatch.setenv("ES_TEST_KEY", "original")
+        with pytest.raises(ValueError):
+            with environment_scope({"ES_TEST_KEY": "modified"}):
+                raise ValueError("boom")
+        assert os.environ["ES_TEST_KEY"] == "original"
+
+    def test_removes_vars_added_inside_scope(self, monkeypatch):
+        from foundry_sandbox.utils import environment_scope
+
+        monkeypatch.delenv("ES_NEW_VAR", raising=False)
+        with environment_scope():
+            os.environ["ES_NEW_VAR"] = "injected"
+            assert os.environ["ES_NEW_VAR"] == "injected"
+        assert "ES_NEW_VAR" not in os.environ
+
+    def test_no_updates(self, monkeypatch):
+        from foundry_sandbox.utils import environment_scope
+
+        monkeypatch.setenv("ES_TEST_KEY", "original")
+        with environment_scope():
+            assert os.environ["ES_TEST_KEY"] == "original"
+        assert os.environ["ES_TEST_KEY"] == "original"
+
+    def test_multiple_updates(self, monkeypatch):
+        from foundry_sandbox.utils import environment_scope
+
+        monkeypatch.delenv("ES_A", raising=False)
+        monkeypatch.delenv("ES_B", raising=False)
+        with environment_scope({"ES_A": "1", "ES_B": "2"}):
+            assert os.environ["ES_A"] == "1"
+            assert os.environ["ES_B"] == "2"
+        assert "ES_A" not in os.environ
+        assert "ES_B" not in os.environ
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])

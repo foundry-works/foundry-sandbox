@@ -6,9 +6,12 @@ the shell scripts lib/utils.sh, lib/format.sh, and lib/runtime.sh.
 
 from __future__ import annotations
 
+import contextlib
+import hashlib
 import os
 import re
 import sys
+from collections.abc import Generator
 
 
 # Color codes - respect TERM environment variable
@@ -157,3 +160,39 @@ def sanitize_ref_component(component: str) -> str:
     if text in {"", ".", ".."}:
         return ""
     return text
+
+
+def generate_sandbox_id(seed: str) -> str:
+    """Generate a sandbox ID from a seed string using SHA-256.
+
+    Args:
+        seed: Seed string.
+
+    Returns:
+        32-character hex digest.
+    """
+    return hashlib.sha256(seed.encode("utf-8")).hexdigest()[:32]
+
+
+@contextlib.contextmanager
+def environment_scope(
+    updates: dict[str, str] | None = None,
+) -> Generator[None]:
+    """Save, optionally mutate, and unconditionally restore ``os.environ``.
+
+    Usage::
+
+        with environment_scope({"KEY": "val"}):
+            ...  # KEY is set; on exit the entire env is restored
+
+    Args:
+        updates: Optional env-var dict to apply on entry.
+    """
+    saved = dict(os.environ)
+    if updates:
+        os.environ.update(updates)
+    try:
+        yield
+    finally:
+        os.environ.clear()
+        os.environ.update(saved)

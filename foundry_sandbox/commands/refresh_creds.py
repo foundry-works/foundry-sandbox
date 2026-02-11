@@ -22,8 +22,8 @@ from foundry_sandbox.commands._helpers import (
     auto_detect_sandbox as _auto_detect_sandbox,
     fzf_select_sandbox as _fzf_select_sandbox_shared,
     list_sandbox_names as _list_sandbox_names_shared,
-    uses_credential_isolation as _uses_credential_isolation_shared,
 )
+from foundry_sandbox.docker import uses_credential_isolation as _uses_credential_isolation_shared
 from foundry_sandbox.credential_setup import sync_runtime_credentials
 from foundry_sandbox.constants import TIMEOUT_DOCKER_COMPOSE, get_worktrees_dir
 from foundry_sandbox.docker import container_is_running, get_compose_command

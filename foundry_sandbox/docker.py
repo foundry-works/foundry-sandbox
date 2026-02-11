@@ -12,22 +12,24 @@ import base64
 import hashlib
 import json
 import os
+import re
 import secrets
 import subprocess
 import sys
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 from foundry_sandbox.constants import (
     get_sandbox_debug,
     get_sandbox_verbose,
     TIMEOUT_DOCKER_COMPOSE,
     TIMEOUT_DOCKER_EXEC,
+    TIMEOUT_DOCKER_NETWORK,
     TIMEOUT_DOCKER_QUERY,
     TIMEOUT_DOCKER_VOLUME,
     TIMEOUT_GIT_QUERY,
 )
-from foundry_sandbox.utils import log_debug, log_error
+from foundry_sandbox.utils import log_debug, log_error, log_warn
 
 
 # ============================================================================
@@ -101,55 +103,54 @@ def _credential_placeholder() -> str:
     return f"CRED_PROXY_{secrets.token_hex(16)}"
 
 
-def setup_credential_placeholders() -> dict[str, str]:
-    """Detect host auth configuration and return appropriate sandbox env vars.
+def setup_credential_placeholders():
+    """Detect host auth configuration and return a CredentialPlaceholders model.
 
     Determines which placeholder credentials to use based on what's configured
-    on the host. Returns a dict of environment variable names to values.
-    Each placeholder is a unique random nonce to prevent cross-sandbox forgery.
+    on the host. Each placeholder is a unique random nonce to prevent
+    cross-sandbox forgery.
 
     Returns:
-        Dictionary of env var names to their values.
+        CredentialPlaceholders model. Use .to_env_dict() for env var dict.
     """
-    env: dict[str, str] = {}
+    from foundry_sandbox.models import CredentialPlaceholders
 
     # Claude: Use OAuth placeholder if CLAUDE_CODE_OAUTH_TOKEN is set on host
     if os.environ.get("CLAUDE_CODE_OAUTH_TOKEN"):
-        env["SANDBOX_ANTHROPIC_API_KEY"] = ""
-        env["SANDBOX_CLAUDE_OAUTH"] = _credential_placeholder()
+        anthropic_key = ""
+        claude_oauth = _credential_placeholder()
     else:
-        env["SANDBOX_ANTHROPIC_API_KEY"] = _credential_placeholder()
-        env["SANDBOX_CLAUDE_OAUTH"] = ""
+        anthropic_key = _credential_placeholder()
+        claude_oauth = ""
 
     # Gemini: Check selectedType in settings file
     gemini_settings = Path.home() / ".gemini" / "settings.json"
     gemini_is_oauth = False
-    if gemini_settings.is_file():
-        try:
-            with open(gemini_settings) as f:
-                data = json.load(f)
-            if data.get("selectedType") == "oauth-personal":
-                gemini_is_oauth = True
-        except (OSError, json.JSONDecodeError) as exc:
-            log_debug(f"Could not read Gemini settings: {exc}")
-    if gemini_is_oauth:
-        env["SANDBOX_GEMINI_API_KEY"] = ""
-    else:
-        env["SANDBOX_GEMINI_API_KEY"] = _credential_placeholder()
+    try:
+        with open(gemini_settings) as f:
+            data = json.load(f)
+        if data.get("selectedType") == "oauth-personal":
+            gemini_is_oauth = True
+    except (OSError, json.JSONDecodeError) as exc:
+        log_debug(f"Could not read Gemini settings: {exc}")
+    gemini_key = "" if gemini_is_oauth else _credential_placeholder()
 
     # OpenCode/Zhipu: Only set placeholder if OpenCode is explicitly enabled
     if os.environ.get("SANDBOX_ENABLE_OPENCODE", "0") == "1":
-        env["SANDBOX_ZHIPU_API_KEY"] = _credential_placeholder()
+        zhipu_key = _credential_placeholder()
     else:
-        env["SANDBOX_ZHIPU_API_KEY"] = ""
+        zhipu_key = ""
 
     # Tavily: Set flag if API key is available on host
-    if os.environ.get("TAVILY_API_KEY"):
-        env["SANDBOX_ENABLE_TAVILY"] = "1"
-    else:
-        env["SANDBOX_ENABLE_TAVILY"] = "0"
+    enable_tavily = "1" if os.environ.get("TAVILY_API_KEY") else "0"
 
-    return env
+    return CredentialPlaceholders(
+        sandbox_anthropic_api_key=anthropic_key,
+        sandbox_claude_oauth=claude_oauth,
+        sandbox_gemini_api_key=gemini_key,
+        sandbox_zhipu_api_key=zhipu_key,
+        sandbox_enable_tavily=enable_tavily,
+    )
 
 
 # ============================================================================
@@ -291,7 +292,7 @@ def compose_up(
     if isolate_credentials:
         # Detect host auth config and set appropriate placeholder env vars
         cred_env = setup_credential_placeholders()
-        env.update(cred_env)
+        env.update(cred_env.to_env_dict())
 
         # Generate a random session management key for this sandbox
         env["GATEWAY_SESSION_MGMT_KEY"] = secrets.token_bytes(32).hex()
@@ -653,3 +654,253 @@ def remove_hmac_volume(container: str) -> None:
         check=False,
         timeout=TIMEOUT_DOCKER_VOLUME,
     )
+
+
+# ============================================================================
+# Container / Network Helpers (moved from commands/_helpers.py)
+# ============================================================================
+
+
+def uses_credential_isolation(container: str) -> bool:
+    """Check if a sandbox uses credential isolation.
+
+    Args:
+        container: Container name prefix.
+
+    Returns:
+        True if unified-proxy container exists.
+    """
+    try:
+        result = subprocess.run(
+            ["docker", "ps", "-a", "--format", "{{.Names}}"],
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=TIMEOUT_DOCKER_QUERY,
+        )
+        if result.returncode == 0:
+            pattern = f"{container}-unified-proxy-"
+            for line in result.stdout.splitlines():
+                if line.strip().startswith(pattern):
+                    return True
+    except OSError:
+        pass
+    return False
+
+
+def apply_network_restrictions(container_id: str, network_mode: str) -> None:
+    """Apply network restrictions to a container.
+
+    Args:
+        container_id: Docker container ID.
+        network_mode: Network mode (``limited``, ``host-only``, ``none``).
+    """
+    if network_mode == "limited":
+        subprocess.run(
+            ["docker", "exec", container_id, "sudo", "/usr/local/bin/network-firewall.sh"],
+            check=False,
+            timeout=TIMEOUT_DOCKER_EXEC,
+        )
+    else:
+        subprocess.run(
+            ["docker", "exec", container_id, "sudo", "/usr/local/bin/network-mode", network_mode],
+            check=False,
+            timeout=TIMEOUT_DOCKER_EXEC,
+        )
+
+
+def proxy_cleanup(container: str, container_id: str) -> None:
+    """Best-effort proxy registration cleanup.
+
+    Saves/restores CONTAINER_NAME env var to avoid leaking state.
+
+    Args:
+        container: Container name prefix (e.g. ``sandbox-foo``).
+        container_id: Full dev container ID (e.g. ``sandbox-foo-dev-1``).
+    """
+    from foundry_sandbox.proxy import cleanup_proxy_registration
+
+    prev_container_name = os.environ.get("CONTAINER_NAME")
+    os.environ["CONTAINER_NAME"] = container
+    try:
+        cleanup_proxy_registration(container_id)
+    except (OSError, subprocess.SubprocessError):
+        pass
+    finally:
+        if prev_container_name is None:
+            os.environ.pop("CONTAINER_NAME", None)
+        else:
+            os.environ["CONTAINER_NAME"] = prev_container_name
+
+
+def remove_sandbox_networks(container: str) -> None:
+    """Remove credential-isolation and proxy-egress networks for a sandbox.
+
+    Best-effort: silently ignores failures.
+
+    Args:
+        container: Container/project name prefix (e.g. ``sandbox-foo``).
+    """
+    for suffix in ("credential-isolation", "proxy-egress"):
+        network_name = f"{container}_{suffix}"
+        try:
+            inspect_result = subprocess.run(
+                ["docker", "network", "inspect", network_name],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                check=False,
+                timeout=TIMEOUT_DOCKER_NETWORK,
+            )
+            if inspect_result.returncode == 0:
+                subprocess.run(
+                    ["docker", "network", "rm", network_name],
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                    check=False,
+                    timeout=TIMEOUT_DOCKER_NETWORK,
+                )
+        except (OSError, subprocess.SubprocessError):
+            pass
+
+
+_NETWORK_PATTERN = re.compile(r"^sandbox-.*_(credential-isolation|proxy-egress)$")
+
+
+def cleanup_orphaned_networks(
+    *,
+    skip_confirm: bool = True,
+    confirm_fn: Callable[[str], bool] | None = None,
+    check_running: bool = False,
+) -> list[str]:
+    """Remove orphaned sandbox Docker networks.
+
+    Args:
+        skip_confirm: If ``True`` remove without prompting.
+        confirm_fn: Called with the network name; return ``True`` to proceed.
+            Ignored when *skip_confirm* is ``True``.
+        check_running: If ``True``, skip networks whose sandbox still has
+            running containers.
+
+    Returns:
+        List of network names that were successfully removed.
+    """
+    removed: list[str] = []
+    try:
+        result = subprocess.run(
+            ["docker", "network", "ls", "--format", "{{.Name}}"],
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=TIMEOUT_DOCKER_QUERY,
+        )
+        if result.returncode != 0:
+            return removed
+
+        for line in result.stdout.splitlines():
+            network_name = line.strip()
+            if not network_name or not _NETWORK_PATTERN.match(network_name):
+                continue
+
+            # Optionally check for running containers
+            if check_running:
+                sandbox_prefix = network_name
+                if sandbox_prefix.endswith("_credential-isolation"):
+                    sandbox_prefix = sandbox_prefix[: -len("_credential-isolation")]
+                elif sandbox_prefix.endswith("_proxy-egress"):
+                    sandbox_prefix = sandbox_prefix[: -len("_proxy-egress")]
+                try:
+                    ps_result = subprocess.run(
+                        ["docker", "ps", "-q", "--filter", f"name=^{sandbox_prefix}-"],
+                        capture_output=True,
+                        text=True,
+                        check=False,
+                        timeout=TIMEOUT_DOCKER_QUERY,
+                    )
+                    if ps_result.stdout.strip():
+                        continue  # Still has running containers
+                except (OSError, subprocess.SubprocessError):
+                    continue  # Fail-safe: skip if we can't check
+
+            # Prompt
+            if not skip_confirm:
+                if confirm_fn and not confirm_fn(network_name):
+                    continue
+
+            # Disconnect dangling endpoints
+            try:
+                inspect_result = subprocess.run(
+                    [
+                        "docker", "network", "inspect",
+                        "--format", "{{range .Containers}}{{.Name}} {{end}}",
+                        network_name,
+                    ],
+                    capture_output=True,
+                    text=True,
+                    check=False,
+                    timeout=TIMEOUT_DOCKER_NETWORK,
+                )
+                if inspect_result.returncode == 0:
+                    for endpoint in inspect_result.stdout.strip().split():
+                        if endpoint:
+                            subprocess.run(
+                                ["docker", "network", "disconnect", "-f", network_name, endpoint],
+                                stdout=subprocess.DEVNULL,
+                                stderr=subprocess.DEVNULL,
+                                check=False,
+                                timeout=TIMEOUT_DOCKER_NETWORK,
+                            )
+            except (OSError, subprocess.SubprocessError):
+                pass
+
+            # Remove stopped containers referencing this sandbox
+            if check_running:
+                sandbox_name_for_rm = network_name
+                if sandbox_name_for_rm.endswith("_credential-isolation"):
+                    sandbox_name_for_rm = sandbox_name_for_rm[: -len("_credential-isolation")]
+                elif sandbox_name_for_rm.endswith("_proxy-egress"):
+                    sandbox_name_for_rm = sandbox_name_for_rm[: -len("_proxy-egress")]
+                try:
+                    stopped_result = subprocess.run(
+                        [
+                            "docker", "ps", "-aq",
+                            "--filter", "status=exited",
+                            "--filter", f"name=^{sandbox_name_for_rm}-",
+                        ],
+                        capture_output=True,
+                        text=True,
+                        check=False,
+                        timeout=TIMEOUT_DOCKER_QUERY,
+                    )
+                    for stopped_id in stopped_result.stdout.splitlines():
+                        stopped_id = stopped_id.strip()
+                        if stopped_id:
+                            subprocess.run(
+                                ["docker", "rm", stopped_id],
+                                stdout=subprocess.DEVNULL,
+                                stderr=subprocess.DEVNULL,
+                                check=False,
+                                timeout=TIMEOUT_DOCKER_QUERY,
+                            )
+                except (OSError, subprocess.SubprocessError):
+                    pass
+
+            # Remove the network
+            try:
+                rm_result = subprocess.run(
+                    ["docker", "network", "rm", network_name],
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                    check=False,
+                    timeout=TIMEOUT_DOCKER_NETWORK,
+                )
+                if rm_result.returncode == 0:
+                    removed.append(network_name)
+                else:
+                    log_warn(f"Failed to remove network: {network_name}")
+            except (OSError, subprocess.SubprocessError):
+                log_warn(f"Failed to remove network: {network_name}")
+
+    except (OSError, subprocess.SubprocessError):
+        pass  # Docker may not be available
+
+    return removed

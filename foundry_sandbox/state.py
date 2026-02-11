@@ -11,8 +11,6 @@ Pure data management with no Docker calls.
 
 from __future__ import annotations
 
-import contextlib
-import fcntl
 import json
 import os
 import shlex
@@ -22,10 +20,16 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from foundry_sandbox.atomic_io import (
+    file_lock as _state_lock,
+    atomic_write_unlocked as _secure_write_unlocked,
+    atomic_write as _secure_write,
+    LOCK_TIMEOUT_SECONDS as _LOCK_TIMEOUT_SECONDS,
+)
 from foundry_sandbox.config import load_json, write_json
 from foundry_sandbox.constants import get_claude_configs_dir
 from foundry_sandbox.utils import flag_enabled as _flag_enabled, log_warn
-from foundry_sandbox.models import SandboxMetadata
+from foundry_sandbox.models import CastNewPreset, SandboxMetadata
 from foundry_sandbox.paths import (
     ensure_dir,
     path_claude_config,
@@ -74,88 +78,6 @@ def metadata_is_secure(path: str | Path) -> bool:
         return False
 
     return True
-
-
-def _secure_write_unlocked(path: Path, content: str) -> None:
-    """Write content atomically with 600 permissions (caller holds lock).
-
-    Uses write-to-temp + os.replace() to avoid corrupted files on crash.
-    The caller MUST already hold an exclusive lock on *path* via _state_lock().
-    """
-    import tempfile
-
-    path.parent.mkdir(parents=True, exist_ok=True)
-    # mkstemp atomically creates the file with 0o600 — no TOCTOU window.
-    fd, tmp_path = tempfile.mkstemp(dir=str(path.parent), suffix=".tmp")
-    try:
-        with os.fdopen(fd, "w") as f:
-            f.write(content)
-        os.replace(tmp_path, path)
-    except OSError:
-        try:
-            os.unlink(tmp_path)
-        except OSError:
-            pass
-        raise
-
-
-def _secure_write(path: Path, content: str) -> None:
-    """Write content to a file atomically with 600 permissions.
-
-    Uses write-to-temp + os.replace() to avoid corrupted files on crash.
-    Acquires an exclusive file lock for the duration of the write.
-    """
-    path.parent.mkdir(parents=True, exist_ok=True)
-    with _state_lock(path):
-        _secure_write_unlocked(path, content)
-
-
-_LOCK_TIMEOUT_SECONDS = 30
-
-
-@contextlib.contextmanager
-def _state_lock(path: Path, *, shared: bool = False):
-    """Acquire a file lock for *path* using a sidecar ``.lock`` file.
-
-    Uses non-blocking attempts with a retry loop so that a stuck lock
-    never blocks indefinitely.
-
-    WARNING: ``fcntl.flock()`` provides only advisory locking and does not
-    work reliably on NFS or other networked filesystems.  If sandbox state
-    is stored on NFS, concurrent operations may race.  For safety, keep
-    state files on local disk.
-
-    Args:
-        path: The file being protected.
-        shared: If ``True`` acquire a shared (read) lock; otherwise exclusive.
-
-    Raises:
-        OSError: If the lock cannot be acquired within the timeout.
-    """
-    import time
-
-    lock_path = path.with_suffix(path.suffix + ".lock")
-    lock_path.parent.mkdir(parents=True, exist_ok=True)
-    fd = os.open(str(lock_path), os.O_CREAT | os.O_RDWR, 0o600)
-    try:
-        lock_op = (fcntl.LOCK_SH if shared else fcntl.LOCK_EX) | fcntl.LOCK_NB
-        deadline = time.monotonic() + _LOCK_TIMEOUT_SECONDS
-        while True:
-            try:
-                fcntl.flock(fd, lock_op)
-                break
-            except OSError:
-                if time.monotonic() >= deadline:
-                    os.close(fd)
-                    raise OSError(
-                        f"Timed out after {_LOCK_TIMEOUT_SECONDS}s waiting for lock on {path}. "
-                        f"If no other process is running, remove {lock_path} and retry."
-                    )
-                time.sleep(0.1)
-        yield
-    finally:
-        fcntl.flock(fd, fcntl.LOCK_UN)
-        os.close(fd)
 
 
 # ============================================================================
@@ -476,6 +398,23 @@ def _write_cast_new_json(
     Returns:
         The command line string for display.
     """
+    # Validate through Pydantic model before persisting
+    preset = CastNewPreset(
+        repo=repo,
+        branch=branch,
+        from_branch=from_branch,
+        working_dir=working_dir,
+        sparse=sparse,
+        pip_requirements=pip_requirements,
+        allow_pr=allow_pr,
+        network_mode=network_mode,
+        sync_ssh=sync_ssh,
+        enable_opencode=enable_opencode,
+        enable_zai=enable_zai,
+        mounts=mounts or [],
+        copies=copies or [],
+    )
+
     timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
     command_line = _build_command_line(
         repo, branch, from_branch, working_dir, sparse,
@@ -486,21 +425,7 @@ def _write_cast_new_json(
     data = {
         "timestamp": timestamp,
         "command_line": command_line,
-        "args": {
-            "repo": repo,
-            "branch": branch,
-            "from_branch": from_branch,
-            "working_dir": working_dir,
-            "sparse": sparse,
-            "pip_requirements": pip_requirements,
-            "allow_pr": allow_pr,
-            "mounts": mounts or [],
-            "copies": copies or [],
-            "network_mode": network_mode,
-            "sync_ssh": sync_ssh,
-            "enable_opencode": enable_opencode,
-            "enable_zai": enable_zai,
-        },
+        "args": preset.model_dump(),
     }
 
     content = json.dumps(data, indent=2) + "\n"
@@ -585,22 +510,28 @@ def _load_cast_new_json(path: str | Path) -> dict[str, Any] | None:
         return None
 
     args = data.get("args", {})
-    return {
-        "command_line": data.get("command_line", ""),
-        "repo": args.get("repo", ""),
-        "branch": args.get("branch", ""),
-        "from_branch": args.get("from_branch", ""),
-        "working_dir": args.get("working_dir", ""),
-        "sparse": _flag_enabled(args.get("sparse", False)),
-        "pip_requirements": args.get("pip_requirements", ""),
-        "allow_pr": _flag_enabled(args.get("allow_pr", False)),
-        "mounts": args.get("mounts", []),
-        "copies": args.get("copies", []),
-        "network_mode": args.get("network_mode", "limited"),
-        "sync_ssh": _flag_enabled(args.get("sync_ssh", False)),
-        "enable_opencode": _flag_enabled(args.get("enable_opencode", False)),
-        "enable_zai": _flag_enabled(args.get("enable_zai", False)),
-    }
+    try:
+        preset = CastNewPreset(**args)
+        result = preset.model_dump()
+    except (ValueError, TypeError):
+        # Fallback: manual extraction for backward compat with pre-model files
+        result = {
+            "repo": args.get("repo", ""),
+            "branch": args.get("branch", ""),
+            "from_branch": args.get("from_branch", ""),
+            "working_dir": args.get("working_dir", ""),
+            "sparse": _flag_enabled(args.get("sparse", False)),
+            "pip_requirements": args.get("pip_requirements", ""),
+            "allow_pr": _flag_enabled(args.get("allow_pr", False)),
+            "mounts": args.get("mounts", []),
+            "copies": args.get("copies", []),
+            "network_mode": args.get("network_mode", "limited"),
+            "sync_ssh": _flag_enabled(args.get("sync_ssh", False)),
+            "enable_opencode": _flag_enabled(args.get("enable_opencode", False)),
+            "enable_zai": _flag_enabled(args.get("enable_zai", False)),
+        }
+    result["command_line"] = data.get("command_line", "")
+    return result
 
 
 def load_last_cast_new() -> dict[str, Any] | None:
