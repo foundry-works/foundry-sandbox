@@ -40,7 +40,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **MockHeaders helper** - Case-insensitive mock headers class in `conftest.py` for realistic mitmproxy header behavior in tests
 
 ### Fixed
-- **Git push/pull authentication** - `GIT_CREDENTIAL_TOKEN` is now passed through the sanitized subprocess environment in `build_clean_env()`, fixing authentication failures for git push/pull/fetch operations through the proxy
+- **Git push/pull authentication** - `FOUNDRY_PROXY_GIT_TOKEN` is now passed through the sanitized subprocess environment in `build_clean_env()`, fixing authentication failures for git push/pull/fetch operations through the proxy
 
 ## [0.11.0] - 2026-02-07
 

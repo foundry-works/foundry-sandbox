@@ -307,7 +307,7 @@ This section documents what IS implemented to address the primary threats.
 | Git credential injection | Unified proxy injects GITHUB_TOKEN for git operations | Token exposure in sandbox |
 | API credential injection | Unified proxy injects API keys for HTTP/HTTPS requests | API key exposure in sandbox |
 | Placeholder values | Sandbox sees `CREDENTIAL_PROXY_PLACEHOLDER` | Environment variable scraping |
-| GIT_CREDENTIAL_TOKEN injection | Proxy injects token into subprocess env for push/fetch | Git credential exposure in sandbox |
+| FOUNDRY_PROXY_GIT_TOKEN injection | Proxy injects token into subprocess env for push/fetch | Git credential exposure in sandbox |
 | Policy engine | Addon chain enforces per-request policy | Unauthorized API access |
 
 ### Layer 4: Request Validation
@@ -467,4 +467,4 @@ ping -c 1 unified-proxy
 |------|---------|---------|
 | 2026-01-31 | 1.0 | Initial threat model for credential isolation gateway |
 | 2026-02-05 | 2.0 | Updated for unified-proxy consolidation: merged gateway + API proxy into single service, replaced session tokens with container registry (SQLite-backed), updated DNS filtering to use integrated mitmproxy DNS mode |
-| 2026-02-08 | 2.1 | Added v0.10-v0.11 features: branch isolation enforcement, protected branch policies, GitHub API endpoint filtering, GIT_CREDENTIAL_TOKEN injection |
+| 2026-02-08 | 2.1 | Added v0.10-v0.11 features: branch isolation enforcement, protected branch policies, GitHub API endpoint filtering, FOUNDRY_PROXY_GIT_TOKEN injection |

@@ -626,9 +626,12 @@ class PolicyEngine:
         log_level = "info" if decision.allowed else "warn"
         log_fn = getattr(ctx.log, log_level)
 
+        # Truncate path to prevent log injection/spam from crafted long paths
+        safe_path = path[:200] if len(path) > 200 else path
+
         decision_str = "ALLOW" if decision.allowed else "DENY"
         log_fn(
-            f"Policy decision: {decision_str} - {method} {host}{path} - "
+            f"Policy decision: {decision_str} - {method} {host}{safe_path} - "
             f"container={decision.container_id or 'unknown'} - "
             f"policy={decision.policy_type} - "
             f"reason={decision.reason}"

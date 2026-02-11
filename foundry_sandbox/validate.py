@@ -71,16 +71,17 @@ def _resolve_path(path: str | Path, must_exist: bool = False) -> Path:
     Args:
         path: Path to resolve.
         must_exist: If True, resolve symlinks strictly (path must exist).
+            Raises OSError if the path does not exist.
 
     Returns:
         Resolved Path object.
+
+    Raises:
+        OSError: If must_exist is True and the path does not exist.
     """
     p = Path(path)
     if must_exist:
-        try:
-            return p.resolve(strict=True)
-        except OSError:
-            return p.resolve(strict=False)
+        return p.resolve(strict=True)
     return p.resolve(strict=False)
 
 
@@ -103,10 +104,17 @@ def validate_mount_path(mount_path: str) -> tuple[bool, str]:
     """
     # Resolve the canonical path, preferring existing paths for security
     # (prevents TOCTOU race conditions with symlink swaps)
-    canonical = _resolve_path(mount_path, must_exist=True)
+    try:
+        canonical = _resolve_path(mount_path, must_exist=True)
+    except OSError:
+        return False, f"Mount path '{mount_path}' does not exist"
 
     for dangerous in _dangerous_paths():
-        dangerous_canonical = _resolve_path(str(dangerous), must_exist=True)
+        try:
+            dangerous_canonical = _resolve_path(str(dangerous), must_exist=True)
+        except OSError:
+            # Dangerous path doesn't exist on this system — skip it
+            continue
 
         # Check exact match
         if canonical == dangerous_canonical:

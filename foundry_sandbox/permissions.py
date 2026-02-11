@@ -86,11 +86,11 @@ SETTINGS_FILE = os.path.join(SETTINGS_DIR, "settings.json")
 FOUNDRY_ALLOW = {allow_json}
 FOUNDRY_DENY = {deny_json}
 
-def merge_permissions(existing, foundry):
+def merge_permissions(existing: list, foundry: list) -> list:
     combined = set(existing) | set(foundry)
     return sorted(combined)
 
-def main():
+def main() -> None:
     os.makedirs(SETTINGS_DIR, exist_ok=True)
     settings = {{}}
     if os.path.exists(SETTINGS_FILE):

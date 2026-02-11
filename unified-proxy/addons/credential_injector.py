@@ -247,7 +247,7 @@ class CredentialInjector:
         except ValueError as e:
             ctx.log.warn(f"Invalid OAuth auth file: {e}")
         except Exception as e:
-            ctx.log.warn(f"Failed to initialize OAuth manager: {e}")
+            ctx.log.error(f"Failed to initialize OAuth manager: {e}")
 
     def _init_opencode_manager(self) -> None:
         """Initialize OpenCode API key manager if OPENCODE_AUTH_FILE is set."""
@@ -272,7 +272,7 @@ class CredentialInjector:
         except ValueError as e:
             ctx.log.warn(f"Invalid OpenCode auth file: {e}")
         except Exception as e:
-            ctx.log.warn(f"Failed to initialize OpenCode manager: {e}")
+            ctx.log.error(f"Failed to initialize OpenCode manager: {e}")
 
     def _init_gemini_manager(self) -> None:
         """Initialize Gemini OAuth token manager if GEMINI_OAUTH_FILE is set."""
@@ -293,7 +293,7 @@ class CredentialInjector:
         except ValueError as e:
             ctx.log.warn(f"Invalid Gemini auth file: {e}")
         except Exception as e:
-            ctx.log.warn(f"Failed to initialize Gemini manager: {e}")
+            ctx.log.error(f"Failed to initialize Gemini manager: {e}")
 
     def _get_container_id(self, flow: http.HTTPFlow) -> Optional[str]:
         """Get container ID from flow metadata for logging context.

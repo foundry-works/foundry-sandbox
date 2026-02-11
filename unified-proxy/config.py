@@ -310,6 +310,17 @@ class AllowlistConfig:
                 raise ConfigError(
                     f"Invalid domain '{domain}': must not include path components"
                 )
+            # Validate wildcard format: only single-level prefix wildcards allowed
+            if domain.startswith("*."):
+                rest = domain[2:]
+                if "*" in rest:
+                    raise ConfigError(
+                        f"Invalid domain '{domain}': multi-level wildcards not supported"
+                    )
+            elif "*" in domain:
+                raise ConfigError(
+                    f"Invalid domain '{domain}': wildcard must be prefix (*.example.com)"
+                )
 
         # Validate http_endpoints
         if not self.http_endpoints:

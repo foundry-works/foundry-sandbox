@@ -43,8 +43,7 @@ COPY logging_config.py /opt/proxy/logging_config.py
 COPY internal_api.py /opt/proxy/internal_api.py
 COPY pktline.py /opt/proxy/pktline.py
 
-# Copy legacy credential injection scripts (still used by entrypoint)
-COPY inject-credentials.py /opt/proxy/inject-credentials.py
+# Copy token manager modules (used by credential_injector addon)
 COPY codex-token-manager.py /opt/proxy/codex_token_manager.py
 COPY opencode-token-manager.py /opt/proxy/opencode_token_manager.py
 COPY gemini-token-manager.py /opt/proxy/gemini_token_manager.py

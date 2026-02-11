@@ -151,7 +151,7 @@ In credential isolation mode, sandboxes cannot directly access the `.git` direct
 
 #### Git HTTPS Credential Injection
 
-For remote git operations (`git push`, `git pull`), the unified-proxy injects `GIT_CREDENTIAL_TOKEN` into HTTPS requests to GitHub. The sandbox never receives the real GitHub token — it is held exclusively by the proxy container and injected at the network level during credential interception.
+For remote git operations (`git push`, `git pull`), the unified-proxy injects `FOUNDRY_PROXY_GIT_TOKEN` into HTTPS requests to GitHub. The sandbox never receives the real GitHub token — it is held exclusively by the proxy container and injected at the network level during credential interception.
 
 #### Branch Isolation
 

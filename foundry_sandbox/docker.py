@@ -17,7 +17,10 @@ import secrets
 import subprocess
 import sys
 from pathlib import Path
-from typing import Any, Callable
+from typing import TYPE_CHECKING, Any, Callable
+
+if TYPE_CHECKING:
+    from foundry_sandbox.models import CredentialPlaceholders
 
 from foundry_sandbox.constants import (
     get_sandbox_debug,
@@ -103,7 +106,7 @@ def _credential_placeholder() -> str:
     return f"CRED_PROXY_{secrets.token_hex(16)}"
 
 
-def setup_credential_placeholders():
+def setup_credential_placeholders() -> CredentialPlaceholders:
     """Detect host auth configuration and return a CredentialPlaceholders model.
 
     Determines which placeholder credentials to use based on what's configured

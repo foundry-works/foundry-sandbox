@@ -367,7 +367,7 @@ case "$1" in
         echo "protocol=https"
         echo "host=github.com"
         echo "username=x-access-token"
-        echo "password=${GIT_CREDENTIAL_TOKEN}"
+        echo "password=${FOUNDRY_PROXY_GIT_TOKEN}"
         echo ""
         ;;
 esac
@@ -375,7 +375,7 @@ HELPER_EOF
     chmod +x "${helper_script}"
 
     # Set the token as an env var for the helper and scope helper to github.com.
-    export GIT_CREDENTIAL_TOKEN="${token}"
+    export FOUNDRY_PROXY_GIT_TOKEN="${token}"
     git config --global --unset-all credential.helper 2>/dev/null || true
     git config --global credential.https://github.com.helper "${helper_script}"
 

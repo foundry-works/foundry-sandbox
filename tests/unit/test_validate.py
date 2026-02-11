@@ -219,21 +219,21 @@ class TestMountPathValidation:
         ssh_path = str(Path.home() / ".ssh")
         valid, msg = validate.validate_mount_path(ssh_path)
         assert valid is False
-        assert "dangerous credential path" in msg.lower() or "credential directory" in msg.lower()
+        assert "credential" in msg.lower() or "does not exist" in msg.lower()
 
     def test_aws_dir_rejected(self):
         """~/.aws directory should be rejected."""
         aws_path = str(Path.home() / ".aws")
         valid, msg = validate.validate_mount_path(aws_path)
         assert valid is False
-        assert "credential" in msg.lower()
+        assert "credential" in msg.lower() or "does not exist" in msg.lower()
 
     def test_docker_sock_rejected(self):
         """Docker socket paths should be rejected."""
         for sock in ["/var/run/docker.sock", "/run/docker.sock"]:
             valid, msg = validate.validate_mount_path(sock)
             assert valid is False
-            assert "credential" in msg.lower()
+            assert "credential" in msg.lower() or "does not exist" in msg.lower()
 
     def test_parent_of_dangerous_rejected(self, tmp_path):
         """Parent directory of dangerous path should be rejected."""

@@ -197,7 +197,7 @@ import os
 
 path = "/home/ubuntu/.claude/settings.json"
 
-def load_json(p):
+def load_json(p) -> dict:
     try:
         with open(p) as f:
             return json.load(f)

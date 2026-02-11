@@ -76,9 +76,11 @@ def build_clean_env() -> Dict[str, str]:
     # Pass through our internal credential token for the git credential helper.
     # This is NOT a git-recognized variable — it's only read by our own
     # /var/run/proxy/git-credential-helper.sh script set up in entrypoint.sh.
-    token = os.environ.get("GIT_CREDENTIAL_TOKEN")
+    # Named FOUNDRY_PROXY_GIT_TOKEN to avoid collision with any future
+    # git-recognized GIT_* variables.
+    token = os.environ.get("FOUNDRY_PROXY_GIT_TOKEN")
     if token:
-        clean["GIT_CREDENTIAL_TOKEN"] = token
+        clean["FOUNDRY_PROXY_GIT_TOKEN"] = token
 
     return clean
 

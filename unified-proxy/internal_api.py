@@ -276,7 +276,7 @@ def create_app(registry: Optional[ContainerRegistry] = None) -> Flask:
             logger.error(f"Health check failed: {e}")
             return jsonify({
                 "status": "unhealthy",
-                "error": str(e),
+                "error": "Health check failed",
             }), 503
 
     @app.route("/internal/containers", methods=["POST"])
