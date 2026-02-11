@@ -41,6 +41,9 @@ python_files = ["test_*.py"]
 python_classes = ["Test*"]
 python_functions = ["test_*"]
 addopts = "--import-mode=importlib -m 'not slow'"
+# NOTE: CI workflows that need slow tests must pass `-m ''` to clear the
+# marker filter, NOT `-o addopts=...` which replaces the entire addopts
+# string and drops --import-mode.
 norecursedirs = ["__pycache__", ".git", ".hypothesis"]
 markers = [
     "slow: marks tests as slow/integration-heavy",

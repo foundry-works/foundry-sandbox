@@ -56,6 +56,7 @@ mock_http.HTTPFlow = MockHTTPFlow
 
 mock_ctx_instance = MockCtx()
 
+import addons.rate_limiter as _rl_module
 from addons.rate_limiter import TokenBucket, RateLimiterAddon, BUCKET_EXPIRY_SECONDS
 from registry import ContainerConfig
 
@@ -461,15 +462,16 @@ class TestRefillBehavior:
     """Tests for token refill over time."""
 
     @patch("addons.rate_limiter.get_container_config")
-    @patch("addons.rate_limiter.time")
     def test_tokens_refill_over_time(
-        self, mock_time, mock_get_config, addon, mock_flow, mock_container_config
+        self, mock_get_config, addon, mock_flow, mock_container_config, monkeypatch
     ):
         """Test tokens refill based on elapsed time."""
         mock_get_config.return_value = mock_container_config
 
-        # Start at t=0
+        # Patch time at the module level before any calls
+        mock_time = MagicMock()
         mock_time.time.return_value = 100.0
+        monkeypatch.setattr(_rl_module, "time", mock_time)
 
         # Consume all tokens
         for _ in range(10):
@@ -498,15 +500,16 @@ class TestRefillBehavior:
         assert mock_flow.response.status_code == 429
 
     @patch("addons.rate_limiter.get_container_config")
-    @patch("addons.rate_limiter.time")
     def test_full_refill_after_waiting(
-        self, mock_time, mock_get_config, addon, mock_flow, mock_container_config
+        self, mock_get_config, addon, mock_flow, mock_container_config, monkeypatch
     ):
         """Test bucket fully refills after sufficient time."""
         mock_get_config.return_value = mock_container_config
 
-        # Start at t=0
+        # Patch time at the module level before any calls
+        mock_time = MagicMock()
         mock_time.time.return_value = 100.0
+        monkeypatch.setattr(_rl_module, "time", mock_time)
 
         # Consume all tokens
         for _ in range(10):
@@ -527,15 +530,16 @@ class TestCleanup:
     """Tests for cleanup of stale buckets."""
 
     @patch("addons.rate_limiter.get_container_config")
-    @patch("addons.rate_limiter.time")
     def test_cleanup_triggered_after_interval(
-        self, mock_time, mock_get_config, addon, mock_flow, mock_container_config
+        self, mock_get_config, addon, mock_flow, mock_container_config, monkeypatch
     ):
         """Test cleanup is triggered after cleanup_interval."""
         mock_get_config.return_value = mock_container_config
 
-        # Start at t=0
+        # Patch time at the module level before any calls
+        mock_time = MagicMock()
         mock_time.time.return_value = 100.0
+        monkeypatch.setattr(_rl_module, "time", mock_time)
         addon.last_cleanup = 100.0
 
         # Make a request

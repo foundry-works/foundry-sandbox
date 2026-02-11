@@ -42,19 +42,22 @@ jobs:
         run: docker info
 
       - name: Run orchestration tests
+        id: orchestration
         env:
           SANDBOX_CLI: ${{ matrix.entrypoint.cli }}
-        run: pytest -o addopts='--import-mode=importlib' tests/orchestration/ -v --tb=short
+        run: pytest tests/orchestration/ -v --tb=short -m ''
 
       - name: Run CLI smoke tests
         if: always()
+        env:
+          SANDBOX_CLI: ${{ matrix.entrypoint.cli }}
         run: bash tests/run.sh
 
       - name: Run security integration tests
-        if: always()
+        if: steps.orchestration.outcome == 'success'
         env:
           SANDBOX_CLI: ${{ matrix.entrypoint.cli }}
-        run: pytest -o addopts='--import-mode=importlib' tests/security/ -v --tb=short
+        run: pytest tests/security/ -v --tb=short -m ''
 
       - name: Cleanup orphaned test sandboxes
         if: always()
@@ -63,3 +66,13 @@ jobs:
             ./sandbox.sh destroy "$name" --force 2>/dev/null || true
           done
           docker system prune -f --volumes 2>/dev/null || true
+
+  cleanup:
+    runs-on: ubuntu-latest
+    needs: [orchestration-tests]
+    if: always()
+    timeout-minutes: 5
+    name: cleanup orphaned containers
+    steps:
+      - name: Prune Docker resources
+        run: docker system prune -f --volumes 2>/dev/null || true

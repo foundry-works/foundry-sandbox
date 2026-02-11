@@ -13,7 +13,7 @@ import pytest
 # Add unified-proxy to path
 unified_proxy_dir = os.path.join(
     os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
-    "unified-proxy"
+    "unified-proxy",
 )
 if unified_proxy_dir not in sys.path:
     sys.path.insert(0, unified_proxy_dir)
@@ -21,11 +21,13 @@ if unified_proxy_dir not in sys.path:
 
 from tests.mocks import install_mitmproxy_mocks
 
-install_mitmproxy_mocks(include_dns=True)
+_MOCK_KWARGS = {"include_dns": True}
+
+install_mitmproxy_mocks(**_MOCK_KWARGS)
 
 
 @pytest.fixture(autouse=True)
 def ensure_mitmproxy_mocks():
     """Reapply mitmproxy mocks before each test to avoid cross-test leakage."""
-    install_mitmproxy_mocks(include_dns=True)
+    install_mitmproxy_mocks(**_MOCK_KWARGS)
     yield

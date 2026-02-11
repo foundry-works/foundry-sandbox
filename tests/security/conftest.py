@@ -97,7 +97,28 @@ def running_sandbox(cli, has_docker, module_local_repo):
     assert name, (
         f"Could not extract sandbox name from output:\n{result.stdout}"
     )
+    # Capture initial state fingerprint for drift detection
+    initial_env = subprocess.run(
+        ["docker", "ps", "-q", "--filter", f"name=sandbox-{name}"],
+        capture_output=True, text=True,
+    ).stdout.strip()
+
     yield name
+
+    # Post-yield: verify sandbox state hasn't drifted (shared-state contract)
+    final_env = subprocess.run(
+        ["docker", "ps", "-q", "--filter", f"name=sandbox-{name}"],
+        capture_output=True, text=True,
+    ).stdout.strip()
+    if initial_env and initial_env != final_env:
+        import warnings
+        warnings.warn(
+            f"Sandbox container state drifted during test module "
+            f"(initial={initial_env!r}, final={final_env!r}). "
+            f"Tests must be read-only observers per the shared-state contract.",
+            stacklevel=1,
+        )
+
     cli("destroy", name, "--force")
 
 

@@ -24,9 +24,23 @@ jobs:
           pip install -e ".[dev,test-proxy]"
 
       - name: Run unified-proxy tests with real mitmproxy
+        id: unified-proxy
         continue-on-error: true
         run: pytest unified-proxy/tests/ -v --tb=short
 
       - name: Run integration tests with real mitmproxy
+        id: integration
         continue-on-error: true
         run: pytest tests/integration/ -v --tb=short
+
+      - name: Report drift failures
+        if: steps.unified-proxy.outcome == 'failure' || steps.integration.outcome == 'failure'
+        run: |
+          echo "::warning::Mitmproxy mock drift detected!"
+          if [ "${{ steps.unified-proxy.outcome }}" = "failure" ]; then
+            echo "::error::unified-proxy tests failed with real mitmproxy — mocks may be out of date"
+          fi
+          if [ "${{ steps.integration.outcome }}" = "failure" ]; then
+            echo "::error::integration tests failed with real mitmproxy — mocks may be out of date"
+          fi
+          exit 1

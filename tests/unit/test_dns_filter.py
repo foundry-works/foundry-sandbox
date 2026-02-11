@@ -313,6 +313,9 @@ class TestContainerIdentification:
 
         assert mock_ctx.log.was_called_with_level("warn")
         messages = mock_ctx.log.get_messages("warn")
+        assert len(messages) > 0, "Expected at least one warning log message"
+        assert any("unknown IP" in msg for msg in messages)
+        messages = mock_ctx.log.get_messages("warn")
         assert any("unknown IP" in msg for msg in messages)
 
     def test_unknown_ip_reason_unknown_container(self, addon, registry):
@@ -337,6 +340,9 @@ class TestContainerIdentification:
         addon.dns_request(flow)
 
         assert mock_ctx.log.was_called_with_level("warn")
+        messages = mock_ctx.log.get_messages("warn")
+        assert len(messages) > 0, "Expected at least one warning log message"
+        assert any("no client address" in msg for msg in messages)
         messages = mock_ctx.log.get_messages("warn")
         assert any("no client address" in msg for msg in messages)
 
@@ -479,6 +485,8 @@ class TestEdgeCases:
 
         # Should log warning and return early (no response set)
         assert mock_ctx.log.was_called_with_level("warn")
+        messages = mock_ctx.log.get_messages("warn")
+        assert len(messages) > 0, "Expected at least one warning log message for missing question"
 
     def test_registry_not_initialized_raises(self):
         """Test that accessing registry without initialization raises."""

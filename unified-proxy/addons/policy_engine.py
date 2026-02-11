@@ -651,11 +651,11 @@ class PolicyEngine:
         # Store decision in metadata
         flow.metadata[POLICY_DECISION_KEY] = decision.to_dict()
 
-        # Create 403 response
+        # Create 403 response with proxy-specific header for test distinguishability
         flow.response = http.Response.make(
             403,
             b"Forbidden: Request denied by policy engine",
-            {"Content-Type": "text/plain"},
+            {"Content-Type": "text/plain", "X-Sandbox-Blocked": "true"},
         )
 
 

@@ -136,29 +136,30 @@ class TestCircuitOpensOnFailures:
             assert status.state == CircuitState.CLOSED
             assert status.failure_count == 2
 
-    def test_circuit_blocks_requests_when_open(self, addon, mock_flow):
+    def test_circuit_blocks_requests_when_open(self, addon, mock_flow, monkeypatch):
         """Test circuit returns 503 when OPEN."""
         # Mock http.Response.make to return a proper mock response
         mock_response = MagicMock()
         mock_response.status_code = 503
         mock_response.content = b"Service Unavailable: Circuit breaker is open"
 
-        with patch('addons.circuit_breaker.http') as mock_http:
-            mock_http.Response.make.return_value = mock_response
+        mock_http = MagicMock()
+        mock_http.Response.make.return_value = mock_response
+        monkeypatch.setattr(_cb_module, "http", mock_http)
 
-            # Trigger circuit opening
-            for i in range(3):
-                addon.request(mock_flow)
-                mock_flow.response = MagicMock()
-                mock_flow.response.status_code = 503
-                addon.response(mock_flow)
-                mock_flow.response = None
-
-            # Next request should be blocked
+        # Trigger circuit opening
+        for i in range(3):
             addon.request(mock_flow)
-            assert mock_flow.response is not None
-            assert mock_flow.response.status_code == 503
-            assert b"Circuit breaker is open" in mock_flow.response.content
+            mock_flow.response = MagicMock()
+            mock_flow.response.status_code = 503
+            addon.response(mock_flow)
+            mock_flow.response = None
+
+        # Next request should be blocked
+        addon.request(mock_flow)
+        assert mock_flow.response is not None
+        assert mock_flow.response.status_code == 503
+        assert b"Circuit breaker is open" in mock_flow.response.content
 
     def test_connection_errors_count_as_failures(self, addon, mock_flow):
         """Test connection errors trigger circuit breaker."""
@@ -232,8 +233,8 @@ class TestHalfOpenState:
         time_control(1.1)
         addon.request(mock_flow)
 
-        # Request should not be blocked
-        assert mock_flow.response is None or mock_flow.response.status_code != 503
+        # Request should be allowed through (no blocking response set)
+        assert mock_flow.response is None
 
     def test_half_open_reopens_on_failure(self, addon, mock_flow, time_control):
         """Test HALF_OPEN transitions back to OPEN on any failure."""
@@ -565,59 +566,60 @@ class TestConfiguration:
 class TestCompleteWorkflow:
     """Tests for complete circuit breaker workflows."""
 
-    def test_complete_failure_recovery_cycle(self, addon, mock_flow, time_control):
+    def test_complete_failure_recovery_cycle(self, addon, mock_flow, time_control, monkeypatch):
         """Test complete cycle: CLOSED -> OPEN -> HALF_OPEN -> CLOSED."""
         # Mock http.Response.make to return a proper mock response
         mock_response = MagicMock()
         mock_response.status_code = 503
         mock_response.content = b"Service Unavailable: Circuit breaker is open"
 
-        with patch('addons.circuit_breaker.http') as mock_http:
-            mock_http.Response.make.return_value = mock_response
+        mock_http = MagicMock()
+        mock_http.Response.make.return_value = mock_response
+        monkeypatch.setattr(_cb_module, "http", mock_http)
 
-            # Start in CLOSED
-            with addon._lock:
-                assert "example.com:443" not in addon._circuits
+        # Start in CLOSED
+        with addon._lock:
+            assert "example.com:443" not in addon._circuits
 
-            # Trigger failures to open circuit
-            for i in range(3):
-                addon.request(mock_flow)
-                mock_flow.response = MagicMock()
-                mock_flow.response.status_code = 503
-                addon.response(mock_flow)
-                mock_flow.response = None
-
-            # Verify OPEN
-            with addon._lock:
-                status = addon._circuits["example.com:443"]
-                assert status.state == CircuitState.OPEN
-
-            # Verify requests are blocked
+        # Trigger failures to open circuit
+        for i in range(3):
             addon.request(mock_flow)
-            assert mock_flow.response.status_code == 503
+            mock_flow.response = MagicMock()
+            mock_flow.response.status_code = 503
+            addon.response(mock_flow)
             mock_flow.response = None
 
-            # Advance past recovery timeout
-            time_control(1.1)
+        # Verify OPEN
+        with addon._lock:
+            status = addon._circuits["example.com:443"]
+            assert status.state == CircuitState.OPEN
 
-            # Request should transition to HALF_OPEN
+        # Verify requests are blocked
+        addon.request(mock_flow)
+        assert mock_flow.response.status_code == 503
+        mock_flow.response = None
+
+        # Advance past recovery timeout
+        time_control(1.1)
+
+        # Request should transition to HALF_OPEN
+        addon.request(mock_flow)
+        with addon._lock:
+            status = addon._circuits["example.com:443"]
+            assert status.state == CircuitState.HALF_OPEN
+
+        # Send successful requests
+        for i in range(2):
             addon.request(mock_flow)
-            with addon._lock:
-                status = addon._circuits["example.com:443"]
-                assert status.state == CircuitState.HALF_OPEN
+            mock_flow.response = MagicMock()
+            mock_flow.response.status_code = 200
+            addon.response(mock_flow)
+            mock_flow.response = None
 
-            # Send successful requests
-            for i in range(2):
-                addon.request(mock_flow)
-                mock_flow.response = MagicMock()
-                mock_flow.response.status_code = 200
-                addon.response(mock_flow)
-                mock_flow.response = None
-
-            # Verify CLOSED
-            with addon._lock:
-                status = addon._circuits["example.com:443"]
-                assert status.state == CircuitState.CLOSED
+        # Verify CLOSED
+        with addon._lock:
+            status = addon._circuits["example.com:443"]
+            assert status.state == CircuitState.CLOSED
 
     def test_multiple_open_close_cycles(self, addon, mock_flow, time_control):
         """Test circuit can open and close multiple times."""

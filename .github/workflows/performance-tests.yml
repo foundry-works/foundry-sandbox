@@ -28,4 +28,4 @@ jobs:
         run: pip install -e ".[dev,test-orchestration]"
 
       - name: Run performance tests
-        run: pytest -o addopts='--import-mode=importlib' tests/performance/ -v --tb=short
+        run: pytest tests/performance/ -v --tb=short -m ''

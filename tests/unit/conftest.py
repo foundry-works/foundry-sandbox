@@ -21,11 +21,13 @@ if unified_proxy_dir not in sys.path:
 
 from tests.mocks import install_mitmproxy_mocks
 
-install_mitmproxy_mocks()
+_MOCK_KWARGS = {"include_dns": False}
+
+install_mitmproxy_mocks(**_MOCK_KWARGS)
 
 
 @pytest.fixture(autouse=True)
 def ensure_mitmproxy_mocks():
     """Reapply mitmproxy mocks before each test to avoid cross-test leakage."""
-    install_mitmproxy_mocks()
+    install_mitmproxy_mocks(**_MOCK_KWARGS)
     yield

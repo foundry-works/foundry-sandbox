@@ -36,8 +36,8 @@ PR_NUMBER = "1"
 REVIEW_ID = "123"
 
 
-def _curl_status_code(docker_exec, method, url, data=None, extra_headers=None):
-    """Run curl inside the sandbox and return the HTTP status code as a string.
+def _curl_status_and_header(docker_exec, method, url, data=None, extra_headers=None):
+    """Run curl inside the sandbox and return (status_code, x_sandbox_blocked).
 
     Args:
         docker_exec: The docker_exec fixture callable.
@@ -47,13 +47,14 @@ def _curl_status_code(docker_exec, method, url, data=None, extra_headers=None):
         extra_headers: Optional list of additional ``-H`` flag pairs.
 
     Returns:
-        The HTTP status code as a string (e.g. ``"403"``), or the raw
-        stdout if the curl command failed unexpectedly.
+        A tuple of (status_code_str, x_sandbox_blocked_header_value).
+        x_sandbox_blocked_header_value is the value of the X-Sandbox-Blocked
+        response header, or empty string if absent.
     """
     cmd = [
         "curl", "-s",
         "-o", "/dev/null",
-        "-w", "%{http_code}",
+        "-w", "%{http_code}\\n%header{X-Sandbox-Blocked}",
         "--max-time", "15",
         "-X", method,
         "-H", f"Authorization: token {PLACEHOLDER}",
@@ -70,7 +71,10 @@ def _curl_status_code(docker_exec, method, url, data=None, extra_headers=None):
     cmd.append(url)
 
     result = docker_exec(*cmd)
-    return result.stdout.strip()
+    lines = result.stdout.strip().split("\n")
+    status = lines[0] if lines else ""
+    blocked_header = lines[1].strip() if len(lines) > 1 else ""
+    return status, blocked_header
 
 
 class TestSelfMergePrevention:
@@ -100,11 +104,15 @@ class TestSelfMergePrevention:
             "merge_method": "merge",
         })
 
-        status = _curl_status_code(docker_exec, "PUT", url, data=data)
+        status, blocked = _curl_status_and_header(docker_exec, "PUT", url, data=data)
 
         assert status == "403", (
             f"Expected 403 for PUT .../pulls/{PR_NUMBER}/merge, got {status}. "
             "The proxy must block PR merge requests to prevent self-merge."
+        )
+        assert blocked == "true", (
+            f"Missing X-Sandbox-Blocked header — 403 may have come from "
+            f"GitHub rather than the proxy (header={blocked!r})."
         )
 
     def test_auto_merge_enable_blocked(self, docker_exec):
@@ -121,11 +129,15 @@ class TestSelfMergePrevention:
             f"/pulls/{PR_NUMBER}/auto-merge"
         )
 
-        status = _curl_status_code(docker_exec, "PUT", url, data="{}")
+        status, blocked = _curl_status_and_header(docker_exec, "PUT", url, data="{}")
 
         assert status == "403", (
             f"Expected 403 for PUT .../pulls/{PR_NUMBER}/auto-merge, got {status}. "
             "The proxy must block auto-merge enablement to prevent self-merge."
+        )
+        assert blocked == "true", (
+            f"Missing X-Sandbox-Blocked header — 403 may have come from "
+            f"GitHub rather than the proxy (header={blocked!r})."
         )
 
     def test_pr_review_create_blocked(self, docker_exec):
@@ -147,12 +159,16 @@ class TestSelfMergePrevention:
             "body": "Looks good",
         })
 
-        status = _curl_status_code(docker_exec, "POST", url, data=data)
+        status, blocked = _curl_status_and_header(docker_exec, "POST", url, data=data)
 
         assert status == "403", (
             f"Expected 403 for POST .../pulls/{PR_NUMBER}/reviews "
             f"(event=APPROVE), got {status}. "
             "The proxy must block self-approval reviews."
+        )
+        assert blocked == "true", (
+            f"Missing X-Sandbox-Blocked header — 403 may have come from "
+            f"GitHub rather than the proxy (header={blocked!r})."
         )
 
     def test_graphql_merge_mutation_blocked(self, docker_exec):
@@ -175,9 +191,13 @@ class TestSelfMergePrevention:
             ),
         })
 
-        status = _curl_status_code(docker_exec, "POST", url, data=data)
+        status, blocked = _curl_status_and_header(docker_exec, "POST", url, data=data)
 
         assert status == "403", (
             f"Expected 403 for GraphQL mergePullRequest mutation, got {status}. "
             "The proxy must block GraphQL merge mutations to prevent self-merge."
+        )
+        assert blocked == "true", (
+            f"Missing X-Sandbox-Blocked header — 403 may have come from "
+            f"GitHub rather than the proxy (header={blocked!r})."
         )
