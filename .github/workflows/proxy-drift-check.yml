@@ -49,3 +49,7 @@ jobs:
             echo "::error::integration tests failed with real mitmproxy — mocks may be out of date"
           fi
           exit 1
+
+      - name: Confirm mocks are in sync
+        if: steps.unified-proxy.outcome == 'success' && steps.integration.outcome == 'success'
+        run: echo "Mitmproxy mocks are in sync with real mitmproxy"

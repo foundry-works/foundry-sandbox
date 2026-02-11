@@ -63,6 +63,7 @@ jobs:
       - name: Run integration tests
         run: >
           pytest tests/integration/ -v --tb=short
+          --cov=foundry_sandbox --cov-report=term-missing
           --junitxml=junit-integration.xml
 
       - name: Upload test results
@@ -99,7 +100,6 @@ jobs:
 
       - name: Run shellcheck
         if: matrix.python-version == '3.12'
-        continue-on-error: true
         run: |
           sudo apt-get install -y -qq shellcheck 2>/dev/null
           shellcheck sandbox.sh entrypoint.sh entrypoint-root.sh stubs/git-wrapper.sh tests/run.sh
@@ -136,3 +136,23 @@ jobs:
         with:
           name: proxy-results-py${{ matrix.python-version }}
           path: junit-proxy.xml
+
+  all-pass:
+    runs-on: ubuntu-latest
+    needs: [unit, integration, lint, unified-proxy]
+    if: always()
+    steps:
+      - name: Check all jobs passed
+        run: |
+          if [ "${{ needs.unit.result }}" != "success" ] ||
+             [ "${{ needs.integration.result }}" != "success" ] ||
+             [ "${{ needs.lint.result }}" != "success" ] ||
+             [ "${{ needs.unified-proxy.result }}" != "success" ]; then
+            echo "One or more required jobs failed:"
+            echo "  unit: ${{ needs.unit.result }}"
+            echo "  integration: ${{ needs.integration.result }}"
+            echo "  lint: ${{ needs.lint.result }}"
+            echo "  unified-proxy: ${{ needs.unified-proxy.result }}"
+            exit 1
+          fi
+          echo "All required jobs passed."

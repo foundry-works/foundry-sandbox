@@ -149,7 +149,7 @@ class TestDefaultDeny:
         policy_engine.request(mock_flow)
 
         # Verify logging was called
-        assert mock_ctx.log.warn.called
+        mock_ctx.log.warn.assert_called()
 
 
 class TestAllowlistMatching:
@@ -224,7 +224,7 @@ class TestAllowlistMatching:
         policy_engine.request(mock_flow)
 
         # Verify info logging
-        assert mock_ctx.log.info.called
+        mock_ctx.log.info.assert_called()
 
     @patch("addons.policy_engine.get_container_config")
     @patch("addons.policy_engine.ctx")
@@ -458,7 +458,7 @@ class TestBlocklistOverride:
         policy_engine.request(flow)
 
         # Verify warning logged
-        assert mock_ctx.log.warn.called
+        mock_ctx.log.warn.assert_called()
 
 
 class TestEvaluationOrder:

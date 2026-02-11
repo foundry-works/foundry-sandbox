@@ -46,7 +46,7 @@ jobs:
         id: orchestration
         env:
           SANDBOX_CLI: ${{ matrix.entrypoint.cli }}
-        run: pytest tests/orchestration/ -v --tb=short -m ''
+        run: pytest tests/orchestration/ -v --tb=short
 
       - name: Run CLI smoke tests
         if: always()
@@ -58,12 +58,10 @@ jobs:
         if: always()
         env:
           SANDBOX_CLI: ${{ matrix.entrypoint.cli }}
-        run: pytest tests/security/ -v --tb=short -m ''
+        run: pytest tests/security/ -v --tb=short
 
       - name: Cleanup orphaned test sandboxes
         if: always()
         run: |
-          for name in $(./sandbox.sh list --json 2>/dev/null | python3 -c "import json,sys; [print(s['name']) for s in json.load(sys.stdin) if s['name'].startswith('test-')]" 2>/dev/null); do
-            ./sandbox.sh destroy "$name" --force 2>/dev/null || true
-          done
+          docker ps -aq --filter "name=test-" | xargs -r docker rm -f 2>/dev/null || true
           docker system prune -f --volumes 2>/dev/null || true

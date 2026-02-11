@@ -674,26 +674,33 @@ class TestEdgeCases:
         """Test thread safety with concurrent requests."""
         import threading
 
-        flow = MagicMock()
-        flow.request = MagicMock()
-        flow.request.pretty_host = "concurrent.com"
-        flow.request.port = 443
-        flow.response = None
-        flow.error = None
+        errors = []
 
         def make_request():
-            addon.request(flow)
-            mock_response = MagicMock()
-            mock_response.status_code = 200
-            flow.response = mock_response
-            addon.response(flow)
-            flow.response = None
+            try:
+                flow = MagicMock()
+                flow.request = MagicMock()
+                flow.request.pretty_host = "concurrent.com"
+                flow.request.port = 443
+                flow.response = None
+                flow.error = None
+
+                addon.request(flow)
+                mock_response = MagicMock()
+                mock_response.status_code = 200
+                flow.response = mock_response
+                addon.response(flow)
+            except Exception as exc:
+                errors.append(exc)
 
         threads = [threading.Thread(target=make_request) for _ in range(10)]
         for t in threads:
             t.start()
         for t in threads:
             t.join()
+
+        # No thread should have raised
+        assert errors == [], f"Threads raised errors: {errors}"
 
         # Should have one circuit with no errors
         with addon._lock:
