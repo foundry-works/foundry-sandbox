@@ -24,6 +24,7 @@ from pathlib import Path
 from typing import Any
 
 from foundry_sandbox.constants import CONTAINER_READY_ATTEMPTS, CONTAINER_READY_DELAY, CONTAINER_USER, TIMEOUT_DOCKER_EXEC, TIMEOUT_LOCAL_CMD, get_sandbox_verbose
+from foundry_sandbox.errors import DockerError
 from foundry_sandbox.utils import log_debug, log_error
 
 
@@ -200,7 +201,7 @@ def copy_file_to_container(
     *,
     quiet: bool = False,
     mode: str | None = None,
-) -> bool:
+) -> None:
     """Copy a single file from host to container using tar piped into docker exec.
 
     Handles basename mismatches via --transform (if supported) or a fallback
@@ -214,11 +215,9 @@ def copy_file_to_container(
         mode: If set, chmod the file to this mode immediately after copy
               (e.g. "0600"). Eliminates TOCTOU window for sensitive files.
 
-    Returns:
-        True on success, False after exhausting retries.
-
     Raises:
         ValueError: If dst targets a blocked system path.
+        DockerError: After exhausting retries.
     """
     _validate_container_dst(dst)
 
@@ -274,7 +273,7 @@ def copy_file_to_container(
             )
             rc = _pipe_tar_to_docker(tar_cmd, docker_cmd, quiet=quiet)
             if rc == 0 and _post_copy_chmod():
-                return True
+                return
         elif _tar_supports_transform():
             # Rename during transfer using --transform
             transform_expr = f"s|^{src_base}$|{dst_base}|"
@@ -296,7 +295,7 @@ def copy_file_to_container(
             )
             rc = _pipe_tar_to_docker(tar_cmd, docker_cmd, quiet=quiet)
             if rc == 0 and _post_copy_chmod():
-                return True
+                return
         else:
             # Fallback: tar with original name, then mv to rename
             tar_cmd = ["tar"] + base_tar_args + ["-C", src_dir, "-cf", "-", src_base]
@@ -321,13 +320,12 @@ def copy_file_to_container(
                 _verbose_trace(" ".join(mv_cmd))
                 mv_result = subprocess.run(mv_cmd, check=False, timeout=TIMEOUT_DOCKER_EXEC, **stderr_kwargs)
                 if mv_result.returncode == 0 and _post_copy_chmod():
-                    return True
+                    return
 
         if attempt < CONTAINER_READY_ATTEMPTS - 1:
             time.sleep(CONTAINER_READY_DELAY)
 
-    log_error(f"copy_file_to_container failed after {CONTAINER_READY_ATTEMPTS} attempts: {src} -> {dst}")
-    return False
+    raise DockerError(f"copy_file_to_container failed after {CONTAINER_READY_ATTEMPTS} attempts: {src} -> {dst}")
 
 
 # ============================================================================
@@ -342,7 +340,7 @@ def copy_dir_to_container(
     excludes: list[str] | None = None,
     *,
     quiet: bool = False,
-) -> bool:
+) -> None:
     """Copy an entire directory from host to container using tar piped into docker exec.
 
     Retries up to 5 attempts with 0.2s sleep between retries.
@@ -354,11 +352,9 @@ def copy_dir_to_container(
         excludes: Optional list of exclude patterns for tar.
         quiet: If True, suppress stderr output.
 
-    Returns:
-        True on success, False after exhausting retries.
-
     Raises:
         ValueError: If dst targets a blocked system path.
+        DockerError: After exhausting retries.
     """
     _validate_container_dst(dst)
 
@@ -399,13 +395,12 @@ def copy_dir_to_container(
 
         rc = _pipe_tar_to_docker(tar_cmd, docker_cmd, quiet=quiet)
         if rc == 0:
-            return True
+            return
 
         if attempt < CONTAINER_READY_ATTEMPTS - 1:
             time.sleep(CONTAINER_READY_DELAY)
 
-    log_error(f"copy_dir_to_container failed after {CONTAINER_READY_ATTEMPTS} attempts: {src} -> {dst}")
-    return False
+    raise DockerError(f"copy_dir_to_container failed after {CONTAINER_READY_ATTEMPTS} attempts: {src} -> {dst}")
 
 
 # ============================================================================
@@ -417,7 +412,7 @@ def copy_file_to_container_quiet(
     container_id: str,
     src: str,
     dst: str,
-) -> bool:
+) -> None:
     """Copy a single file from host to container, suppressing stderr.
 
     Same as ``copy_file_to_container`` but passes stderr=subprocess.DEVNULL
@@ -428,10 +423,10 @@ def copy_file_to_container_quiet(
         src: Source file path on the host.
         dst: Destination file path inside the container.
 
-    Returns:
-        True on success, False after exhausting retries.
+    Raises:
+        DockerError: After exhausting retries.
     """
-    return copy_file_to_container(container_id, src, dst, quiet=True)
+    copy_file_to_container(container_id, src, dst, quiet=True)
 
 
 def copy_dir_to_container_quiet(
@@ -439,7 +434,7 @@ def copy_dir_to_container_quiet(
     src: str,
     dst: str,
     excludes: list[str] | None = None,
-) -> bool:
+) -> None:
     """Copy an entire directory from host to container, suppressing stderr.
 
     Same as ``copy_dir_to_container`` but passes stderr=subprocess.DEVNULL
@@ -451,10 +446,10 @@ def copy_dir_to_container_quiet(
         dst: Destination directory path inside the container.
         excludes: Optional list of exclude patterns for tar.
 
-    Returns:
-        True on success, False after exhausting retries.
+    Raises:
+        DockerError: After exhausting retries.
     """
-    return copy_dir_to_container(container_id, src, dst, excludes=excludes, quiet=True)
+    copy_dir_to_container(container_id, src, dst, excludes=excludes, quiet=True)
 
 
 # ============================================================================

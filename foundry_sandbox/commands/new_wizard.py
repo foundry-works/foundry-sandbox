@@ -23,7 +23,7 @@ def _wizard_repo() -> tuple[str, str, str, str]:
     Returns:
         Tuple of (repo_url, repo_root, repo_display, current_branch).
     """
-    from foundry_sandbox.commands.new import _resolve_repo_input
+    from foundry_sandbox.commands.new_resolver import _resolve_repo_input
 
     click.echo()
     click.echo("  Step 1/7: Repository")
@@ -79,7 +79,7 @@ def _wizard_branch(repo_root: str, current_branch: str) -> tuple[str, str, bool]
     Returns:
         Tuple of (branch, from_branch, create_branch).
     """
-    from foundry_sandbox.commands.new import _get_local_branches
+    from foundry_sandbox.commands.new_resolver import _get_local_branches
 
     click.echo()
     click.echo("  Step 2/7: Branch")

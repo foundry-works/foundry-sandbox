@@ -1,4 +1,9 @@
 #!/bin/bash
+# DEPRECATED: This file is superseded by Python modules in foundry_sandbox/.
+# Python equivalents: container_io.py, credential_setup.py, settings_merge.py,
+#   foundry_plugin.py, container_configurator.py, tool_configs.py
+# Do not add new functions here. See docs/adr/ for migration context.
+# Target removal: after full Python migration is validated in production.
 
 TAR_NO_XATTRS_ARGS=()
 TAR_TRANSFORM_SUPPORTED=0

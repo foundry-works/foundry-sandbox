@@ -20,6 +20,7 @@ from foundry_sandbox.constants import (
     get_sandbox_verbose,
 )
 from foundry_sandbox.container_io import copy_file_to_container
+from foundry_sandbox.errors import DockerError
 from foundry_sandbox.utils import log_debug, log_info, log_warn
 
 
@@ -95,7 +96,9 @@ def install_pip_requirements(
             return
 
         container_req_path = "/tmp/sandbox-requirements.txt"
-        if not copy_file_to_container(container_id, expanded_path, container_req_path):
+        try:
+            copy_file_to_container(container_id, expanded_path, container_req_path)
+        except DockerError:
             return
     else:
         # Workspace-relative path

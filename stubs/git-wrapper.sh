@@ -15,6 +15,10 @@
 
 set -euo pipefail
 
+# Restrict file creation permissions — ensures mktemp files (which may contain
+# git output or auth responses) are created with 0600 instead of default umask.
+umask 077
+
 # ---------------------------------------------------------------------------
 # Dependency Check
 # ---------------------------------------------------------------------------

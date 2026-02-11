@@ -27,6 +27,7 @@ from foundry_sandbox.container_io import (
     docker_exec_json,
     docker_exec_text,
 )
+from foundry_sandbox.errors import DockerError
 
 
 # ---------------------------------------------------------------------------
@@ -230,10 +231,9 @@ class TestCopyFileToContainer:
     @patch("foundry_sandbox.container_io.subprocess.run", return_value=_completed())
     def test_simple_copy_same_basename(self, mock_run, mock_pipe, _t, _x):
         """When src and dst basenames match, no rename needed."""
-        result = copy_file_to_container(
+        copy_file_to_container(
             "container-1", "/host/file.txt", "/home/ubuntu/.config/file.txt",
         )
-        assert result is True
         mock_pipe.assert_called_once()
 
     @patch("foundry_sandbox.container_io._tar_supports_no_xattrs", return_value=False)
@@ -242,10 +242,9 @@ class TestCopyFileToContainer:
     @patch("foundry_sandbox.container_io.subprocess.run", return_value=_completed())
     def test_rename_via_transform(self, mock_run, mock_pipe, _t, _x):
         """When basenames differ and --transform supported, uses transform."""
-        result = copy_file_to_container(
+        copy_file_to_container(
             "container-1", "/host/src.txt", "/home/ubuntu/.config/dst.txt",
         )
-        assert result is True
         # Check that the tar command included --transform
         tar_cmd = mock_pipe.call_args[0][0]
         assert any("--transform" in arg for arg in tar_cmd)
@@ -256,10 +255,9 @@ class TestCopyFileToContainer:
     @patch("foundry_sandbox.container_io.subprocess.run", return_value=_completed())
     def test_rename_fallback_mv(self, mock_run, mock_pipe, _t, _x):
         """When basenames differ and no --transform, uses tar + mv fallback."""
-        result = copy_file_to_container(
+        copy_file_to_container(
             "container-1", "/host/src.txt", "/home/ubuntu/.config/dst.txt",
         )
-        assert result is True
         # Should have run mv command
         mv_calls = [
             c for c in mock_run.call_args_list
@@ -273,11 +271,11 @@ class TestCopyFileToContainer:
     @patch("foundry_sandbox.container_io.subprocess.run", return_value=_completed())
     @patch("foundry_sandbox.container_io.time.sleep")
     def test_retries_on_failure(self, mock_sleep, mock_run, mock_pipe, _t, _x):
-        """Retries up to CONTAINER_READY_ATTEMPTS times on pipe failure."""
-        result = copy_file_to_container(
-            "container-1", "/host/file.txt", "/home/ubuntu/.config/file.txt",
-        )
-        assert result is False
+        """Retries up to CONTAINER_READY_ATTEMPTS times then raises DockerError."""
+        with pytest.raises(DockerError, match="copy_file_to_container failed"):
+            copy_file_to_container(
+                "container-1", "/host/file.txt", "/home/ubuntu/.config/file.txt",
+            )
         # Should have retried (5 attempts = 4 sleeps)
         assert mock_sleep.call_count == 4
         assert mock_pipe.call_count == 5
@@ -293,11 +291,10 @@ class TestCopyFileToContainer:
     @patch("foundry_sandbox.container_io.subprocess.run", return_value=_completed())
     def test_chmod_applied_after_copy(self, mock_run, mock_pipe, _t, _x):
         """When mode is set, chmod is applied immediately after copy."""
-        result = copy_file_to_container(
+        copy_file_to_container(
             "container-1", "/host/key", "/home/ubuntu/.ssh/id_rsa",
             mode="0600",
         )
-        assert result is True
         # Find the chmod call
         chmod_calls = [
             c for c in mock_run.call_args_list
@@ -343,10 +340,9 @@ class TestCopyFileToContainer:
 class TestCopyFileToContainerQuiet:
     """Quiet variant delegates to copy_file_to_container with quiet=True."""
 
-    @patch("foundry_sandbox.container_io.copy_file_to_container", return_value=True)
+    @patch("foundry_sandbox.container_io.copy_file_to_container")
     def test_delegates_with_quiet(self, mock_copy):
-        result = copy_file_to_container_quiet("c1", "/src", "/dst")
-        assert result is True
+        copy_file_to_container_quiet("c1", "/src", "/dst")
         mock_copy.assert_called_once_with("c1", "/src", "/dst", quiet=True)
 
 
@@ -362,8 +358,7 @@ class TestCopyDirToContainer:
     @patch("foundry_sandbox.container_io._pipe_tar_to_docker", return_value=0)
     @patch("foundry_sandbox.container_io.subprocess.run", return_value=_completed())
     def test_simple_dir_copy(self, mock_run, mock_pipe, _x):
-        result = copy_dir_to_container("c1", "/host/dir", "/home/ubuntu/.config/dir")
-        assert result is True
+        copy_dir_to_container("c1", "/host/dir", "/home/ubuntu/.config/dir")
         mock_pipe.assert_called_once()
 
     @patch("foundry_sandbox.container_io._tar_supports_no_xattrs", return_value=False)
@@ -384,8 +379,8 @@ class TestCopyDirToContainer:
     @patch("foundry_sandbox.container_io.subprocess.run", return_value=_completed())
     @patch("foundry_sandbox.container_io.time.sleep")
     def test_retries_on_failure(self, mock_sleep, mock_run, mock_pipe, _x):
-        result = copy_dir_to_container("c1", "/host/dir", "/home/ubuntu/.config/dir")
-        assert result is False
+        with pytest.raises(DockerError, match="copy_dir_to_container failed"):
+            copy_dir_to_container("c1", "/host/dir", "/home/ubuntu/.config/dir")
         assert mock_pipe.call_count == 5
 
     def test_rejects_dst_outside_allowlist(self):
@@ -396,10 +391,9 @@ class TestCopyDirToContainer:
 class TestCopyDirToContainerQuiet:
     """Quiet variant delegates with quiet=True."""
 
-    @patch("foundry_sandbox.container_io.copy_dir_to_container", return_value=True)
+    @patch("foundry_sandbox.container_io.copy_dir_to_container")
     def test_delegates_with_quiet(self, mock_copy):
-        result = copy_dir_to_container_quiet("c1", "/src", "/dst", ["*.pyc"])
-        assert result is True
+        copy_dir_to_container_quiet("c1", "/src", "/dst", ["*.pyc"])
         mock_copy.assert_called_once_with("c1", "/src", "/dst", excludes=["*.pyc"], quiet=True)
 
 

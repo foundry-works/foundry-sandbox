@@ -21,6 +21,7 @@ from foundry_sandbox.constants import (
     TIMEOUT_DOCKER_EXEC,
 )
 from foundry_sandbox.container_io import copy_file_to_container
+from foundry_sandbox.errors import DockerError
 from foundry_sandbox.utils import log_warn
 
 
@@ -39,7 +40,7 @@ def merge_claude_settings_in_container(container_id: str, host_settings: str) ->
 
     try:
         copy_file_to_container(container_id, host_settings, temp_host)
-    except (OSError, subprocess.CalledProcessError) as exc:
+    except (OSError, subprocess.CalledProcessError, DockerError) as exc:
         log_warn(f"Failed to copy host settings for merge: {exc}")
         return False
 

@@ -28,10 +28,8 @@ Performs the following sequence:
 from __future__ import annotations
 
 import os
-import subprocess
 import sys
 from dataclasses import dataclass
-from datetime import datetime
 from pathlib import Path
 
 import click
@@ -46,15 +44,14 @@ from foundry_sandbox.paths import (
 from foundry_sandbox.utils import flag_enabled as _saved_flag_enabled
 from foundry_sandbox.commands.new_setup import _SetupError, _new_setup, _rollback_new
 from foundry_sandbox.commands.new_wizard import _guided_new
-from foundry_sandbox.utils import sanitize_ref_component
-from foundry_sandbox.api_keys import check_claude_key_required, has_opencode_key
-from foundry_sandbox.constants import TIMEOUT_GIT_QUERY, TIMEOUT_LOCAL_CMD
-from foundry_sandbox.image import check_image_freshness
+from foundry_sandbox.commands.new_resolver import _resolve_repo_input, _get_local_branches, _generate_branch_name
+from foundry_sandbox.commands.new_validation import _validate_preconditions, _validate_working_dir, _validate_mounts
+from foundry_sandbox.api_keys import has_opencode_key
 from foundry_sandbox.paths import derive_sandbox_paths
 from foundry_sandbox.state import save_last_cast_new, save_cast_preset, load_last_cast_new, load_cast_preset, save_last_attach
 from foundry_sandbox import tmux
-from foundry_sandbox.utils import environment_scope, log_debug, log_error, log_info, log_section, log_warn
-from foundry_sandbox.validate import check_docker_network_capacity, validate_git_url, validate_mount_path, validate_sandbox_name
+from foundry_sandbox.utils import environment_scope, log_error, log_info, log_section, log_warn
+from foundry_sandbox.validate import validate_sandbox_name
 
 
 @dataclass
@@ -144,137 +141,6 @@ def _apply_saved_new_defaults(
     )
 
 
-# ---------------------------------------------------------------------------
-# Repository Resolution Helpers
-# ---------------------------------------------------------------------------
-
-
-def _resolve_repo_input(repo_input: str) -> tuple[str, str, str, str]:
-    """Resolve repo input to URL, root path, display name, and current branch.
-
-    Args:
-        repo_input: User input (URL, '.', local path, or owner/repo).
-
-    Returns:
-        Tuple of (repo_url, repo_root, repo_display, current_branch).
-        repo_root is empty for remote URLs.
-    """
-    # Local path inputs
-    if repo_input in (".", "/", "./", "../", "~/") or repo_input.startswith(("/", "./", "../", "~/")):
-        expanded = os.path.expanduser(repo_input)
-        result = subprocess.run(
-            ["git", "-C", expanded, "rev-parse", "--show-toplevel"],
-            capture_output=True,
-            text=True,
-            check=False,
-            timeout=TIMEOUT_GIT_QUERY,
-        )
-        if result.returncode != 0:
-            return ("", "", "", "")
-
-        repo_root = result.stdout.strip()
-        origin_result = subprocess.run(
-            ["git", "-C", repo_root, "remote", "get-url", "origin"],
-            capture_output=True,
-            text=True,
-            check=False,
-            timeout=TIMEOUT_GIT_QUERY,
-        )
-
-        if origin_result.returncode == 0 and origin_result.stdout.strip():
-            repo_url = origin_result.stdout.strip()
-            repo_display = repo_url
-        else:
-            repo_url = repo_root
-            repo_display = repo_root
-
-        branch_result = subprocess.run(
-            ["git", "-C", repo_root, "rev-parse", "--abbrev-ref", "HEAD"],
-            capture_output=True,
-            text=True,
-            check=False,
-            timeout=TIMEOUT_GIT_QUERY,
-        )
-        current_branch = branch_result.stdout.strip() if branch_result.returncode == 0 else ""
-
-        return (repo_url, repo_root, repo_display, current_branch)
-
-    # URL or shorthand
-    if repo_input.startswith(("http://", "https://", "git@")) or "://" in repo_input:
-        repo_url = repo_input
-    else:
-        repo_url = f"https://github.com/{repo_input}"
-
-    return (repo_url, "", repo_url, "")
-
-
-def _get_local_branches(repo_root: str) -> list[str]:
-    """Get list of local branches in a repo."""
-    result = subprocess.run(
-        ["git", "-C", repo_root, "for-each-ref", "--format=%(refname:short)", "refs/heads"],
-        capture_output=True,
-        text=True,
-        check=False,
-        timeout=TIMEOUT_GIT_QUERY,
-    )
-    if result.returncode != 0:
-        return []
-    return [line for line in result.stdout.strip().split("\n") if line]
-
-
-def _generate_branch_name(repo_url: str, from_branch: str) -> str:
-    """Generate a branch name for a new sandbox."""
-    timestamp = datetime.now().strftime("%Y%m%d-%H%M")
-    repo_name = os.path.basename(repo_url.removesuffix(".git"))
-
-    user_segment = os.environ.get("USER", "")
-    if not user_segment:
-        try:
-            user_segment = subprocess.run(
-                ["id", "-un"],
-                capture_output=True,
-                text=True,
-                check=False,
-                timeout=TIMEOUT_LOCAL_CMD,
-            ).stdout.strip()
-        except (OSError, subprocess.TimeoutExpired):
-            log_debug("Failed to get username from id command")
-
-    if not user_segment:
-        user_segment = "user"
-
-    user_segment = sanitize_ref_component(user_segment)
-    safe_repo_name = sanitize_ref_component(repo_name)
-
-    if not safe_repo_name:
-        safe_repo_name = "repo"
-
-    branch = f"{user_segment}/{safe_repo_name}-{timestamp}"
-
-    # Validate branch name
-    check_result = subprocess.run(
-        ["git", "check-ref-format", "--branch", branch],
-        capture_output=True,
-        check=False,
-        timeout=TIMEOUT_GIT_QUERY,
-    )
-
-    if check_result.returncode != 0:
-        fallback_branch = f"{safe_repo_name}-{timestamp}"
-        check_fallback = subprocess.run(
-            ["git", "check-ref-format", "--branch", fallback_branch],
-            capture_output=True,
-            check=False,
-            timeout=TIMEOUT_GIT_QUERY,
-        )
-        if check_fallback.returncode == 0:
-            branch = fallback_branch
-        else:
-            branch = f"sandbox-{timestamp}"
-
-    return branch
-
-
 def _load_and_apply_defaults(
     data: dict[str, object] | None,
     label: str,
@@ -329,53 +195,6 @@ def _load_and_apply_defaults(
         pip_requirements=pip_requirements,
         allow_pr=allow_pr,
     )
-
-
-def _validate_preconditions(
-    ctx: click.Context,
-    repo_url: str,
-    copies: tuple[str, ...],
-    skip_key_check: bool,
-    isolate_credentials: bool,
-) -> None:
-    """Validate API keys, copy sources, image freshness, and network capacity.
-
-    Args:
-        ctx: Click context (for invoking build command).
-        repo_url: Validated repository URL.
-        copies: Tuple of copy specs (host:container).
-        skip_key_check: Whether to skip API key validation.
-        isolate_credentials: Whether credential isolation is enabled.
-
-    Raises:
-        SystemExit: On validation failure.
-    """
-    ok, msg = validate_git_url(repo_url)
-    if not ok:
-        log_error(msg)
-        sys.exit(1)
-
-    if not skip_key_check:
-        ok, msg = check_claude_key_required()
-        if not ok:
-            log_error("Sandbox creation cancelled - Claude authentication required.")
-            sys.exit(1)
-
-    for copy_spec in copies:
-        src, _, _ = copy_spec.partition(":")
-        if not os.path.exists(src):
-            log_error(f"Copy source does not exist: {src}")
-            sys.exit(1)
-
-    if check_image_freshness():
-        if click.confirm("Rebuild image now?", default=True):
-            from foundry_sandbox.commands.build import build as build_cmd
-            ctx.invoke(build_cmd)
-
-    ok, msg = check_docker_network_capacity(isolate_credentials)
-    if not ok:
-        log_error(msg)
-        sys.exit(1)
 
 
 def _persist_sandbox_state(
@@ -680,11 +499,9 @@ def new(
 
     # Validate working directory
     if wd:
-        if wd.startswith("/"):
-            log_error("Working directory must be relative, not absolute")
-            sys.exit(1)
-        if ".." in wd:
-            log_error("Working directory cannot contain parent traversal")
+        ok, msg = _validate_working_dir(wd)
+        if not ok:
+            log_error(msg)
             sys.exit(1)
         wd = wd.lstrip("./")
 
@@ -748,13 +565,11 @@ def new(
 
     # Validate mount paths
     if not allow_dangerous_mount:
-        for mount in mounts:
-            src, _, _ = mount.partition(":")
-            ok, msg = validate_mount_path(src)
-            if not ok:
-                log_error(msg)
-                click.echo("Use --allow-dangerous-mount to bypass this check (not recommended)")
-                sys.exit(1)
+        ok, msg = _validate_mounts(mounts)
+        if not ok:
+            log_error(msg)
+            click.echo("Use --allow-dangerous-mount to bypass this check (not recommended)")
+            sys.exit(1)
 
     # Setup opt-in tool enablement
     enable_opencode_flag = "0"
