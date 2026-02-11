@@ -6,7 +6,7 @@ on:
     branches: ["main"]
 
 jobs:
-  test:
+  unit:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     strategy:
@@ -24,7 +24,7 @@ jobs:
         run: |
           pip install -e ".[dev,test-orchestration]"
 
-      - name: Run tests
+      - name: Run unit tests
         run: pytest tests/unit/ -v --tb=short
 
   integration:
@@ -43,7 +43,7 @@ jobs:
 
       - name: Install dependencies
         run: |
-          pip install -e ".[dev,test-orchestration]"
+          pip install -e ".[dev,test-orchestration,test-proxy]"
 
       - name: Run integration tests
         run: pytest tests/integration/ -v --tb=short
