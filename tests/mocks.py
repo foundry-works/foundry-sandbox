@@ -81,16 +81,19 @@ class MockCtxLog:
     def __init__(self):
         self.calls = []
 
-    def info(self, msg):
+    def info(self, msg, **kwargs):
         self.calls.append(("info", msg))
 
-    def warn(self, msg):
+    def warn(self, msg, **kwargs):
         self.calls.append(("warn", msg))
 
-    def debug(self, msg):
+    def warning(self, msg, **kwargs):
+        self.calls.append(("warn", msg))
+
+    def debug(self, msg, **kwargs):
         self.calls.append(("debug", msg))
 
-    def error(self, msg):
+    def error(self, msg, **kwargs):
         self.calls.append(("error", msg))
 
     def reset(self):

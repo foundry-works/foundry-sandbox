@@ -17,7 +17,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../../unified-proxy"
 from internal_api import create_app, rate_limiter
 from registry import ContainerRegistry
 
-from tests.mocks import MockCtx, MockDNSFlow
+from tests.mocks import MockCtxLog, MockDNSFlow
 
 # Set up mitmproxy.dns in sys.modules before importing dns_filter
 _mock_dns = MagicMock()
@@ -35,13 +35,13 @@ import dns_filter  # noqa: E402
 @pytest.fixture(autouse=True)
 def _dns_filter_mocks():
     """Inject integration-test mocks into dns_filter for each test, then restore."""
-    mock_ctx = MockCtx()
-    orig_ctx = dns_filter.ctx
+    mock_logger = MockCtxLog()
+    orig_logger = dns_filter.logger
     orig_dns = dns_filter.dns
-    dns_filter.ctx = mock_ctx
+    dns_filter.logger = mock_logger
     dns_filter.dns = _mock_dns
-    yield mock_ctx
-    dns_filter.ctx = orig_ctx
+    yield mock_logger
+    dns_filter.logger = orig_logger
     dns_filter.dns = orig_dns
 
 

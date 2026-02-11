@@ -25,7 +25,7 @@ import sys
 import time
 from typing import Optional, Dict
 
-from mitmproxy import http, ctx
+from mitmproxy import http
 
 # Add parent directory to path for imports
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -123,8 +123,7 @@ class MetricsAddon:
 
     def load(self, loader):
         """Called when addon is loaded."""
-        logger.info("Metrics addon loaded")
-        ctx.log.info("Metrics addon loaded - metrics available at /internal/metrics")
+        logger.info("Metrics addon loaded - metrics available at /internal/metrics")
 
     def request(self, flow: http.HTTPFlow) -> None:
         """Process incoming request.

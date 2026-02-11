@@ -22,7 +22,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../../unified-proxy"
 
 # Mock mitmproxy before importing container_identity
 from tests.mocks import (
-    MockHeaders, MockResponse, MockClientConn, MockCtx,
+    MockHeaders, MockResponse, MockClientConn, MockCtxLog,
 )
 
 
@@ -56,7 +56,7 @@ mock_http = MagicMock()
 mock_http.Response = MockResponse
 mock_http.HTTPFlow = MockHTTPFlow
 
-mock_ctx = MockCtx()
+mock_logger = MockCtxLog()
 
 # Add addons path and import container_identity (uses conftest mitmproxy mocks)
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../../unified-proxy/addons"))
@@ -64,7 +64,7 @@ import container_identity
 
 # Replace the module-level mitmproxy references with our test-specific mocks
 # so that container_identity uses MockResponse/MockCtx defined above.
-container_identity.ctx = mock_ctx
+container_identity.logger = mock_logger
 container_identity.http = mock_http
 
 # Import registry directly (no mitmproxy dependency)
@@ -98,9 +98,9 @@ def addon(registry):
 
 
 @pytest.fixture(autouse=True)
-def reset_mock_ctx():
-    """Reset mock ctx before each test."""
-    mock_ctx.log.reset()
+def reset_mock_logger():
+    """Reset mock logger before each test."""
+    mock_logger.reset()
     yield
 
 
@@ -139,8 +139,8 @@ class TestUnknownSourceIP:
         addon.request(flow)
 
         # Verify warning was logged
-        assert mock_ctx.log.was_called_with_level("warn")
-        messages = mock_ctx.log.get_messages("warn")
+        assert mock_logger.was_called_with_level("warn")
+        messages = mock_logger.get_messages("warn")
         assert any("Unknown source IP" in msg for msg in messages)
 
     def test_unknown_ip_does_not_set_metadata(self, addon):
@@ -188,8 +188,8 @@ class TestMismatchedHeader:
 
         addon.request(flow)
 
-        assert mock_ctx.log.was_called_with_level("warn")
-        messages = mock_ctx.log.get_messages("warn")
+        assert mock_logger.was_called_with_level("warn")
+        messages = mock_logger.get_messages("warn")
         assert any("mismatch" in msg.lower() for msg in messages)
 
 
@@ -229,7 +229,7 @@ class TestExpiredRegistration:
         addon.request(flow)
 
         # Check that warning was logged (either expired or unknown)
-        assert mock_ctx.log.was_called_with_level("warn")
+        assert mock_logger.was_called_with_level("warn")
 
 
 class TestValidRegistration:
@@ -521,8 +521,8 @@ class TestPathTraversalValidation:
         flow = create_flow("172.17.0.23")
         addon.request(flow)
 
-        assert mock_ctx.log.was_called_with_level("warn")
-        messages = mock_ctx.log.get_messages("warn")
+        assert mock_logger.was_called_with_level("warn")
+        messages = mock_logger.get_messages("warn")
         assert any("path traversal" in msg.lower() for msg in messages)
 
     def test_three_part_repo_skips_enrichment(self, addon, registry):

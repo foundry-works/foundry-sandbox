@@ -22,7 +22,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../../unified-proxy"
 
 # Mock mitmproxy before importing git_proxy
 from tests.mocks import (
-    MockHeaders, MockResponse, MockClientConn, MockCtx,
+    MockHeaders, MockResponse, MockClientConn, MockCtx, MockCtxLog,
 )
 
 
@@ -60,13 +60,14 @@ mock_http.Response = MockResponse
 mock_http.HTTPFlow = MockHTTPFlow
 
 mock_ctx = MockCtx()
+mock_logger = MockCtxLog()
 
 # Add addons path and import git_proxy (uses conftest mitmproxy mocks)
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../../unified-proxy/addons"))
 import git_proxy
 
 # Replace the module-level mitmproxy references with our test-specific mocks
-git_proxy.ctx = mock_ctx
+git_proxy.logger = mock_logger
 git_proxy.http = mock_http
 
 # Import pktline for creating test data
@@ -80,13 +81,13 @@ from registry import ContainerConfig
 GIT_METADATA_KEY = "git_operation"
 @pytest.fixture(autouse=True)
 def reset_mock_ctx():
-    """Reset mock ctx before each test.
+    """Reset mock logger before each test.
 
-    Uses git_proxy.ctx (not local mock_ctx) to handle cross-file mock
+    Uses git_proxy.logger (not local mock_logger) to handle cross-file mock
     interference when pytest runs multiple test files in the same process.
     """
-    git_proxy.ctx = mock_ctx
-    mock_ctx.log.reset()
+    git_proxy.logger = mock_logger
+    mock_logger.reset()
     yield
 
 
@@ -295,7 +296,7 @@ class TestRepoAuthorization:
         addon.request(flow)
 
         # Should log warning but not set response (container_identity should have denied)
-        assert mock_ctx.log.was_called_with_level("warn")
+        assert mock_logger.was_called_with_level("warn")
 
 
 class TestBranchDeletionBlocking:
@@ -610,8 +611,8 @@ class TestLogging:
 
         addon.request(flow)
 
-        assert mock_ctx.log.was_called_with_level("info")
-        messages = mock_ctx.log.get_messages("info")
+        assert mock_logger.was_called_with_level("info")
+        messages = mock_logger.get_messages("info")
         assert any("ALLOW" in msg for msg in messages)
 
     def test_denied_operation_logs_warn(self):
@@ -625,8 +626,8 @@ class TestLogging:
 
         addon.request(flow)
 
-        assert mock_ctx.log.was_called_with_level("warn")
-        messages = mock_ctx.log.get_messages("warn")
+        assert mock_logger.was_called_with_level("warn")
+        messages = mock_logger.get_messages("warn")
         assert any("DENY" in msg for msg in messages)
 
     def test_push_logs_include_refs(self):

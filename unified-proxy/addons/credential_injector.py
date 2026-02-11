@@ -37,9 +37,12 @@ import json
 import os
 from typing import Optional
 
-from mitmproxy import http, ctx
+from mitmproxy import http
 
 from addons.container_identity import get_container_config
+from logging_config import get_logger
+
+logger = get_logger(__name__)
 
 # Import OAuth token managers (available when auth files are set)
 try:
@@ -212,7 +215,7 @@ class CredentialInjector:
                     "header": header,
                     "value": self._format_value(value, fmt),
                 }
-                ctx.log.info(f"Loaded credential for {host} from {used_env_var}")
+                logger.info(f"Loaded credential for {host} from {used_env_var}")
             else:
                 # Build list of all possible env vars for warning message
                 env_vars = [env_var]
@@ -220,7 +223,7 @@ class CredentialInjector:
                     env_vars.append(fallback_env_var)
                 if alt_env_var:
                     env_vars.append(alt_env_var)
-                ctx.log.warn(f"No credential for {host}: {' or '.join(env_vars)} not set")
+                logger.warning(f"No credential for {host}: {' or '.join(env_vars)} not set")
 
     def _format_value(self, value: str, fmt: str) -> str:
         """Format credential value based on provider requirements."""
@@ -232,68 +235,68 @@ class CredentialInjector:
         """Initialize OAuth token manager if CODEX_AUTH_FILE is set."""
         codex_auth_file = os.environ.get("CODEX_AUTH_FILE")
         if not codex_auth_file:
-            ctx.log.info("CODEX_AUTH_FILE not set, OAuth support disabled")
+            logger.info("CODEX_AUTH_FILE not set, OAuth support disabled")
             return
 
         if OAuthTokenManager is None:
-            ctx.log.warn("OAuth token manager module not available")
+            logger.warning("OAuth token manager module not available")
             return
 
         try:
             self.oauth_manager = OAuthTokenManager(codex_auth_file)
-            ctx.log.info(f"OAuth token manager initialized from {codex_auth_file}")
+            logger.info(f"OAuth token manager initialized from {codex_auth_file}")
         except FileNotFoundError:
-            ctx.log.warn(f"OAuth auth file not found: {codex_auth_file}")
+            logger.warning(f"OAuth auth file not found: {codex_auth_file}")
         except ValueError as e:
-            ctx.log.warn(f"Invalid OAuth auth file: {e}")
+            logger.warning(f"Invalid OAuth auth file: {e}")
         except Exception as e:
-            ctx.log.error(f"Failed to initialize OAuth manager: {e}")
+            logger.error(f"Failed to initialize OAuth manager: {e}")
 
     def _init_opencode_manager(self) -> None:
         """Initialize OpenCode API key manager if OPENCODE_AUTH_FILE is set."""
         opencode_auth_file = os.environ.get("OPENCODE_AUTH_FILE")
         if not opencode_auth_file:
-            ctx.log.info("OPENCODE_AUTH_FILE not set, OpenCode API key support disabled")
+            logger.info("OPENCODE_AUTH_FILE not set, OpenCode API key support disabled")
             return
 
         if OpenCodeKeyManager is None:
-            ctx.log.warn("OpenCode key manager module not available")
+            logger.warning("OpenCode key manager module not available")
             return
 
         try:
             self.opencode_manager = OpenCodeKeyManager(opencode_auth_file)
             providers = self.opencode_manager.get_providers()
-            ctx.log.info(
+            logger.info(
                 f"OpenCode key manager initialized from {opencode_auth_file} "
                 f"with providers: {', '.join(providers)}"
             )
         except FileNotFoundError:
-            ctx.log.warn(f"OpenCode auth file not found: {opencode_auth_file}")
+            logger.warning(f"OpenCode auth file not found: {opencode_auth_file}")
         except ValueError as e:
-            ctx.log.warn(f"Invalid OpenCode auth file: {e}")
+            logger.warning(f"Invalid OpenCode auth file: {e}")
         except Exception as e:
-            ctx.log.error(f"Failed to initialize OpenCode manager: {e}")
+            logger.error(f"Failed to initialize OpenCode manager: {e}")
 
     def _init_gemini_manager(self) -> None:
         """Initialize Gemini OAuth token manager if GEMINI_OAUTH_FILE is set."""
         gemini_auth_file = os.environ.get("GEMINI_OAUTH_FILE")
         if not gemini_auth_file:
-            ctx.log.info("GEMINI_OAUTH_FILE not set, Gemini OAuth support disabled")
+            logger.info("GEMINI_OAUTH_FILE not set, Gemini OAuth support disabled")
             return
 
         if GeminiTokenManager is None:
-            ctx.log.warn("Gemini token manager module not available")
+            logger.warning("Gemini token manager module not available")
             return
 
         try:
             self.gemini_manager = GeminiTokenManager(gemini_auth_file)
-            ctx.log.info(f"Gemini token manager initialized from {gemini_auth_file}")
+            logger.info(f"Gemini token manager initialized from {gemini_auth_file}")
         except FileNotFoundError:
-            ctx.log.warn(f"Gemini auth file not found: {gemini_auth_file}")
+            logger.warning(f"Gemini auth file not found: {gemini_auth_file}")
         except ValueError as e:
-            ctx.log.warn(f"Invalid Gemini auth file: {e}")
+            logger.warning(f"Invalid Gemini auth file: {e}")
         except Exception as e:
-            ctx.log.error(f"Failed to initialize Gemini manager: {e}")
+            logger.error(f"Failed to initialize Gemini manager: {e}")
 
     def _get_container_id(self, flow: http.HTTPFlow) -> Optional[str]:
         """Get container ID from flow metadata for logging context.
@@ -329,10 +332,10 @@ class CredentialInjector:
 
         # Route to appropriate token manager based on endpoint
         if host == "auth.openai.com" and self.oauth_manager:
-            ctx.log.info(f"Intercepting Codex OAuth refresh request to {host}")
+            logger.info(f"Intercepting Codex OAuth refresh request to {host}")
             placeholder_response = self.oauth_manager.get_placeholder_response()
         elif host == "oauth2.googleapis.com" and self.gemini_manager:
-            ctx.log.info(f"Intercepting Gemini OAuth refresh request to {host}")
+            logger.info(f"Intercepting Gemini OAuth refresh request to {host}")
             placeholder_response = self.gemini_manager.get_placeholder_response()
 
         if placeholder_response is None:
@@ -373,13 +376,13 @@ class CredentialInjector:
             real_token = self.oauth_manager.get_valid_token()
             flow.request.headers["Authorization"] = f"Bearer {real_token}"
             container_id = self._get_container_id(flow)
-            ctx.log.info(
+            logger.info(
                 f"Injected real OAuth token for {flow.request.host} "
                 f"(container: {container_id or 'unknown'})"
             )
             return True
         except Exception as e:
-            ctx.log.error(f"Failed to get OAuth token: {e}")
+            logger.error(f"Failed to get OAuth token: {e}")
             flow.response = http.Response.make(
                 500,
                 json.dumps({"error": "Authentication failed"}).encode(),
@@ -411,21 +414,21 @@ class CredentialInjector:
             if self.opencode_manager.has_provider("zai-coding-plan"):
                 try:
                     api_key = self.opencode_manager.get_api_key("zai-coding-plan")
-                    ctx.log.info("Got API key from OpenCode auth file for zai-coding-plan")
+                    logger.info("Got API key from OpenCode auth file for zai-coding-plan")
                 except Exception as e:
-                    ctx.log.warn(f"Failed to get API key from OpenCode auth file: {e}")
+                    logger.warning(f"Failed to get API key from OpenCode auth file: {e}")
             else:
-                ctx.log.warn("OpenCode zai-coding-plan provider not configured in auth file")
+                logger.warning("OpenCode zai-coding-plan provider not configured in auth file")
         else:
-            ctx.log.info("OpenCode manager not available, trying ZHIPU_API_KEY env var")
+            logger.info("OpenCode manager not available, trying ZHIPU_API_KEY env var")
 
         # Fall back to ZHIPU_API_KEY env var if auth file didn't work
         if not api_key:
             api_key = os.environ.get("ZHIPU_API_KEY")
             if api_key:
-                ctx.log.info("Got API key from ZHIPU_API_KEY env var for OpenCode")
+                logger.info("Got API key from ZHIPU_API_KEY env var for OpenCode")
             else:
-                ctx.log.error("No API key available: neither OpenCode auth file nor ZHIPU_API_KEY env var")
+                logger.error("No API key available: neither OpenCode auth file nor ZHIPU_API_KEY env var")
                 flow.response = http.Response.make(
                     500,
                     json.dumps({"error": "Credential not configured: ZHIPU_API_KEY not set and OpenCode auth file not available"}).encode(),
@@ -435,7 +438,7 @@ class CredentialInjector:
 
         flow.request.headers["Authorization"] = f"Bearer {api_key}"
         container_id = self._get_container_id(flow)
-        ctx.log.info(
+        logger.info(
             f"Injected API key for OpenCode zai-coding-plan ({host}) "
             f"(container: {container_id or 'unknown'})"
         )
@@ -464,13 +467,13 @@ class CredentialInjector:
             real_token = self.gemini_manager.get_valid_token()
             flow.request.headers["Authorization"] = f"Bearer {real_token}"
             container_id = self._get_container_id(flow)
-            ctx.log.info(
+            logger.info(
                 f"Injected real OAuth token for Gemini ({host}) "
                 f"(container: {container_id or 'unknown'})"
             )
             return True
         except Exception as e:
-            ctx.log.error(f"Failed to get Gemini OAuth token: {e}")
+            logger.error(f"Failed to get Gemini OAuth token: {e}")
             flow.response = http.Response.make(
                 500,
                 json.dumps({"error": "Authentication failed"}).encode(),
@@ -501,7 +504,7 @@ class CredentialInjector:
         # Get the real API key from environment
         tavily_api_key = os.environ.get("TAVILY_API_KEY")
         if not tavily_api_key:
-            ctx.log.warn("TAVILY_API_KEY not set, cannot inject into body")
+            logger.warning("TAVILY_API_KEY not set, cannot inject into body")
             return False
 
         # Try to parse and modify the request body
@@ -524,17 +527,17 @@ class CredentialInjector:
             data["api_key"] = tavily_api_key
             flow.request.set_text(json.dumps(data))
             container_id = self._get_container_id(flow)
-            ctx.log.info(
+            logger.info(
                 f"Injected api_key into request body for {host} "
                 f"(container: {container_id or 'unknown'})"
             )
             return True
 
         except json.JSONDecodeError as e:
-            ctx.log.warn(f"Failed to parse Tavily request body as JSON: {e}")
+            logger.warning(f"Failed to parse Tavily request body as JSON: {e}")
             return False
         except Exception as e:
-            ctx.log.error(f"Error injecting Tavily API key into body: {e}")
+            logger.error(f"Error injecting Tavily API key into body: {e}")
             return False
 
     def request(self, flow: http.HTTPFlow) -> None:
@@ -578,12 +581,12 @@ class CredentialInjector:
             if host in ("api.github.com", "uploads.github.com", "github.com"):
                 # Allow unauthenticated GitHub API requests when no token is available
                 self._strip_github_placeholder(flow)
-                ctx.log.info(
+                logger.info(
                     f"No GitHub token available; allowing unauthenticated request to {host} "
                     f"(container: {container_id or 'unknown'})"
                 )
                 return
-            ctx.log.error(
+            logger.error(
                 f"Missing credential for {host}, returning 500 "
                 f"(container: {container_id or 'unknown'})"
             )
@@ -601,14 +604,14 @@ class CredentialInjector:
         # This ensures we don't send placeholder values to the API
         for header_to_remove in ["x-api-key", "Authorization"]:
             if header_to_remove in flow.request.headers:
-                ctx.log.info(
+                logger.info(
                     f"Removing placeholder {header_to_remove} header for {host} "
                     f"(container: {container_id or 'unknown'})"
                 )
                 del flow.request.headers[header_to_remove]
 
         flow.request.headers[header_name] = cred["value"]
-        ctx.log.info(
+        logger.info(
             f"Injected {header_name} for {host} "
             f"(container: {container_id or 'unknown'})"
         )
@@ -618,7 +621,7 @@ class CredentialInjector:
         auth_header = flow.request.headers.get("Authorization", "")
         if _has_credential_placeholder(auth_header):
             del flow.request.headers["Authorization"]
-            ctx.log.info("Removed placeholder GitHub Authorization header")
+            logger.info("Removed placeholder GitHub Authorization header")
 
 
 addons = [CredentialInjector()]

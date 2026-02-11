@@ -23,10 +23,13 @@ This ensures gh api raw access is blocked while normal gh commands work.
 import json
 import os
 import re
-from mitmproxy import http, ctx
+from mitmproxy import http
 
 # Import shared GitHub configuration
 from github_config import GITHUB_API_HOSTS
+from logging_config import get_logger
+
+logger = get_logger(__name__)
 
 # Check if PR operations are allowed (env var set by sandbox creation)
 ALLOW_PR_OPERATIONS = os.environ.get("ALLOW_PR_OPERATIONS", "").lower() in ("true", "1", "yes")
@@ -284,7 +287,7 @@ class GitHubAPIFilter:
         # Check explicit blocklist first (for clear error messages)
         for blocked_method, pattern, message in _blocked_compiled:
             if method == blocked_method and pattern.match(path_without_query):
-                ctx.log.warn(f"BLOCKED GitHub API: {method} {path} - {message}")
+                logger.warning(f"BLOCKED GitHub API: {method} {path} - {message}")
                 self._block_request(flow, message)
                 return
 
@@ -292,7 +295,7 @@ class GitHubAPIFilter:
         # This is always blocked regardless of ALLOW_PR_OPERATIONS
         if method == "PATCH" and _pr_patch_pattern.match(path_without_query):
             if self._is_pr_reopen(flow):
-                ctx.log.warn(f"BLOCKED GitHub API: {method} {path} - PR reopen not allowed")
+                logger.warning(f"BLOCKED GitHub API: {method} {path} - PR reopen not allowed")
                 self._block_request(flow, "gh pr reopen: reopening closed PRs requires human approval")
                 return
 
@@ -300,7 +303,7 @@ class GitHubAPIFilter:
         if method == "POST" and path_without_query == "/graphql":
             blocked_mutation = self._check_graphql_mutations(flow)
             if blocked_mutation:
-                ctx.log.warn(f"BLOCKED GitHub GraphQL: {blocked_mutation}")
+                logger.warning(f"BLOCKED GitHub GraphQL: {blocked_mutation}")
                 self._block_request(flow, f"GraphQL mutation '{blocked_mutation}' is not permitted")
                 return
 
@@ -308,7 +311,7 @@ class GitHubAPIFilter:
         if not ALLOW_PR_OPERATIONS:
             for pr_method, pattern in _conditional_pr_compiled:
                 if method == pr_method and pattern.match(path_without_query):
-                    ctx.log.warn(f"BLOCKED GitHub API (PR ops disabled): {method} {path}")
+                    logger.warning(f"BLOCKED GitHub API (PR ops disabled): {method} {path}")
                     self._block_request(
                         flow,
                         "PR operations blocked by sandbox policy. Use --allow-pr flag to enable."
@@ -318,18 +321,18 @@ class GitHubAPIFilter:
         # Check allowlist
         for allowed_method, pattern in _allowed_compiled:
             if method == allowed_method and pattern.match(path_without_query):
-                ctx.log.info(f"Allowed GitHub API: {method} {path}")
+                logger.info(f"Allowed GitHub API: {method} {path}")
                 return
 
         # Check if it's a conditional PR operation that's now allowed
         if ALLOW_PR_OPERATIONS:
             for pr_method, pattern in _conditional_pr_compiled:
                 if method == pr_method and pattern.match(path_without_query):
-                    ctx.log.info(f"Allowed GitHub API (PR ops enabled): {method} {path}")
+                    logger.info(f"Allowed GitHub API (PR ops enabled): {method} {path}")
                     return
 
         # Not in allowlist - block with generic message
-        ctx.log.warn(f"BLOCKED GitHub API (not in allowlist): {method} {path}")
+        logger.warning(f"BLOCKED GitHub API (not in allowlist): {method} {path}")
         self._block_request(
             flow,
             f"gh api: raw API access not permitted ({method} {path_without_query})"

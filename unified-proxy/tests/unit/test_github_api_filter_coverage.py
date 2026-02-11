@@ -124,8 +124,8 @@ class TestConditionalPROperations:
             assert flow.response is not None
             assert flow.response.status_code == 403
 
-    @patch.object(github_api_filter, "ctx")
-    def test_post_pulls_allowed_with_flag(self, mock_ctx, api_filter):
+    @patch.object(github_api_filter, "logger")
+    def test_post_pulls_allowed_with_flag(self, mock_logger, api_filter):
         """Test POST /repos/owner/repo/pulls is allowed when PR ops enabled."""
         with patch.object(github_api_filter, "ALLOW_PR_OPERATIONS", True):
             flow = _make_flow("POST", "/repos/owner/repo/pulls")
@@ -158,8 +158,8 @@ class TestConditionalPROperations:
             assert flow.response is not None
             assert flow.response.status_code == 403
 
-    @patch.object(github_api_filter, "ctx")
-    def test_patch_pulls_allowed_with_flag(self, mock_ctx, api_filter):
+    @patch.object(github_api_filter, "logger")
+    def test_patch_pulls_allowed_with_flag(self, mock_logger, api_filter):
         """Test PATCH /repos/owner/repo/pulls/1 is allowed when PR ops enabled."""
         with patch.object(github_api_filter, "ALLOW_PR_OPERATIONS", True):
             flow = _make_flow("PATCH", "/repos/owner/repo/pulls/1")
@@ -183,8 +183,8 @@ class TestConditionalPROperations:
             assert flow.response is not None
             assert flow.response.status_code == 403
 
-    @patch.object(github_api_filter, "ctx")
-    def test_graphql_create_pr_allowed_with_flag(self, mock_ctx, api_filter):
+    @patch.object(github_api_filter, "logger")
+    def test_graphql_create_pr_allowed_with_flag(self, mock_logger, api_filter):
         """Test createPullRequest GraphQL mutation is allowed when PR ops enabled."""
         with patch.object(github_api_filter, "ALLOW_PR_OPERATIONS", True):
             flow = Mock()
@@ -246,29 +246,29 @@ class TestAllowlistCompleteness:
     def api_filter(self):
         return GitHubAPIFilter()
 
-    @patch.object(github_api_filter, "ctx")
-    def test_post_issues_allowed(self, mock_ctx, api_filter):
+    @patch.object(github_api_filter, "logger")
+    def test_post_issues_allowed(self, mock_logger, api_filter):
         """Test POST /repos/owner/repo/issues is allowed."""
         flow = _make_flow("POST", "/repos/owner/repo/issues")
         api_filter.request(flow)
         assert flow.response is None
 
-    @patch.object(github_api_filter, "ctx")
-    def test_post_releases_allowed(self, mock_ctx, api_filter):
+    @patch.object(github_api_filter, "logger")
+    def test_post_releases_allowed(self, mock_logger, api_filter):
         """Test POST /repos/owner/repo/releases is allowed."""
         flow = _make_flow("POST", "/repos/owner/repo/releases")
         api_filter.request(flow)
         assert flow.response is None
 
-    @patch.object(github_api_filter, "ctx")
-    def test_post_check_runs_allowed(self, mock_ctx, api_filter):
+    @patch.object(github_api_filter, "logger")
+    def test_post_check_runs_allowed(self, mock_logger, api_filter):
         """Test POST /repos/owner/repo/check-runs is allowed."""
         flow = _make_flow("POST", "/repos/owner/repo/check-runs")
         api_filter.request(flow)
         assert flow.response is None
 
-    @patch.object(github_api_filter, "ctx")
-    def test_get_rate_limit_allowed(self, mock_ctx, api_filter):
+    @patch.object(github_api_filter, "logger")
+    def test_get_rate_limit_allowed(self, mock_logger, api_filter):
         """Test GET /rate_limit is allowed."""
         flow = _make_flow("GET", "/rate_limit")
         api_filter.request(flow)

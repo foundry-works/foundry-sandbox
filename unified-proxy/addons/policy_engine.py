@@ -37,7 +37,7 @@ import sys
 from typing import Optional, List
 from urllib.parse import unquote, urlparse
 
-from mitmproxy import http, ctx
+from mitmproxy import http
 from mitmproxy.flow import Flow
 
 # Add parent directory to path for imports
@@ -50,6 +50,9 @@ from config import (
     ConfigError,
     segment_match,
 )
+from logging_config import get_logger
+
+logger = get_logger(__name__)
 
 # Metadata key for policy decisions
 POLICY_DECISION_KEY = "policy_decision"
@@ -197,16 +200,16 @@ class PolicyEngine:
             self._allowlist = load_allowlist_config(self._allowlist_path)
             self._domains = self._allowlist.domains
             _allowlist_config = self._allowlist
-            ctx.log.info(f"Policy engine loaded allowlist with {len(self._domains)} domains")
+            logger.info(f"Policy engine loaded allowlist with {len(self._domains)} domains")
         except ConfigError as e:
-            ctx.log.warn(f"Failed to load allowlist config: {e}")
-            ctx.log.warn("Policy engine operating in default-deny mode (no allowlist)")
+            logger.warning(f"Failed to load allowlist config: {e}")
+            logger.warning("Policy engine operating in default-deny mode (no allowlist)")
             self._domains = []
         except Exception as e:
-            ctx.log.error(f"Unexpected error loading allowlist: {e}")
+            logger.error(f"Unexpected error loading allowlist: {e}")
             self._domains = []
 
-        ctx.log.info("Policy engine addon loaded (default-deny enabled)")
+        logger.info("Policy engine addon loaded (default-deny enabled)")
 
     def request(self, flow: http.HTTPFlow) -> None:
         """Evaluate policies for incoming request.
@@ -623,8 +626,8 @@ class PolicyEngine:
             host: Request host.
             path: Request path.
         """
-        log_level = "info" if decision.allowed else "warn"
-        log_fn = getattr(ctx.log, log_level)
+        log_level = "info" if decision.allowed else "warning"
+        log_fn = getattr(logger, log_level)
 
         # Truncate path to prevent log injection/spam from crafted long paths
         safe_path = path[:200] if len(path) > 200 else path

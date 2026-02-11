@@ -18,13 +18,17 @@ import os
 import sys
 from typing import Optional
 
-from mitmproxy import http, ctx
+from mitmproxy import http
 from mitmproxy.flow import Flow
+
+from logging_config import get_logger
 
 # Add parent directory to path for registry import
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from registry import ContainerConfig, ContainerRegistry
+
+logger = get_logger(__name__)
 
 # Header used for optional container identity validation
 CONTAINER_ID_HEADER = "X-Container-Id"
@@ -69,7 +73,7 @@ class ContainerIdentityAddon:
 
     def load(self, loader):
         """Called when addon is loaded."""
-        ctx.log.info("Container identity addon loaded")
+        logger.info("Container identity addon loaded")
 
     def request(self, flow: http.HTTPFlow) -> None:
         """Process incoming request to identify container.
@@ -92,7 +96,7 @@ class ContainerIdentityAddon:
             self._deny_request(
                 flow,
                 f"Unknown source IP: {source_ip}",
-                log_level="warn",
+                log_level="warning",
             )
             return
 
@@ -101,7 +105,7 @@ class ContainerIdentityAddon:
             self._deny_request(
                 flow,
                 f"Expired registration for container {container_config.container_id}",
-                log_level="warn",
+                log_level="warning",
             )
             return
 
@@ -113,13 +117,13 @@ class ContainerIdentityAddon:
                     flow,
                     f"Container ID mismatch: header={header_container_id}, "
                     f"registered={container_config.container_id}",
-                    log_level="warn",
+                    log_level="warning",
                 )
                 return
 
             # Strip header before forwarding (prevent leakage to upstream)
             del flow.request.headers[CONTAINER_ID_HEADER]
-            ctx.log.debug(
+            logger.debug(
                 f"Validated and stripped {CONTAINER_ID_HEADER} header "
                 f"for container {container_config.container_id}"
             )
@@ -141,13 +145,13 @@ class ContainerIdentityAddon:
                     # pointing bare_repo_path at arbitrary filesystem
                     # locations.
                     if ".." in owner or ".." in repo_name:
-                        ctx.log.warn(
+                        logger.warning(
                             f"Rejecting repo with path traversal: {repo}"
                         )
                         self._deny_request(
                             flow,
                             "Invalid repo metadata: path traversal detected",
-                            log_level="warn",
+                            log_level="warning",
                         )
                         return
                     candidate_path = os.path.join(
@@ -156,14 +160,14 @@ class ContainerIdentityAddon:
                     real_path = os.path.realpath(candidate_path)
                     real_base = os.path.realpath(REPOS_BASE_DIR)
                     if not real_path.startswith(real_base + os.sep) and real_path != real_base:
-                        ctx.log.warn(
+                        logger.warning(
                             f"Rejecting repo path escaping base dir: "
                             f"{candidate_path} -> {real_path}"
                         )
                         self._deny_request(
                             flow,
                             "Invalid repo metadata: path escapes base directory",
-                            log_level="warn",
+                            log_level="warning",
                         )
                         return
                     metadata["bare_repo_path"] = candidate_path
@@ -172,7 +176,7 @@ class ContainerIdentityAddon:
         # Attach container config to flow metadata for downstream addons
         flow.metadata[FLOW_METADATA_KEY] = container_config
 
-        ctx.log.debug(
+        logger.debug(
             f"Identified request from container {container_config.container_id} "
             f"(IP: {source_ip}) to {flow.request.pretty_host}"
         )
@@ -191,7 +195,7 @@ class ContainerIdentityAddon:
             log_level: Log level for the denial message.
         """
         # Log the denial
-        log_fn = getattr(ctx.log, log_level, ctx.log.info)
+        log_fn = getattr(logger, log_level, logger.info)
         log_fn(f"Denying request: {reason}")
 
         # Create 403 response
@@ -232,9 +236,9 @@ def load(loader):
 
     try:
         _registry = ContainerRegistry(db_path=db_path)
-        ctx.log.info(f"Container registry initialized at {db_path}")
+        logger.info(f"Container registry initialized at {db_path}")
     except Exception as e:
-        ctx.log.error(f"Failed to initialize container registry: {e}")
+        logger.error(f"Failed to initialize container registry: {e}")
         raise
 
 
