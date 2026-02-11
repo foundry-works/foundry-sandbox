@@ -11,7 +11,6 @@ runtime import verification and Phase 5-specific dependency constraints.
 from __future__ import annotations
 
 import ast
-import importlib
 import subprocess
 import sys
 from pathlib import Path

@@ -14,6 +14,7 @@ Security properties tested:
 """
 
 import os
+import subprocess
 import sys
 
 import pytest
@@ -27,9 +28,6 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../../unified-proxy"
 
 from branch_isolation import ValidationError
 from git_operations import (
-    ALLOWED_COMMANDS,
-    COMMAND_BLOCKED_FLAGS,
-    GLOBAL_BLOCKED_FLAGS,
     validate_command,
 )
 from git_policies import check_protected_branches
@@ -40,7 +38,6 @@ from foundry_sandbox.validate import (
     validate_sandbox_name,
     validate_git_url,
     validate_mount_path,
-    validate_ssh_mode,
 )
 from foundry_sandbox.state import (
     write_sandbox_metadata,
@@ -862,7 +859,7 @@ class TestWorktreeNameFuzzing:
         than a shell string (injectable). This test captures and inspects
         the args passed to subprocess.run to verify list-based invocation.
         """
-        from unittest.mock import patch, MagicMock, call
+        from unittest.mock import patch, MagicMock
         from foundry_sandbox.git_worktree import create_worktree
 
         mock_run = MagicMock()

@@ -29,19 +29,10 @@ import pytest
 pytest.importorskip("flask", reason="requires test-proxy extras (flask)")
 
 # Import the modules under test
-import git_operations
 from git_operations import (
-    ALLOWED_COMMANDS,
-    CONFIG_NEVER_ALLOW,
-    CONFIG_PERMITTED_PREFIXES,
-    ENV_VARS_TO_CLEAR,
-    GLOBAL_BLOCKED_FLAGS,
     MAX_ARGS_COUNT,
-    MAX_REQUEST_BODY_SIZE,
     MAX_RESPONSE_SIZE,
     MAX_STDIN_SIZE,
-    REMOTE_ALLOWED_SUBCOMMANDS,
-    REMOTE_BLOCKED_SUBCOMMANDS,
     GitExecRequest,
     build_clean_env,
     check_push_protected_branches,

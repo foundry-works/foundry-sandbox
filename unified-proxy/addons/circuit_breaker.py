@@ -41,7 +41,6 @@ from threading import Lock
 from typing import Dict, Optional
 
 from mitmproxy import http, ctx
-from mitmproxy.flow import Flow
 
 # Add parent directory to path for logging import
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))

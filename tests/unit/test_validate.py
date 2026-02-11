@@ -9,12 +9,9 @@ Tests cover:
 
 from __future__ import annotations
 
-import json
-import subprocess
 from pathlib import Path
-from unittest.mock import MagicMock, Mock, mock_open, patch
+from unittest.mock import Mock, mock_open, patch
 
-import pytest
 
 from foundry_sandbox import api_keys, docker, validate
 

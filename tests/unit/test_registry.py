@@ -17,7 +17,7 @@ import pytest
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../../unified-proxy"))
 
 import registry as _registry_module
-from registry import ContainerConfig, ContainerRegistry
+from registry import ContainerRegistry
 
 
 @pytest.fixture

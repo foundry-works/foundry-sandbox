@@ -12,8 +12,6 @@ from typing import List, Optional
 
 from branch_types import (
     REF_ENUM_CMDS,
-    WELL_KNOWN_BRANCHES,
-    WELL_KNOWN_BRANCH_PREFIXES,
     _BRANCH_LINE_RE,
     _CUSTOM_D_RE,
     _DECORATION_LINE_RE,

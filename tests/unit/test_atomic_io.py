@@ -6,14 +6,10 @@ Tests atomic file writes, file locking primitives, and error handling.
 from __future__ import annotations
 
 import os
-import stat
-import time
-from pathlib import Path
 
 import pytest
 
 from foundry_sandbox.atomic_io import (
-    LOCK_TIMEOUT_SECONDS,
     atomic_write,
     atomic_write_unlocked,
     file_lock,

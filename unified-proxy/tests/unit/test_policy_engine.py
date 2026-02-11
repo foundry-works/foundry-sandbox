@@ -4,7 +4,6 @@ Tests normalize_path(), PolicyDecision, and PolicyEngine's GitHub blocklist
 and body inspection methods.
 """
 
-import pytest
 
 from addons.policy_engine import normalize_path, PolicyDecision, PolicyEngine
 

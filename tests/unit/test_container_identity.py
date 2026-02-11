@@ -22,7 +22,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../../unified-proxy"
 
 # Mock mitmproxy before importing container_identity
 from tests.mocks import (
-    MockHeaders, MockResponse, MockClientConn, MockCtxLog, MockCtx,
+    MockHeaders, MockResponse, MockClientConn, MockCtx,
 )
 
 

@@ -22,7 +22,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../../unified-proxy"
 
 # Mock mitmproxy before importing git_proxy
 from tests.mocks import (
-    MockHeaders, MockResponse, MockClientConn, MockCtxLog, MockCtx,
+    MockHeaders, MockResponse, MockClientConn, MockCtx,
 )
 
 
@@ -779,10 +779,10 @@ class TestProtectedBranchEnforcement:
     def test_bootstrap_creation_succeeds_then_blocked(self):
         """Test bootstrap creation to refs/heads/main succeeds once then blocked."""
         import tempfile
-        addon = git_proxy.GitProxyAddon()
+        git_proxy.GitProxyAddon()
 
         with tempfile.TemporaryDirectory() as tmpdir:
-            container = create_container_config(
+            create_container_config(
                 repos=["octocat/hello-world"],
                 git={"protected_branches": {"bare_repo_path": tmpdir}},
             )

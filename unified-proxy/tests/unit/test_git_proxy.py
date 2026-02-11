@@ -4,14 +4,10 @@ Tests repo authorization, bot mode restrictions, and related git proxy
 policy enforcement logic.
 """
 
-import pytest
 
 from addons.git_proxy import (
     GitProxyAddon,
     GitOperation,
-    ALLOWED_MARKETPLACES,
-    SANDBOX_BRANCH_PATTERN,
-    DEFAULT_MAX_PUSH_SIZE,
 )
 from pktline import PktLineRef
 

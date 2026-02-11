@@ -5,7 +5,6 @@ and .to_env_dict() for all Pydantic models.
 """
 from __future__ import annotations
 
-import json
 
 import pytest
 
@@ -13,7 +12,6 @@ from foundry_sandbox.models import (
     CastNewPreset,
     CredentialPlaceholders,
     ProxyRegistration,
-    SandboxMetadata,
 )
 
 

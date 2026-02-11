@@ -7,7 +7,6 @@ Supports API key credentials (type: "api") for providers like zai-coding-plan.
 
 import json
 import os
-from typing import Optional
 
 
 class OpenCodeKeyManager:

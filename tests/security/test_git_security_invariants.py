@@ -14,7 +14,6 @@ modules directly, without mitmproxy or network dependencies.
 """
 
 import os
-import re
 import sys
 import tempfile
 from unittest.mock import MagicMock, patch
@@ -27,7 +26,6 @@ import pytest
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../../unified-proxy"))
 
 from branch_isolation import (
-    ValidationError,
     _filter_branch_output,
     _filter_ref_enum_output,
     _filter_log_decorations,
@@ -42,7 +40,6 @@ from git_policies import (
     ZERO_SHA,
     DEFAULT_PROTECTED_PATTERNS,
     check_protected_branches,
-    load_branch_policy,
 )
 
 # foundry_sandbox is in the repo root
@@ -262,7 +259,7 @@ class TestBranchIsolationFailClosed:
         A short hex string could be a branch name disguised as a SHA.
         The system must not allow it as a SHA bypass.
         """
-        metadata = _make_metadata()
+        _make_metadata()
         # "abc123" is 6 chars of hex - could be a branch name
         short_hex = "abc123"
         assert not _is_allowed_ref(short_hex, SANDBOX_BRANCH), (
@@ -271,7 +268,7 @@ class TestBranchIsolationFailClosed:
 
     def test_11_char_hex_treated_as_branch(self):
         """11-char hex string is below the 12-char SHA threshold."""
-        metadata = _make_metadata()
+        _make_metadata()
         hex_11 = "a" * 11
         assert not _is_allowed_ref(hex_11, SANDBOX_BRANCH), (
             "11-char hex should be treated as branch name and denied"
@@ -279,7 +276,7 @@ class TestBranchIsolationFailClosed:
 
     def test_12_char_hex_treated_as_sha(self):
         """12-char hex string meets the SHA threshold and is allowed."""
-        metadata = _make_metadata()
+        _make_metadata()
         hex_12 = "a" * 12
         assert _is_allowed_ref(hex_12, SANDBOX_BRANCH), (
             "12-char hex should be treated as SHA and allowed"
@@ -287,7 +284,7 @@ class TestBranchIsolationFailClosed:
 
     def test_40_char_hex_treated_as_sha(self):
         """Full 40-char SHA is always allowed."""
-        metadata = _make_metadata()
+        _make_metadata()
         sha_40 = "a" * 40
         assert _is_allowed_ref(sha_40, SANDBOX_BRANCH), (
             "40-char SHA should be allowed"
@@ -295,7 +292,7 @@ class TestBranchIsolationFailClosed:
 
     def test_fetch_head_always_blocked(self):
         """FETCH_HEAD is always blocked (could contain cross-branch data)."""
-        metadata = _make_metadata()
+        _make_metadata()
         assert not _is_allowed_ref("FETCH_HEAD", SANDBOX_BRANCH), (
             "FETCH_HEAD must always be blocked"
         )
@@ -414,11 +411,11 @@ class TestBranchIsolationFailClosed:
 
     def test_rev_suffix_stripping(self):
         """Revision suffixes (~N, ^N) must be stripped before checking."""
-        metadata = _make_metadata()
+        _make_metadata()
         # Own branch with suffix should be allowed
         assert _is_allowed_ref(f"{SANDBOX_BRANCH}~3", SANDBOX_BRANCH)
         assert _is_allowed_ref(f"{SANDBOX_BRANCH}^2", SANDBOX_BRANCH)
-        assert _is_allowed_ref(f"main~5", SANDBOX_BRANCH)
+        assert _is_allowed_ref("main~5", SANDBOX_BRANCH)
 
         # Other sandbox branch with suffix should still be denied
         assert not _is_allowed_ref(f"{OTHER_SANDBOX_BRANCH}~3", SANDBOX_BRANCH)

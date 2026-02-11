@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import os
 
 from foundry_sandbox.commands.start import _export_feature_flags, _flag_enabled
 

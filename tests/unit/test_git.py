@@ -9,9 +9,7 @@ Tests cover:
 
 from __future__ import annotations
 
-import subprocess
-from pathlib import Path
-from unittest.mock import MagicMock, Mock, call, patch
+from unittest.mock import Mock, patch
 
 import pytest
 

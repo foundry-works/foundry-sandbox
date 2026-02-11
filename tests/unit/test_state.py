@@ -5,10 +5,8 @@ and last-attach state tracking.
 """
 
 import json
-import os
 import stat
 import pytest
-from pathlib import Path
 
 from foundry_sandbox.state import (
     metadata_is_secure,

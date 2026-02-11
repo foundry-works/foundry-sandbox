@@ -14,7 +14,7 @@ All subprocess.run calls are mocked so tests run without Docker.
 from __future__ import annotations
 
 import subprocess
-from unittest.mock import MagicMock, call, patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 

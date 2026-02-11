@@ -16,9 +16,7 @@ import sys
 import tempfile
 import threading
 import time
-from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import List, Callable
-from unittest import mock
 
 import pytest
 

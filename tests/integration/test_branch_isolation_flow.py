@@ -11,9 +11,6 @@ Tests cover:
 - Fetch/pull deny when refspec targets another sandbox
 """
 
-import os
-import sys
-from unittest import mock
 
 import pytest
 

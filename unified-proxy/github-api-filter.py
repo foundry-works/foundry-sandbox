@@ -311,7 +311,7 @@ class GitHubAPIFilter:
                     ctx.log.warn(f"BLOCKED GitHub API (PR ops disabled): {method} {path}")
                     self._block_request(
                         flow,
-                        f"PR operations blocked by sandbox policy. Use --allow-pr flag to enable."
+                        "PR operations blocked by sandbox policy. Use --allow-pr flag to enable."
                     )
                     return
 

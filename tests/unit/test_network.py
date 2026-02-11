@@ -10,9 +10,6 @@ Tests cover:
 from __future__ import annotations
 
 import json
-import os
-import subprocess
-from pathlib import Path
 from unittest.mock import Mock, patch, MagicMock
 
 import pytest
@@ -409,7 +406,7 @@ class TestStripSshAgentConfig:
             "services:\n"
             "  dev:\n"
             "    volumes:\n"
-            f'      - "/tmp/ssh-agent:/ssh-agent"\n'
+            '      - "/tmp/ssh-agent:/ssh-agent"\n'
             '      - "/data:/data"\n'
             "    environment:\n"
             "      - SSH_AUTH_SOCK=/ssh-agent\n"
@@ -695,7 +692,6 @@ class TestNetworkAtomicWrites:
 
     def test_written_files_have_0600_permissions(self, tmp_path):
         """Files written by network functions should have 0o600 permissions."""
-        import stat
 
         f = tmp_path / "override.yml"
         f.write_text("services:\n  dev:\n    cap_add:\n      - NET_ADMIN\n")

@@ -16,7 +16,7 @@ import os
 import sys
 import time
 import threading
-from unittest.mock import Mock, MagicMock, patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -25,7 +25,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../../unified-proxy"
 
 
 # Mock mitmproxy before importing rate_limiter
-from tests.mocks import MockHeaders, MockResponse, MockCtxLog, MockCtx
+from tests.mocks import MockHeaders, MockResponse, MockCtx
 
 
 class MockRequest:

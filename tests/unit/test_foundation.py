@@ -550,7 +550,7 @@ class TestJsonArrayFromLines:
         assert '"a"' in result
         assert '"b"' in result
         # Blank lines should not appear as entries
-        lines = [l.strip() for l in result.splitlines() if l.strip() and l.strip() not in ("[", "]")]
+        lines = [line.strip() for line in result.splitlines() if line.strip() and line.strip() not in ("[", "]")]
         assert len(lines) == 2
 
 

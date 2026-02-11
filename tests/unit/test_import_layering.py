@@ -18,7 +18,6 @@ ensuring the rules hold even if import order would mask cycles at runtime.
 """
 
 import ast
-import sys
 from pathlib import Path
 
 import pytest

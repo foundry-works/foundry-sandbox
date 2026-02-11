@@ -14,7 +14,7 @@ from unittest.mock import patch
 import click.testing
 import pytest
 
-from foundry_sandbox.cli import ALIASES, CastGroup, cli
+from foundry_sandbox.cli import ALIASES, cli
 
 
 @pytest.fixture()

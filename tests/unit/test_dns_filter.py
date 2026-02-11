@@ -20,12 +20,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../../unified-proxy"
 
 from tests.mocks import (
     MockCtx,
-    MockCtxLog,
-    MockDNSClientConn,
     MockDNSFlow,
-    MockDNSQuestion,
-    MockDNSRequest,
-    MockDNSResponse,
 )
 
 

@@ -13,7 +13,7 @@ handled and must be justified in KNOWN_ASYMMETRIES.
 
 import importlib
 import json
-from unittest.mock import Mock, patch, MagicMock
+from unittest.mock import Mock, patch
 
 import pytest
 

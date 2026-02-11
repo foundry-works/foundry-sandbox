@@ -411,7 +411,7 @@ class CredentialInjector:
             if self.opencode_manager.has_provider("zai-coding-plan"):
                 try:
                     api_key = self.opencode_manager.get_api_key("zai-coding-plan")
-                    ctx.log.info(f"Got API key from OpenCode auth file for zai-coding-plan")
+                    ctx.log.info("Got API key from OpenCode auth file for zai-coding-plan")
                 except Exception as e:
                     ctx.log.warn(f"Failed to get API key from OpenCode auth file: {e}")
             else:
@@ -423,7 +423,7 @@ class CredentialInjector:
         if not api_key:
             api_key = os.environ.get("ZHIPU_API_KEY")
             if api_key:
-                ctx.log.info(f"Got API key from ZHIPU_API_KEY env var for OpenCode")
+                ctx.log.info("Got API key from ZHIPU_API_KEY env var for OpenCode")
             else:
                 ctx.log.error("No API key available: neither OpenCode auth file nor ZHIPU_API_KEY env var")
                 flow.response = http.Response.make(

@@ -146,7 +146,7 @@ class ContainerIdentityAddon:
                         )
                         self._deny_request(
                             flow,
-                            f"Invalid repo metadata: path traversal detected",
+                            "Invalid repo metadata: path traversal detected",
                             log_level="warn",
                         )
                         return
@@ -162,7 +162,7 @@ class ContainerIdentityAddon:
                         )
                         self._deny_request(
                             flow,
-                            f"Invalid repo metadata: path escapes base directory",
+                            "Invalid repo metadata: path escapes base directory",
                             log_level="warn",
                         )
                         return

@@ -8,8 +8,7 @@ All subprocess and file I/O calls are mocked so tests run without Docker.
 from __future__ import annotations
 
 import subprocess
-from pathlib import Path
-from unittest.mock import MagicMock, call, mock_open, patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 

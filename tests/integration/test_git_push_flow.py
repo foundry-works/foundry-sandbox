@@ -343,7 +343,7 @@ class TestHMACAuthenticationFlow:
     def test_replayed_nonce_rejected(self, client, hmac_secret):
         """Request with replayed nonce should be rejected."""
         # First request should succeed (past auth, may fail on git exec)
-        response1 = make_authenticated_request(
+        make_authenticated_request(
             client,
             sandbox_id="test-sandbox",
             hmac_secret=hmac_secret,

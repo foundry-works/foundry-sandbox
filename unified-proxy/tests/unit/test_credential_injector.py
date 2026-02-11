@@ -102,9 +102,6 @@ from addons.credential_injector import (
     OAUTH_PLACEHOLDER,
     OPENCODE_PLACEHOLDER,
     GITHUB_PLACEHOLDER_MARKER,
-    GEMINI_API_HOSTS,
-    ZHIPU_API_HOSTS,
-    REFRESH_ENDPOINTS,
 )
 
 
