@@ -17,7 +17,6 @@ import re
 import shutil
 import subprocess
 from pathlib import Path
-from typing import Any
 from urllib.parse import urlparse
 
 from foundry_sandbox.constants import (
@@ -28,7 +27,7 @@ from foundry_sandbox.constants import (
     get_claude_configs_dir,
 )
 from foundry_sandbox.paths import ensure_dir
-from foundry_sandbox.utils import log_error, log_warn
+from foundry_sandbox.utils import log_warn
 
 
 # ============================================================================
@@ -383,13 +382,13 @@ def check_docker_network_capacity(
     # Try to create a test network to verify capacity
     test_name = f"sandbox-network-capacity-test-{os.getpid()}"
     try:
-        result = subprocess.run(
+        create_result = subprocess.run(
             ["docker", "network", "create", test_name],
             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
             check=False,
             timeout=TIMEOUT_DOCKER_NETWORK,
         )
-        if result.returncode != 0:
+        if create_result.returncode != 0:
             msg = (
                 "Docker network address pool exhausted\n"
                 "\n"

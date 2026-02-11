@@ -8,8 +8,6 @@ from __future__ import annotations
 import os
 import re
 import subprocess
-import sys
-from pathlib import Path
 
 from foundry_sandbox.constants import CONTAINER_USER, TIMEOUT_DOCKER_EXEC, get_sandbox_home, get_sandbox_verbose
 from foundry_sandbox.utils import log_debug, log_info

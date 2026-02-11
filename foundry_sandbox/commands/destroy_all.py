@@ -22,7 +22,7 @@ import sys
 
 import click
 
-from foundry_sandbox.constants import TIMEOUT_LOCAL_CMD, get_worktrees_dir
+from foundry_sandbox.constants import TIMEOUT_LOCAL_CMD
 from foundry_sandbox.docker import cleanup_orphaned_networks as _cleanup_orphaned_networks_shared, compose_down, proxy_cleanup as _proxy_cleanup, remove_hmac_volume, remove_sandbox_networks, remove_stubs_volume
 from foundry_sandbox.git_worktree import cleanup_sandbox_branch, remove_worktree
 from foundry_sandbox.paths import derive_sandbox_paths, repo_url_to_bare_path as _repo_url_to_bare_path

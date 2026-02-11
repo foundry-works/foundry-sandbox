@@ -89,10 +89,10 @@ class CastGroup(click.Group):
 
         module_path, attr_name = entry
         mod = importlib.import_module(module_path)
-        cmd = getattr(mod, attr_name)
+        loaded_cmd: click.Command = getattr(mod, attr_name)
         # Cache so subsequent lookups skip the import
-        self.add_command(cmd, cmd_name)
-        return cmd
+        self.add_command(loaded_cmd, cmd_name)
+        return loaded_cmd
 
     # -----------------------------------------------------------------
     # Alias + fallback resolution

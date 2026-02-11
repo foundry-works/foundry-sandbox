@@ -13,13 +13,11 @@ from __future__ import annotations
 
 import os
 import re
-import tempfile
 from pathlib import Path
 from typing import Callable, Optional
 
 from foundry_sandbox.atomic_io import file_lock, atomic_write_unlocked
 from foundry_sandbox.constants import SSH_AGENT_CONTAINER_SOCK
-from foundry_sandbox.utils import log_warn
 
 # Characters safe for use in YAML volume mount paths (no YAML special chars)
 _SAFE_PATH_RE = re.compile(r"^[A-Za-z0-9_./ -]+$")
@@ -321,9 +319,9 @@ def detect_host_timezone() -> Optional[str]:
             pass
 
     # Try $TZ environment variable
-    tz = os.environ.get("TZ")
-    if tz:
-        return tz
+    tz_env = os.environ.get("TZ")
+    if tz_env:
+        return tz_env
 
     return None
 

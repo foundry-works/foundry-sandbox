@@ -51,7 +51,7 @@ def check_image_freshness() -> bool:
     # Parse the ISO 8601 timestamp from docker inspect
     image_created = result.stdout.strip()
     try:
-        from datetime import datetime, timezone
+        from datetime import datetime
         # Handle fractional seconds and Z suffix
         ts = image_created.replace("Z", "+00:00")
         image_time = datetime.fromisoformat(ts).timestamp()

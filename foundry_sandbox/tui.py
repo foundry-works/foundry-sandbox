@@ -45,7 +45,8 @@ def tui_input(prompt: str, default: Optional[str] = None) -> str:
             raise ValueError(f"Cannot prompt for input in non-interactive mode: {prompt}")
         return default
 
-    return click.prompt(prompt, default=default, type=str)
+    result: str = click.prompt(prompt, default=default, type=str)
+    return result
 
 
 def tui_question(prompt: str, choices: list[str]) -> str:
@@ -61,11 +62,12 @@ def tui_question(prompt: str, choices: list[str]) -> str:
     if _is_noninteractive():
         return choices[0]
 
-    return click.prompt(
+    result: str = click.prompt(
         prompt,
         type=click.Choice(choices, case_sensitive=False),
         show_choices=True
     )
+    return result
 
 
 def tui_confirm(prompt: str, default_yes: bool = True) -> bool:
@@ -117,4 +119,4 @@ def tui_choose(prompt: str, options: list[str]) -> str:
         default=1
     )
 
-    return options[choice - 1]
+    return options[int(choice) - 1]

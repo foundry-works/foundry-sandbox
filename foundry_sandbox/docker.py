@@ -23,7 +23,6 @@ if TYPE_CHECKING:
     from foundry_sandbox.models import CredentialPlaceholders
 
 from foundry_sandbox.constants import (
-    get_sandbox_debug,
     get_sandbox_verbose,
     TIMEOUT_DOCKER_COMPOSE,
     TIMEOUT_DOCKER_EXEC,
@@ -32,7 +31,7 @@ from foundry_sandbox.constants import (
     TIMEOUT_DOCKER_VOLUME,
     TIMEOUT_GIT_QUERY,
 )
-from foundry_sandbox.utils import log_debug, log_error, log_warn
+from foundry_sandbox.utils import log_debug, log_warn
 
 
 # ============================================================================
@@ -348,15 +347,15 @@ def compose_up(
     if get_sandbox_verbose():
         print(f"+ {' '.join(cmd)}", file=sys.stderr)
 
-    result = subprocess.run(
+    compose_result = subprocess.run(
         cmd, env=env, check=False,
         capture_output=True,
         timeout=TIMEOUT_DOCKER_COMPOSE,
     )
-    if result.returncode != 0:
-        stderr_text = result.stderr.decode() if isinstance(result.stderr, bytes) else (result.stderr or "")
+    if compose_result.returncode != 0:
+        stderr_text = compose_result.stderr.decode() if isinstance(compose_result.stderr, bytes) else (compose_result.stderr or "")
         raise subprocess.CalledProcessError(
-            result.returncode, cmd, output=result.stdout, stderr=stderr_text,
+            compose_result.returncode, cmd, output=compose_result.stdout, stderr=stderr_text,
         )
 
 

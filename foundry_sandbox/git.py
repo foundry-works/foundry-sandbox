@@ -12,10 +12,9 @@ Security-critical: ref validation preserves deny-by-default behavior.
 from __future__ import annotations
 
 import subprocess
-import sys
 import time
 from pathlib import Path
-from typing import Any, Callable
+from typing import Callable
 
 from foundry_sandbox.constants import TIMEOUT_GIT_QUERY, TIMEOUT_GIT_TRANSFER
 from foundry_sandbox.paths import ensure_dir

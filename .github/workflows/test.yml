@@ -1,7 +1,6 @@
 name: Tests
 
 on:
-  push:
   pull_request:
 
 jobs:
@@ -37,8 +36,8 @@ jobs:
         with:
           python-version: "3.12"
 
-      - name: Install dev tools
-        run: pip install mypy ruff
+      - name: Install dependencies
+        run: pip install -e ".[dev]"
 
       - name: Run mypy
         run: mypy --strict foundry_sandbox/

@@ -25,6 +25,9 @@ import pytest
 
 # mitmproxy mocks and sys.path setup handled by conftest.py
 
+# These tests require flask (test-proxy extra); skip if not installed
+pytest.importorskip("flask", reason="requires test-proxy extras (flask)")
+
 # Import the modules under test
 import git_operations
 from git_operations import (

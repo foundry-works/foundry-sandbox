@@ -25,7 +25,7 @@ from typing import Any
 
 from foundry_sandbox.constants import CONTAINER_READY_ATTEMPTS, CONTAINER_READY_DELAY, CONTAINER_USER, TIMEOUT_DOCKER_EXEC, TIMEOUT_LOCAL_CMD, get_sandbox_verbose
 from foundry_sandbox.errors import DockerError
-from foundry_sandbox.utils import log_debug, log_error
+from foundry_sandbox.utils import log_debug
 
 
 # ============================================================================
@@ -167,7 +167,8 @@ def _pipe_tar_to_docker(
         docker_proc = subprocess.Popen(
             docker_cmd, stdin=tar_proc.stdout, **stderr_kwargs,
         )
-        tar_proc.stdout.close()  # Allow tar_proc to receive SIGPIPE if docker_proc exits
+        if tar_proc.stdout is not None:
+            tar_proc.stdout.close()  # Allow tar_proc to receive SIGPIPE if docker_proc exits
         try:
             docker_proc.wait(timeout=TIMEOUT_DOCKER_EXEC)
         except subprocess.TimeoutExpired:

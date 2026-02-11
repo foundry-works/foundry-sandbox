@@ -18,9 +18,7 @@ from foundry_sandbox.constants import (
     CONTAINER_OPENCODE_PLUGIN_DIR,
     CONTAINER_USER,
     TIMEOUT_DOCKER_EXEC,
-    get_sandbox_home,
     get_sandbox_opencode_default_model,
-    get_sandbox_opencode_disable_npm_plugins,
     get_sandbox_opencode_plugin_dir,
     get_sandbox_opencode_prefetch_npm_plugins,
 )
@@ -82,7 +80,7 @@ def _docker_exec_sh(
     *,
     quiet: bool = False,
     check: bool = True,
-) -> subprocess.CompletedProcess:
+) -> subprocess.CompletedProcess[str]:
     """Execute a shell command inside the container.
 
     Args:

@@ -17,22 +17,18 @@ Migrated from commands/attach.sh. Performs the following sequence:
 from __future__ import annotations
 
 import os
-import shutil
-import subprocess
 import sys
-from pathlib import Path
 
 import click
 
 from foundry_sandbox.commands._helpers import auto_detect_sandbox as _auto_detect_sandbox, fzf_select_sandbox as _fzf_select_sandbox_shared
-from foundry_sandbox.constants import get_worktrees_dir
 from foundry_sandbox.credential_setup import sync_runtime_credentials
 from foundry_sandbox.docker import container_is_running
-from foundry_sandbox.paths import derive_sandbox_paths
+from foundry_sandbox.paths import SandboxPaths, derive_sandbox_paths
 from foundry_sandbox.state import load_last_attach, load_sandbox_metadata, save_last_attach
 from foundry_sandbox.tool_configs import sync_opencode_local_plugins_on_first_attach
-from foundry_sandbox.tmux import attach as tmux_attach_session, session_exists as tmux_session_exists, create_and_attach as tmux_create_and_attach, attach_existing as tmux_attach_to_existing
-from foundry_sandbox.utils import log_debug, log_error, log_info, log_warn
+from foundry_sandbox.tmux import attach as tmux_attach_session
+from foundry_sandbox.utils import flag_enabled as _flag_enabled, log_debug, log_error, log_warn
 from foundry_sandbox.validate import validate_existing_sandbox_name
 
 # ---------------------------------------------------------------------------
@@ -50,9 +46,6 @@ def _list_sandboxes() -> None:
 def _fzf_select_sandbox() -> str | None:
     """Interactively select a sandbox using fzf."""
     return _fzf_select_sandbox_shared()
-
-
-from foundry_sandbox.commands._helpers import flag_enabled as _flag_enabled
 
 
 def _start_container(name: str) -> None:
@@ -91,7 +84,7 @@ def _sync_opencode_plugins(name: str, container_id: str) -> None:
         log_warn(f"OpenCode plugin sync skipped: {exc}")
 
 
-def _tmux_attach(name: str, working_dir: str, paths) -> None:
+def _tmux_attach(name: str, working_dir: str, paths: SandboxPaths) -> None:
     """Create or attach to tmux session for sandbox.
 
     Delegates to foundry_sandbox.tmux module.
@@ -164,7 +157,7 @@ def _resolve_sandbox_name(name: str | None, use_last: bool) -> str:
     if not name:
         name = _fzf_select_sandbox()
         if not name:
-            click.echo(f"Usage: cast attach <sandbox-name>")
+            click.echo("Usage: cast attach <sandbox-name>")
             click.echo("")
             _list_sandboxes()
             sys.exit(1)

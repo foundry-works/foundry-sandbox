@@ -7,7 +7,6 @@ constructor-injected for testing, auto-imported for production use.
 from __future__ import annotations
 
 from types import ModuleType
-from typing import Any
 
 
 class ContainerConfigurator:
@@ -20,14 +19,14 @@ class ContainerConfigurator:
 
     def __init__(
         self,
-        container_setup=None,
-        foundry_plugin=None,
-        stub_manager=None,
-        git_path_fixer=None,
-        credential_setup=None,
-        tool_configs=None,
-        container_io=None,
-    ):
+        container_setup: ModuleType | None = None,
+        foundry_plugin: ModuleType | None = None,
+        stub_manager: ModuleType | None = None,
+        git_path_fixer: ModuleType | None = None,
+        credential_setup: ModuleType | None = None,
+        tool_configs: ModuleType | None = None,
+        container_io: ModuleType | None = None,
+    ) -> None:
         """Accept all 7 module dependencies.
 
         If any dependency is None, import the real module lazily.
@@ -51,7 +50,7 @@ class ContainerConfigurator:
         self._container_io = container_io
 
     @property
-    def container_setup(self):
+    def container_setup(self) -> ModuleType:
         """Lazy-load container_setup module if not injected."""
         if self._container_setup is None:
             import foundry_sandbox.container_setup as container_setup
@@ -59,7 +58,7 @@ class ContainerConfigurator:
         return self._container_setup
 
     @property
-    def foundry_plugin(self):
+    def foundry_plugin(self) -> ModuleType:
         """Lazy-load foundry_plugin module if not injected."""
         if self._foundry_plugin is None:
             import foundry_sandbox.foundry_plugin as foundry_plugin
@@ -67,7 +66,7 @@ class ContainerConfigurator:
         return self._foundry_plugin
 
     @property
-    def stub_manager(self):
+    def stub_manager(self) -> ModuleType:
         """Lazy-load stub_manager module if not injected."""
         if self._stub_manager is None:
             import foundry_sandbox.stub_manager as stub_manager
@@ -75,7 +74,7 @@ class ContainerConfigurator:
         return self._stub_manager
 
     @property
-    def git_path_fixer(self):
+    def git_path_fixer(self) -> ModuleType:
         """Lazy-load git_path_fixer module if not injected."""
         if self._git_path_fixer is None:
             import foundry_sandbox.git_path_fixer as git_path_fixer
@@ -83,7 +82,7 @@ class ContainerConfigurator:
         return self._git_path_fixer
 
     @property
-    def credential_setup(self):
+    def credential_setup(self) -> ModuleType:
         """Lazy-load credential_setup module if not injected."""
         if self._credential_setup is None:
             import foundry_sandbox.credential_setup as credential_setup
@@ -91,7 +90,7 @@ class ContainerConfigurator:
         return self._credential_setup
 
     @property
-    def tool_configs(self):
+    def tool_configs(self) -> ModuleType:
         """Lazy-load tool_configs module if not injected."""
         if self._tool_configs is None:
             import foundry_sandbox.tool_configs as tool_configs
@@ -99,7 +98,7 @@ class ContainerConfigurator:
         return self._tool_configs
 
     @property
-    def container_io(self):
+    def container_io(self) -> ModuleType:
         """Lazy-load container_io module if not injected."""
         if self._container_io is None:
             import foundry_sandbox.container_io as container_io
@@ -154,7 +153,7 @@ class ContainerConfigurator:
         self.credential_setup.sync_runtime_credentials(container_id)
 
 
-def create_configurator(**overrides) -> ContainerConfigurator:
+def create_configurator(**overrides: ModuleType | None) -> ContainerConfigurator:
     """Create a ContainerConfigurator with default dependencies.
 
     Accepts keyword overrides for any dependency module.

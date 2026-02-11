@@ -46,7 +46,9 @@ def preset(ctx: click.Context) -> None:
 @click.pass_context
 def help_cmd(ctx: click.Context) -> None:
     """Show preset usage information."""
-    click.echo(ctx.parent.get_help())
+    parent = ctx.parent
+    if parent is not None:
+        click.echo(parent.get_help())
 
 
 @preset.command("list")

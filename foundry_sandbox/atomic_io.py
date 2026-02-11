@@ -16,13 +16,14 @@ import fcntl
 import os
 import tempfile
 import time
+from collections.abc import Iterator
 from pathlib import Path
 
 LOCK_TIMEOUT_SECONDS = 30
 
 
 @contextlib.contextmanager
-def file_lock(path: Path, *, shared: bool = False):
+def file_lock(path: Path, *, shared: bool = False) -> Iterator[None]:
     """Acquire a file lock for *path* using a sidecar ``.lock`` file.
 
     Uses non-blocking attempts with a retry loop so that a stuck lock

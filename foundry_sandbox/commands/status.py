@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import json
 import subprocess
-from pathlib import Path
+from typing import Any
 
 import click
 
@@ -44,7 +44,7 @@ def _tmux_session_exists(name: str) -> bool:
         return False
 
 
-def _collect_sandbox_info(name: str) -> dict:
+def _collect_sandbox_info(name: str) -> dict[str, Any]:
     paths = derive_sandbox_paths(name)
     worktrees_dir = get_worktrees_dir()
     configs_dir = get_claude_configs_dir()

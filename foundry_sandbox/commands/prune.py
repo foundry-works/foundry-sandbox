@@ -18,12 +18,11 @@ from __future__ import annotations
 import json
 import os
 import subprocess
-import sys
 
 import click
 
 from foundry_sandbox.constants import TIMEOUT_DOCKER_QUERY, get_claude_configs_dir, get_worktrees_dir
-from foundry_sandbox.docker import container_is_running, remove_stubs_volume, remove_hmac_volume
+from foundry_sandbox.docker import remove_stubs_volume, remove_hmac_volume
 from foundry_sandbox.git_worktree import cleanup_sandbox_branch, remove_worktree
 from foundry_sandbox.paths import derive_sandbox_paths, safe_remove
 from foundry_sandbox.state import load_sandbox_metadata

@@ -15,7 +15,6 @@ import re
 import subprocess
 import shutil
 from pathlib import Path
-from typing import Any
 
 from foundry_sandbox.constants import TIMEOUT_GIT_QUERY, TIMEOUT_GIT_TRANSFER
 from foundry_sandbox.git import git_with_retry

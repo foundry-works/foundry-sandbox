@@ -7,7 +7,6 @@ Orchestrates docker-compose.override.yml assembly from sandbox configuration.
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Optional
 
 from foundry_sandbox.network import (
     add_claude_home_to_override,

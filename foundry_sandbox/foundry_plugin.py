@@ -12,14 +12,12 @@ import json
 import os
 import shlex
 import subprocess
-import sys
 from pathlib import Path
-from typing import Any
 
 from foundry_sandbox.config import load_json, write_json
-from foundry_sandbox.constants import CONTAINER_HOME, CONTAINER_USER, TIMEOUT_DOCKER_EXEC, TIMEOUT_GIT_TRANSFER, TIMEOUT_LOCAL_CMD, get_sandbox_verbose
+from foundry_sandbox.constants import CONTAINER_HOME, CONTAINER_USER, TIMEOUT_DOCKER_EXEC, TIMEOUT_GIT_TRANSFER, TIMEOUT_LOCAL_CMD
 from foundry_sandbox.permissions import FOUNDRY_ALLOW, FOUNDRY_DENY
-from foundry_sandbox.utils import log_debug, log_info, log_step, log_warn
+from foundry_sandbox.utils import log_debug, log_step, log_warn
 
 DEFAULT_HOOKS = {
     "PreToolUse": [

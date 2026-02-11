@@ -26,7 +26,7 @@ from typing import Any, Callable
 
 from foundry_sandbox.constants import PROXY_TIMEOUT
 from foundry_sandbox.errors import ProxyError
-from foundry_sandbox.utils import log_debug, log_error, log_info, log_warn
+from foundry_sandbox.utils import log_debug, log_error, log_warn
 
 # Constants
 DEFAULT_TTL_SECONDS = 86400
@@ -406,7 +406,7 @@ def proxy_is_registered(container_id: str) -> bool:
 
     try:
         result = proxy_curl("GET", f"/internal/containers/{container_id}", include_status_code=True)
-        return result["http_code"] == 200
+        return bool(result["http_code"] == 200)
     except Exception as exc:
         log_debug(f"Could not check proxy registration for {container_id}: {exc}")
         return False

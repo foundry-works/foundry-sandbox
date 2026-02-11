@@ -11,12 +11,10 @@ import sys
 from pathlib import Path
 
 from foundry_sandbox.constants import (
-    CONTAINER_HOME,
     CONTAINER_USER,
     SSH_AGENT_CONTAINER_SOCK,
     TIMEOUT_DOCKER_EXEC,
     TIMEOUT_PIP_INSTALL,
-    get_sandbox_sync_ssh,
     get_sandbox_verbose,
 )
 from foundry_sandbox.container_io import copy_file_to_container
@@ -124,8 +122,8 @@ def install_pip_requirements(
     if get_sandbox_verbose():
         print(f"+ {' '.join(cmd)}", file=sys.stderr)
 
-    result = subprocess.run(cmd, capture_output=True, text=True, check=False, timeout=TIMEOUT_PIP_INSTALL)
-    if result.returncode == 0:
+    pip_result = subprocess.run(cmd, capture_output=True, text=True, check=False, timeout=TIMEOUT_PIP_INSTALL)
+    if pip_result.returncode == 0:
         if not quiet:
             log_info("Python packages installed successfully")
     else:
@@ -137,9 +135,9 @@ def install_pip_requirements(
     cmd = ["docker", "exec", container_id, "grep", "-q", "gateway\\|172\\.", "/etc/resolv.conf"]
     if get_sandbox_verbose():
         print(f"+ {' '.join(cmd)}", file=sys.stderr)
-    result = subprocess.run(cmd, capture_output=True, check=False, timeout=TIMEOUT_DOCKER_EXEC)
+    dns_result = subprocess.run(cmd, capture_output=True, check=False, timeout=TIMEOUT_DOCKER_EXEC)
 
-    if result.returncode == 0:
+    if dns_result.returncode == 0:
         block_pypi_after_install(container_id, quiet=quiet)
 
     # Clean up temp file
@@ -250,8 +248,8 @@ def ssh_agent_preflight(
     if get_sandbox_verbose():
         print(f"+ {' '.join(cmd)}", file=sys.stderr)
 
-    result = subprocess.run(cmd, capture_output=True, check=False, timeout=TIMEOUT_DOCKER_EXEC)
-    if result.returncode != 0:
+    sock_check = subprocess.run(cmd, capture_output=True, check=False, timeout=TIMEOUT_DOCKER_EXEC)
+    if sock_check.returncode != 0:
         log_warn(f"SSH agent socket not available at {SSH_AGENT_CONTAINER_SOCK} inside container.")
         return
 
@@ -263,10 +261,10 @@ def ssh_agent_preflight(
     if get_sandbox_verbose():
         print(f"+ {' '.join(cmd)}", file=sys.stderr)
 
-    result = subprocess.run(cmd, capture_output=True, text=True, check=False, timeout=TIMEOUT_DOCKER_EXEC)
-    ssh_add_output = result.stdout + result.stderr
+    ssh_result = subprocess.run(cmd, capture_output=True, text=True, check=False, timeout=TIMEOUT_DOCKER_EXEC)
+    ssh_add_output = ssh_result.stdout + ssh_result.stderr
 
-    if result.returncode == 0:
+    if ssh_result.returncode == 0:
         log_info("SSH agent forwarding looks active.")
         return
 

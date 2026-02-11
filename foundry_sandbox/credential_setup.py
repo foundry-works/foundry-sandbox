@@ -12,7 +12,6 @@ import getpass
 import os
 import shutil
 import subprocess
-import sys
 import time
 from pathlib import Path
 
@@ -21,20 +20,18 @@ from foundry_sandbox.constants import (
     CONTAINER_READY_ATTEMPTS,
     CONTAINER_READY_DELAY,
     CONTAINER_USER,
-    SSH_AGENT_CONTAINER_SOCK,
     TIMEOUT_DOCKER_EXEC,
     get_sandbox_debug,
     get_sandbox_home,
-    get_sandbox_verbose,
 )
 from foundry_sandbox.container_io import (
     copy_dir_to_container,
     copy_dir_to_container_quiet,
     copy_file_to_container,
     copy_file_to_container_quiet,
-    docker_exec_text,
+    docker_exec_text,  # noqa: F401 — re-exported for test mocking
 )
-from foundry_sandbox.utils import log_debug, log_info, log_step, log_warn
+from foundry_sandbox.utils import log_debug, log_step, log_warn
 
 import json as _json_mod
 from datetime import datetime, timezone
@@ -582,7 +579,6 @@ def sync_runtime_credentials(
         isolate_credentials: If True, skip real credential copies
     """
     # Lazy imports
-    from foundry_sandbox.container_setup import ensure_container_user
     from foundry_sandbox.foundry_plugin import (
         ensure_claude_foundry_mcp,
         ensure_foundry_mcp_config,
@@ -707,7 +703,7 @@ def sync_runtime_credentials(
     configure_foundry_research_providers(container_id, quiet=True)
 
     # Detect nested git repos
-    detect_nested_git_repos(container_id, quiet=True)
+    detect_nested_git_repos(container_id)
 
     if get_sandbox_debug():
         log_debug("Runtime credential sync complete")

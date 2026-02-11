@@ -16,7 +16,7 @@ from pathlib import Path
 from typing import Any
 
 from foundry_sandbox.constants import TIMEOUT_LOCAL_CMD
-from foundry_sandbox.utils import log_step, log_warn
+from foundry_sandbox.utils import log_step
 
 
 # ============================================================================

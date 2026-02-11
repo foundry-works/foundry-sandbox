@@ -10,8 +10,8 @@ import shlex
 import subprocess
 import sys
 
-from foundry_sandbox.constants import CONTAINER_USER, TIMEOUT_DOCKER_EXEC, get_sandbox_verbose
-from foundry_sandbox.utils import log_debug, log_warn
+from foundry_sandbox.constants import TIMEOUT_DOCKER_EXEC, get_sandbox_verbose
+from foundry_sandbox.utils import log_warn
 
 
 def _validate_host_user(host_user: str) -> bool:

@@ -313,7 +313,7 @@ def _wizard_summary(
     click.echo()
 
 
-def _guided_new() -> tuple[str, ...]:
+def _guided_new() -> tuple[str, str, str, str, bool, str, bool]:
     """Run the guided wizard for sandbox creation.
 
     Returns:

@@ -15,7 +15,6 @@ import json
 import os
 import shlex
 import stat
-import sys
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -24,15 +23,13 @@ from foundry_sandbox.atomic_io import (
     file_lock as _state_lock,
     atomic_write_unlocked as _secure_write_unlocked,
     atomic_write as _secure_write,
-    LOCK_TIMEOUT_SECONDS as _LOCK_TIMEOUT_SECONDS,
 )
-from foundry_sandbox.config import load_json, write_json
+from foundry_sandbox.config import load_json
 from foundry_sandbox.constants import get_claude_configs_dir
 from foundry_sandbox.utils import flag_enabled as _flag_enabled, log_warn
 from foundry_sandbox.models import CastNewPreset, SandboxMetadata
 from foundry_sandbox.paths import (
     ensure_dir,
-    path_claude_config,
     path_last_attach,
     path_last_cast_new,
     path_metadata_file,

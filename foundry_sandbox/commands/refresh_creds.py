@@ -10,11 +10,8 @@ Migrated from commands/refresh-credentials.sh. Supports:
 
 from __future__ import annotations
 
-import os
-import shutil
 import subprocess
 import sys
-from pathlib import Path
 
 import click
 
@@ -25,11 +22,11 @@ from foundry_sandbox.commands._helpers import (
 )
 from foundry_sandbox.docker import uses_credential_isolation as _uses_credential_isolation_shared
 from foundry_sandbox.credential_setup import sync_runtime_credentials
-from foundry_sandbox.constants import TIMEOUT_DOCKER_COMPOSE, get_worktrees_dir
+from foundry_sandbox.constants import TIMEOUT_DOCKER_COMPOSE
 from foundry_sandbox.docker import container_is_running, get_compose_command
 from foundry_sandbox.paths import derive_sandbox_paths
 from foundry_sandbox.state import load_last_attach, load_sandbox_metadata
-from foundry_sandbox.utils import log_error, log_info
+from foundry_sandbox.utils import log_error
 from foundry_sandbox.validate import validate_existing_sandbox_name
 
 

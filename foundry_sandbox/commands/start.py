@@ -55,7 +55,6 @@ from foundry_sandbox.network import (
     add_ssh_agent_to_override,
     add_timezone_to_override,
     ensure_override_from_metadata,
-    ensure_override_header,
 )
 from foundry_sandbox.paths import derive_sandbox_paths, ensure_dir, path_claude_home
 from foundry_sandbox.proxy import setup_proxy_registration

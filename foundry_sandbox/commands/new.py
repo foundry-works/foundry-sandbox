@@ -30,7 +30,6 @@ from __future__ import annotations
 import os
 import sys
 from dataclasses import dataclass
-from pathlib import Path
 
 import click
 from click.core import ParameterSource
@@ -44,7 +43,7 @@ from foundry_sandbox.paths import (
 from foundry_sandbox.utils import flag_enabled as _saved_flag_enabled
 from foundry_sandbox.commands.new_setup import _SetupError, _new_setup, _rollback_new
 from foundry_sandbox.commands.new_wizard import _guided_new
-from foundry_sandbox.commands.new_resolver import _resolve_repo_input, _get_local_branches, _generate_branch_name
+from foundry_sandbox.commands.new_resolver import _resolve_repo_input, _generate_branch_name
 from foundry_sandbox.commands.new_validation import _validate_preconditions, _validate_working_dir, _validate_mounts
 from foundry_sandbox.api_keys import has_opencode_key
 from foundry_sandbox.paths import derive_sandbox_paths
@@ -663,7 +662,7 @@ def new(
 
         # Success message
         click.echo()
-        click.echo(f"✓ Your sandbox is ready!")
+        click.echo("✓ Your sandbox is ready!")
         click.echo()
         click.echo(f"  Sandbox    {name}")
         click.echo(f"  Worktree   {worktree_path}")

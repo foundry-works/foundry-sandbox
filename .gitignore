@@ -8,6 +8,8 @@ specs/.plans
 specs/.notes
 specs/.research
 __pycache__/
+.hypothesis/
 .claude-tmp/
 *.coverage
 .env
+PLAN*.md
