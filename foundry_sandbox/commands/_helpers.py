@@ -229,7 +229,7 @@ def fzf_select_sandbox() -> str | None:
 
         if result.returncode == 0 and result.stdout.strip():
             return result.stdout.strip()
-    except Exception:
+    except OSError:
         log_debug("fzf selection failed, falling back")
 
     return None

@@ -136,6 +136,96 @@ def _prompt_ide_selection(worktree_path: str, name: str) -> bool:
     return prompt_ide_selection(worktree_path, name)
 
 
+def _resolve_sandbox_name(name: str | None, use_last: bool) -> str:
+    """Resolve sandbox name from --last flag, auto-detect, or fzf selection.
+
+    Args:
+        name: Explicit sandbox name (may be None).
+        use_last: Whether --last flag was set.
+
+    Returns:
+        Validated sandbox name.
+
+    Raises:
+        SystemExit: If no sandbox can be resolved or name is invalid.
+    """
+    if use_last:
+        name = load_last_attach()
+        if not name:
+            log_error("No previous sandbox found. Run 'cast attach <name>' first.")
+            sys.exit(1)
+        click.echo(f"Reattaching to: {name}")
+
+    if not name:
+        name = _auto_detect_sandbox()
+        if name:
+            click.echo(f"Auto-detected sandbox: {name}")
+
+    if not name:
+        name = _fzf_select_sandbox()
+        if not name:
+            click.echo(f"Usage: cast attach <sandbox-name>")
+            click.echo("")
+            _list_sandboxes()
+            sys.exit(1)
+
+    valid_name, name_error = validate_existing_sandbox_name(name)
+    if not valid_name:
+        log_error(name_error)
+        sys.exit(1)
+
+    return name
+
+
+def _handle_ide_options(
+    name: str,
+    worktree_path: str,
+    no_ide: bool,
+    with_ide: str | None,
+    ide_only: str | None,
+) -> bool:
+    """Handle IDE launch options and return whether to skip terminal.
+
+    Args:
+        name: Sandbox name.
+        worktree_path: Path to worktree directory.
+        no_ide: Whether --no-ide flag was set.
+        with_ide: Value of --with-ide option (None, "auto", or IDE name).
+        ide_only: Value of --ide-only option (None, "auto", or IDE name).
+
+    Returns:
+        True if terminal should be skipped (--ide-only launched successfully).
+    """
+    if not os.isatty(0):
+        return False
+
+    if no_ide:
+        return False
+
+    if ide_only and ide_only != "auto":
+        if _launch_ide(ide_only, worktree_path):
+            click.echo(f"IDE launched. Run 'cast attach {name}' for terminal.")
+            return True
+
+    if with_ide and with_ide != "auto":
+        _launch_ide(with_ide, worktree_path)
+        return False
+
+    if ide_only == "auto":
+        if _prompt_ide_selection(worktree_path, name):
+            click.echo("")
+            click.echo("  Run this in your IDE's terminal to connect:")
+            click.echo("")
+            click.echo(f"    cast attach {name}")
+            click.echo("")
+            return True
+
+    if with_ide == "auto":
+        _prompt_ide_selection(worktree_path, name)
+
+    return False
+
+
 # ---------------------------------------------------------------------------
 # Command
 # ---------------------------------------------------------------------------
@@ -171,49 +261,19 @@ def attach(
     """Attach to a sandbox via tmux."""
 
     # ------------------------------------------------------------------
-    # 1. Handle --last flag
+    # 1. Resolve sandbox name (--last, auto-detect, fzf, or explicit)
     # ------------------------------------------------------------------
-    if use_last:
-        name = load_last_attach()
-        if not name:
-            log_error("No previous sandbox found. Run 'cast attach <name>' first.")
-            sys.exit(1)
-        click.echo(f"Reattaching to: {name}")
+    name = _resolve_sandbox_name(name, use_last)
 
     # ------------------------------------------------------------------
-    # 2. Auto-detect sandbox from current directory
-    # ------------------------------------------------------------------
-    if not name:
-        name = _auto_detect_sandbox()
-        if name:
-            click.echo(f"Auto-detected sandbox: {name}")
-
-    # ------------------------------------------------------------------
-    # 3. Interactive fzf selection
-    # ------------------------------------------------------------------
-    if not name:
-        name = _fzf_select_sandbox()
-        if not name:
-            # Show usage and list sandboxes
-            click.echo(f"Usage: cast attach <sandbox-name>")
-            click.echo("")
-            _list_sandboxes()
-            sys.exit(1)
-
-    valid_name, name_error = validate_existing_sandbox_name(name)
-    if not valid_name:
-        log_error(name_error)
-        sys.exit(1)
-
-    # ------------------------------------------------------------------
-    # 4. Derive sandbox paths
+    # 2. Derive sandbox paths
     # ------------------------------------------------------------------
     paths = derive_sandbox_paths(name)
     worktree_path = paths.worktree_path
     container = paths.container_name
 
     # ------------------------------------------------------------------
-    # 5. Check if worktree exists
+    # 3. Check if worktree exists
     # ------------------------------------------------------------------
     if not worktree_path.is_dir():
         log_error(f"Sandbox '{name}' not found")
@@ -221,7 +281,7 @@ def attach(
         sys.exit(1)
 
     # ------------------------------------------------------------------
-    # 6. Check if container is running, start if needed
+    # 4. Check if container is running, start if needed
     # ------------------------------------------------------------------
     container_id = f"{container}-dev-1"
 
@@ -238,59 +298,26 @@ def attach(
             log_debug("Skipping credential sync on attach (SANDBOX_SYNC_ON_ATTACH=0)")
 
     # ------------------------------------------------------------------
-    # 7. Ensure metadata is loaded (may not be if container was just started)
+    # 5. Load metadata and feature flags
     # ------------------------------------------------------------------
     metadata = load_sandbox_metadata(name)
     working_dir = str(metadata.get("working_dir", "")) if metadata else ""
     enable_opencode = _flag_enabled(metadata.get("enable_opencode", False)) if metadata else False
 
     # ------------------------------------------------------------------
-    # 8. Sync OpenCode plugins on first attach
+    # 6. Sync OpenCode plugins on first attach
     # ------------------------------------------------------------------
     if enable_opencode:
         _sync_opencode_plugins(name, container_id)
 
     # ------------------------------------------------------------------
-    # 9. Save this sandbox as last attached
+    # 7. Save this sandbox as last attached
     # ------------------------------------------------------------------
     save_last_attach(name)
 
     # ------------------------------------------------------------------
-    # 10. IDE launch logic
+    # 8. IDE launch and tmux attach
     # ------------------------------------------------------------------
-    skip_terminal = False
-
-    # Only handle IDE logic if stdin is a TTY
-    if os.isatty(0):
-        if no_ide:
-            # --no-ide: skip IDE prompt entirely
-            pass
-        elif ide_only and ide_only != "auto":
-            # Specific IDE requested via --ide-only=<name>
-            if _launch_ide(ide_only, str(worktree_path)):
-                skip_terminal = True
-                click.echo(f"IDE launched. Run 'cast attach {name}' for terminal.")
-        elif with_ide and with_ide != "auto":
-            # Specific IDE requested via --with-ide=<name>
-            _launch_ide(with_ide, str(worktree_path))
-            # Don't skip terminal for --with-ide
-        elif ide_only == "auto":
-            # --ide-only without specific name: prompt for selection
-            if _prompt_ide_selection(str(worktree_path), name):
-                skip_terminal = True
-                click.echo("")
-                click.echo("  Run this in your IDE's terminal to connect:")
-                click.echo("")
-                click.echo(f"    cast attach {name}")
-                click.echo("")
-        elif with_ide == "auto":
-            # --with-ide without specific name: prompt for selection
-            _prompt_ide_selection(str(worktree_path), name)
-            # Don't skip terminal for --with-ide
-        # Default for attach: go directly to terminal (no IDE prompt)
-
-    # ------------------------------------------------------------------
-    # 11. Attach to tmux (unless --ide-only)
-    # ------------------------------------------------------------------
+    skip_terminal = _handle_ide_options(name, str(worktree_path), no_ide, with_ide, ide_only)
     if not skip_terminal:
         _tmux_attach(name, working_dir, paths)

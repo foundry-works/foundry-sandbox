@@ -91,7 +91,7 @@ def _secure_write_unlocked(path: Path, content: str) -> None:
             f.write(content)
         os.chmod(tmp_path, 0o600)
         os.replace(tmp_path, path)
-    except Exception:
+    except OSError:
         try:
             os.unlink(tmp_path)
         except OSError:

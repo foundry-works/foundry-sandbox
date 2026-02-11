@@ -61,8 +61,11 @@ def launch_ide(ide: str, path: str) -> None:
             stderr=subprocess.DEVNULL,
             start_new_session=True,
         )
-        # Detach: we don't wait on the IDE process, but prevent ResourceWarning
-        proc.returncode = 0
+        # Fire-and-forget: the IDE runs in its own session and we intentionally
+        # never wait on it.  Setting returncode silences Python's ResourceWarning
+        # on GC; poll() would also return None immediately since the IDE is still
+        # starting up, so we explicitly mark it as "not our problem".
+        proc.returncode = 0  # intentional: suppress ResourceWarning for detached process
     except (OSError, FileNotFoundError):
         click.echo(f"Failed to launch {display}.", err=True)
 

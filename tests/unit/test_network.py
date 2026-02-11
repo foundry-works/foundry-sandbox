@@ -165,6 +165,235 @@ class TestStripNetworkConfig:
         assert "SANDBOX_NETWORK_MODE" not in content
 
 
+class TestStripYamlBlocksEdgeCases:
+    """Edge-case tests for _strip_yaml_blocks (the YAML block parser).
+
+    Exercises corner cases in the manual YAML list-item parser that
+    strip_network_config, strip_ssh_agent_config, etc. delegate to.
+    """
+
+    def test_empty_file(self, tmp_path):
+        """Empty file should remain empty."""
+        f = tmp_path / "override.yml"
+        f.write_text("")
+
+        network._strip_yaml_blocks(str(f), {
+            "volumes": lambda line: True,
+        })
+
+        assert f.read_text() == ""
+
+    def test_header_only_no_items(self, tmp_path):
+        """Block header with no items should be dropped entirely."""
+        f = tmp_path / "override.yml"
+        f.write_text(
+            "services:\n"
+            "  dev:\n"
+            "    volumes:\n"
+            "    image: test\n"
+        )
+
+        network._strip_yaml_blocks(str(f), {
+            "volumes": lambda line: True,
+        })
+
+        content = f.read_text()
+        assert "volumes:" not in content
+        assert "image: test" in content
+
+    def test_all_items_removed_drops_header(self, tmp_path):
+        """Block whose items are all filtered should lose its header too."""
+        f = tmp_path / "override.yml"
+        f.write_text(
+            "services:\n"
+            "  dev:\n"
+            "    cap_add:\n"
+            "      - NET_ADMIN\n"
+            "      - NET_RAW\n"
+            "    image: test\n"
+        )
+
+        network._strip_yaml_blocks(str(f), {
+            "cap_add": lambda line: True,  # remove all
+        })
+
+        content = f.read_text()
+        assert "cap_add:" not in content
+        assert "NET_ADMIN" not in content
+        assert "NET_RAW" not in content
+        assert "image: test" in content
+
+    def test_some_items_kept(self, tmp_path):
+        """Block with mixed kept/removed items preserves header and kept items."""
+        f = tmp_path / "override.yml"
+        f.write_text(
+            "services:\n"
+            "  dev:\n"
+            "    cap_add:\n"
+            "      - NET_ADMIN\n"
+            "      - MKNOD\n"
+            "      - SYS_ADMIN\n"
+        )
+
+        network._strip_yaml_blocks(str(f), {
+            "cap_add": lambda line: "NET_ADMIN" in line or "SYS_ADMIN" in line,
+        })
+
+        content = f.read_text()
+        assert "cap_add:" in content
+        assert "MKNOD" in content
+        assert "NET_ADMIN" not in content
+        assert "SYS_ADMIN" not in content
+
+    def test_block_at_end_of_file(self, tmp_path):
+        """Block at the very end of file (no trailing content) should work."""
+        f = tmp_path / "override.yml"
+        f.write_text(
+            "services:\n"
+            "  dev:\n"
+            "    environment:\n"
+            "      - KEEP=yes\n"
+            "      - DROP=yes\n"
+        )
+
+        network._strip_yaml_blocks(str(f), {
+            "environment": lambda line: "DROP" in line,
+        })
+
+        content = f.read_text()
+        assert "KEEP=yes" in content
+        assert "DROP" not in content
+
+    def test_multiple_tracked_blocks(self, tmp_path):
+        """Multiple tracked blocks should each be filtered independently."""
+        f = tmp_path / "override.yml"
+        f.write_text(
+            "services:\n"
+            "  dev:\n"
+            "    cap_add:\n"
+            "      - NET_ADMIN\n"
+            "      - MKNOD\n"
+            "    volumes:\n"
+            '      - "/data:/data"\n'
+            '      - "/ssh:/ssh-agent"\n'
+            "    environment:\n"
+            "      - SANDBOX_NETWORK_MODE=limited\n"
+            "      - MY_VAR=value\n"
+        )
+
+        network._strip_yaml_blocks(str(f), {
+            "cap_add": lambda line: "NET_ADMIN" in line,
+            "volumes": lambda line: "/ssh-agent" in line,
+            "environment": lambda line: "SANDBOX_NETWORK_MODE" in line,
+        })
+
+        content = f.read_text()
+        assert "MKNOD" in content
+        assert "NET_ADMIN" not in content
+        assert "/data:/data" in content
+        assert "/ssh-agent" not in content
+        assert "MY_VAR=value" in content
+        assert "SANDBOX_NETWORK_MODE" not in content
+
+    def test_untracked_blocks_preserved(self, tmp_path):
+        """Blocks not in the filter dict should be left untouched."""
+        f = tmp_path / "override.yml"
+        f.write_text(
+            "services:\n"
+            "  dev:\n"
+            "    ports:\n"
+            '      - "8080:80"\n'
+            "    cap_add:\n"
+            "      - NET_ADMIN\n"
+        )
+
+        network._strip_yaml_blocks(str(f), {
+            "cap_add": lambda line: True,
+        })
+
+        content = f.read_text()
+        assert "ports:" in content
+        assert "8080:80" in content
+        assert "cap_add:" not in content
+
+    def test_adjacent_tracked_blocks(self, tmp_path):
+        """Two tracked blocks directly adjacent (no gap) should both filter."""
+        f = tmp_path / "override.yml"
+        f.write_text(
+            "services:\n"
+            "  dev:\n"
+            "    cap_add:\n"
+            "      - NET_ADMIN\n"
+            "    environment:\n"
+            "      - DROP_ME=yes\n"
+        )
+
+        network._strip_yaml_blocks(str(f), {
+            "cap_add": lambda line: True,
+            "environment": lambda line: True,
+        })
+
+        content = f.read_text()
+        assert "cap_add:" not in content
+        assert "environment:" not in content
+        assert "NET_ADMIN" not in content
+        assert "DROP_ME" not in content
+
+    def test_predicate_receives_rstripped_line(self, tmp_path):
+        """Predicate should receive right-stripped line content."""
+        received = []
+        f = tmp_path / "override.yml"
+        f.write_text(
+            "services:\n"
+            "  dev:\n"
+            "    environment:\n"
+            "      - FOO=bar\n"
+        )
+
+        def capture(line):
+            received.append(line)
+            return False
+
+        network._strip_yaml_blocks(str(f), {"environment": capture})
+
+        assert len(received) == 1
+        assert received[0] == "      - FOO=bar"
+
+    def test_nonexistent_file_noop(self, tmp_path):
+        """Non-existent file should not raise."""
+        network._strip_yaml_blocks(
+            str(tmp_path / "missing.yml"),
+            {"volumes": lambda line: True},
+        )
+
+    def test_idempotent_strip(self, tmp_path):
+        """Running the same strip twice should produce identical output."""
+        f = tmp_path / "override.yml"
+        original = (
+            "services:\n"
+            "  dev:\n"
+            "    cap_add:\n"
+            "      - NET_ADMIN\n"
+            "      - MKNOD\n"
+            "    environment:\n"
+            "      - SANDBOX_NETWORK_MODE=limited\n"
+            "      - MY_VAR=value\n"
+        )
+        f.write_text(original)
+        filters = {
+            "cap_add": lambda line: "NET_ADMIN" in line,
+            "environment": lambda line: "SANDBOX_NETWORK_MODE" in line,
+        }
+
+        network._strip_yaml_blocks(str(f), filters)
+        first = f.read_text()
+
+        network._strip_yaml_blocks(str(f), filters)
+        second = f.read_text()
+
+        assert first == second
+
+
 class TestStripSshAgentConfig:
     """Tests for strip_ssh_agent_config()."""
 

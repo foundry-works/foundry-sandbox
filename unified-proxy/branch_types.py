@@ -248,3 +248,42 @@ def _normalize_base_branch(base_branch: Optional[str]) -> Optional[str]:
                 base_branch = base_branch[len(prefix):]
                 break
     return base_branch or None
+
+
+# ---------------------------------------------------------------------------
+# Branch Name Validation
+# ---------------------------------------------------------------------------
+
+
+def _is_allowed_branch_name(
+    name: str,
+    sandbox_branch: str,
+    base_branch: Optional[str] = None,
+) -> bool:
+    """Check if a bare branch name is allowed for this sandbox.
+
+    Allowed: the sandbox's own branch, well-known branches,
+    the sandbox's base branch (if any), and branches matching
+    well-known prefixes.
+    """
+    if name == sandbox_branch:
+        return True
+    if base_branch and name == base_branch:
+        return True
+    if name in WELL_KNOWN_BRANCHES:
+        return True
+    for prefix in WELL_KNOWN_BRANCH_PREFIXES:
+        if name.startswith(prefix):
+            return True
+    return False
+
+
+# ---------------------------------------------------------------------------
+# Ref Enumeration Commands
+# ---------------------------------------------------------------------------
+
+# Commands that enumerate refs (used by both branch_isolation and
+# branch_output_filter for dispatch).
+REF_ENUM_CMDS: FrozenSet[str] = frozenset({
+    "for-each-ref", "ls-remote", "show-ref",
+})

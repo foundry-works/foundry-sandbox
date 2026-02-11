@@ -47,6 +47,7 @@ def _docker_exec_python(
     script: str,
     *,
     quiet: bool = False,
+    env: dict[str, str] | None = None,
 ) -> None:
     """Execute a Python script inside the container via docker exec.
 
@@ -54,13 +55,18 @@ def _docker_exec_python(
         container_id: Container ID
         script: Python script to execute
         quiet: If True, suppress output
+        env: Optional environment variables to pass via ``-e``
     """
-    cmd = ["docker", "exec", "-u", CONTAINER_USER, "-i", container_id, "python3", "-"]
+    cmd = ["docker", "exec", "-u", CONTAINER_USER]
+    if env:
+        for key, value in env.items():
+            cmd.extend(["-e", f"{key}={value}"])
+    cmd.extend(["-i", container_id, "python3", "-"])
 
     if not quiet:
         log_debug(f"Running Python script in container {container_id}")
 
-    result = subprocess.run(
+    subprocess.run(
         cmd,
         input=script,
         text=True,
@@ -275,26 +281,11 @@ def ensure_codex_config(container_id: str, *, quiet: bool = False) -> None:
     if not quiet:
         log_step("Codex: setting defaults (no updates/analytics)")
 
-    # Pass SANDBOX_ENABLE_TAVILY to container
-    enable_tavily = os.environ.get("SANDBOX_ENABLE_TAVILY", "0")
-
-    script = _read_script("ensure_codex_config.py")
-
-    cmd = [
-        "docker", "exec",
-        "-u", CONTAINER_USER,
-        "-e", f"SANDBOX_ENABLE_TAVILY={enable_tavily}",
-        "-i", container_id,
-        "python3", "-"
-    ]
-
-    subprocess.run(
-        cmd,
-        input=script,
-        text=True,
-        capture_output=quiet,
-        check=True,
-        timeout=TIMEOUT_DOCKER_EXEC,
+    _docker_exec_python(
+        container_id,
+        _read_script("ensure_codex_config.py"),
+        quiet=quiet,
+        env={"SANDBOX_ENABLE_TAVILY": os.environ.get("SANDBOX_ENABLE_TAVILY", "0")},
     )
 
 
@@ -319,25 +310,11 @@ def ensure_gemini_settings(container_id: str, *, quiet: bool = False) -> None:
     if not quiet:
         log_step("Gemini: setting defaults (no updates/telemetry)")
 
-    enable_tavily = os.environ.get("SANDBOX_ENABLE_TAVILY", "0")
-
-    script = _read_script("ensure_gemini_settings.py")
-
-    cmd = [
-        "docker", "exec",
-        "-u", CONTAINER_USER,
-        "-e", f"SANDBOX_ENABLE_TAVILY={enable_tavily}",
-        "-i", container_id,
-        "python3", "-"
-    ]
-
-    subprocess.run(
-        cmd,
-        input=script,
-        text=True,
-        capture_output=quiet,
-        check=True,
-        timeout=TIMEOUT_DOCKER_EXEC,
+    _docker_exec_python(
+        container_id,
+        _read_script("ensure_gemini_settings.py"),
+        quiet=quiet,
+        env={"SANDBOX_ENABLE_TAVILY": os.environ.get("SANDBOX_ENABLE_TAVILY", "0")},
     )
 
 
@@ -375,23 +352,11 @@ def ensure_opencode_default_model(container_id: str, *, quiet: bool = False) -> 
     if not default_model:
         return
 
-    script = _read_script("ensure_opencode_default_model.py")
-
-    cmd = [
-        "docker", "exec",
-        "-u", CONTAINER_USER,
-        "-e", f"SANDBOX_OPENCODE_DEFAULT_MODEL={default_model}",
-        "-i", container_id,
-        "python3", "-"
-    ]
-
-    subprocess.run(
-        cmd,
-        input=script,
-        text=True,
-        capture_output=quiet,
-        check=True,
-        timeout=TIMEOUT_DOCKER_EXEC,
+    _docker_exec_python(
+        container_id,
+        _read_script("ensure_opencode_default_model.py"),
+        quiet=quiet,
+        env={"SANDBOX_OPENCODE_DEFAULT_MODEL": default_model},
     )
 
 
@@ -449,19 +414,15 @@ def prefetch_opencode_npm_plugins(container_id: str, *, quiet: bool = False) -> 
     if not quiet:
         log_info("Prefetching OpenCode npm plugins...")
 
-    script = _read_script("prefetch_opencode_plugins.py")
-
-    result = subprocess.run(
-        ["docker", "exec", "-u", CONTAINER_USER, "-i", container_id, "python3", "-"],
-        input=script,
-        text=True,
-        capture_output=quiet,
-        check=False,
-        timeout=TIMEOUT_DOCKER_EXEC,
-    )
-
-    if result.returncode != 0 and not quiet:
-        log_warn("Failed to prefetch OpenCode npm plugins")
+    try:
+        _docker_exec_python(
+            container_id,
+            _read_script("prefetch_opencode_plugins.py"),
+            quiet=quiet,
+        )
+    except subprocess.CalledProcessError:
+        if not quiet:
+            log_warn("Failed to prefetch OpenCode npm plugins")
 
 
 def sync_opencode_local_plugins_on_first_attach(

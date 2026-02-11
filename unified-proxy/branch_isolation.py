@@ -25,6 +25,7 @@ from typing import FrozenSet, List, Optional, Tuple
 from branch_types import (  # noqa: F401
     GIT_BINARY,
     GLOBAL_VALUE_FLAGS,
+    REF_ENUM_CMDS,
     SHA_CHECK_TIMEOUT,
     ValidationError,
     WELL_KNOWN_BRANCHES,
@@ -38,6 +39,7 @@ from branch_types import (  # noqa: F401
     _REMOTE_BRANCH_LINE_RE,
     _STDERR_BARE_BRANCH_RE,
     _STDERR_REF_RE,
+    _is_allowed_branch_name,
     _is_sha_like,
     _normalize_base_branch,
     get_subcommand,
@@ -159,10 +161,9 @@ _REF_READING_CMDS: FrozenSet[str] = frozenset({
     "cat-file", "ls-tree",
 })
 
-# Commands that enumerate refs
-_REF_ENUM_CMDS: FrozenSet[str] = frozenset({
-    "for-each-ref", "ls-remote", "show-ref",
-})
+# REF_ENUM_CMDS is imported from branch_types (canonical location).
+# Keep local alias for backward compatibility with existing references.
+_REF_ENUM_CMDS = REF_ENUM_CMDS
 
 # Notes sub-subcommands (used in branch isolation for positional arg parsing)
 _NOTES_SUBCMDS: FrozenSet[str] = frozenset({
@@ -252,27 +253,8 @@ def _strip_rev_suffixes(ref: str) -> str:
     return _REV_SUFFIX_RE.sub("", ref)
 
 
-def _is_allowed_branch_name(
-    name: str,
-    sandbox_branch: str,
-    base_branch: Optional[str] = None,
-) -> bool:
-    """Check if a bare branch name is allowed for this sandbox.
 
-    Allowed: the sandbox's own branch, well-known branches,
-    the sandbox's base branch (if any), and branches matching
-    well-known prefixes.
-    """
-    if name == sandbox_branch:
-        return True
-    if base_branch and name == base_branch:
-        return True
-    if name in WELL_KNOWN_BRANCHES:
-        return True
-    for prefix in WELL_KNOWN_BRANCH_PREFIXES:
-        if name.startswith(prefix):
-            return True
-    return False
+# _is_allowed_branch_name is imported from branch_types (canonical location).
 
 
 def _is_allowed_ref(

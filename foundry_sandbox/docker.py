@@ -22,6 +22,7 @@ from foundry_sandbox.constants import (
     get_sandbox_debug,
     get_sandbox_verbose,
     TIMEOUT_DOCKER_COMPOSE,
+    TIMEOUT_DOCKER_EXEC,
     TIMEOUT_DOCKER_QUERY,
     TIMEOUT_DOCKER_VOLUME,
     TIMEOUT_GIT_QUERY,
@@ -483,7 +484,7 @@ def exec_in_container(container_id: str, *args: str) -> subprocess.CompletedProc
     Returns:
         CompletedProcess result.
     """
-    return _run_cmd(["docker", "exec", container_id, *args])
+    return _run_cmd(["docker", "exec", container_id, *args], timeout=TIMEOUT_DOCKER_EXEC)
 
 
 def copy_to_container(src: str, container_id: str, dst: str) -> None:
@@ -494,7 +495,7 @@ def copy_to_container(src: str, container_id: str, dst: str) -> None:
         container_id: Docker container ID or name.
         dst: Destination path inside container.
     """
-    _run_cmd(["docker", "cp", src, f"{container_id}:{dst}"])
+    _run_cmd(["docker", "cp", src, f"{container_id}:{dst}"], timeout=TIMEOUT_DOCKER_EXEC)
 
 
 # ============================================================================

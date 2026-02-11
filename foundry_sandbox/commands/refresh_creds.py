@@ -64,7 +64,7 @@ def _refresh_direct_mode(container_id: str) -> None:
 
     try:
         sync_runtime_credentials(container_id)
-    except Exception as exc:
+    except (OSError, subprocess.SubprocessError, RuntimeError) as exc:
         log_error(f"Failed to sync credentials: {exc}")
         sys.exit(1)
 
@@ -95,7 +95,7 @@ def _refresh_isolation_mode(name: str, container: str, override_file: str) -> No
     except subprocess.CalledProcessError as exc:
         log_error(f"Failed to restart unified-proxy: {exc}")
         sys.exit(1)
-    except Exception as exc:
+    except (OSError, subprocess.TimeoutExpired) as exc:
         log_error(f"Error restarting unified-proxy: {exc}")
         sys.exit(1)
 

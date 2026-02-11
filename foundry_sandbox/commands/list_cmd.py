@@ -50,7 +50,7 @@ def _get_docker_status(container_name: str) -> str:
         )
         status = result.stdout.strip().split("\n")[0] if result.stdout.strip() else ""
         return status if status else "no container"
-    except Exception:
+    except (OSError, subprocess.TimeoutExpired):
         log_debug("Failed to query container status")
         return "no container"
 
@@ -72,7 +72,7 @@ def _tmux_session_exists(name: str) -> bool:
             timeout=TIMEOUT_LOCAL_CMD,
         )
         return result.returncode == 0
-    except Exception:
+    except (OSError, subprocess.TimeoutExpired):
         log_debug("Failed to check tmux session")
         return False
 

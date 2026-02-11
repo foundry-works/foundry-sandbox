@@ -172,6 +172,6 @@ def detect_nested_git_repos(container_id: str, workspace_path: str = "/workspace
         paths = [line.strip() for line in result.stdout.splitlines() if line.strip()]
         return paths
 
-    except Exception:
+    except (OSError, subprocess.SubprocessError):
         log_warn("Failed to detect nested git repos")
         return []

@@ -11,6 +11,7 @@ import re
 from typing import List, Optional
 
 from branch_types import (
+    REF_ENUM_CMDS,
     WELL_KNOWN_BRANCHES,
     WELL_KNOWN_BRANCH_PREFIXES,
     _BRANCH_LINE_RE,
@@ -20,31 +21,13 @@ from branch_types import (
     _REMOTE_BRANCH_LINE_RE,
     _STDERR_BARE_BRANCH_RE,
     _STDERR_REF_RE,
+    _is_allowed_branch_name,
     _is_sha_like,
     _normalize_base_branch,
     get_subcommand_args,
 )
 
 logger = logging.getLogger(__name__)
-
-
-# ---------------------------------------------------------------------------
-# Helpers (imported from branch_isolation at call time to avoid circular deps)
-# ---------------------------------------------------------------------------
-
-# _is_allowed_branch_name is imported lazily to avoid circular imports.
-# branch_isolation imports from branch_types, and branch_output_filter
-# imports from both branch_types and branch_isolation.
-
-
-def _get_is_allowed_branch_name():
-    from branch_isolation import _is_allowed_branch_name
-    return _is_allowed_branch_name
-
-
-def _get_ref_enum_cmds():
-    from branch_isolation import _REF_ENUM_CMDS
-    return _REF_ENUM_CMDS
 
 
 # ---------------------------------------------------------------------------
@@ -74,7 +57,7 @@ def _filter_branch_output(
     if not output:
         return output
 
-    _is_allowed_branch_name = _get_is_allowed_branch_name()
+
     filtered_lines: List[str] = []
     for line in output.splitlines(True):
         stripped = line.rstrip("\n\r")
@@ -124,7 +107,7 @@ def _is_allowed_short_ref_token(
     base_branch: Optional[str] = None,
 ) -> bool:
     """Check whether a short/custom ref token from ref-enum output is allowed."""
-    _is_allowed_branch_name = _get_is_allowed_branch_name()
+
     if not token:
         return True
     if token.startswith("("):
@@ -197,7 +180,7 @@ def _filter_ref_enum_output(
     if not output:
         return output
 
-    _is_allowed_branch_name = _get_is_allowed_branch_name()
+
     filtered_lines: List[str] = []
     for line in output.splitlines(True):
         stripped = line.rstrip("\n\r")
@@ -278,7 +261,7 @@ def _is_decoration_ref_allowed(
     Always keeps: HEAD, HEAD -> branch (if branch allowed), tags,
     detached HEAD annotations.
     """
-    _is_allowed_branch_name = _get_is_allowed_branch_name()
+
     ref = ref.strip()
     if not ref:
         return True
@@ -405,7 +388,7 @@ def _filter_custom_format_decorations(
     if not output:
         return output
 
-    _is_allowed_branch_name = _get_is_allowed_branch_name()
+
     filtered_lines: List[str] = []
     for line in output.splitlines(True):
         stripped = line.rstrip("\n\r")
@@ -524,7 +507,7 @@ def _filter_log_source_refs(
     if not output:
         return output
 
-    _is_allowed_branch_name = _get_is_allowed_branch_name()
+
     filtered_lines: List[str] = []
     for line in output.splitlines(True):
         stripped = line.rstrip("\n\r")
@@ -568,7 +551,7 @@ def filter_stderr_branch_refs(
     if not stderr or not sandbox_branch:
         return stderr
     base_branch = _normalize_base_branch(base_branch)
-    _is_allowed_branch_name = _get_is_allowed_branch_name()
+
 
     def _redact_match(m: re.Match) -> str:
         branch = m.group("branch") or m.group("remote_branch")
@@ -622,14 +605,12 @@ def filter_ref_listing_output(
     if subcommand is None:
         return output
 
-    _REF_ENUM_CMDS = _get_ref_enum_cmds()
-
     # Branch listing
     if subcommand == "branch":
         return _filter_branch_output(output, sandbox_branch, base_branch)
 
     # Ref enumeration commands
-    if subcommand in _REF_ENUM_CMDS:
+    if subcommand in REF_ENUM_CMDS:
         return _filter_ref_enum_output(output, sandbox_branch, base_branch)
 
     # Log with decorations

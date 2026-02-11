@@ -135,11 +135,6 @@ def _opencode_enabled() -> bool:
     return os.environ.get("OPENCODE_ENABLED", "").lower() in ("1", "true", "yes")
 
 
-def _resolve_ssh_agent_sock() -> str:
-    """Find SSH agent socket from environment."""
-    return os.environ.get("SSH_AUTH_SOCK", "")
-
-
 def _stage_setup_user(container_id: str) -> None:
     """Stage 1: Create container user and wait for home directory."""
     from foundry_sandbox.container_setup import ensure_container_user

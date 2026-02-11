@@ -5,6 +5,25 @@ Provides:
     running_sandbox   - module-scoped fixture that creates a sandbox and
                         yields its name, destroying it on teardown
     docker_exec       - helper to run commands inside the sandbox container
+
+Shared-state contract
+---------------------
+``running_sandbox`` is **module-scoped** so that all security tests within a
+single test module share one Docker sandbox.  This is intentional: creating and
+destroying a real sandbox per test would make the suite prohibitively slow.
+
+Consequences for test authors:
+
+* **Tests must be read-only observers.**  They may inspect sandbox state (env
+  vars, filesystem, network) but must not mutate it in ways visible to other
+  tests.  If a test creates temporary artefacts (e.g. marker files), it must
+  clean them up before returning.
+* **Test ordering within a module is undefined.**  Do not rely on one test
+  running before another.  Each test must be independently valid against a
+  sandbox in its as-created state.
+* **Cross-module isolation is guaranteed.**  Each test module gets its own
+  sandbox instance, so mutations in ``test_credential_isolation.py`` cannot
+  affect ``test_filesystem_readonly.py``.
 """
 
 import os
@@ -59,6 +78,10 @@ def running_sandbox(cli, has_docker, module_local_repo):
     Yields the sandbox name.  The sandbox is created with ``--skip-key-check``
     so no API keys are required during testing.  Skips the entire module
     when Docker is not available.
+
+    **Shared-state:** This fixture is module-scoped for performance.  All tests
+    in the consuming module share this single sandbox instance.  See the module
+    docstring for the shared-state contract that test authors must follow.
     """
     if not has_docker:
         pytest.skip("Docker is not available")

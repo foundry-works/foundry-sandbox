@@ -237,7 +237,7 @@ def _generate_branch_name(repo_url: str, from_branch: str) -> str:
                 check=False,
                 timeout=TIMEOUT_LOCAL_CMD,
             ).stdout.strip()
-        except Exception:
+        except (OSError, subprocess.TimeoutExpired):
             log_debug("Failed to get username from id command")
 
     if not user_segment:
@@ -329,6 +329,187 @@ def _load_and_apply_defaults(
         pip_requirements=pip_requirements,
         allow_pr=allow_pr,
     )
+
+
+def _validate_preconditions(
+    ctx: click.Context,
+    repo_url: str,
+    copies: tuple[str, ...],
+    skip_key_check: bool,
+    isolate_credentials: bool,
+) -> None:
+    """Validate API keys, copy sources, image freshness, and network capacity.
+
+    Args:
+        ctx: Click context (for invoking build command).
+        repo_url: Validated repository URL.
+        copies: Tuple of copy specs (host:container).
+        skip_key_check: Whether to skip API key validation.
+        isolate_credentials: Whether credential isolation is enabled.
+
+    Raises:
+        SystemExit: On validation failure.
+    """
+    ok, msg = validate_git_url(repo_url)
+    if not ok:
+        log_error(msg)
+        sys.exit(1)
+
+    if not skip_key_check:
+        ok, msg = check_claude_key_required()
+        if not ok:
+            log_error("Sandbox creation cancelled - Claude authentication required.")
+            sys.exit(1)
+
+    for copy_spec in copies:
+        src = copy_spec.split(":")[0]
+        if not os.path.exists(src):
+            log_error(f"Copy source does not exist: {src}")
+            sys.exit(1)
+
+    if check_image_freshness():
+        if click.confirm("Rebuild image now?", default=True):
+            from foundry_sandbox.commands.build import build as build_cmd
+            ctx.invoke(build_cmd)
+
+    ok, msg = check_docker_network_capacity(isolate_credentials)
+    if not ok:
+        log_error(msg)
+        sys.exit(1)
+
+
+def _persist_sandbox_state(
+    repo_url: str,
+    branch: str,
+    from_branch: str,
+    wd: str,
+    sparse: bool,
+    pip_requirements: str,
+    allow_pr: bool,
+    network_mode: str,
+    sync_ssh_enabled: bool,
+    with_opencode: bool,
+    with_zai: bool,
+    mounts: tuple[str, ...],
+    copies: tuple[str, ...],
+    save_as: str,
+    name: str,
+) -> None:
+    """Save last command, preset (if --save-as), and last attach state.
+
+    Args:
+        repo_url: Repository URL.
+        branch: Sandbox branch name.
+        from_branch: Base branch name.
+        wd: Working directory.
+        sparse: Whether sparse checkout is enabled.
+        pip_requirements: Pip requirements path.
+        allow_pr: Whether PR operations are allowed.
+        network_mode: Network mode string.
+        sync_ssh_enabled: Whether SSH sync is enabled.
+        with_opencode: Whether OpenCode is enabled.
+        with_zai: Whether ZAI is enabled.
+        mounts: Mount specifications.
+        copies: Copy specifications.
+        save_as: Preset name to save as (empty to skip).
+        name: Sandbox name.
+    """
+    save_last_cast_new(
+        repo=repo_url,
+        branch=branch,
+        from_branch=from_branch or "",
+        working_dir=wd or "",
+        sparse=sparse,
+        pip_requirements=pip_requirements or "",
+        allow_pr=allow_pr,
+        network_mode=network_mode or "",
+        sync_ssh=sync_ssh_enabled,
+        enable_opencode=with_opencode,
+        enable_zai=with_zai,
+        mounts=list(mounts),
+        copies=list(copies),
+    )
+
+    save_last_attach(name)
+
+    if save_as:
+        save_cast_preset(
+            preset_name=save_as,
+            repo=repo_url,
+            branch=branch,
+            from_branch=from_branch or "",
+            working_dir=wd or "",
+            sparse=sparse,
+            pip_requirements=pip_requirements or "",
+            allow_pr=allow_pr,
+            network_mode=network_mode or "",
+            sync_ssh=sync_ssh_enabled,
+            enable_opencode=with_opencode,
+            enable_zai=with_zai,
+            mounts=list(mounts),
+            copies=list(copies),
+        )
+
+
+def _handle_new_ide_and_attach(
+    name: str,
+    worktree_path: str,
+    container: str,
+    wd: str,
+    no_ide: bool,
+    with_ide: str,
+    ide_only: str,
+) -> None:
+    """Handle IDE launch and tmux attach after sandbox creation.
+
+    Args:
+        name: Sandbox name.
+        worktree_path: Path to worktree directory.
+        container: Container name prefix.
+        wd: Working directory inside container.
+        no_ide: Whether --no-ide flag was set.
+        with_ide: Value of --with-ide option.
+        ide_only: Value of --ide-only option.
+    """
+    skip_terminal = False
+
+    if sys.stdin.isatty():
+        from foundry_sandbox.ide import auto_launch_ide, prompt_ide_selection
+
+        if no_ide:
+            input("Press Enter to launch... ")
+        elif with_ide:
+            if auto_launch_ide(with_ide, worktree_path):
+                if ide_only:
+                    skip_terminal = True
+                    click.echo()
+                    click.echo(f"IDE launched. Run 'cast attach {name}' for terminal.")
+                else:
+                    input("Press Enter to launch terminal... ")
+            else:
+                input("Press Enter to launch... ")
+        elif ide_only:
+            prompt_ide_selection(worktree_path, name)
+            skip_terminal = True
+            click.echo()
+            click.echo("  Run this in your IDE's terminal to connect:")
+            click.echo()
+            click.echo(f"    cast attach {name}")
+            click.echo()
+        else:
+            ide_was_launched = prompt_ide_selection(worktree_path, name)
+            if ide_was_launched:
+                click.echo()
+                click.echo("  Run this in your IDE's terminal to connect:")
+                click.echo()
+                click.echo(f"    cast attach {name}")
+                click.echo()
+                skip_terminal = True
+            else:
+                input("Press Enter to launch terminal... ")
+
+    if not skip_terminal and sys.stdin.isatty():
+        tmux.attach(name, f"{container}-dev-1", worktree_path, wd or "")
 
 
 # ---------------------------------------------------------------------------
@@ -516,38 +697,9 @@ def new(
     if not repo_url.startswith(("http://", "https://", "git@")) and "://" not in repo_url and not repo_url.startswith("/"):
         repo_url = f"https://github.com/{repo_url}"
 
-    # Validate git URL
-    ok, msg = validate_git_url(repo_url)
-    if not ok:
-        log_error(msg)
-        sys.exit(1)
-
-    # Check API keys unless skipped
-    if not skip_key_check:
-        ok, msg = check_claude_key_required()
-        if not ok:
-            log_error("Sandbox creation cancelled - Claude authentication required.")
-            sys.exit(1)
-
-    # Validate --copy source paths
-    for copy_spec in copies:
-        src = copy_spec.split(":")[0]
-        if not os.path.exists(src):
-            log_error(f"Copy source does not exist: {src}")
-            sys.exit(1)
-
-    # Check image freshness
-    if check_image_freshness():
-        if click.confirm("Rebuild image now?", default=True):
-            from foundry_sandbox.commands.build import build as build_cmd
-            ctx.invoke(build_cmd)
-
-    # Check network capacity
+    # Validate preconditions: git URL, API keys, copies, image, network
     isolate_credentials = not no_isolate_credentials
-    ok, msg = check_docker_network_capacity(isolate_credentials)
-    if not ok:
-        log_error(msg)
-        sys.exit(1)
+    _validate_preconditions(ctx, repo_url, copies, skip_key_check, isolate_credentials)
 
     # Setup network and SSH flags
     network_mode = network or os.environ.get("SANDBOX_NETWORK_MODE", "limited")
@@ -674,44 +826,24 @@ def new(
             _rollback_new(worktree_path, claude_config_path, container, override_file)
             sys.exit(1)
 
-        # Save last command
-        save_last_cast_new(
-            repo=repo_url,
+        # Save state: last command, preset, last attach
+        _persist_sandbox_state(
+            repo_url=repo_url,
             branch=branch,
-            from_branch=from_branch or "",
-            working_dir=wd or "",
+            from_branch=from_branch,
+            wd=wd,
             sparse=sparse,
-            pip_requirements=pip_requirements or "",
+            pip_requirements=pip_requirements,
             allow_pr=allow_pr,
-            network_mode=network_mode or "",
-            sync_ssh=sync_ssh_enabled,
-            enable_opencode=with_opencode,
-            enable_zai=with_zai,
-            mounts=list(mounts),
-            copies=list(copies),
+            network_mode=network_mode,
+            sync_ssh_enabled=sync_ssh_enabled,
+            with_opencode=with_opencode,
+            with_zai=with_zai,
+            mounts=mounts,
+            copies=copies,
+            save_as=save_as,
+            name=name,
         )
-
-        # Save last attached
-        save_last_attach(name)
-
-        # Save preset
-        if save_as:
-            save_cast_preset(
-                preset_name=save_as,
-                repo=repo_url,
-                branch=branch,
-                from_branch=from_branch or "",
-                working_dir=wd or "",
-                sparse=sparse,
-                pip_requirements=pip_requirements or "",
-                allow_pr=allow_pr,
-                network_mode=network_mode or "",
-                sync_ssh=sync_ssh_enabled,
-                enable_opencode=with_opencode,
-                enable_zai=with_zai,
-                mounts=list(mounts),
-                copies=list(copies),
-            )
 
         # Success message
         click.echo()
@@ -728,46 +860,10 @@ def new(
         click.echo("    cast repeat         - repeat this setup")
         click.echo()
 
-        # IDE launch logic
-        skip_terminal = False
-
-        if sys.stdin.isatty():
-            from foundry_sandbox.ide import auto_launch_ide, prompt_ide_selection
-
-            if no_ide:
-                input("Press Enter to launch... ")
-            elif with_ide:
-                if auto_launch_ide(with_ide, str(worktree_path)):
-                    if ide_only:
-                        skip_terminal = True
-                        click.echo()
-                        click.echo(f"IDE launched. Run 'cast attach {name}' for terminal.")
-                    else:
-                        input("Press Enter to launch terminal... ")
-                else:
-                    input("Press Enter to launch... ")
-            elif ide_only:
-                prompt_ide_selection(str(worktree_path), name)
-                skip_terminal = True
-                click.echo()
-                click.echo("  Run this in your IDE's terminal to connect:")
-                click.echo()
-                click.echo(f"    cast attach {name}")
-                click.echo()
-            else:
-                ide_was_launched = prompt_ide_selection(str(worktree_path), name)
-                if ide_was_launched:
-                    click.echo()
-                    click.echo("  Run this in your IDE's terminal to connect:")
-                    click.echo()
-                    click.echo(f"    cast attach {name}")
-                    click.echo()
-                    skip_terminal = True
-                else:
-                    input("Press Enter to launch terminal... ")
-
-        if not skip_terminal and sys.stdin.isatty():
-            tmux.attach(name, f"{container}-dev-1", str(worktree_path), wd or "")
+        # IDE launch and tmux attach
+        _handle_new_ide_and_attach(
+            name, str(worktree_path), container, wd, no_ide, with_ide, ide_only,
+        )
     finally:
         os.environ.clear()
         os.environ.update(_saved_env)

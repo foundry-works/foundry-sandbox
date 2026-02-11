@@ -52,7 +52,7 @@ def write_json(path: str, data: dict[str, Any]) -> None:
             json.dump(data, f, indent=2)
             f.write("\n")
         os.rename(tmp_path, path)
-    except Exception:
+    except OSError:
         os.unlink(tmp_path)
         raise
 
