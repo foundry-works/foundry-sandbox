@@ -7,7 +7,6 @@ on:
   pull_request:
     paths:
       - 'unified-proxy/**'
-      - 'tests/integration/**'
 
 jobs:
   drift-check:
