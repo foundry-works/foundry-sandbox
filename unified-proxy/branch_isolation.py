@@ -1040,13 +1040,13 @@ def validate_sha_reachability(
             "reachability check"
         )
 
-    # Shallow repo: skip checks (log warning)
+    # Shallow repo: fail closed (cannot verify reachability)
     shallow_file = os.path.join(bare_repo, "shallow")
     if os.path.isfile(shallow_file):
-        logger.warning(
-            "SHA reachability check skipped: shallow repo at %s", bare_repo,
+        return ValidationError(
+            "Branch isolation: SHA reachability check cannot be performed on "
+            "shallow repo. Deepen the clone or contact an administrator."
         )
-        return None
 
     # Build allowed refs and check each SHA
     allowed_refs = _get_allowed_refs(bare_repo, sandbox_branch, base_branch)

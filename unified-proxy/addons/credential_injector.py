@@ -382,7 +382,7 @@ class CredentialInjector:
             ctx.log.error(f"Failed to get OAuth token: {e}")
             flow.response = http.Response.make(
                 500,
-                json.dumps({"error": f"OAuth token error: {e}"}).encode(),
+                json.dumps({"error": "Authentication failed"}).encode(),
                 {"Content-Type": "application/json"},
             )
             return True
@@ -473,7 +473,7 @@ class CredentialInjector:
             ctx.log.error(f"Failed to get Gemini OAuth token: {e}")
             flow.response = http.Response.make(
                 500,
-                json.dumps({"error": f"Gemini OAuth token error: {e}"}).encode(),
+                json.dumps({"error": "Authentication failed"}).encode(),
                 {"Content-Type": "application/json"},
             )
             return True
@@ -517,8 +517,7 @@ class CredentialInjector:
                 return False
 
             current_key = data.get("api_key", "")
-            if current_key == tavily_api_key:
-                # Already has the real key, no modification needed
+            if not _has_credential_placeholder(current_key):
                 return False
 
             # Replace placeholder with real API key
