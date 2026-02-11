@@ -64,8 +64,14 @@ class _MockRegistry:
 
 @pytest.fixture
 def hmac_secret():
-    """Generate a test HMAC secret."""
-    return os.urandom(32)
+    """Generate a test HMAC secret.
+
+    Uses rstrip to remove any trailing newline bytes, matching the
+    behaviour of SecretStore.get_secret() which strips a trailing \\n
+    from on-disk secrets.  Without this, a random secret ending in 0x0a
+    would cause an HMAC mismatch (~1/256 chance per test).
+    """
+    return os.urandom(32).rstrip(b"\n")
 
 
 @pytest.fixture
