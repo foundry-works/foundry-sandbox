@@ -25,11 +25,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../../unified-proxy"
 
 
 # Mock mitmproxy before importing rate_limiter
-class MockHeaders(dict):
-    """Mock mitmproxy Headers class."""
-
-    def get(self, key, default=None):
-        return super().get(key, default)
+from tests.mocks import MockHeaders, MockResponse, MockCtxLog, MockCtx
 
 
 class MockRequest:
@@ -40,19 +36,6 @@ class MockRequest:
         self.headers = MockHeaders()
 
 
-class MockResponse:
-    """Mock mitmproxy Response class."""
-
-    def __init__(self, status_code, content, headers=None):
-        self.status_code = status_code
-        self.content = content
-        self.headers = headers or {}
-
-    @classmethod
-    def make(cls, status_code, content, headers=None):
-        return cls(status_code, content, headers)
-
-
 class MockHTTPFlow:
     """Mock mitmproxy HTTPFlow class."""
 
@@ -60,29 +43,6 @@ class MockHTTPFlow:
         self.request = MockRequest(pretty_host)
         self.response = None
         self.metadata = {}
-
-
-class MockCtxLog:
-    """Mock mitmproxy ctx.log."""
-
-    def info(self, msg):
-        pass
-
-    def warn(self, msg):
-        pass
-
-    def debug(self, msg):
-        pass
-
-    def error(self, msg):
-        pass
-
-
-class MockCtx:
-    """Mock mitmproxy ctx module."""
-
-    def __init__(self):
-        self.log = MockCtxLog()
 
 
 # Create test-specific mock objects for rate_limiter tests.

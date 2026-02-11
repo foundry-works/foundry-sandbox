@@ -65,27 +65,45 @@ def _tar_supports_transform() -> bool:
 # ============================================================================
 
 
-# Directories that container copy operations should never target.
-# These are system paths that, if overwritten, could compromise the container.
-_CONTAINER_BLOCKED_PREFIXES = (
-    "/etc/", "/proc/", "/sys/", "/dev/",
-    "/var/run/", "/run/", "/sbin/", "/bin/",
-    "/usr/sbin/", "/usr/bin/",
+# Allowed destination prefixes for container copy operations.
+# Only paths under these prefixes (or matching exact paths below) are accepted.
+# This allowlist prevents writes to sensitive locations like ~/.bashrc or
+# ~/.ssh/authorized_keys from misconfigured mounts.
+_CONTAINER_ALLOWED_PREFIXES = (
+    "/home/ubuntu/.claude/",
+    "/home/ubuntu/.config/",
+    "/home/ubuntu/.local/",
+    "/home/ubuntu/.codex/",
+    "/home/ubuntu/.gemini/",
+    "/home/ubuntu/.ssh/",
+    "/home/ubuntu/.sandboxes/",
+    "/workspace/",
+    "/tmp/",
+)
+
+# Exact file paths allowed outside the prefix directories.
+_CONTAINER_ALLOWED_EXACT = (
+    "/home/ubuntu/.claude.json",
+    "/home/ubuntu/.gitconfig",
 )
 
 
 def _validate_container_dst(dst: str) -> None:
-    """Reject container destination paths targeting sensitive system directories.
+    """Reject container destination paths not in the allowlist.
 
     Raises:
-        ValueError: If dst targets a blocked system path.
+        ValueError: If dst is not under an allowed prefix or exact path.
     """
-    normalized = dst.rstrip("/") + "/"
-    for prefix in _CONTAINER_BLOCKED_PREFIXES:
-        if normalized.startswith(prefix) or dst == prefix.rstrip("/"):
-            raise ValueError(
-                f"Refusing to copy to container system path: {dst}"
-            )
+    import posixpath
+
+    resolved = posixpath.normpath(dst)
+    if resolved in _CONTAINER_ALLOWED_EXACT:
+        return
+    # Ensure trailing slash for prefix comparison
+    resolved_dir = resolved.rstrip("/") + "/"
+    if any(resolved_dir.startswith(p) for p in _CONTAINER_ALLOWED_PREFIXES):
+        return
+    raise ValueError(f"Container destination not in allowlist: {dst}")
 
 
 def _build_tar_base_args() -> list[str]:

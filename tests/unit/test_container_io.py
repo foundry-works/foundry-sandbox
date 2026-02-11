@@ -1,6 +1,6 @@
 """Unit tests for foundry_sandbox.container_io.
 
-Tests blocked-path validation, tar feature detection, file/directory copy
+Tests allowlist-path validation, tar feature detection, file/directory copy
 command construction, retry logic, chmod mode handling, and docker exec helpers.
 
 All subprocess calls are mocked so tests run without Docker.
@@ -15,7 +15,8 @@ from unittest.mock import MagicMock, call, patch
 import pytest
 
 from foundry_sandbox.container_io import (
-    _CONTAINER_BLOCKED_PREFIXES,
+    _CONTAINER_ALLOWED_EXACT,
+    _CONTAINER_ALLOWED_PREFIXES,
     _build_tar_base_args,
     _tar_env,
     _validate_container_dst,
@@ -48,9 +49,9 @@ def _completed(stdout="", stderr="", returncode=0):
 
 
 class TestValidateContainerDst:
-    """_validate_container_dst must reject blocked system paths."""
+    """_validate_container_dst must only allow paths in the allowlist."""
 
-    @pytest.mark.parametrize("blocked_path", [
+    @pytest.mark.parametrize("rejected_path", [
         "/etc/passwd",
         "/etc/",
         "/proc/1/status",
@@ -62,32 +63,51 @@ class TestValidateContainerDst:
         "/bin/sh",
         "/usr/sbin/nologin",
         "/usr/bin/env",
+        "/opt/tools",
+        "/home/ubuntu/.bashrc",
+        "/home/ubuntu/.profile",
     ])
-    def test_rejects_blocked_paths(self, blocked_path):
-        with pytest.raises(ValueError, match="Refusing to copy to container system path"):
-            _validate_container_dst(blocked_path)
+    def test_rejects_paths_outside_allowlist(self, rejected_path):
+        with pytest.raises(ValueError, match="not in allowlist"):
+            _validate_container_dst(rejected_path)
 
     @pytest.mark.parametrize("allowed_path", [
-        "/home/ubuntu/.config",
+        "/home/ubuntu/.config/gh/hosts.yml",
+        "/home/ubuntu/.claude/settings.json",
+        "/home/ubuntu/.local/share/opencode",
+        "/home/ubuntu/.codex/config",
+        "/home/ubuntu/.gemini/oauth_creds.json",
+        "/home/ubuntu/.ssh/config",
+        "/home/ubuntu/.sandboxes/repos",
         "/workspace/project",
         "/tmp/scratch",
-        "/opt/tools",
-        "/home/ubuntu/.ssh/config",
     ])
-    def test_allows_safe_paths(self, allowed_path):
+    def test_allows_paths_under_allowed_prefixes(self, allowed_path):
         # Should not raise
         _validate_container_dst(allowed_path)
 
-    def test_rejects_exact_prefix_without_trailing_slash(self):
-        """e.g., '/etc' without trailing slash must still be blocked."""
-        with pytest.raises(ValueError):
-            _validate_container_dst("/etc")
+    @pytest.mark.parametrize("exact_path", [
+        "/home/ubuntu/.claude.json",
+        "/home/ubuntu/.gitconfig",
+    ])
+    def test_allows_exact_allowed_paths(self, exact_path):
+        # Should not raise
+        _validate_container_dst(exact_path)
 
     def test_all_prefixes_covered(self):
-        """Every prefix in _CONTAINER_BLOCKED_PREFIXES must trigger rejection."""
-        for prefix in _CONTAINER_BLOCKED_PREFIXES:
-            with pytest.raises(ValueError):
-                _validate_container_dst(prefix + "test")
+        """Every prefix in _CONTAINER_ALLOWED_PREFIXES must accept subpaths."""
+        for prefix in _CONTAINER_ALLOWED_PREFIXES:
+            _validate_container_dst(prefix + "test")
+
+    def test_all_exact_paths_covered(self):
+        """Every exact path in _CONTAINER_ALLOWED_EXACT must be accepted."""
+        for path in _CONTAINER_ALLOWED_EXACT:
+            _validate_container_dst(path)
+
+    def test_rejects_traversal_attack(self):
+        """Path traversal via '..' must not escape the allowlist."""
+        with pytest.raises(ValueError):
+            _validate_container_dst("/home/ubuntu/.config/../../etc/passwd")
 
 
 # ---------------------------------------------------------------------------
@@ -211,7 +231,7 @@ class TestCopyFileToContainer:
     def test_simple_copy_same_basename(self, mock_run, mock_pipe, _t, _x):
         """When src and dst basenames match, no rename needed."""
         result = copy_file_to_container(
-            "container-1", "/host/file.txt", "/home/ubuntu/file.txt",
+            "container-1", "/host/file.txt", "/home/ubuntu/.config/file.txt",
         )
         assert result is True
         mock_pipe.assert_called_once()
@@ -223,7 +243,7 @@ class TestCopyFileToContainer:
     def test_rename_via_transform(self, mock_run, mock_pipe, _t, _x):
         """When basenames differ and --transform supported, uses transform."""
         result = copy_file_to_container(
-            "container-1", "/host/src.txt", "/home/ubuntu/dst.txt",
+            "container-1", "/host/src.txt", "/home/ubuntu/.config/dst.txt",
         )
         assert result is True
         # Check that the tar command included --transform
@@ -237,7 +257,7 @@ class TestCopyFileToContainer:
     def test_rename_fallback_mv(self, mock_run, mock_pipe, _t, _x):
         """When basenames differ and no --transform, uses tar + mv fallback."""
         result = copy_file_to_container(
-            "container-1", "/host/src.txt", "/home/ubuntu/dst.txt",
+            "container-1", "/host/src.txt", "/home/ubuntu/.config/dst.txt",
         )
         assert result is True
         # Should have run mv command
@@ -255,16 +275,16 @@ class TestCopyFileToContainer:
     def test_retries_on_failure(self, mock_sleep, mock_run, mock_pipe, _t, _x):
         """Retries up to CONTAINER_READY_ATTEMPTS times on pipe failure."""
         result = copy_file_to_container(
-            "container-1", "/host/file.txt", "/home/ubuntu/file.txt",
+            "container-1", "/host/file.txt", "/home/ubuntu/.config/file.txt",
         )
         assert result is False
         # Should have retried (5 attempts = 4 sleeps)
         assert mock_sleep.call_count == 4
         assert mock_pipe.call_count == 5
 
-    def test_rejects_blocked_dst(self):
-        """Must raise ValueError for blocked destinations."""
-        with pytest.raises(ValueError, match="Refusing to copy"):
+    def test_rejects_dst_outside_allowlist(self):
+        """Must raise ValueError for destinations outside allowlist."""
+        with pytest.raises(ValueError, match="not in allowlist"):
             copy_file_to_container("container-1", "/host/file", "/etc/passwd")
 
     @patch("foundry_sandbox.container_io._tar_supports_no_xattrs", return_value=False)
@@ -295,7 +315,7 @@ class TestCopyFileToContainer:
         """Invalid chmod mode must raise ValueError."""
         with pytest.raises(ValueError, match="invalid chmod mode"):
             copy_file_to_container(
-                "container-1", "/host/file", "/home/ubuntu/file",
+                "container-1", "/host/file", "/home/ubuntu/.config/file",
                 mode="abc",
             )
 
@@ -306,7 +326,7 @@ class TestCopyFileToContainer:
     def test_mkdir_creates_parent_dir(self, mock_run, mock_pipe, _t, _x):
         """mkdir -p is called for the parent directory."""
         copy_file_to_container(
-            "container-1", "/host/file.txt", "/home/ubuntu/deep/nested/file.txt",
+            "container-1", "/host/file.txt", "/home/ubuntu/.config/deep/nested/file.txt",
         )
         mkdir_calls = [
             c for c in mock_run.call_args_list
@@ -342,7 +362,7 @@ class TestCopyDirToContainer:
     @patch("foundry_sandbox.container_io._pipe_tar_to_docker", return_value=0)
     @patch("foundry_sandbox.container_io.subprocess.run", return_value=_completed())
     def test_simple_dir_copy(self, mock_run, mock_pipe, _x):
-        result = copy_dir_to_container("c1", "/host/dir", "/home/ubuntu/dir")
+        result = copy_dir_to_container("c1", "/host/dir", "/home/ubuntu/.config/dir")
         assert result is True
         mock_pipe.assert_called_once()
 
@@ -352,7 +372,7 @@ class TestCopyDirToContainer:
     def test_excludes_passed_to_tar(self, mock_run, mock_pipe, _x):
         """Exclude patterns are passed as --exclude=<pattern> to tar."""
         copy_dir_to_container(
-            "c1", "/host/dir", "/home/ubuntu/dir",
+            "c1", "/host/dir", "/home/ubuntu/.config/dir",
             excludes=["node_modules", ".git"],
         )
         tar_cmd = mock_pipe.call_args[0][0]
@@ -364,12 +384,12 @@ class TestCopyDirToContainer:
     @patch("foundry_sandbox.container_io.subprocess.run", return_value=_completed())
     @patch("foundry_sandbox.container_io.time.sleep")
     def test_retries_on_failure(self, mock_sleep, mock_run, mock_pipe, _x):
-        result = copy_dir_to_container("c1", "/host/dir", "/home/ubuntu/dir")
+        result = copy_dir_to_container("c1", "/host/dir", "/home/ubuntu/.config/dir")
         assert result is False
         assert mock_pipe.call_count == 5
 
-    def test_rejects_blocked_dst(self):
-        with pytest.raises(ValueError, match="Refusing to copy"):
+    def test_rejects_dst_outside_allowlist(self):
+        with pytest.raises(ValueError, match="not in allowlist"):
             copy_dir_to_container("c1", "/host/dir", "/etc/cron.d")
 
 

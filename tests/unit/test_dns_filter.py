@@ -18,108 +18,15 @@ import pytest
 # Add unified-proxy to path for registry import
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../../unified-proxy"))
 
-
-# Mock mitmproxy DNS components before importing dns_filter
-class MockDNSQuestion:
-    """Mock DNS question in a DNS request."""
-
-    def __init__(self, name, query_type=1):
-        """Initialize DNS question.
-
-        Args:
-            name: Domain name being queried (str or bytes).
-            query_type: Query type (1=A, 28=AAAA, 5=CNAME).
-        """
-        self.name = name
-        self.type = query_type
-
-
-class MockDNSRequest:
-    """Mock DNS request."""
-
-    def __init__(self, question):
-        self.question = question
-
-    def fail(self, response_code):
-        """Create a failed DNS response.
-
-        Args:
-            response_code: DNS response code (e.g., NXDOMAIN).
-
-        Returns:
-            MockDNSResponse with the failure code.
-        """
-        return MockDNSResponse(response_code)
-
-
-class MockDNSResponse:
-    """Mock DNS response."""
-
-    def __init__(self, response_code):
-        self.response_code = response_code
-
-
-class MockDNSClientConn:
-    """Mock DNS client connection."""
-
-    def __init__(self, peername):
-        self.peername = peername
-
-
-class MockDNSFlow:
-    """Mock mitmproxy DNSFlow class."""
-
-    def __init__(self, domain, source_ip, query_type=1):
-        """Create a DNS flow.
-
-        Args:
-            domain: Domain being queried (str).
-            source_ip: Source IP address (or None).
-            query_type: DNS query type (default: 1 for A record).
-        """
-        self.request = MockDNSRequest(MockDNSQuestion(domain, query_type))
-        if source_ip is None:
-            self.client_conn = MockDNSClientConn(None)
-        else:
-            self.client_conn = MockDNSClientConn((source_ip, 12345))
-        self.response = None
-
-
-class MockCtxLog:
-    """Mock mitmproxy ctx.log with proper tracking."""
-
-    def __init__(self):
-        self.calls = []
-
-    def info(self, msg):
-        self.calls.append(("info", msg))
-
-    def warn(self, msg):
-        self.calls.append(("warn", msg))
-
-    def debug(self, msg):
-        self.calls.append(("debug", msg))
-
-    def error(self, msg):
-        self.calls.append(("error", msg))
-
-    def reset(self):
-        self.calls.clear()
-
-    def was_called_with_level(self, level):
-        return any(call[0] == level for call in self.calls)
-
-    def get_messages(self, level=None):
-        if level:
-            return [call[1] for call in self.calls if call[0] == level]
-        return [call[1] for call in self.calls]
-
-
-class MockCtx:
-    """Mock mitmproxy ctx module."""
-
-    def __init__(self):
-        self.log = MockCtxLog()
+from tests.mocks import (
+    MockCtx,
+    MockCtxLog,
+    MockDNSClientConn,
+    MockDNSFlow,
+    MockDNSQuestion,
+    MockDNSRequest,
+    MockDNSResponse,
+)
 
 
 # Create test-specific mock objects for dns_filter tests.

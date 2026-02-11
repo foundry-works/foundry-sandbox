@@ -4,7 +4,10 @@ Replaces lib/validate.sh (252 lines). Pure validation logic for sandbox names,
 URLs, mount paths, SSH modes, environment requirements, git remote credential
 detection, and Docker network capacity checking.
 
-No Click or Pydantic imports at module level (bridge-callable constraint).
+Convention:
+- Functions validating user input return (is_valid: bool, error_msg: str).
+  An empty error_msg indicates success.
+- Functions validating internal state raise ValueError/TypeError on failure.
 """
 
 from __future__ import annotations

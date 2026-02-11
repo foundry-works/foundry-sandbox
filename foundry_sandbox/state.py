@@ -24,7 +24,7 @@ from typing import Any
 
 from foundry_sandbox.config import load_json, write_json
 from foundry_sandbox.constants import get_claude_configs_dir
-from foundry_sandbox.utils import flag_enabled as _flag_enabled
+from foundry_sandbox.utils import flag_enabled as _flag_enabled, log_warn
 from foundry_sandbox.models import SandboxMetadata
 from foundry_sandbox.paths import (
     ensure_dir,
@@ -85,11 +85,11 @@ def _secure_write_unlocked(path: Path, content: str) -> None:
     import tempfile
 
     path.parent.mkdir(parents=True, exist_ok=True)
+    # mkstemp atomically creates the file with 0o600 — no TOCTOU window.
     fd, tmp_path = tempfile.mkstemp(dir=str(path.parent), suffix=".tmp")
     try:
         with os.fdopen(fd, "w") as f:
             f.write(content)
-        os.chmod(tmp_path, 0o600)
         os.replace(tmp_path, path)
     except OSError:
         try:
@@ -119,6 +119,11 @@ def _state_lock(path: Path, *, shared: bool = False):
 
     Uses non-blocking attempts with a retry loop so that a stuck lock
     never blocks indefinitely.
+
+    WARNING: ``fcntl.flock()`` provides only advisory locking and does not
+    work reliably on NFS or other networked filesystems.  If sandbox state
+    is stored on NFS, concurrent operations may race.  For safety, keep
+    state files on local disk.
 
     Args:
         path: The file being protected.
@@ -300,12 +305,15 @@ def load_sandbox_metadata(name: str) -> dict[str, Any] | None:
             # Auto-derive ssh_mode if missing
             if not data.get("ssh_mode"):
                 data["ssh_mode"] = "always" if str(data.get("sync_ssh", "0")) == "1" else "disabled"
-            # Validate through Pydantic model (lenient: extra keys are ignored)
+            # Validate through Pydantic model — fail fast on bad schema
             try:
                 model = SandboxMetadata(**data)
                 return model.model_dump()
-            except (ValueError, TypeError):
-                # Fall back to raw dict if validation fails (e.g. legacy data)
+            except (ValueError, TypeError) as exc:
+                log_warn(
+                    f"Metadata for '{name}' failed schema validation: {exc}; "
+                    "using raw data (may indicate corruption or version skew)"
+                )
                 return data
         return None
 

@@ -36,23 +36,44 @@ from foundry_sandbox.container_io import (
 )
 from foundry_sandbox.utils import log_debug, log_info, log_step, log_warn
 
+import json as _json_mod
+from datetime import datetime, timezone
 
-def _merge_claude_settings_in_container(container_id: str, host_settings: str) -> None:
+
+def _audit_credential_op(operation: str, container_id: str, target: str, *, success: bool) -> None:
+    """Log a structured audit entry for credential operations.
+
+    Uses the existing debug logging infrastructure. Can be promoted to a
+    dedicated audit log file later if needed.
+    """
+    entry = {
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "operation": operation,
+        "container": container_id,
+        "target": target,
+        "success": success,
+    }
+    log_debug(f"CREDENTIAL_AUDIT: {_json_mod.dumps(entry)}")
+
+
+def _merge_claude_settings_in_container(container_id: str, host_settings: str) -> bool:
     """Merge host Claude settings into container settings via docker exec.
 
     Matches the shell merge_claude_settings() in lib/container_config.sh:
     1. Copy host settings to temp location inside container
     2. Run merge inside container (preserves hooks, model from container defaults)
     3. Clean up temp file
+
+    Returns True if the merge succeeded, False on failure.
     """
     temp_host = "/tmp/host-settings.json"
     container_settings = f"{CONTAINER_HOME}/.claude/settings.json"
 
     try:
         copy_file_to_container(container_id, host_settings, temp_host)
-    except (OSError, subprocess.CalledProcessError):
-        log_warn("Failed to copy host settings for merge")
-        return
+    except (OSError, subprocess.CalledProcessError) as exc:
+        log_warn(f"Failed to copy host settings for merge: {exc}")
+        return False
 
     subprocess.run(
         [
@@ -72,9 +93,10 @@ def _merge_claude_settings_in_container(container_id: str, host_settings: str) -
         capture_output=True,
         timeout=TIMEOUT_DOCKER_EXEC,
     )
+    return True
 
 
-def _merge_claude_settings_safe(container_id: str, host_settings: str) -> None:
+def _merge_claude_settings_safe(container_id: str, host_settings: str) -> bool:
     """Merge host Claude settings into container, stripping credential-bearing keys.
 
     Used when credential isolation is enabled to prevent real API keys or
@@ -90,9 +112,9 @@ def _merge_claude_settings_safe(container_id: str, host_settings: str) -> None:
     try:
         with open(host_settings) as f:
             data = _json.load(f)
-    except (OSError, _json.JSONDecodeError):
-        log_warn("Failed to read host settings for safe merge")
-        return
+    except (OSError, _json.JSONDecodeError) as exc:
+        log_warn(f"Failed to read host settings for safe merge: {exc}")
+        return False
 
     # Strip keys that commonly carry credentials
     for key in ("env", "mcpServers", "oauthTokens", "apiKey"):
@@ -106,7 +128,7 @@ def _merge_claude_settings_safe(container_id: str, host_settings: str) -> None:
         ) as tmp:
             _json.dump(data, tmp, indent=2)
             tmp_path = tmp.name
-        _merge_claude_settings_in_container(container_id, tmp_path)
+        return _merge_claude_settings_in_container(container_id, tmp_path)
     finally:
         if tmp_path is not None:
             try:
@@ -230,9 +252,11 @@ def _stage_setup_claude_config(
     if settings_json.exists():
         if isolate_credentials:
             log_debug("Credential isolation: merging settings with secret-bearing keys stripped")
-            _merge_claude_settings_safe(container_id, str(settings_json))
+            ok = _merge_claude_settings_safe(container_id, str(settings_json))
         else:
-            _merge_claude_settings_in_container(container_id, str(settings_json))
+            ok = _merge_claude_settings_in_container(container_id, str(settings_json))
+        if not ok:
+            log_warn("Claude settings merge was incomplete; some settings may be missing")
     else:
         log_debug("~/.claude/settings.json not found, skipping")
 
@@ -363,6 +387,7 @@ def _stage_setup_credentials(
                 container_id, str(gemini_oauth),
                 f"{CONTAINER_HOME}/.gemini/oauth_creds.json",
             )
+            _audit_credential_op("copy_gemini_oauth", container_id, "gemini/oauth_creds.json", success=True)
         else:
             log_debug("Gemini OAuth not found, skipping")
 
@@ -373,6 +398,7 @@ def _stage_setup_credentials(
                 container_id, str(opencode_auth),
                 f"{CONTAINER_HOME}/.config/opencode/auth.json",
             )
+            _audit_credential_op("copy_opencode_auth", container_id, "opencode/auth.json", success=True)
         else:
             log_debug("OpenCode auth not found, skipping")
 
@@ -382,6 +408,7 @@ def _stage_setup_credentials(
             copy_dir_to_container(
                 container_id, str(codex_dir), f"{CONTAINER_HOME}/.codex",
             )
+            _audit_credential_op("copy_codex_dir", container_id, ".codex/", success=True)
         else:
             log_debug("~/.codex not found, skipping")
 
@@ -399,6 +426,7 @@ def _stage_setup_credentials(
                             f"{CONTAINER_HOME}/.ssh/{key_file}",
                             mode="0600",
                         )
+                        _audit_credential_op("copy_ssh_key", container_id, f".ssh/{key_file}", success=True)
                     if pub_path.exists():
                         copy_file_to_container(
                             container_id, str(pub_path),
@@ -423,6 +451,7 @@ def _stage_setup_credentials(
         else:
             log_debug("SSH not enabled, skipping SSH key setup")
     else:
+        _audit_credential_op("isolation_active", container_id, "*", success=True)
         log_debug("Credential isolation enabled, skipping real credentials")
 
 
@@ -666,9 +695,11 @@ def sync_runtime_credentials(
     settings_json = home / ".claude" / "settings.json"
     if settings_json.exists():
         if isolate_credentials:
-            _merge_claude_settings_safe(container_id, str(settings_json))
+            ok = _merge_claude_settings_safe(container_id, str(settings_json))
         else:
-            _merge_claude_settings_in_container(container_id, str(settings_json))
+            ok = _merge_claude_settings_in_container(container_id, str(settings_json))
+        if not ok:
+            log_warn("Claude settings merge was incomplete; some settings may be missing")
 
     # Copy statusline.conf (quiet)
     statusline_conf = home / ".claude" / "statusline.conf"

@@ -3,10 +3,9 @@
 Fuzzes the git command validation pipeline (validate_command) and
 protected-branch policy checker (check_protected_branches) from the
 unified-proxy with random inputs to ensure they never crash on
-arbitrary data.  Expected rejections (ValueError, TypeError,
-ValidationError) are fine -- the invariant is that no *unhandled*
-exception escapes the validation layer.  SystemExit is intentionally
-NOT caught so that accidental sys.exit() calls surface as failures.
+arbitrary data.  The invariant is that these functions always return
+a valid result (None or ValidationError/str) and never raise
+unhandled exceptions on arbitrary input.
 
 Security properties tested:
 - validate_command never raises an unhandled exception on arbitrary argv
@@ -151,19 +150,10 @@ class TestGitValidationFuzzing:
         validate_command() and asserts that the function either returns
         None (valid) or a ValidationError (rejected), but never raises
         an unhandled exception.
-
-        Expected rejection exceptions (ValueError, TypeError) are caught
-        and treated as acceptable -- only unexpected exceptions constitute
-        a test failure.  SystemExit is intentionally NOT caught so that
-        accidental sys.exit() calls surface as failures.
         """
-        try:
-            result = validate_command(argv)
-            # validate_command returns None (valid) or ValidationError (rejected)
-            assert result is None or isinstance(result, ValidationError)
-        except (ValueError, TypeError):
-            # These are acceptable rejections from deeper validation layers
-            pass
+        result = validate_command(argv)
+        # validate_command returns None (valid) or ValidationError (rejected)
+        assert result is None or isinstance(result, ValidationError)
 
     @settings(
         derandomize=True,
@@ -178,11 +168,8 @@ class TestGitValidationFuzzing:
         the extra_allowed parameter path, ensuring custom command
         extensions cannot introduce crashes.
         """
-        try:
-            result = validate_command(argv, extra_allowed={"custom-cmd"})
-            assert result is None or isinstance(result, ValidationError)
-        except (ValueError, TypeError):
-            pass
+        result = validate_command(argv, extra_allowed={"custom-cmd"})
+        assert result is None or isinstance(result, ValidationError)
 
     def test_git_validation_fail_closed(self):
         """Verify known dangerous git operations are rejected by validation.
@@ -297,17 +284,14 @@ class TestPolicyEvaluationFuzzing:
         and asserts it always returns either None (allowed) or a string
         (block reason), never raising an unhandled exception.
         """
-        try:
-            result = check_protected_branches(
-                refname=refname,
-                old_sha=old_sha,
-                new_sha=new_sha,
-                bare_repo_path=None,
-                metadata=None,
-            )
-            assert result is None or isinstance(result, str)
-        except (ValueError, TypeError):
-            pass
+        result = check_protected_branches(
+            refname=refname,
+            old_sha=old_sha,
+            new_sha=new_sha,
+            bare_repo_path=None,
+            metadata=None,
+        )
+        assert result is None or isinstance(result, str)
 
     @settings(
         derandomize=True,
@@ -338,17 +322,14 @@ class TestPolicyEvaluationFuzzing:
                 }
             }
         }
-        try:
-            result = check_protected_branches(
-                refname=refname,
-                old_sha=old_sha,
-                new_sha=new_sha,
-                bare_repo_path=None,
-                metadata=metadata,
-            )
-            assert result is None or isinstance(result, str)
-        except (ValueError, TypeError):
-            pass
+        result = check_protected_branches(
+            refname=refname,
+            old_sha=old_sha,
+            new_sha=new_sha,
+            bare_repo_path=None,
+            metadata=metadata,
+        )
+        assert result is None or isinstance(result, str)
 
 
 class TestSandboxNameFuzzing:

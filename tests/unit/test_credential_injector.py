@@ -14,26 +14,7 @@ from unittest.mock import patch
 import pytest
 
 from addons import credential_injector
-
-
-class MockHeaders(dict):
-    """Mock mitmproxy Headers that supports case-insensitive get/set/del."""
-
-    def get(self, key, default=""):
-        for k, v in self.items():
-            if k.lower() == key.lower():
-                return v
-        return default
-
-    def __contains__(self, key):
-        return any(k.lower() == key.lower() for k in self.keys())
-
-    def __delitem__(self, key):
-        for k in list(self.keys()):
-            if k.lower() == key.lower():
-                super().__delitem__(k)
-                return
-        raise KeyError(key)
+from tests.mocks import MockHeaders
 
 
 class MockRequest:

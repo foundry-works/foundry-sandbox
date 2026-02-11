@@ -219,6 +219,7 @@ def fzf_select_sandbox() -> str | None:
         if not sandboxes:
             return None
 
+        # no timeout: fzf is interactive and waits for user input
         result = subprocess.run(
             ["fzf", "--prompt=Select sandbox: ", "--height=10", "--reverse"],
             input="\n".join(sandboxes),

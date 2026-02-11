@@ -24,19 +24,19 @@ from foundry_sandbox.utils import log_warn
 _SAFE_PATH_RE = re.compile(r"^[A-Za-z0-9_./ -]+$")
 
 
-def validate_network_mode(mode: str) -> None:
+def validate_network_mode(mode: str) -> tuple[bool, str]:
     """Validate network mode is one of the supported modes.
 
     Args:
         mode: Network mode to validate.
 
-    Raises:
-        ValueError: If mode is invalid or 'full' (removed for security).
+    Returns:
+        Tuple of (is_valid, error_message).
     """
     valid_modes = {"limited", "host-only", "none"}
 
     if mode == "full":
-        raise ValueError(
+        return False, (
             "Network mode 'full' has been removed for security reasons.\n"
             "Available modes: limited (default), host-only, none\n"
             "\n"
@@ -44,7 +44,9 @@ def validate_network_mode(mode: str) -> None:
         )
 
     if mode not in valid_modes:
-        raise ValueError(f"Invalid network mode: {mode} (use: limited, host-only, none)")
+        return False, f"Invalid network mode: {mode} (use: limited, host-only, none)"
+
+    return True, ""
 
 
 def generate_network_config(mode: str, override_file: str) -> None:

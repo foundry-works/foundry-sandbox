@@ -21,11 +21,9 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../../unified-proxy"
 
 
 # Mock mitmproxy before importing container_identity
-class MockHeaders(dict):
-    """Mock mitmproxy Headers class."""
-
-    def get(self, key, default=None):
-        return super().get(key, default)
+from tests.mocks import (
+    MockHeaders, MockResponse, MockClientConn, MockCtxLog, MockCtx,
+)
 
 
 class MockRequest:
@@ -34,26 +32,6 @@ class MockRequest:
     def __init__(self, headers=None):
         self.headers = MockHeaders(headers or {})
         self.pretty_host = "example.com"
-
-
-class MockResponse:
-    """Mock mitmproxy Response class."""
-
-    def __init__(self, status_code, content, headers=None):
-        self.status_code = status_code
-        self.content = content
-        self.headers = headers or {}
-
-    @classmethod
-    def make(cls, status_code, content, headers=None):
-        return cls(status_code, content, headers)
-
-
-class MockClientConn:
-    """Mock mitmproxy client connection."""
-
-    def __init__(self, peername):
-        self.peername = peername
 
 
 class MockHTTPFlow:
@@ -67,43 +45,6 @@ class MockHTTPFlow:
         self.request = MockRequest(headers)
         self.response = None
         self.metadata = {}
-
-
-class MockCtxLog:
-    """Mock mitmproxy ctx.log with proper tracking."""
-
-    def __init__(self):
-        self.calls = []
-
-    def info(self, msg):
-        self.calls.append(("info", msg))
-
-    def warn(self, msg):
-        self.calls.append(("warn", msg))
-
-    def debug(self, msg):
-        self.calls.append(("debug", msg))
-
-    def error(self, msg):
-        self.calls.append(("error", msg))
-
-    def reset(self):
-        self.calls.clear()
-
-    def was_called_with_level(self, level):
-        return any(call[0] == level for call in self.calls)
-
-    def get_messages(self, level=None):
-        if level:
-            return [call[1] for call in self.calls if call[0] == level]
-        return [call[1] for call in self.calls]
-
-
-class MockCtx:
-    """Mock mitmproxy ctx module."""
-
-    def __init__(self):
-        self.log = MockCtxLog()
 
 
 # Create test-specific mock objects for container_identity tests.

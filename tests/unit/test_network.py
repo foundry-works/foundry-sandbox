@@ -29,19 +29,23 @@ class TestValidateNetworkMode:
     """Tests for validate_network_mode()."""
 
     def test_valid_modes_accepted(self):
-        """Valid network modes should not raise."""
+        """Valid network modes should return (True, '')."""
         for mode in ["limited", "host-only", "none"]:
-            network.validate_network_mode(mode)  # Should not raise
+            ok, msg = network.validate_network_mode(mode)
+            assert ok is True
+            assert msg == ""
 
     def test_full_mode_rejected(self):
-        """'full' mode should raise ValueError with security message."""
-        with pytest.raises(ValueError, match="removed for security"):
-            network.validate_network_mode("full")
+        """'full' mode should return (False, ...) with security message."""
+        ok, msg = network.validate_network_mode("full")
+        assert ok is False
+        assert "removed for security" in msg
 
     def test_invalid_mode_rejected(self):
-        """Invalid mode should raise ValueError."""
-        with pytest.raises(ValueError, match="Invalid network mode"):
-            network.validate_network_mode("unrestricted")
+        """Invalid mode should return (False, ...) with error message."""
+        ok, msg = network.validate_network_mode("unrestricted")
+        assert ok is False
+        assert "Invalid network mode" in msg
 
 
 class TestGenerateNetworkConfig:

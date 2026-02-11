@@ -1,9 +1,7 @@
 """Click-based CLI entrypoint for foundry-sandbox.
 
-This module provides the main CLI group and shell fallback mechanism.
-Commands that have been migrated to Python are registered as Click subcommands;
-unmigrated commands fall back to sandbox.sh execution with full passthrough
-of environment, cwd, stdout, stderr, and exit code.
+All commands are implemented as Click subcommands with lazy loading.
+Unknown commands raise an error.
 """
 
 from __future__ import annotations
@@ -108,8 +106,7 @@ class CastGroup(click.Group):
         Order of operations:
         1. If the token is an alias, rewrite to canonical name + prepend args.
         2. Try normal Click resolution (registered subcommands).
-        3. If not found, build a synthetic Click command that invokes the
-           shell fallback instead of raising ``UsageError``.
+        3. If not found, raise an error.
         """
         # Nothing to resolve — let Click handle the empty case.
         if not args:
@@ -169,6 +166,27 @@ def cli(ctx: click.Context) -> None:
 # ---------------------------------------------------------------------------
 
 
+def _validate_lazy_commands() -> None:
+    """Verify all lazy command entries resolve to valid modules.
+
+    Only runs when CAST_VALIDATE_COMMANDS=1 is set (debug/CI).
+    """
+    if not os.environ.get("CAST_VALIDATE_COMMANDS"):
+        return
+    for cmd_name, (module_path, attr_name) in _LAZY_COMMANDS.items():
+        try:
+            mod = importlib.import_module(module_path)
+            if not hasattr(mod, attr_name):
+                raise RuntimeError(
+                    f"Lazy command '{cmd_name}' is broken: "
+                    f"{module_path}.{attr_name} not found"
+                )
+        except ImportError as exc:
+            raise RuntimeError(
+                f"Lazy command '{cmd_name}' is broken: {exc}"
+            ) from exc
+
+
 def main() -> None:
     """Entry point for the CLI.
 
@@ -181,14 +199,17 @@ def main() -> None:
     exit code 1 to match the shell entrypoint's behaviour.  Click's
     default for ``UsageError`` is exit code 2.
     """
+    _validate_lazy_commands()
     try:
         result = cli(standalone_mode=False)
     except click.UsageError as exc:
-        # Normalise Click's exit code 2 → 1 for shell parity.
+        # With standalone_mode=False, Click raises UsageError directly
+        # (not wrapped in SystemExit). Normalise to exit 1 for shell parity.
         click.echo(f"Error: {exc.format_message()}", err=True)
         sys.exit(1)
     except SystemExit as exc:
-        # Catch Click's SystemExit(2) from nested usage errors.
+        # Commands may raise SystemExit directly. Normalise Click's exit 2
+        # (usage error from nested invocations) to 1 for shell parity.
         code = exc.code if isinstance(exc.code, int) else 1
         sys.exit(1 if code == 2 else code)
     # If a migrated command returned an integer exit code, honour it.

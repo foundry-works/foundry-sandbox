@@ -9,7 +9,7 @@ from __future__ import annotations
 import subprocess
 from pathlib import Path
 
-from foundry_sandbox.constants import DOCKER_IMAGE
+from foundry_sandbox.constants import DOCKER_IMAGE, TIMEOUT_DOCKER_QUERY
 from foundry_sandbox.utils import log_debug, log_warn
 
 
@@ -41,6 +41,7 @@ def check_image_freshness() -> bool:
         capture_output=True,
         text=True,
         check=False,
+        timeout=TIMEOUT_DOCKER_QUERY,
     )
 
     if result.returncode != 0:
