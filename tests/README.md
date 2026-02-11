@@ -277,9 +277,11 @@ class TestAttackCategory:
 ## CI Integration
 
 Tests run automatically on:
-- Pull request creation
-- Push to main branch
-- Nightly performance regression
+- Pull requests (`.github/workflows/test.yml`): unit, integration, lint
+- Pushes to `main` (`.github/workflows/test.yml`): unit, integration, lint
+- Nightly orchestration + security runs (`.github/workflows/orchestration-tests.yml`)
+- Nightly performance regression (`.github/workflows/performance-tests.yml`)
+- Manual runs via `workflow_dispatch` for full orchestration/performance workflows
 
 ### Recommended CI Configuration
 

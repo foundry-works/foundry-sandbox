@@ -1,0 +1,30 @@
+name: Performance Tests
+
+on:
+  schedule:
+    - cron: "0 7 * * *"
+  workflow_dispatch:
+
+concurrency:
+  group: performance-tests-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  performance-tests:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: pip install -e ".[dev,test-orchestration]"
+
+      - name: Run performance tests
+        run: pytest -o addopts='--import-mode=importlib' tests/performance/ -v --tb=short

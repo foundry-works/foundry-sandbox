@@ -37,16 +37,19 @@ jobs:
       - name: Install dependencies
         run: pip install -e ".[dev,test-orchestration]"
 
+      - name: Verify Docker availability
+        run: docker info
+
       - name: Run orchestration tests
         env:
           SANDBOX_CLI: ${{ matrix.entrypoint.cli }}
-        run: pytest tests/orchestration/ -v --tb=short
+        run: pytest -o addopts='--import-mode=importlib' tests/orchestration/ -v --tb=short
 
       - name: Run security integration tests
         if: always()
         env:
           SANDBOX_CLI: ${{ matrix.entrypoint.cli }}
-        run: pytest tests/security/ -v --tb=short
+        run: pytest -o addopts='--import-mode=importlib' tests/security/ -v --tb=short
 
       - name: Cleanup orphaned test sandboxes
         if: always()
