@@ -14,7 +14,6 @@ import sys
 import tempfile
 from typing import Any
 
-from foundry_sandbox._bridge import bridge_main
 
 
 def load_json(path: str) -> dict[str, Any]:
@@ -142,39 +141,3 @@ def json_array_from_lines(lines: str) -> str:
             output.append(f"  ,{line}")
     output.append("]")
     return "\n".join(output)
-
-
-# Command handlers for bridge dispatcher
-
-
-def _cmd_load(path: str) -> dict[str, Any]:
-    """Load command: Load JSON from file.
-
-    Args:
-        path: Path to JSON file.
-
-    Returns:
-        Dictionary containing JSON data.
-    """
-    return load_json(path)
-
-
-def _cmd_merge(base_path: str, overlay_path: str, output_path: str) -> None:
-    """Merge command: Deep merge two JSON files and write result.
-
-    Args:
-        base_path: Path to base JSON file.
-        overlay_path: Path to overlay JSON file.
-        output_path: Path to write merged JSON.
-    """
-    base = load_json(base_path)
-    overlay = load_json(overlay_path)
-    merged = deep_merge(base, overlay)
-    write_json(output_path, merged)
-
-
-if __name__ == "__main__":
-    bridge_main({
-        "load": _cmd_load,
-        "merge": _cmd_merge,
-    })

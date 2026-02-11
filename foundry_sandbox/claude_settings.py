@@ -9,7 +9,6 @@ Migrated from lib/python/merge_claude_settings.py.
 
 from __future__ import annotations
 
-from foundry_sandbox._bridge import bridge_main
 from foundry_sandbox.config import deep_merge, load_json, write_json
 
 # Keys that should be preserved from container defaults, not overwritten by host
@@ -47,22 +46,3 @@ def merge_claude_settings(container_path: str, host_path: str) -> None:
     merged.pop("extraKnownMarketplaces", None)
 
     write_json(container_path, merged)
-
-
-# Command handlers for bridge dispatcher
-
-
-def _cmd_merge(container_path: str, host_path: str) -> None:
-    """Merge command: Merge host Claude settings into container settings.
-
-    Args:
-        container_path: Path to container's settings.json.
-        host_path: Path to host's settings.json.
-    """
-    merge_claude_settings(container_path, host_path)
-
-
-if __name__ == "__main__":
-    bridge_main({
-        "merge": _cmd_merge,
-    })

@@ -12,7 +12,6 @@ import shutil
 import sys
 from typing import Any
 
-from foundry_sandbox._bridge import bridge_main
 from foundry_sandbox.config import deep_merge_no_overwrite, load_json, write_json
 
 # Type alias for plugin specifications
@@ -227,23 +226,3 @@ def sync_opencode_foundry(template_path: str, config_path: str) -> None:
             merged.setdefault("mcp", {}).setdefault("foundry-mcp", {})["command"] = new_command
 
     write_json(config_path, merged)
-
-
-def _sync_bridge(template_path: str, config_path: str) -> str:
-    """Bridge handler for sync command.
-
-    Args:
-        template_path: Path to opencode-foundry.json template.
-        config_path: Path to opencode.json config file.
-
-    Returns:
-        Success message.
-    """
-    sync_opencode_foundry(template_path, config_path)
-    return "OpenCode configuration synced successfully"
-
-
-if __name__ == "__main__":
-    bridge_main({
-        "sync": _sync_bridge,
-    })

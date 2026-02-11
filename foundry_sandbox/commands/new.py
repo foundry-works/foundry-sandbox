@@ -50,7 +50,6 @@ from foundry_sandbox.utils import sanitize_ref_component
 from foundry_sandbox.api_keys import check_claude_key_required, has_opencode_key
 from foundry_sandbox.constants import TIMEOUT_GIT_QUERY, TIMEOUT_LOCAL_CMD
 from foundry_sandbox.image import check_image_freshness
-from foundry_sandbox.legacy_bridge import run_legacy_command
 from foundry_sandbox.paths import derive_sandbox_paths
 from foundry_sandbox.state import save_last_cast_new, save_cast_preset, load_last_cast_new, load_cast_preset, save_last_attach
 from foundry_sandbox import tmux
@@ -540,7 +539,8 @@ def new(
     # Check image freshness
     if check_image_freshness():
         if click.confirm("Rebuild image now?", default=True):
-            run_legacy_command("build", capture_output=False)
+            from foundry_sandbox.commands.build import build as build_cmd
+            ctx.invoke(build_cmd)
 
     # Check network capacity
     isolate_credentials = not no_isolate_credentials

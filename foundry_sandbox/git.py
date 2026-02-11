@@ -17,7 +17,6 @@ import time
 from pathlib import Path
 from typing import Any, Callable
 
-from foundry_sandbox._bridge import bridge_main
 from foundry_sandbox.constants import TIMEOUT_GIT_QUERY, TIMEOUT_GIT_TRANSFER
 from foundry_sandbox.paths import ensure_dir
 from foundry_sandbox.utils import log_info, log_step, log_warn
@@ -240,51 +239,3 @@ def branch_exists(repo_path: str | Path, branch: str) -> bool:
         timeout=TIMEOUT_GIT_QUERY,
     )
     return result.returncode == 0
-
-
-# ============================================================================
-# Bridge Commands
-# ============================================================================
-
-
-def _cmd_git_with_retry(*args: str) -> dict[str, Any]:
-    """Bridge command: Run git with retry.
-
-    Args are passed directly as git sub-command and arguments.
-    Returns dict with returncode, stdout, stderr.
-    """
-    result = git_with_retry(list(args))
-    return {
-        "returncode": result.returncode,
-        "stdout": result.stdout,
-        "stderr": result.stderr,
-    }
-
-
-def _cmd_ensure_bare_repo(repo_url: str, bare_path: str) -> None:
-    """Bridge command: Ensure a bare repository exists and is up to date."""
-    ensure_bare_repo(repo_url, bare_path)
-
-
-def _cmd_ensure_repo_checkout(repo_url: str, checkout_path: str, branch: str = "main") -> None:
-    """Bridge command: Ensure a working checkout exists and is up to date."""
-    ensure_repo_checkout(repo_url, checkout_path, branch)
-
-
-def _cmd_branch_exists(repo_path: str, branch: str) -> bool:
-    """Bridge command: Check if a branch exists."""
-    return branch_exists(repo_path, branch)
-
-
-# ============================================================================
-# Bridge Dispatcher
-# ============================================================================
-
-
-if __name__ == "__main__":
-    bridge_main({
-        "git-with-retry": _cmd_git_with_retry,
-        "ensure-bare-repo": _cmd_ensure_bare_repo,
-        "ensure-repo-checkout": _cmd_ensure_repo_checkout,
-        "branch-exists": _cmd_branch_exists,
-    })

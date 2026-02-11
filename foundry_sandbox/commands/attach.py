@@ -26,8 +26,8 @@ import click
 
 from foundry_sandbox.commands._helpers import auto_detect_sandbox as _auto_detect_sandbox, fzf_select_sandbox as _fzf_select_sandbox_shared
 from foundry_sandbox.constants import get_worktrees_dir
+from foundry_sandbox.credential_setup import sync_runtime_credentials
 from foundry_sandbox.docker import container_is_running
-from foundry_sandbox.legacy_bridge import run_legacy_command
 from foundry_sandbox.paths import derive_sandbox_paths
 from foundry_sandbox.state import load_last_attach, load_sandbox_metadata, save_last_attach
 from foundry_sandbox.tool_configs import sync_opencode_local_plugins_on_first_attach
@@ -41,8 +41,10 @@ from foundry_sandbox.validate import validate_existing_sandbox_name
 
 
 def _list_sandboxes() -> None:
-    """Display available sandboxes (fallback to shell for now)."""
-    run_legacy_command("list", capture_output=False)
+    """Display available sandboxes."""
+    from foundry_sandbox.commands.list_cmd import list_cmd
+    ctx = click.Context(list_cmd, info_name="list")
+    ctx.invoke(list_cmd)
 
 
 def _fzf_select_sandbox() -> str | None:
@@ -54,26 +56,25 @@ from foundry_sandbox.commands._helpers import flag_enabled as _flag_enabled
 
 
 def _start_container(name: str) -> None:
-    """Start a sandbox container using shell fallback.
+    """Start a sandbox container.
 
     Args:
         name: Sandbox name.
     """
     click.echo("Container not running. Starting...")
-    result = run_legacy_command("start", name, capture_output=False)
-    if result.returncode != 0:
-        sys.exit(result.returncode)
+    from foundry_sandbox.commands.start import start as start_cmd
+    ctx = click.Context(start_cmd, info_name="start")
+    ctx.invoke(start_cmd, name=name)
 
 
 def _sync_credentials(container_id: str) -> None:
-    """Sync runtime credentials to container (stub/shell fallback).
+    """Sync runtime credentials to container.
 
     Args:
         container_id: Container ID.
     """
-    # Shell fallback for now - this function is in lib/container_config.sh
     log_debug(f"Syncing credentials to {container_id}")
-    run_legacy_command("_bridge_sync_creds", container_id, capture_output=False)
+    sync_runtime_credentials(container_id)
 
 
 def _sync_opencode_plugins(name: str, container_id: str) -> None:

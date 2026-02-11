@@ -3,14 +3,13 @@
 Enforces module dependency boundaries to prevent cyclic imports and
 import latency creep:
 
-  Base layer (constants, utils, _bridge, models):
+  Base layer (constants, utils, models):
     May NOT import from any other foundry_sandbox module.
 
   Mid layer (paths, config):
     May import only from base layer modules.
 
-  Bridge-callable modules (claude_settings, opencode_sync, and any future
-  modules with bridge_main):
+  Internal modules (claude_settings, opencode_sync, etc.):
     May import from base + mid layers.
     May NOT import Click or Pydantic at module level (latency constraint).
 
@@ -29,7 +28,7 @@ PACKAGE_DIR = Path(__file__).resolve().parents[2] / "foundry_sandbox"
 # Layer definitions: module name -> allowed foundry_sandbox imports.
 # Module names are relative to foundry_sandbox (e.g., "constants" for foundry_sandbox.constants).
 
-BASE_MODULES = {"constants", "utils", "_bridge", "models", "__init__"}
+BASE_MODULES = {"constants", "utils", "models", "__init__"}
 
 MID_MODULES = {"paths", "config"}
 
@@ -43,7 +42,7 @@ BRIDGE_CALLABLE_MODULES = {
 
 # Top-layer modules: unrestricted imports (CLI entrypoints, UI, compatibility shims).
 # These may import Click/Pydantic at module level and from any layer.
-TOP_MODULES = {"cli", "ide", "legacy_bridge", "tui"}
+TOP_MODULES = {"cli", "ide", "tui"}
 
 # Heavy imports forbidden at module level in bridge-callable modules.
 FORBIDDEN_BRIDGE_IMPORTS = {"click", "pydantic"}
@@ -116,7 +115,7 @@ class TestBaseLayerBoundaries:
         forbidden = imports - {"__init__"}
         assert not forbidden, (
             f"Base layer module '{module}' imports from foundry_sandbox submodules: "
-            f"{forbidden}. Base modules (constants, utils, _bridge, models) "
+            f"{forbidden}. Base modules (constants, utils, models) "
             f"must not import from other foundry_sandbox modules."
         )
 

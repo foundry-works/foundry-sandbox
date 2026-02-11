@@ -17,7 +17,6 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
 
-from foundry_sandbox._bridge import bridge_main
 from foundry_sandbox.constants import (
     TIMEOUT_DOCKER_NETWORK,
     TIMEOUT_DOCKER_QUERY,
@@ -501,78 +500,3 @@ def validate_git_remotes(git_dir: str = ".git") -> tuple[bool, str]:
     msg += "Remove credentials from git remote URLs before enabling credential isolation"
 
     return False, msg
-
-
-# ============================================================================
-# Bridge Commands
-# ============================================================================
-
-
-def _cmd_validate_sandbox_name(name: str) -> dict[str, Any]:
-    """Bridge command: Validate sandbox name."""
-    ok, msg = validate_sandbox_name(name)
-    return {"valid": ok, "error": msg}
-
-
-def _cmd_validate_git_url(url: str) -> dict[str, Any]:
-    """Bridge command: Validate git URL."""
-    ok, msg = validate_git_url(url)
-    return {"valid": ok, "error": msg}
-
-
-def _cmd_validate_ssh_mode(mode: str) -> dict[str, Any]:
-    """Bridge command: Validate SSH mode."""
-    ok, msg = validate_ssh_mode(mode)
-    return {"valid": ok, "error": msg}
-
-
-def _cmd_validate_mount_path(path: str) -> dict[str, Any]:
-    """Bridge command: Validate mount path."""
-    ok, msg = validate_mount_path(path)
-    return {"valid": ok, "error": msg}
-
-
-def _cmd_check_docker_running() -> dict[str, Any]:
-    """Bridge command: Check Docker is running."""
-    ok, msg = check_docker_running()
-    return {"running": ok, "error": msg}
-
-
-def _cmd_validate_environment() -> dict[str, Any]:
-    """Bridge command: Validate environment."""
-    ok, msg = validate_environment()
-    return {"valid": ok, "error": msg}
-
-
-def _cmd_check_network_capacity(isolate_credentials: str = "true") -> dict[str, Any]:
-    """Bridge command: Check Docker network capacity."""
-    ok, msg = check_docker_network_capacity(
-        isolate_credentials=isolate_credentials == "true"
-    )
-    return {"capacity": ok, "error": msg}
-
-
-def _cmd_validate_git_remotes(git_dir: str = ".git") -> dict[str, Any]:
-    """Bridge command: Validate git remotes for embedded credentials."""
-    ok, msg = validate_git_remotes(git_dir)
-    return {"clean": ok, "error": msg}
-
-
-def _cmd_require_command(cmd: str) -> dict[str, Any]:
-    """Bridge command: Check required command."""
-    ok, msg = require_command(cmd)
-    return {"available": ok, "error": msg}
-
-
-if __name__ == "__main__":
-    bridge_main({
-        "validate-name": _cmd_validate_sandbox_name,
-        "validate-url": _cmd_validate_git_url,
-        "validate-ssh-mode": _cmd_validate_ssh_mode,
-        "validate-mount": _cmd_validate_mount_path,
-        "check-docker": _cmd_check_docker_running,
-        "validate-env": _cmd_validate_environment,
-        "check-network-capacity": _cmd_check_network_capacity,
-        "validate-git-remotes": _cmd_validate_git_remotes,
-        "require-command": _cmd_require_command,
-    })

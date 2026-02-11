@@ -85,33 +85,6 @@ def tmux_session_name(name: str) -> str:
     return name
 
 
-def shell_call(*args: str) -> subprocess.CompletedProcess[str]:
-    """Call legacy bridge with arguments (stdout/stderr passed through).
-
-    Args:
-        *args: Arguments to pass to the legacy bridge.
-
-    Returns:
-        CompletedProcess result.
-    """
-    from foundry_sandbox.legacy_bridge import run_legacy_command
-    return run_legacy_command(*args, capture_output=False)
-
-
-def shell_call_capture(*args: str) -> str:
-    """Call legacy bridge with arguments and capture stdout.
-
-    Args:
-        *args: Arguments to pass to the legacy bridge.
-
-    Returns:
-        stdout output as string (stripped), or empty string on failure.
-    """
-    from foundry_sandbox.legacy_bridge import run_legacy_command
-    result = run_legacy_command(*args, capture_output=True)
-    return result.stdout.strip() if result.returncode == 0 else ""
-
-
 def auto_detect_sandbox() -> str | None:
     """Auto-detect sandbox name from current working directory.
 

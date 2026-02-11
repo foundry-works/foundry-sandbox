@@ -23,7 +23,6 @@ import subprocess
 import time
 from typing import Any, Callable
 
-from foundry_sandbox._bridge import bridge_main
 from foundry_sandbox.constants import PROXY_TIMEOUT
 from foundry_sandbox.utils import log_debug, log_error, log_info, log_warn
 
@@ -400,67 +399,3 @@ def proxy_is_registered(container_id: str) -> bool:
     except Exception as exc:
         log_debug(f"Could not check proxy registration for {container_id}: {exc}")
         return False
-
-
-# Bridge command handlers
-
-def _cmd_proxy_container_name() -> str:
-    """Bridge command: Get proxy container name."""
-    return proxy_container_name()
-
-
-def _cmd_proxy_register(
-    container_id: str,
-    ip_address: str,
-    ttl_seconds: str = str(DEFAULT_TTL_SECONDS),
-    metadata_json: str = "",
-) -> str:
-    """Bridge command: Register container with proxy."""
-    ttl = int(ttl_seconds)
-    metadata = json.loads(metadata_json) if metadata_json else None
-    return proxy_register(container_id, ip_address, ttl, metadata)
-
-
-def _cmd_proxy_unregister(container_id: str) -> int:
-    """Bridge command: Unregister container from proxy."""
-    return proxy_unregister(container_id)
-
-
-def _cmd_proxy_wait_ready(timeout: str = "30") -> bool:
-    """Bridge command: Wait for proxy to be ready."""
-    return proxy_wait_ready(int(timeout))
-
-
-def _cmd_proxy_get_container_ip(container_id: str, network: str = DEFAULT_NETWORK) -> str:
-    """Bridge command: Get container IP on network."""
-    return proxy_get_container_ip(container_id, network)
-
-
-def _cmd_setup_proxy_registration(container_id: str, metadata_json: str = "") -> str:
-    """Bridge command: Setup proxy registration."""
-    metadata = json.loads(metadata_json) if metadata_json else None
-    setup_proxy_registration(container_id, metadata)
-    return "success"
-
-
-def _cmd_cleanup_proxy_registration(container_id: str) -> int:
-    """Bridge command: Cleanup proxy registration."""
-    return cleanup_proxy_registration(container_id)
-
-
-def _cmd_proxy_is_registered(container_id: str) -> bool:
-    """Bridge command: Check if container is registered."""
-    return proxy_is_registered(container_id)
-
-
-if __name__ == "__main__":
-    bridge_main({
-        "proxy-container-name": _cmd_proxy_container_name,
-        "proxy-register": _cmd_proxy_register,
-        "proxy-unregister": _cmd_proxy_unregister,
-        "proxy-wait-ready": _cmd_proxy_wait_ready,
-        "proxy-get-container-ip": _cmd_proxy_get_container_ip,
-        "setup-proxy-registration": _cmd_setup_proxy_registration,
-        "cleanup-proxy-registration": _cmd_cleanup_proxy_registration,
-        "proxy-is-registered": _cmd_proxy_is_registered,
-    })

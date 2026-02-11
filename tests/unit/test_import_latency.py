@@ -23,7 +23,6 @@ BRIDGE_MODULES = [
 # Internal modules that are imported transitively.
 INTERNAL_MODULES = [
     "foundry_sandbox",
-    "foundry_sandbox._bridge",
     "foundry_sandbox.constants",
     "foundry_sandbox.models",
     "foundry_sandbox.paths",

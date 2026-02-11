@@ -17,7 +17,6 @@ import tempfile
 from pathlib import Path
 from typing import Callable, Optional
 
-from foundry_sandbox._bridge import bridge_main
 from foundry_sandbox.constants import SSH_AGENT_CONTAINER_SOCK
 from foundry_sandbox.utils import log_warn
 
@@ -421,74 +420,34 @@ def add_network_to_override(mode: str, override_file: str) -> None:
     generate_network_config(mode, override_file)
 
 
-# Bridge command implementations
+def ensure_override_from_metadata(name: str, override_file: str) -> None:
+    """Rebuild the docker-compose override file from saved sandbox metadata.
 
-def _cmd_validate_network_mode(mode: str) -> None:
-    """Bridge command: Validate network mode."""
-    validate_network_mode(mode)
+    Loads the sandbox metadata for *name*, writes a fresh override header,
+    re-appends volume mounts, and applies the network mode.
 
+    Args:
+        name: Sandbox name.
+        override_file: Path to docker-compose override file.
 
-def _cmd_generate_network_config(mode: str, override_file: str) -> None:
-    """Bridge command: Generate network config."""
-    generate_network_config(mode, override_file)
+    Raises:
+        ValueError: If the network mode in metadata is invalid.
+        OSError: If the override file cannot be written.
+    """
+    from foundry_sandbox.paths import ensure_dir
+    from foundry_sandbox.state import load_sandbox_metadata
 
+    metadata = load_sandbox_metadata(name) or {}
+    ensure_dir(Path(override_file).parent)
+    Path(override_file).write_text("services:\n  dev:\n")
 
-def _cmd_ensure_override_header(override_file: str) -> None:
-    """Bridge command: Ensure override header."""
-    ensure_override_header(override_file)
+    mounts = metadata.get("mounts", [])
+    if isinstance(mounts, list):
+        for mount in mounts:
+            if isinstance(mount, str) and mount:
+                append_override_list_item(override_file, "volumes", mount)
 
+    network_mode = str(metadata.get("network_mode", "")).strip()
+    if network_mode:
+        add_network_to_override(network_mode, override_file)
 
-def _cmd_strip_network_config(override_file: str) -> None:
-    """Bridge command: Strip network config."""
-    strip_network_config(override_file)
-
-
-def _cmd_strip_ssh_agent_config(override_file: str) -> None:
-    """Bridge command: Strip SSH agent config."""
-    strip_ssh_agent_config(override_file)
-
-
-def _cmd_strip_claude_home_config(override_file: str) -> None:
-    """Bridge command: Strip Claude home config."""
-    strip_claude_home_config(override_file)
-
-
-def _cmd_strip_timezone_config(override_file: str) -> None:
-    """Bridge command: Strip timezone config."""
-    strip_timezone_config(override_file)
-
-
-def _cmd_add_claude_home_to_override(override_file: str, claude_home: str) -> None:
-    """Bridge command: Add Claude home to override."""
-    add_claude_home_to_override(override_file, claude_home)
-
-
-def _cmd_add_ssh_agent_to_override(override_file: str, agent_sock: str) -> None:
-    """Bridge command: Add SSH agent to override."""
-    add_ssh_agent_to_override(override_file, agent_sock)
-
-
-def _cmd_add_timezone_to_override(override_file: str) -> None:
-    """Bridge command: Add timezone to override."""
-    add_timezone_to_override(override_file)
-
-
-def _cmd_add_network_to_override(mode: str, override_file: str) -> None:
-    """Bridge command: Add network to override."""
-    add_network_to_override(mode, override_file)
-
-
-if __name__ == "__main__":
-    bridge_main({
-        "validate-network-mode": _cmd_validate_network_mode,
-        "generate-network-config": _cmd_generate_network_config,
-        "ensure-override-header": _cmd_ensure_override_header,
-        "strip-network-config": _cmd_strip_network_config,
-        "strip-ssh-agent-config": _cmd_strip_ssh_agent_config,
-        "strip-claude-home-config": _cmd_strip_claude_home_config,
-        "strip-timezone-config": _cmd_strip_timezone_config,
-        "add-claude-home-to-override": _cmd_add_claude_home_to_override,
-        "add-ssh-agent-to-override": _cmd_add_ssh_agent_to_override,
-        "add-timezone-to-override": _cmd_add_timezone_to_override,
-        "add-network-to-override": _cmd_add_network_to_override,
-    })

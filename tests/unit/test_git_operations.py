@@ -16,6 +16,7 @@ Tests the git_operations.py and git_api.py modules covering:
 import base64
 import json
 import os
+import subprocess
 import tempfile
 import time
 from unittest.mock import MagicMock, patch
@@ -480,7 +481,7 @@ class TestResponseHandling:
         """Test that server-side repo root derivation ignores client cwd."""
         with tempfile.TemporaryDirectory() as tmpdir:
             # Create a git repo
-            os.system(f"cd {tmpdir} && git init >/dev/null 2>&1")
+            subprocess.run(["git", "init"], cwd=tmpdir, capture_output=True, check=False)
             metadata = {"sandbox_branch": "test-branch"}
 
             # Client requests cwd of "evil/path"

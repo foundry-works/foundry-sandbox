@@ -22,7 +22,6 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from foundry_sandbox._bridge import bridge_main
 from foundry_sandbox.config import load_json, write_json
 from foundry_sandbox.constants import get_claude_configs_dir
 from foundry_sandbox.utils import flag_enabled as _flag_enabled
@@ -111,19 +110,43 @@ def _secure_write(path: Path, content: str) -> None:
         _secure_write_unlocked(path, content)
 
 
+_LOCK_TIMEOUT_SECONDS = 30
+
+
 @contextlib.contextmanager
 def _state_lock(path: Path, *, shared: bool = False):
     """Acquire a file lock for *path* using a sidecar ``.lock`` file.
 
+    Uses non-blocking attempts with a retry loop so that a stuck lock
+    never blocks indefinitely.
+
     Args:
         path: The file being protected.
         shared: If ``True`` acquire a shared (read) lock; otherwise exclusive.
+
+    Raises:
+        OSError: If the lock cannot be acquired within the timeout.
     """
+    import time
+
     lock_path = path.with_suffix(path.suffix + ".lock")
     lock_path.parent.mkdir(parents=True, exist_ok=True)
     fd = os.open(str(lock_path), os.O_CREAT | os.O_RDWR, 0o600)
     try:
-        fcntl.flock(fd, fcntl.LOCK_SH if shared else fcntl.LOCK_EX)
+        lock_op = (fcntl.LOCK_SH if shared else fcntl.LOCK_EX) | fcntl.LOCK_NB
+        deadline = time.monotonic() + _LOCK_TIMEOUT_SECONDS
+        while True:
+            try:
+                fcntl.flock(fd, lock_op)
+                break
+            except OSError:
+                if time.monotonic() >= deadline:
+                    os.close(fd)
+                    raise OSError(
+                        f"Timed out after {_LOCK_TIMEOUT_SECONDS}s waiting for lock on {path}. "
+                        f"If no other process is running, remove {lock_path} and retry."
+                    )
+                time.sleep(0.1)
         yield
     finally:
         fcntl.flock(fd, fcntl.LOCK_UN)
@@ -681,78 +704,3 @@ def load_last_attach() -> str | None:
     data = load_json(str(path))
     name = data.get("sandbox_name", "")
     return name if name else None
-
-
-# ============================================================================
-# Bridge Commands
-# ============================================================================
-
-
-def _cmd_load_metadata(name: str) -> dict[str, Any] | None:
-    """Bridge command: Load sandbox metadata."""
-    return load_sandbox_metadata(name)
-
-
-_WRITE_METADATA_KEYS = frozenset({
-    "repo_url", "branch", "from_branch", "network_mode", "sync_ssh",
-    "ssh_mode", "working_dir", "sparse_checkout", "pip_requirements",
-    "allow_pr", "enable_opencode", "enable_zai", "mounts", "copies",
-})
-
-
-def _cmd_write_metadata(name: str, json_str: str) -> None:
-    """Bridge command: Write sandbox metadata from JSON string."""
-    data = json.loads(json_str)
-    unknown = set(data.keys()) - _WRITE_METADATA_KEYS
-    if unknown:
-        raise ValueError(f"Unknown metadata keys: {', '.join(sorted(unknown))}")
-    write_sandbox_metadata(name, **data)
-
-
-def _cmd_list_sandboxes() -> list[dict[str, Any]]:
-    """Bridge command: List all sandboxes."""
-    return list_sandboxes()
-
-
-def _cmd_inspect(name: str) -> dict[str, Any] | None:
-    """Bridge command: Inspect a single sandbox."""
-    return inspect_sandbox(name)
-
-
-def _cmd_save_last_attach(sandbox_name: str) -> None:
-    """Bridge command: Save last attach."""
-    save_last_attach(sandbox_name)
-
-
-def _cmd_load_last_attach() -> str | None:
-    """Bridge command: Load last attach."""
-    return load_last_attach()
-
-
-def _cmd_list_presets() -> list[str]:
-    """Bridge command: List presets."""
-    return list_cast_presets()
-
-
-def _cmd_show_preset(preset_name: str) -> str | None:
-    """Bridge command: Show preset."""
-    return show_cast_preset(preset_name)
-
-
-def _cmd_delete_preset(preset_name: str) -> bool:
-    """Bridge command: Delete preset."""
-    return delete_cast_preset(preset_name)
-
-
-if __name__ == "__main__":
-    bridge_main({
-        "load-metadata": _cmd_load_metadata,
-        "write-metadata": _cmd_write_metadata,
-        "list": _cmd_list_sandboxes,
-        "inspect": _cmd_inspect,
-        "save-last-attach": _cmd_save_last_attach,
-        "load-last-attach": _cmd_load_last_attach,
-        "list-presets": _cmd_list_presets,
-        "show-preset": _cmd_show_preset,
-        "delete-preset": _cmd_delete_preset,
-    })

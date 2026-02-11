@@ -27,7 +27,7 @@ PHASE5_MODULES = [
 ]
 
 # container_io.py is a leaf: it may only import from these base-layer modules.
-CONTAINER_IO_ALLOWED_IMPORTS = {"constants", "utils", "_bridge", "__init__"}
+CONTAINER_IO_ALLOWED_IMPORTS = {"constants", "utils", "__init__"}
 
 
 def _get_foundry_imports(module_path: Path) -> set[str]:

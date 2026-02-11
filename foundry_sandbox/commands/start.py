@@ -30,31 +30,36 @@ from pathlib import Path
 
 import click
 
+from foundry_sandbox import api_keys
+from foundry_sandbox.commands._helpers import (
+    apply_network_restrictions as _apply_network_restrictions_shared,
+    flag_enabled as _flag_enabled,
+    generate_sandbox_id,
+    resolve_ssh_agent_sock,
+    uses_credential_isolation as _uses_credential_isolation_shared,
+)
 from foundry_sandbox.constants import get_repos_dir
+from foundry_sandbox.container_setup import install_pip_requirements
+from foundry_sandbox.credential_setup import copy_configs_to_container
 from foundry_sandbox.docker import (
     compose_up,
     hmac_secret_file_count,
     populate_stubs_volume,
     repair_hmac_secret_permissions,
 )
+from foundry_sandbox.foundry_plugin import prepopulate_foundry_global
+from foundry_sandbox.git_path_fixer import fix_proxy_worktree_paths
 from foundry_sandbox.image import check_image_freshness
-from foundry_sandbox.legacy_bridge import run_legacy_command
 from foundry_sandbox.network import (
     add_claude_home_to_override,
     add_ssh_agent_to_override,
     add_timezone_to_override,
+    ensure_override_from_metadata,
     ensure_override_header,
 )
 from foundry_sandbox.paths import derive_sandbox_paths, ensure_dir, path_claude_home
 from foundry_sandbox.proxy import setup_proxy_registration
 from foundry_sandbox.state import load_sandbox_metadata
-from foundry_sandbox.commands._helpers import (
-    apply_network_restrictions as _apply_network_restrictions_shared,
-    flag_enabled as _flag_enabled,
-    shell_call as _shell_call,
-    shell_call_capture as _shell_call_capture,
-    uses_credential_isolation as _uses_credential_isolation_shared,
-)
 from foundry_sandbox.utils import log_error, log_info, log_step, log_warn
 from foundry_sandbox.validate import validate_existing_sandbox_name
 
@@ -105,15 +110,15 @@ def _uses_credential_isolation(container: str) -> bool:
 
 
 def _generate_sandbox_id(seed: str) -> str:
-    """Generate a sandbox ID using shell fallback.
+    """Generate a sandbox ID from a seed string.
 
     Args:
         seed: Seed string for ID generation.
 
     Returns:
-        Generated sandbox ID, or empty string on failure.
+        Generated sandbox ID.
     """
-    return _shell_call_capture("_bridge_generate_sandbox_id", seed)
+    return generate_sandbox_id(seed)
 
 
 def _apply_network_restrictions(container_id: str, network_mode: str) -> None:
@@ -129,7 +134,8 @@ def _apply_network_restrictions(container_id: str, network_mode: str) -> None:
 
 @click.command()
 @click.argument("name")
-def start(name: str) -> None:
+@click.pass_context
+def start(ctx: click.Context, name: str) -> None:
     """Start a stopped sandbox container."""
     valid_name, name_error = validate_existing_sandbox_name(name)
     if not valid_name:
@@ -154,7 +160,8 @@ def start(name: str) -> None:
     # ------------------------------------------------------------------
     if check_image_freshness():
         if click.confirm("Rebuild image now?", default=True):
-            _shell_call("build")
+            from foundry_sandbox.commands.build import build as build_cmd
+            ctx.invoke(build_cmd)
 
     # ------------------------------------------------------------------
     # 3. Load metadata and export enable flags
@@ -226,7 +233,7 @@ def start(name: str) -> None:
         # 6. Setup override file from metadata (shell fallback)
         # --------------------------------------------------------------
         click.echo(f"Starting sandbox: {name}...")
-        _shell_call("_bridge_ensure_override_from_metadata", name, str(override_file))
+        ensure_override_from_metadata(name, str(override_file))
 
         # Ensure override directory exists
         ensure_dir(override_file.parent)
@@ -239,8 +246,8 @@ def start(name: str) -> None:
         add_claude_home_to_override(str(override_file), str(claude_home_path))
         add_timezone_to_override(str(override_file))
 
-        # Pre-populate foundry skills and hooks (shell fallback)
-        _shell_call("_bridge_prepopulate_foundry_global", str(claude_home_path), "1")
+        # Pre-populate foundry skills and hooks
+        prepopulate_foundry_global(str(claude_home_path), skip_if_populated=True)
 
         # --------------------------------------------------------------
         # 8. Handle SSH agent forwarding
@@ -254,8 +261,8 @@ def start(name: str) -> None:
                 log_warn(f"SSH mode '{ssh_mode}' disables forwarding; use --with-ssh to enable.")
                 add_ssh_agent_to_override(str(override_file), "")
             else:
-                # Try to resolve SSH agent socket (shell fallback)
-                ssh_agent_sock = _shell_call_capture("_bridge_resolve_ssh_agent_sock")
+                # Resolve SSH agent socket
+                ssh_agent_sock = resolve_ssh_agent_sock()
                 if ssh_agent_sock:
                     add_ssh_agent_to_override(str(override_file), ssh_agent_sock)
                     enable_ssh = True
@@ -266,10 +273,12 @@ def start(name: str) -> None:
             add_ssh_agent_to_override(str(override_file), "")
 
         # --------------------------------------------------------------
-        # 9. Export GitHub token (shell fallback)
+        # 9. Export GitHub token
         # --------------------------------------------------------------
-        result = _shell_call("_bridge_export_gh_token")
-        if result.returncode == 0:
+        token = api_keys.export_gh_token()
+        if token:
+            os.environ["GITHUB_TOKEN"] = token
+            os.environ["GH_TOKEN"] = token
             log_info("GitHub CLI token exported for container")
 
         # --------------------------------------------------------------
@@ -365,11 +374,11 @@ def start(name: str) -> None:
 
             os.environ["SANDBOX_GATEWAY_ENABLED"] = "true"
 
-            # Fix proxy worktree paths (shell fallback)
+            # Fix proxy worktree paths
             proxy_container = f"{container}-unified-proxy-1"
             os.environ["PROXY_CONTAINER_NAME"] = proxy_container
             username = os.environ.get("USER", "ubuntu")
-            _shell_call("_bridge_fix_proxy_worktree_paths", proxy_container, username)
+            fix_proxy_worktree_paths(proxy_container, username)
 
             # Prepare metadata JSON
             repo_url = _string_value(metadata.get("repo_url", ""))
@@ -400,23 +409,22 @@ def start(name: str) -> None:
                 sys.exit(1)
 
         # --------------------------------------------------------------
-        # 13. Copy configs to container (shell fallback)
+        # 13. Copy configs to container
         # --------------------------------------------------------------
         working_dir = _string_value(metadata.get("working_dir", ""))
         repo_url = _string_value(metadata.get("repo_url", ""))
         from_branch = _string_value(metadata.get("from_branch", ""))
         sandbox_branch = _string_value(metadata.get("branch", ""))
 
-        _shell_call(
-            "_bridge_copy_configs_to_container",
+        copy_configs_to_container(
             container_id,
-            "0",  # is_new
-            "1" if enable_ssh else "0",
-            working_dir,
-            isolate_credentials,
-            from_branch,
-            sandbox_branch,
-            repo_url,
+            skip_plugins=False,
+            enable_ssh=enable_ssh,
+            working_dir=working_dir,
+            isolate_credentials=bool(isolate_credentials),
+            from_branch=from_branch,
+            branch=sandbox_branch,
+            repo_url=repo_url,
         )
 
         # --------------------------------------------------------------
@@ -427,11 +435,11 @@ def start(name: str) -> None:
             log_info(f"Sparse checkout active for: {working_dir}")
 
         # --------------------------------------------------------------
-        # 15. Install pip requirements if configured (shell fallback)
+        # 15. Install pip requirements if configured
         # --------------------------------------------------------------
         pip_requirements = _string_value(metadata.get("pip_requirements", ""))
         if pip_requirements:
-            _shell_call("_bridge_install_pip_requirements", container_id, pip_requirements)
+            install_pip_requirements(container_id, pip_requirements)
 
         # --------------------------------------------------------------
         # 16. Apply network restrictions

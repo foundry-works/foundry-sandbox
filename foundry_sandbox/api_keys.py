@@ -15,7 +15,6 @@ import subprocess
 from pathlib import Path
 from typing import Any
 
-from foundry_sandbox._bridge import bridge_main
 from foundry_sandbox.constants import TIMEOUT_LOCAL_CMD
 from foundry_sandbox.utils import log_step, log_warn
 
@@ -366,85 +365,3 @@ def export_gh_token() -> str:
 
     return ""
 
-
-# ============================================================================
-# Bridge Commands
-# ============================================================================
-
-
-def _cmd_check_any_ai_key() -> bool:
-    """Bridge command: Check any AI provider key."""
-    return check_any_ai_key()
-
-
-def _cmd_has_claude_key() -> bool:
-    """Bridge command: Check Claude auth."""
-    return has_claude_key()
-
-
-def _cmd_has_gemini_key() -> bool:
-    """Bridge command: Check Gemini auth."""
-    return has_gemini_key()
-
-
-def _cmd_has_opencode_key() -> bool:
-    """Bridge command: Check OpenCode auth."""
-    return has_opencode_key()
-
-
-def _cmd_has_codex_key() -> bool:
-    """Bridge command: Check Codex auth."""
-    return has_codex_key()
-
-
-def _cmd_has_zai_key() -> bool:
-    """Bridge command: Check ZAI auth."""
-    return has_zai_key()
-
-
-def _cmd_check_claude_required() -> dict[str, Any]:
-    """Bridge command: Check Claude key (mandatory)."""
-    ok, msg = check_claude_key_required()
-    return {"present": ok, "message": msg}
-
-
-def _cmd_cli_status() -> list[str]:
-    """Bridge command: Get CLI status lines."""
-    return get_cli_status()
-
-
-def _cmd_check_api_keys() -> dict[str, Any]:
-    """Bridge command: Full API key status check."""
-    return check_api_keys_status()
-
-
-def _cmd_export_gh_token() -> str:
-    """Bridge command: Get GitHub token."""
-    return export_gh_token()
-
-
-def _cmd_check_any_search_key() -> bool:
-    """Bridge command: Check search provider keys."""
-    return check_any_search_key()
-
-
-def _cmd_missing_keys_warning() -> str:
-    """Bridge command: Get missing keys warning."""
-    return get_missing_keys_warning()
-
-
-if __name__ == "__main__":
-    bridge_main({
-        "check-any-ai-key": _cmd_check_any_ai_key,
-        "has-claude-key": _cmd_has_claude_key,
-        "has-gemini-key": _cmd_has_gemini_key,
-        "has-opencode-key": _cmd_has_opencode_key,
-        "has-codex-key": _cmd_has_codex_key,
-        "has-zai-key": _cmd_has_zai_key,
-        "check-claude-required": _cmd_check_claude_required,
-        "cli-status": _cmd_cli_status,
-        "check-api-keys": _cmd_check_api_keys,
-        "export-gh-token": _cmd_export_gh_token,
-        "check-any-search-key": _cmd_check_any_search_key,
-        "missing-keys-warning": _cmd_missing_keys_warning,
-    })

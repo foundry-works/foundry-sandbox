@@ -17,7 +17,6 @@ import shutil
 from pathlib import Path
 from typing import Any
 
-from foundry_sandbox._bridge import bridge_main
 from foundry_sandbox.constants import TIMEOUT_GIT_QUERY, TIMEOUT_GIT_TRANSFER
 from foundry_sandbox.git import git_with_retry
 from foundry_sandbox.utils import log_info, log_step, log_warn
@@ -455,62 +454,3 @@ def remove_worktree(worktree_path: str | Path) -> None:
 
     # Fall back to rm -rf
     shutil.rmtree(wt_p, ignore_errors=True)
-
-
-# ============================================================================
-# Bridge Commands
-# ============================================================================
-
-
-def _cmd_configure_sparse_checkout(bare_path: str, worktree_path: str, working_dir: str) -> None:
-    """Bridge command: Configure sparse checkout for a worktree."""
-    configure_sparse_checkout(bare_path, worktree_path, working_dir)
-
-
-def _cmd_worktree_has_changes(worktree_path: str) -> bool:
-    """Bridge command: Check if worktree has uncommitted changes."""
-    return worktree_has_changes(worktree_path)
-
-
-def _cmd_create_worktree(
-    bare_path: str,
-    worktree_path: str,
-    branch: str,
-    from_branch: str = "",
-    sparse_checkout: str = "0",
-    working_dir: str = "",
-) -> None:
-    """Bridge command: Create a worktree."""
-    create_worktree(
-        bare_path,
-        worktree_path,
-        branch,
-        from_branch or None,
-        sparse_checkout == "1",
-        working_dir or None,
-    )
-
-
-def _cmd_cleanup_sandbox_branch(branch: str, bare_path: str) -> None:
-    """Bridge command: Cleanup a sandbox branch."""
-    cleanup_sandbox_branch(branch, bare_path)
-
-
-def _cmd_remove_worktree(worktree_path: str) -> None:
-    """Bridge command: Remove a worktree."""
-    remove_worktree(worktree_path)
-
-
-# ============================================================================
-# Bridge Dispatcher
-# ============================================================================
-
-
-if __name__ == "__main__":
-    bridge_main({
-        "configure-sparse-checkout": _cmd_configure_sparse_checkout,
-        "worktree-has-changes": _cmd_worktree_has_changes,
-        "create-worktree": _cmd_create_worktree,
-        "cleanup-sandbox-branch": _cmd_cleanup_sandbox_branch,
-        "remove-worktree": _cmd_remove_worktree,
-    })

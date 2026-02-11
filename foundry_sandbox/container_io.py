@@ -23,7 +23,6 @@ import time
 from pathlib import Path
 from typing import Any
 
-from foundry_sandbox._bridge import bridge_main
 from foundry_sandbox.constants import CONTAINER_READY_ATTEMPTS, CONTAINER_READY_DELAY, CONTAINER_USER, TIMEOUT_DOCKER_EXEC, TIMEOUT_LOCAL_CMD, get_sandbox_verbose
 from foundry_sandbox.utils import log_debug, log_error
 
@@ -503,57 +502,3 @@ def docker_exec_text(
         cmd, capture_output=True, text=True, check=True, timeout=TIMEOUT_DOCKER_EXEC,
     )
     return result.stdout.strip()
-
-
-# ============================================================================
-# Bridge Commands
-# ============================================================================
-
-
-def _cmd_copy_file(container_id: str, src: str, dst: str) -> bool:
-    """Bridge command: Copy a single file to container."""
-    return copy_file_to_container(container_id, src, dst)
-
-
-def _cmd_copy_dir(container_id: str, src: str, dst: str, *excludes: str) -> bool:
-    """Bridge command: Copy a directory to container.
-
-    Extra positional args after dst are treated as exclude patterns.
-    """
-    exclude_list = list(excludes) if excludes else None
-    return copy_dir_to_container(container_id, src, dst, excludes=exclude_list)
-
-
-def _cmd_copy_file_quiet(container_id: str, src: str, dst: str) -> bool:
-    """Bridge command: Copy a single file to container (quiet)."""
-    return copy_file_to_container_quiet(container_id, src, dst)
-
-
-def _cmd_copy_dir_quiet(container_id: str, src: str, dst: str, *excludes: str) -> bool:
-    """Bridge command: Copy a directory to container (quiet).
-
-    Extra positional args after dst are treated as exclude patterns.
-    """
-    exclude_list = list(excludes) if excludes else None
-    return copy_dir_to_container_quiet(container_id, src, dst, excludes=exclude_list)
-
-
-def _cmd_exec_json(container_id: str, *args: str) -> Any:
-    """Bridge command: Execute command in container, return JSON."""
-    return docker_exec_json(container_id, *args)
-
-
-def _cmd_exec_text(container_id: str, *args: str) -> str:
-    """Bridge command: Execute command in container, return text."""
-    return docker_exec_text(container_id, *args)
-
-
-if __name__ == "__main__":
-    bridge_main({
-        "copy-file": _cmd_copy_file,
-        "copy-dir": _cmd_copy_dir,
-        "copy-file-quiet": _cmd_copy_file_quiet,
-        "copy-dir-quiet": _cmd_copy_dir_quiet,
-        "exec-json": _cmd_exec_json,
-        "exec-text": _cmd_exec_text,
-    })
