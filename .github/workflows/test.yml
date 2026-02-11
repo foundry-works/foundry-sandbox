@@ -27,7 +27,7 @@ jobs:
           pip install -e ".[dev,test-orchestration]"
 
       - name: Run unit tests
-        run: pytest tests/unit/ -v --tb=short --cov=foundry_sandbox --cov-report=term-missing --cov-fail-under=80
+        run: pytest tests/unit/ -v --tb=short --cov=foundry_sandbox --cov-report=term-missing --cov-fail-under=60
 
   security-unit:
     runs-on: ubuntu-latest

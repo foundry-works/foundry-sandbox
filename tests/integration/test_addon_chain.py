@@ -15,10 +15,7 @@ interaction scenarios like:
 import os
 import sys
 import time
-from unittest import mock
 from unittest.mock import patch, MagicMock
-
-import pytest
 
 # Add unified-proxy to path
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../../unified-proxy"))
@@ -26,7 +23,6 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../../unified-proxy"
 from addons.credential_injector import CredentialInjector
 from addons.rate_limiter import RateLimiterAddon
 from addons.circuit_breaker import CircuitBreakerAddon
-from addons.policy_engine import PolicyEngine
 from registry import ContainerConfig
 
 
