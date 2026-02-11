@@ -25,6 +25,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../../unified-proxy"
 # Mock mitmproxy before importing git_proxy
 from tests.mocks import (
     MockHeaders, MockResponse, MockClientConn, MockCtx,
+    install_mitmproxy_mocks,
 )
 
 
@@ -52,19 +53,18 @@ class MockHTTPFlow:
         self.metadata = {}
 
 
-# Create and install mock modules
-mock_mitmproxy = MagicMock()
-mock_http = MagicMock()
+# Install shared mitmproxy mocks, then layer on test-specific overrides
+install_mitmproxy_mocks()
+
+mock_http = sys.modules["mitmproxy.http"]
 mock_http.Response = MockResponse
 mock_http.HTTPFlow = MockHTTPFlow
-mock_ctx = MockCtx()
-mock_flow = MagicMock()
-mock_flow.Flow = MockHTTPFlow
 
-sys.modules["mitmproxy"] = mock_mitmproxy
-sys.modules["mitmproxy.http"] = mock_http
+mock_ctx = MockCtx()
 sys.modules["mitmproxy.ctx"] = mock_ctx
-sys.modules["mitmproxy.flow"] = mock_flow
+
+mock_flow = sys.modules["mitmproxy.flow"]
+mock_flow.Flow = MockHTTPFlow
 
 # Add addons path and import
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../../unified-proxy/addons"))
@@ -77,7 +77,17 @@ git_proxy.http = mock_http
 from pktline import ZERO_SHA
 from registry import ContainerConfig
 
-DEFAULT_TEST_BARE_REPO = "/tmp/foundry-test-bare.git"
+_MODULE_BARE_REPO: str | None = None
+
+
+@pytest.fixture(scope="module", autouse=True)
+def _set_module_bare_repo(tmp_path_factory):
+    """Create a module-scoped bare repo dir via pytest's tmp_path_factory.
+
+    Replaces the old tempfile.mkdtemp approach so pytest manages cleanup.
+    """
+    global _MODULE_BARE_REPO
+    _MODULE_BARE_REPO = str(tmp_path_factory.mktemp("foundry-test-bare"))
 
 
 @pytest.fixture(autouse=True)
@@ -105,16 +115,16 @@ def bypass_restricted_path_check(monkeypatch):
 def create_container_config(
     repos=None,
     auth_mode="normal",
-    bare_repo_path=DEFAULT_TEST_BARE_REPO,
+    bare_repo_path=None,
     **extra_metadata,
 ):
     """Create a ContainerConfig with given configuration."""
     import time
 
+    if bare_repo_path is None:
+        bare_repo_path = _MODULE_BARE_REPO
     metadata = {"repos": repos or [], "auth_mode": auth_mode}
     if bare_repo_path is not None:
-        if bare_repo_path == DEFAULT_TEST_BARE_REPO:
-            os.makedirs(bare_repo_path, exist_ok=True)
         metadata["bare_repo_path"] = bare_repo_path
     metadata.update(extra_metadata)
 

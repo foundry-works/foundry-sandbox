@@ -10,6 +10,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     strategy:
+      fail-fast: false
       matrix:
         python-version: ["3.10", "3.12"]
     steps:
@@ -25,12 +26,13 @@ jobs:
           pip install -e ".[dev,test-orchestration]"
 
       - name: Run unit tests
-        run: pytest tests/unit/ -v --tb=short
+        run: pytest tests/unit/ -v --tb=short --cov=foundry_sandbox --cov-report=term-missing
 
   integration:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     strategy:
+      fail-fast: false
       matrix:
         python-version: ["3.10", "3.12"]
     steps:
@@ -67,3 +69,25 @@ jobs:
 
       - name: Run ruff
         run: ruff check .
+
+  unified-proxy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.10", "3.12"]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install dependencies
+        run: |
+          pip install -e ".[dev,test-proxy]"
+
+      - name: Run unified-proxy tests
+        run: pytest unified-proxy/tests/ -v --tb=short

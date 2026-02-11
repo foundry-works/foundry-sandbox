@@ -110,7 +110,18 @@ def docker_exec(running_sandbox):
         result = docker_exec("whoami")
         result = docker_exec("cat", "/etc/hostname")
     """
-    container = f"sandbox-{running_sandbox}-dev-1"
+    # Discover container by name prefix instead of assuming the exact
+    # Docker Compose naming convention (e.g. sandbox-{name}-dev-1).
+    result = subprocess.run(
+        ["docker", "ps", "-q", "--filter", f"name=sandbox-{running_sandbox}"],
+        capture_output=True,
+        text=True,
+    )
+    containers = result.stdout.strip().splitlines()
+    assert containers, (
+        f"No running container found matching name prefix 'sandbox-{running_sandbox}'"
+    )
+    container = containers[0]
 
     def _exec(*args, **kwargs):
         cmd = ["docker", "exec", container] + list(args)

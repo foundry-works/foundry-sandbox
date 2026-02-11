@@ -1,0 +1,32 @@
+name: Proxy Drift Check
+
+on:
+  schedule:
+    - cron: '0 9 * * 1'  # Weekly on Monday at 9am UTC
+  workflow_dispatch:
+
+jobs:
+  drift-check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    name: mitmproxy mock drift check
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies (with real mitmproxy)
+        run: |
+          pip install -e ".[dev,test-proxy]"
+
+      - name: Run unified-proxy tests with real mitmproxy
+        continue-on-error: true
+        run: pytest unified-proxy/tests/ -v --tb=short
+
+      - name: Run integration tests with real mitmproxy
+        continue-on-error: true
+        run: pytest tests/integration/ -v --tb=short

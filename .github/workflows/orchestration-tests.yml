@@ -45,6 +45,10 @@ jobs:
           SANDBOX_CLI: ${{ matrix.entrypoint.cli }}
         run: pytest -o addopts='--import-mode=importlib' tests/orchestration/ -v --tb=short
 
+      - name: Run CLI smoke tests
+        if: always()
+        run: bash tests/run.sh
+
       - name: Run security integration tests
         if: always()
         env:
