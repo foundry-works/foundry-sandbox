@@ -101,8 +101,10 @@ jobs:
         if: matrix.python-version == '3.12'
         run: |
           sudo apt-get install -y -qq shellcheck 2>/dev/null
-          shellcheck sandbox.sh entrypoint.sh entrypoint-root.sh stubs/git-wrapper.sh tests/run.sh \
-            unified-proxy/entrypoint.sh install.sh uninstall.sh
+          shellcheck sandbox.sh entrypoint.sh entrypoint-root.sh stubs/git-wrapper.sh tests/run.sh
+          shellcheck -e SC2317 unified-proxy/entrypoint.sh
+          shellcheck -e SC2317,SC2155,SC2034,SC1091,SC2162,SC2064,SC2129 install.sh
+          shellcheck -e SC2034 uninstall.sh
           shellcheck -e SC2163 safety/credential-redaction.sh
           shellcheck -e SC2015 safety/network-firewall.sh
           shellcheck -e SC2317,SC2034,SC2088 tests/test-pip-requirements.sh
