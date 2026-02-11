@@ -12,7 +12,6 @@ import pytest
 from git_policies import (
     DEFAULT_PROTECTED_PATTERNS,
     ZERO_SHA,
-    BranchPolicyConfig,
     check_protected_branches,
     load_branch_policy,
 )

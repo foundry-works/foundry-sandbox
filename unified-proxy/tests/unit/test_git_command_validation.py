@@ -11,9 +11,7 @@ from unittest.mock import patch
 import pytest
 
 from git_command_validation import (
-    ALLOWED_COMMANDS,
     ALLOWED_MARKETPLACES,
-    GLOBAL_BLOCKED_FLAGS,
     MAX_ARG_LENGTH,
     MAX_ARGS_COUNT,
     MAX_STDIN_SIZE,
