@@ -14,6 +14,7 @@ from __future__ import annotations
 import re
 import subprocess
 import shutil
+import time
 from pathlib import Path
 
 from foundry_sandbox.constants import TIMEOUT_GIT_QUERY, TIMEOUT_GIT_TRANSFER
@@ -451,5 +452,15 @@ def remove_worktree(worktree_path: str | Path) -> None:
         if remove_result.returncode == 0:
             return
 
-    # Fall back to rm -rf
-    shutil.rmtree(wt_p, ignore_errors=True)
+    # Fall back to rm -rf with retry for Docker lock release
+    for attempt in range(3):
+        try:
+            shutil.rmtree(wt_p)
+        except OSError:
+            if not wt_p.exists():
+                return
+            if attempt < 2:
+                time.sleep(0.5)
+                continue
+            raise  # Final attempt — propagate the error
+        return  # Success

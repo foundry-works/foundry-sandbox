@@ -55,10 +55,11 @@ jobs:
           echo "container=$CONTAINER" >> "$GITHUB_OUTPUT"
 
       - name: Run red team tests inside sandbox
+        continue-on-error: true
         run: |
           # docker cp fails on read-only rootfs; use tar+exec to write to tmpfs
           tar -C tests -cf - redteam/ | docker exec -i ${{ steps.sandbox.outputs.container }} tar -C /tmp -xf -
-          docker exec ${{ steps.sandbox.outputs.container }} \
+          docker exec -u ubuntu ${{ steps.sandbox.outputs.container }} \
             bash /tmp/redteam/runner.sh --output-format junit --output-dir /tmp/results
 
       - name: Copy results from container

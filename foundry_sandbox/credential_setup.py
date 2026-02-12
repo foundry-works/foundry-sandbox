@@ -128,7 +128,7 @@ def _stage_create_config_dirs(container_id: str) -> list[str]:
     ]
     for dir_path in dirs:
         subprocess.run(
-            ["docker", "exec", container_id, "mkdir", "-p", dir_path],
+            ["docker", "exec", "-u", CONTAINER_USER, container_id, "mkdir", "-p", dir_path],
             check=False,
             capture_output=True,
             timeout=TIMEOUT_DOCKER_EXEC,
@@ -162,17 +162,20 @@ def _stage_setup_claude_config(
     else:
         log_debug("~/.claude.json not found, skipping")
 
-    # Fix ownership on .claude dirs
-    subprocess.run(
-        [
-            "docker", "exec", container_id,
-            "chown", "-R", f"{CONTAINER_USER}:{CONTAINER_USER}",
-            f"{CONTAINER_HOME}/.claude",
-        ],
-        check=False,
-        capture_output=True,
-        timeout=TIMEOUT_DOCKER_EXEC,
-    )
+    # Fix ownership on .claude dirs — only needed when running as root
+    # (credential isolation mode). Without isolation, the container already
+    # runs as CONTAINER_USER and chown would fail (non-root can't chown).
+    if isolate_credentials:
+        subprocess.run(
+            [
+                "docker", "exec", container_id,
+                "chown", "-R", f"{CONTAINER_USER}:{CONTAINER_USER}",
+                f"{CONTAINER_HOME}/.claude",
+            ],
+            check=False,
+            capture_output=True,
+            timeout=TIMEOUT_DOCKER_EXEC,
+        )
 
     log_step("Ensuring Claude onboarding")
     ensure_claude_onboarding(container_id)
@@ -479,22 +482,26 @@ def _stage_fix_ownership(
     dirs: list[str],
     *,
     enable_ssh: bool,
+    isolate_credentials: bool = True,
 ) -> None:
     """Stage 8: chown operations and SSH preflight."""
     from foundry_sandbox.container_setup import ssh_agent_preflight
 
-    log_step("Fixing ownership")
-    for dir_path in dirs:
-        subprocess.run(
-            [
-                "docker", "exec", container_id,
-                "chown", "-R", f"{CONTAINER_USER}:{CONTAINER_USER}",
-                dir_path,
-            ],
-            check=False,
-            capture_output=True,
-            timeout=TIMEOUT_DOCKER_EXEC,
-        )
+    # chown only needed when running as root (credential isolation mode).
+    # Without isolation, the container runs as CONTAINER_USER already.
+    if isolate_credentials:
+        log_step("Fixing ownership")
+        for dir_path in dirs:
+            subprocess.run(
+                [
+                    "docker", "exec", container_id,
+                    "chown", "-R", f"{CONTAINER_USER}:{CONTAINER_USER}",
+                    dir_path,
+                ],
+                check=False,
+                capture_output=True,
+                timeout=TIMEOUT_DOCKER_EXEC,
+            )
 
     if enable_ssh:
         log_step("SSH agent preflight")
@@ -550,7 +557,11 @@ def copy_configs_to_container(
         branch=branch,
         repo_url=repo_url,
     )
-    _stage_fix_ownership(container_id, dirs, enable_ssh=enable_ssh)
+    _stage_fix_ownership(
+        container_id, dirs,
+        enable_ssh=enable_ssh,
+        isolate_credentials=isolate_credentials,
+    )
 
     if get_sandbox_debug():
         log_debug("Config copy complete")

@@ -481,7 +481,7 @@ class TestRemoveWorktree:
     @patch("foundry_sandbox.git_worktree.shutil.rmtree")
     @patch("foundry_sandbox.git_worktree.subprocess.run")
     def test_fallback_to_rmtree(self, mock_run, mock_rmtree, tmp_path):
-        """Failed git worktree remove should fall back to shutil.rmtree."""
+        """Failed git worktree remove should fall back to shutil.rmtree with retry."""
         wt = tmp_path / "worktree"
         wt.mkdir()
 
@@ -492,7 +492,7 @@ class TestRemoveWorktree:
 
         git_worktree.remove_worktree(wt)
 
-        mock_rmtree.assert_called_once_with(wt, ignore_errors=True)
+        mock_rmtree.assert_called_once_with(wt)
 
 
 # ============================================================================
