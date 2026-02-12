@@ -413,8 +413,13 @@ def _stage_setup_git_config(container_id: str, home: Path, host_user: str) -> No
     # Re-apply git security hardening after host gitconfig copy.
     # The entrypoint sets these in ~/.gitconfig, but the host copy above
     # overwrites the file, so we must re-apply them here.
+    # Use --file with explicit path instead of --global because in
+    # credential isolation mode the compose override sets user:root,
+    # so docker exec -u ubuntu inherits HOME=/root and --global would
+    # write to /root/.gitconfig instead of /home/ubuntu/.gitconfig.
     log_step("Applying git security hardening")
     _git_cfg = "/usr/bin/git"
+    _gitconfig_path = f"{CONTAINER_HOME}/.gitconfig"
     for key, value in [
         ("core.hooksPath", "/dev/null"),
         ("init.templateDir", ""),
@@ -424,7 +429,7 @@ def _stage_setup_git_config(container_id: str, home: Path, host_user: str) -> No
     ]:
         try:
             docker_exec_text(
-                container_id, _git_cfg, "config", "--global", key, value,
+                container_id, _git_cfg, "config", "--file", _gitconfig_path, key, value,
             )
         except subprocess.CalledProcessError:
             log_warn(f"Failed to set git hardening: {key}={value}")

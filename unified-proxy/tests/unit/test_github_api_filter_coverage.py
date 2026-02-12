@@ -140,13 +140,16 @@ class TestConditionalPROperations:
             assert flow.response is not None
             assert flow.response.status_code == 403
 
-    def test_pr_reviews_blocked_by_default(self, api_filter):
-        """Test POST /repos/owner/repo/pulls/1/reviews is blocked by default."""
+    def test_pr_reviews_allowed_for_body_inspection(self, api_filter):
+        """Test POST /repos/owner/repo/pulls/1/reviews is always allowed.
+
+        PR reviews pass through to policy_engine.py which does body inspection
+        to block APPROVE events while allowing COMMENT/REQUEST_CHANGES.
+        """
         with patch.object(github_api_filter, "ALLOW_PR_OPERATIONS", False):
             flow = _make_flow("POST", "/repos/owner/repo/pulls/1/reviews")
             api_filter.request(flow)
-            assert flow.response is not None
-            assert flow.response.status_code == 403
+            assert flow.response is None  # Allowed through
 
     def test_patch_pulls_blocked_by_default(self, api_filter):
         """Test PATCH /repos/owner/repo/pulls/1 is blocked by default."""

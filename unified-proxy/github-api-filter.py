@@ -135,6 +135,11 @@ ALLOWED_OPERATIONS = [
 
     # --- GraphQL (allowed but mutations are filtered - see request handler) ---
     ("POST", r"^/graphql$"),
+
+    # --- PR reviews (body inspection in policy_engine.py blocks APPROVE only) ---
+    # Allowed here so COMMENT and REQUEST_CHANGES reviews pass through.
+    # GraphQL addPullRequestReview is blocked separately (cannot inspect variables).
+    ("POST", r"^/repos/[^/]+/[^/]+/pulls/\d+/reviews$"),
 ]
 
 # Conditionally allowed PR operations (only when ALLOW_PR_OPERATIONS is set)
@@ -142,7 +147,6 @@ ALLOWED_OPERATIONS = [
 CONDITIONAL_PR_OPERATIONS = [
     ("POST", r"^/repos/[^/]+/[^/]+/pulls$"),  # Create PR
     ("POST", r"^/repos/[^/]+/[^/]+/pulls/\d+/comments$"),  # Add PR comment
-    ("POST", r"^/repos/[^/]+/[^/]+/pulls/\d+/reviews$"),  # Add PR review
     ("PATCH", r"^/repos/[^/]+/[^/]+/pulls/\d+$"),  # Update PR (close, update title/body)
 ]
 
