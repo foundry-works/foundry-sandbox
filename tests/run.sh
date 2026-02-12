@@ -2,7 +2,6 @@
 
 set -e
 
-SCRIPT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 CLI="${SANDBOX_CLI:-python3 -m foundry_sandbox.cli}"
 
 failures=0

@@ -60,3 +60,22 @@ jobs:
         run: gh release create ${{ github.ref_name }} --generate-notes
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  publish:
+    needs: [release]
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+    environment: pypi
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install build tools
+        run: pip install build
+      - name: Build package
+        run: python -m build
+      - name: Publish to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
