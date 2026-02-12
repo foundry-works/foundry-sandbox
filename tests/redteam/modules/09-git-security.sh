@@ -9,9 +9,10 @@ run_tests() {
     echo ""
     echo "Testing git security boundaries..."
 
-    # Check git config
+    # Check git config (use /usr/bin/git to bypass the git wrapper which
+    # intercepts commands when CWD is /workspace and proxies to git API)
     info "Git configuration:"
-    git config --global --list 2>/dev/null | grep -E "(user|credential)" | sed 's/^/    /' || echo "    (no relevant config)"
+    /usr/bin/git config --global --list 2>/dev/null | grep -E "(user|credential)" | sed 's/^/    /' || echo "    (no relevant config)"
 
     # Check if we can see the gateway session
     if [[ -f "$HOME/.git-session-token" ]]; then
@@ -34,8 +35,14 @@ run_tests() {
     echo ""
     echo "Testing git hook hardening (core.hooksPath, fsmonitor, etc.)..."
 
+    # Use /usr/bin/git directly to bypass the git wrapper at /usr/local/bin/git.
+    # The wrapper intercepts all commands when CWD is /workspace and proxies them
+    # to the git API, which rejects bare 'git config <key>' (no --get flag).
+    # We need the real binary to read the sandbox user's global gitconfig.
+    _REAL_GIT=/usr/bin/git
+
     # Test 1: core.hooksPath should be /dev/null
-    HOOKS_PATH=$(git config --global core.hooksPath 2>/dev/null)
+    HOOKS_PATH=$($_REAL_GIT config --global core.hooksPath 2>/dev/null)
     if [[ "$HOOKS_PATH" == "/dev/null" ]]; then
         test_pass "core.hooksPath is /dev/null"
     else
@@ -43,7 +50,7 @@ run_tests() {
     fi
 
     # Test 2: core.fsmonitor should be false
-    FSMONITOR=$(git config --global core.fsmonitor 2>/dev/null)
+    FSMONITOR=$($_REAL_GIT config --global core.fsmonitor 2>/dev/null)
     if [[ "$FSMONITOR" == "false" ]]; then
         test_pass "core.fsmonitor is false"
     else
@@ -51,7 +58,7 @@ run_tests() {
     fi
 
     # Test 3: init.templateDir should be empty string
-    TEMPLATE_DIR=$(git config --global init.templateDir 2>/dev/null)
+    TEMPLATE_DIR=$($_REAL_GIT config --global init.templateDir 2>/dev/null)
     if [[ "$TEMPLATE_DIR" == "" ]]; then
         test_pass "init.templateDir is empty string"
     else
@@ -59,7 +66,7 @@ run_tests() {
     fi
 
     # Test 4: core.fsmonitorHookVersion should be 0
-    FSMONITOR_VER=$(git config --global core.fsmonitorHookVersion 2>/dev/null)
+    FSMONITOR_VER=$($_REAL_GIT config --global core.fsmonitorHookVersion 2>/dev/null)
     if [[ "$FSMONITOR_VER" == "0" ]]; then
         test_pass "core.fsmonitorHookVersion is 0"
     else
@@ -67,7 +74,7 @@ run_tests() {
     fi
 
     # Test 5: receive.denyCurrentBranch should be refuse
-    DENY_CURRENT=$(git config --global receive.denyCurrentBranch 2>/dev/null)
+    DENY_CURRENT=$($_REAL_GIT config --global receive.denyCurrentBranch 2>/dev/null)
     if [[ "$DENY_CURRENT" == "refuse" ]]; then
         test_pass "receive.denyCurrentBranch is refuse"
     else
@@ -85,8 +92,8 @@ run_tests() {
     mkdir -p "$HOOK_REPO_DIR"
     (
         cd "$HOOK_REPO_DIR"
-        git init --quiet
-        git commit --allow-empty -m "init" --quiet
+        $_REAL_GIT init --quiet
+        $_REAL_GIT commit --allow-empty -m "init" --quiet
         mkdir -p .git/hooks
         cat > .git/hooks/post-checkout << HOOKEOF
 #!/bin/bash
@@ -96,7 +103,8 @@ HOOKEOF
     )
 
     # Clone the repo - hook should NOT fire because core.hooksPath=/dev/null
-    git clone --quiet "$HOOK_REPO_DIR" "$HOOK_TEST_DIR" 2>/dev/null
+    # Use real git binary to test local gitconfig hardening, not the proxy wrapper
+    $_REAL_GIT clone --quiet "$HOOK_REPO_DIR" "$HOOK_TEST_DIR" 2>/dev/null
 
     if [[ -f "$HOOK_MARKER" ]]; then
         test_fail "Malicious post-checkout hook executed during clone!"
