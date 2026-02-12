@@ -54,14 +54,15 @@ jobs:
 
       - name: Run red team tests inside sandbox
         run: |
-          docker cp tests/redteam/ ${{ steps.sandbox.outputs.container }}:/tmp/redteam/
+          # docker cp fails on read-only rootfs; use tar+exec to write to tmpfs
+          tar -C tests -cf - redteam/ | docker exec -i ${{ steps.sandbox.outputs.container }} tar -C /tmp -xf -
           docker exec ${{ steps.sandbox.outputs.container }} \
             bash /tmp/redteam/runner.sh --output-format junit --output-dir /tmp/results
 
       - name: Copy results from container
         if: always()
         run: |
-          docker cp ${{ steps.sandbox.outputs.container }}:/tmp/results/redteam-junit.xml . || true
+          docker exec ${{ steps.sandbox.outputs.container }} cat /tmp/results/redteam-junit.xml > redteam-junit.xml 2>/dev/null || true
 
       - name: Upload test results
         if: always()
