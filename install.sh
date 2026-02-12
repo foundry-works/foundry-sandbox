@@ -432,8 +432,12 @@ fi
 
 echo ""
 
-# Add alias to shell rc
-ALIAS_LINE="alias cast='$INSTALL_DIR/sandbox.sh'"
+# Install Python package (provides `cast` entry point via pyproject.toml)
+echo -e "${BLUE}Installing Python package...${NC}"
+pip install -e "$INSTALL_DIR" >/dev/null 2>&1 && \
+    echo -e "  ${GREEN}✓${NC} cast CLI installed ($(which cast 2>/dev/null || echo 'restart shell to use'))" || \
+    echo -e "  ${RED}✗${NC} pip install failed — run manually: pip install -e $INSTALL_DIR"
+
 COMPLETION_LINE="source '$INSTALL_DIR/completion.bash'"
 
 add_to_shell_rc() {
@@ -451,7 +455,6 @@ add_to_shell_rc() {
 }
 
 echo -e "${BLUE}Configuring shell...${NC}"
-add_to_shell_rc "$ALIAS_LINE" "cast alias"
 add_to_shell_rc "$COMPLETION_LINE" "tab completion"
 
 echo ""
@@ -463,7 +466,7 @@ if [[ "$BUILD_IMAGE" == true ]]; then
     echo ""
 
     cd "$INSTALL_DIR"
-    if ./sandbox.sh build $NO_CACHE $WITHOUT_OPENCODE; then
+    if cast build $NO_CACHE $WITHOUT_OPENCODE; then
         echo ""
         echo -e "${GREEN}Docker image built successfully.${NC}"
     else

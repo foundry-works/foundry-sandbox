@@ -158,7 +158,7 @@ The sandbox contains **zero real credentials**:
 | ANTHROPIC_API_KEY | Unified Proxy container | `CREDENTIAL_PROXY_PLACEHOLDER` |
 | OPENAI_API_KEY | Unified Proxy container | `CREDENTIAL_PROXY_PLACEHOLDER` |
 | Other API keys | Unified Proxy container | `CREDENTIAL_PROXY_PLACEHOLDER` |
-| GIT_CREDENTIAL_TOKEN | Unified Proxy subprocess env only | Nothing (never exposed) |
+| FOUNDRY_PROXY_GIT_TOKEN | Unified Proxy subprocess env only | Nothing (never exposed) |
 
 - Real credentials never enter sandbox containers
 - Sandboxes are registered with the proxy via container registration

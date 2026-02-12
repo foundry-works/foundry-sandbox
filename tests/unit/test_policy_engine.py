@@ -115,9 +115,9 @@ class TestDefaultDeny:
         return flow
 
     @patch("addons.policy_engine.get_container_config")
-    @patch("addons.policy_engine.ctx")
+    @patch("addons.policy_engine.logger")
     def test_unidentified_container_denied(
-        self, mock_ctx, mock_get_config, policy_engine, mock_flow
+        self, mock_logger, mock_get_config, policy_engine, mock_flow
     ):
         """Test that unidentified containers are denied."""
         # Setup: container_identity returned None (no identity)
@@ -138,18 +138,18 @@ class TestDefaultDeny:
         assert mock_flow.response is None
 
     @patch("addons.policy_engine.get_container_config")
-    @patch("addons.policy_engine.ctx")
+    @patch("addons.policy_engine.logger")
     def test_identity_failure_logged(
-        self, mock_ctx, mock_get_config, policy_engine, mock_flow
+        self, mock_logger, mock_get_config, policy_engine, mock_flow
     ):
         """Test that identity verification failure is logged."""
         mock_get_config.return_value = None
-        mock_ctx.log = Mock()
+
 
         policy_engine.request(mock_flow)
 
         # Verify logging was called
-        assert mock_ctx.log.warn.called
+        mock_logger.warning.assert_called()
 
 
 class TestAllowlistMatching:
@@ -192,13 +192,13 @@ class TestAllowlistMatching:
         return config
 
     @patch("addons.policy_engine.get_container_config")
-    @patch("addons.policy_engine.ctx")
+    @patch("addons.policy_engine.logger")
     def test_identified_container_allowed(
-        self, mock_ctx, mock_get_config, policy_engine, mock_flow, mock_container_config
+        self, mock_logger, mock_get_config, policy_engine, mock_flow, mock_container_config
     ):
         """Test that identified containers are allowed for allowlisted domains."""
         mock_get_config.return_value = mock_container_config
-        mock_ctx.log = Mock()
+
 
         policy_engine.request(mock_flow)
 
@@ -213,27 +213,27 @@ class TestAllowlistMatching:
         assert mock_flow.response is None
 
     @patch("addons.policy_engine.get_container_config")
-    @patch("addons.policy_engine.ctx")
+    @patch("addons.policy_engine.logger")
     def test_allowed_request_logged(
-        self, mock_ctx, mock_get_config, policy_engine, mock_flow, mock_container_config
+        self, mock_logger, mock_get_config, policy_engine, mock_flow, mock_container_config
     ):
         """Test that allowed requests are logged."""
         mock_get_config.return_value = mock_container_config
-        mock_ctx.log = Mock()
+
 
         policy_engine.request(mock_flow)
 
         # Verify info logging
-        assert mock_ctx.log.info.called
+        mock_logger.info.assert_called()
 
     @patch("addons.policy_engine.get_container_config")
-    @patch("addons.policy_engine.ctx")
+    @patch("addons.policy_engine.logger")
     def test_allowlisted_hosts_allowed(
-        self, mock_ctx, mock_get_config, policy_engine, mock_container_config
+        self, mock_logger, mock_get_config, policy_engine, mock_container_config
     ):
         """Test that allowlisted hosts are allowed for identified containers."""
         mock_get_config.return_value = mock_container_config
-        mock_ctx.log = Mock()
+
 
         # Test various allowlisted hosts
         hosts = [
@@ -259,13 +259,13 @@ class TestAllowlistMatching:
 
     @patch("addons.policy_engine.http.Response.make", side_effect=make_mock_response)
     @patch("addons.policy_engine.get_container_config")
-    @patch("addons.policy_engine.ctx")
+    @patch("addons.policy_engine.logger")
     def test_non_allowlisted_hosts_denied(
-        self, mock_ctx, mock_get_config, mock_response_make, policy_engine, mock_container_config
+        self, mock_logger, mock_get_config, mock_response_make, policy_engine, mock_container_config
     ):
         """Test that non-allowlisted hosts are denied (default-deny)."""
         mock_get_config.return_value = mock_container_config
-        mock_ctx.log = Mock()
+
 
         # Test non-allowlisted hosts
         hosts = [
@@ -312,13 +312,13 @@ class TestBlocklistOverride:
 
     @patch("addons.policy_engine.http.Response.make", side_effect=make_mock_response)
     @patch("addons.policy_engine.get_container_config")
-    @patch("addons.policy_engine.ctx")
+    @patch("addons.policy_engine.logger")
     def test_github_pr_merge_blocked(
-        self, mock_ctx, mock_get_config, mock_response_make, policy_engine, mock_container_config
+        self, mock_logger, mock_get_config, mock_response_make, policy_engine, mock_container_config
     ):
         """Test that GitHub PR merge operations are blocked."""
         mock_get_config.return_value = mock_container_config
-        mock_ctx.log = Mock()
+
 
         # Test PR merge endpoint
         flow = Mock()
@@ -344,13 +344,13 @@ class TestBlocklistOverride:
 
     @patch("addons.policy_engine.http.Response.make", side_effect=make_mock_response)
     @patch("addons.policy_engine.get_container_config")
-    @patch("addons.policy_engine.ctx")
+    @patch("addons.policy_engine.logger")
     def test_github_release_creation_blocked(
-        self, mock_ctx, mock_get_config, mock_response_make, policy_engine, mock_container_config
+        self, mock_logger, mock_get_config, mock_response_make, policy_engine, mock_container_config
     ):
         """Test that GitHub release creation is blocked."""
         mock_get_config.return_value = mock_container_config
-        mock_ctx.log = Mock()
+
 
         flow = Mock()
         flow.request = Mock()
@@ -374,13 +374,13 @@ class TestBlocklistOverride:
 
     @patch("addons.policy_engine.http.Response.make", side_effect=make_mock_response)
     @patch("addons.policy_engine.get_container_config")
-    @patch("addons.policy_engine.ctx")
+    @patch("addons.policy_engine.logger")
     def test_github_pr_merge_variations_blocked(
-        self, mock_ctx, mock_get_config, mock_response_make, policy_engine, mock_container_config
+        self, mock_logger, mock_get_config, mock_response_make, policy_engine, mock_container_config
     ):
         """Test various PR merge path patterns are blocked."""
         mock_get_config.return_value = mock_container_config
-        mock_ctx.log = Mock()
+
 
         merge_paths = [
             "/repos/user/project/pulls/1/merge",
@@ -404,13 +404,13 @@ class TestBlocklistOverride:
             assert flow.response.status_code == 403
 
     @patch("addons.policy_engine.get_container_config")
-    @patch("addons.policy_engine.ctx")
+    @patch("addons.policy_engine.logger")
     def test_github_similar_paths_not_blocked(
-        self, mock_ctx, mock_get_config, policy_engine, mock_container_config
+        self, mock_logger, mock_get_config, policy_engine, mock_container_config
     ):
         """Test that similar but different GitHub paths are not blocked."""
         mock_get_config.return_value = mock_container_config
-        mock_ctx.log = Mock()
+
 
         # These paths should NOT match the blocklist patterns (domain is in allowlist)
         allowed_paths = [
@@ -439,13 +439,13 @@ class TestBlocklistOverride:
             assert flow.response is None
 
     @patch("addons.policy_engine.get_container_config")
-    @patch("addons.policy_engine.ctx")
+    @patch("addons.policy_engine.logger")
     def test_blocklist_logged_as_warning(
-        self, mock_ctx, mock_get_config, policy_engine, mock_container_config
+        self, mock_logger, mock_get_config, policy_engine, mock_container_config
     ):
         """Test that blocklist denials are logged as warnings."""
         mock_get_config.return_value = mock_container_config
-        mock_ctx.log = Mock()
+
 
         flow = Mock()
         flow.request = Mock()
@@ -458,7 +458,7 @@ class TestBlocklistOverride:
         policy_engine.request(flow)
 
         # Verify warning logged
-        assert mock_ctx.log.warn.called
+        mock_logger.warning.assert_called()
 
 
 class TestEvaluationOrder:
@@ -479,13 +479,13 @@ class TestEvaluationOrder:
         return config
 
     @patch("addons.policy_engine.get_container_config")
-    @patch("addons.policy_engine.ctx")
+    @patch("addons.policy_engine.logger")
     def test_identity_checked_first(
-        self, mock_ctx, mock_get_config, policy_engine
+        self, mock_logger, mock_get_config, policy_engine
     ):
         """Test that identity verification is checked before other policies."""
         mock_get_config.return_value = None
-        mock_ctx.log = Mock()
+
 
         # Even for a blocked GitHub endpoint, identity check fails first
         flow = Mock()
@@ -503,13 +503,13 @@ class TestEvaluationOrder:
         assert decision["allowed"] is False
 
     @patch("addons.policy_engine.get_container_config")
-    @patch("addons.policy_engine.ctx")
+    @patch("addons.policy_engine.logger")
     def test_blocklist_checked_after_identity(
-        self, mock_ctx, mock_get_config, policy_engine, mock_container_config
+        self, mock_logger, mock_get_config, policy_engine, mock_container_config
     ):
         """Test that blocklist is checked after identity verification."""
         mock_get_config.return_value = mock_container_config
-        mock_ctx.log = Mock()
+
 
         # Container is identified, so blocklist check happens
         flow = Mock()
@@ -528,13 +528,13 @@ class TestEvaluationOrder:
         assert decision["container_id"] == "test-container"
 
     @patch("addons.policy_engine.get_container_config")
-    @patch("addons.policy_engine.ctx")
+    @patch("addons.policy_engine.logger")
     def test_allowlist_checked_after_blocklist(
-        self, mock_ctx, mock_get_config, policy_engine, mock_container_config
+        self, mock_logger, mock_get_config, policy_engine, mock_container_config
     ):
         """Test that allowlist applies if blocklist doesn't match."""
         mock_get_config.return_value = mock_container_config
-        mock_ctx.log = Mock()
+
 
         # Non-blocked GitHub request
         flow = Mock()
@@ -570,13 +570,13 @@ class TestConflictResolution:
         return config
 
     @patch("addons.policy_engine.get_container_config")
-    @patch("addons.policy_engine.ctx")
+    @patch("addons.policy_engine.logger")
     def test_blocklist_overrides_identity_allowlist(
-        self, mock_ctx, mock_get_config, policy_engine, mock_container_config
+        self, mock_logger, mock_get_config, policy_engine, mock_container_config
     ):
         """Test that blocklist overrides identity-based allowlist."""
         mock_get_config.return_value = mock_container_config
-        mock_ctx.log = Mock()
+
 
         # Container is identified (would normally be allowed)
         # But requests blocked GitHub endpoint
@@ -597,13 +597,13 @@ class TestConflictResolution:
 
     @patch("addons.policy_engine.http.Response.make", side_effect=make_mock_response)
     @patch("addons.policy_engine.get_container_config")
-    @patch("addons.policy_engine.ctx")
+    @patch("addons.policy_engine.logger")
     def test_identified_but_blocked_creates_403(
-        self, mock_ctx, mock_get_config, mock_response_make, policy_engine, mock_container_config
+        self, mock_logger, mock_get_config, mock_response_make, policy_engine, mock_container_config
     ):
         """Test that identified containers still get 403 for blocked requests."""
         mock_get_config.return_value = mock_container_config
-        mock_ctx.log = Mock()
+
 
         flow = Mock()
         flow.request = Mock()
@@ -622,13 +622,13 @@ class TestConflictResolution:
 
     @patch("addons.policy_engine.http.Response.make", side_effect=make_mock_response)
     @patch("addons.policy_engine.get_container_config")
-    @patch("addons.policy_engine.ctx")
+    @patch("addons.policy_engine.logger")
     def test_multiple_requests_from_same_container(
-        self, mock_ctx, mock_get_config, mock_response_make, policy_engine, mock_container_config
+        self, mock_logger, mock_get_config, mock_response_make, policy_engine, mock_container_config
     ):
         """Test conflict resolution across multiple requests from same container."""
         mock_get_config.return_value = mock_container_config
-        mock_ctx.log = Mock()
+
 
         requests = [
             ("GET", "/repos/owner/repo", True, "allowlist"),  # Allowed
@@ -1052,14 +1052,14 @@ class TestEndpointPathEnforcement:
 
     @patch("addons.policy_engine.http.Response.make", side_effect=make_mock_response)
     @patch("addons.policy_engine.get_container_config")
-    @patch("addons.policy_engine.ctx")
+    @patch("addons.policy_engine.logger")
     def test_allowed_repo_path(
-        self, mock_ctx, mock_get_config, mock_response_make,
+        self, mock_logger, mock_get_config, mock_response_make,
         policy_engine_with_config, mock_container_config
     ):
         """GET /repos/owner/repo is allowed."""
         mock_get_config.return_value = mock_container_config
-        mock_ctx.log = Mock()
+
         flow = self._make_flow("GET", "api.github.com", "/repos/owner/repo")
 
         policy_engine_with_config.request(flow)
@@ -1069,14 +1069,14 @@ class TestEndpointPathEnforcement:
 
     @patch("addons.policy_engine.http.Response.make", side_effect=make_mock_response)
     @patch("addons.policy_engine.get_container_config")
-    @patch("addons.policy_engine.ctx")
+    @patch("addons.policy_engine.logger")
     def test_disallowed_method_denied(
-        self, mock_ctx, mock_get_config, mock_response_make,
+        self, mock_logger, mock_get_config, mock_response_make,
         policy_engine_with_config, mock_container_config
     ):
         """HEAD method is denied when endpoint methods do not include HEAD."""
         mock_get_config.return_value = mock_container_config
-        mock_ctx.log = Mock()
+
         flow = self._make_flow("HEAD", "api.github.com", "/repos/owner/repo")
 
         policy_engine_with_config.request(flow)
@@ -1088,14 +1088,14 @@ class TestEndpointPathEnforcement:
 
     @patch("addons.policy_engine.http.Response.make", side_effect=make_mock_response)
     @patch("addons.policy_engine.get_container_config")
-    @patch("addons.policy_engine.ctx")
+    @patch("addons.policy_engine.logger")
     def test_blocked_hooks_path(
-        self, mock_ctx, mock_get_config, mock_response_make,
+        self, mock_logger, mock_get_config, mock_response_make,
         policy_engine_with_config, mock_container_config
     ):
         """POST /repos/owner/repo/hooks is denied (not in allowed paths)."""
         mock_get_config.return_value = mock_container_config
-        mock_ctx.log = Mock()
+
         flow = self._make_flow("POST", "api.github.com", "/repos/owner/repo/hooks")
 
         policy_engine_with_config.request(flow)
@@ -1106,14 +1106,14 @@ class TestEndpointPathEnforcement:
 
     @patch("addons.policy_engine.http.Response.make", side_effect=make_mock_response)
     @patch("addons.policy_engine.get_container_config")
-    @patch("addons.policy_engine.ctx")
+    @patch("addons.policy_engine.logger")
     def test_blocked_actions_secrets(
-        self, mock_ctx, mock_get_config, mock_response_make,
+        self, mock_logger, mock_get_config, mock_response_make,
         policy_engine_with_config, mock_container_config
     ):
         """POST /repos/owner/repo/actions/secrets is denied (not in allowed paths)."""
         mock_get_config.return_value = mock_container_config
-        mock_ctx.log = Mock()
+
         flow = self._make_flow("POST", "api.github.com", "/repos/owner/repo/actions/secrets")
 
         policy_engine_with_config.request(flow)
@@ -1124,14 +1124,14 @@ class TestEndpointPathEnforcement:
 
     @patch("addons.policy_engine.http.Response.make", side_effect=make_mock_response)
     @patch("addons.policy_engine.get_container_config")
-    @patch("addons.policy_engine.ctx")
+    @patch("addons.policy_engine.logger")
     def test_path_traversal_blocked(
-        self, mock_ctx, mock_get_config, mock_response_make,
+        self, mock_logger, mock_get_config, mock_response_make,
         policy_engine_with_config, mock_container_config
     ):
         """Path traversal with .. resolves and is checked against allowed paths."""
         mock_get_config.return_value = mock_container_config
-        mock_ctx.log = Mock()
+
         # /repos/owner/repo/../../../admin resolves to /admin — not in allowed paths
         flow = self._make_flow("GET", "api.github.com", "/repos/owner/repo/../../../admin")
 
@@ -1143,14 +1143,14 @@ class TestEndpointPathEnforcement:
 
     @patch("addons.policy_engine.http.Response.make", side_effect=make_mock_response)
     @patch("addons.policy_engine.get_container_config")
-    @patch("addons.policy_engine.ctx")
+    @patch("addons.policy_engine.logger")
     def test_double_encoded_path_rejected(
-        self, mock_ctx, mock_get_config, mock_response_make,
+        self, mock_logger, mock_get_config, mock_response_make,
         policy_engine_with_config, mock_container_config
     ):
         """%252F double-encoded path is rejected."""
         mock_get_config.return_value = mock_container_config
-        mock_ctx.log = Mock()
+
         flow = self._make_flow("GET", "api.github.com", "/repos/%252e%252e/evil")
 
         policy_engine_with_config.request(flow)
@@ -1161,14 +1161,14 @@ class TestEndpointPathEnforcement:
 
     @patch("addons.policy_engine.http.Response.make", side_effect=make_mock_response)
     @patch("addons.policy_engine.get_container_config")
-    @patch("addons.policy_engine.ctx")
+    @patch("addons.policy_engine.logger")
     def test_repeated_separators_normalized(
-        self, mock_ctx, mock_get_config, mock_response_make,
+        self, mock_logger, mock_get_config, mock_response_make,
         policy_engine_with_config, mock_container_config
     ):
         """Repeated slashes are collapsed before matching."""
         mock_get_config.return_value = mock_container_config
-        mock_ctx.log = Mock()
+
         # /repos//owner///repo → /repos/owner/repo (matches /repos/*/*)
         flow = self._make_flow("GET", "api.github.com", "/repos//owner///repo")
 
@@ -1179,14 +1179,14 @@ class TestEndpointPathEnforcement:
 
     @patch("addons.policy_engine.http.Response.make", side_effect=make_mock_response)
     @patch("addons.policy_engine.get_container_config")
-    @patch("addons.policy_engine.ctx")
+    @patch("addons.policy_engine.logger")
     def test_trailing_slash_normalized(
-        self, mock_ctx, mock_get_config, mock_response_make,
+        self, mock_logger, mock_get_config, mock_response_make,
         policy_engine_with_config, mock_container_config
     ):
         """Trailing slashes are stripped before matching."""
         mock_get_config.return_value = mock_container_config
-        mock_ctx.log = Mock()
+
         flow = self._make_flow("GET", "api.github.com", "/repos/owner/repo/")
 
         policy_engine_with_config.request(flow)
@@ -1195,14 +1195,14 @@ class TestEndpointPathEnforcement:
         assert decision["allowed"] is True
 
     @patch("addons.policy_engine.get_container_config")
-    @patch("addons.policy_engine.ctx")
+    @patch("addons.policy_engine.logger")
     def test_non_endpoint_host_domain_level_only(
-        self, mock_ctx, mock_get_config,
+        self, mock_logger, mock_get_config,
         policy_engine_with_config, mock_container_config
     ):
         """Hosts without endpoint config use domain-level allowlisting only."""
         mock_get_config.return_value = mock_container_config
-        mock_ctx.log = Mock()
+
         # pypi.org is in domains but has no http_endpoints entry
         flow = self._make_flow("GET", "pypi.org", "/any/path/here")
 
@@ -1213,14 +1213,14 @@ class TestEndpointPathEnforcement:
 
     @patch("addons.policy_engine.http.Response.make", side_effect=make_mock_response)
     @patch("addons.policy_engine.get_container_config")
-    @patch("addons.policy_engine.ctx")
+    @patch("addons.policy_engine.logger")
     def test_unmatched_path_denied(
-        self, mock_ctx, mock_get_config, mock_response_make,
+        self, mock_logger, mock_get_config, mock_response_make,
         policy_engine_with_config, mock_container_config
     ):
         """Paths not matching any allowed pattern are denied."""
         mock_get_config.return_value = mock_container_config
-        mock_ctx.log = Mock()
+
         flow = self._make_flow("GET", "api.github.com", "/admin/something")
 
         policy_engine_with_config.request(flow)
@@ -1231,14 +1231,14 @@ class TestEndpointPathEnforcement:
 
     @patch("addons.policy_engine.http.Response.make", side_effect=make_mock_response)
     @patch("addons.policy_engine.get_container_config")
-    @patch("addons.policy_engine.ctx")
+    @patch("addons.policy_engine.logger")
     def test_mixed_case_encoding_normalized(
-        self, mock_ctx, mock_get_config, mock_response_make,
+        self, mock_logger, mock_get_config, mock_response_make,
         policy_engine_with_config, mock_container_config
     ):
         """Mixed-case %2f/%2F both normalize to /."""
         mock_get_config.return_value = mock_container_config
-        mock_ctx.log = Mock()
+
         # %2f and %2F both decode to / — should match /repos/*/*
         flow = self._make_flow("GET", "api.github.com", "/repos/owner%2frepo")
 
@@ -1250,14 +1250,14 @@ class TestEndpointPathEnforcement:
 
     @patch("addons.policy_engine.http.Response.make", side_effect=make_mock_response)
     @patch("addons.policy_engine.get_container_config")
-    @patch("addons.policy_engine.ctx")
+    @patch("addons.policy_engine.logger")
     def test_legitimate_path_no_encoding(
-        self, mock_ctx, mock_get_config, mock_response_make,
+        self, mock_logger, mock_get_config, mock_response_make,
         policy_engine_with_config, mock_container_config
     ):
         """Legitimate path with no encoding is allowed."""
         mock_get_config.return_value = mock_container_config
-        mock_ctx.log = Mock()
+
         flow = self._make_flow("GET", "api.github.com", "/repos/owner/repo/pulls/123")
 
         policy_engine_with_config.request(flow)
@@ -1267,14 +1267,14 @@ class TestEndpointPathEnforcement:
 
     @patch("addons.policy_engine.http.Response.make", side_effect=make_mock_response)
     @patch("addons.policy_engine.get_container_config")
-    @patch("addons.policy_engine.ctx")
+    @patch("addons.policy_engine.logger")
     def test_compare_path_with_encoded_slash_allowed(
-        self, mock_ctx, mock_get_config, mock_response_make,
+        self, mock_logger, mock_get_config, mock_response_make,
         policy_engine_with_config, mock_container_config
     ):
         """Compare refs with encoded slashes should remain allowed."""
         mock_get_config.return_value = mock_container_config
-        mock_ctx.log = Mock()
+
         flow = self._make_flow(
             "GET",
             "api.github.com",
@@ -1288,14 +1288,14 @@ class TestEndpointPathEnforcement:
 
     @patch("addons.policy_engine.http.Response.make", side_effect=make_mock_response)
     @patch("addons.policy_engine.get_container_config")
-    @patch("addons.policy_engine.ctx")
+    @patch("addons.policy_engine.logger")
     def test_git_ref_mutation_path_blocked(
-        self, mock_ctx, mock_get_config, mock_response_make,
+        self, mock_logger, mock_get_config, mock_response_make,
         policy_engine_with_config, mock_container_config
     ):
         """Git ref update endpoints are blocked even when endpoint paths allow /git/**."""
         mock_get_config.return_value = mock_container_config
-        mock_ctx.log = Mock()
+
         flow = self._make_flow(
             "PATCH",
             "api.github.com",
@@ -1311,14 +1311,14 @@ class TestEndpointPathEnforcement:
 
     @patch("addons.policy_engine.http.Response.make", side_effect=make_mock_response)
     @patch("addons.policy_engine.get_container_config")
-    @patch("addons.policy_engine.ctx")
+    @patch("addons.policy_engine.logger")
     def test_git_ref_read_path_allowed(
-        self, mock_ctx, mock_get_config, mock_response_make,
+        self, mock_logger, mock_get_config, mock_response_make,
         policy_engine_with_config, mock_container_config
     ):
         """Git ref read endpoints remain allowed."""
         mock_get_config.return_value = mock_container_config
-        mock_ctx.log = Mock()
+
         flow = self._make_flow(
             "GET",
             "api.github.com",
@@ -1332,14 +1332,14 @@ class TestEndpointPathEnforcement:
 
     @patch("addons.policy_engine.http.Response.make", side_effect=make_mock_response)
     @patch("addons.policy_engine.get_container_config")
-    @patch("addons.policy_engine.ctx")
+    @patch("addons.policy_engine.logger")
     def test_contents_path_with_nested_file_allowed(
-        self, mock_ctx, mock_get_config, mock_response_make,
+        self, mock_logger, mock_get_config, mock_response_make,
         policy_engine_with_config, mock_container_config
     ):
         """Nested file paths in contents endpoint should remain allowed."""
         mock_get_config.return_value = mock_container_config
-        mock_ctx.log = Mock()
+
         flow = self._make_flow(
             "GET",
             "api.github.com",
@@ -1353,14 +1353,14 @@ class TestEndpointPathEnforcement:
 
     @patch("addons.policy_engine.http.Response.make", side_effect=make_mock_response)
     @patch("addons.policy_engine.get_container_config")
-    @patch("addons.policy_engine.ctx")
+    @patch("addons.policy_engine.logger")
     def test_contents_root_path_allowed(
-        self, mock_ctx, mock_get_config, mock_response_make,
+        self, mock_logger, mock_get_config, mock_response_make,
         policy_engine_with_config, mock_container_config
     ):
         """Contents root endpoint should remain allowed."""
         mock_get_config.return_value = mock_container_config
-        mock_ctx.log = Mock()
+
         flow = self._make_flow(
             "GET",
             "api.github.com",
@@ -1374,14 +1374,14 @@ class TestEndpointPathEnforcement:
 
     @patch("addons.policy_engine.http.Response.make", side_effect=make_mock_response)
     @patch("addons.policy_engine.get_container_config")
-    @patch("addons.policy_engine.ctx")
+    @patch("addons.policy_engine.logger")
     def test_uppercase_host_still_enforces_github_blocklist(
-        self, mock_ctx, mock_get_config, mock_response_make,
+        self, mock_logger, mock_get_config, mock_response_make,
         policy_engine_with_config, mock_container_config
     ):
         """Mixed-case host headers must not bypass GitHub blocklist checks."""
         mock_get_config.return_value = mock_container_config
-        mock_ctx.log = Mock()
+
         flow = self._make_flow(
             "PATCH",
             "API.GITHUB.COM",
@@ -1397,14 +1397,14 @@ class TestEndpointPathEnforcement:
 
     @patch("addons.policy_engine.http.Response.make", side_effect=make_mock_response)
     @patch("addons.policy_engine.get_container_config")
-    @patch("addons.policy_engine.ctx")
+    @patch("addons.policy_engine.logger")
     def test_issue_comment_path_allowed(
-        self, mock_ctx, mock_get_config, mock_response_make,
+        self, mock_logger, mock_get_config, mock_response_make,
         policy_engine_with_config, mock_container_config
     ):
         """Issue comment endpoints remain allowed."""
         mock_get_config.return_value = mock_container_config
-        mock_ctx.log = Mock()
+
         flow = self._make_flow(
             "POST",
             "api.github.com",
@@ -1418,16 +1418,16 @@ class TestEndpointPathEnforcement:
 
     @patch("addons.policy_engine.http.Response.make", side_effect=make_mock_response)
     @patch("addons.policy_engine.get_container_config")
-    @patch("addons.policy_engine.ctx")
+    @patch("addons.policy_engine.logger")
     def test_pull_review_path_allowed(
-        self, mock_ctx, mock_get_config, mock_response_make,
+        self, mock_logger, mock_get_config, mock_response_make,
         policy_engine_with_config, mock_container_config
     ):
         """Pull request review endpoints remain allowed for non-APPROVE events."""
         import json
 
         mock_get_config.return_value = mock_container_config
-        mock_ctx.log = Mock()
+
         flow = self._make_flow(
             "POST",
             "api.github.com",
@@ -1444,14 +1444,14 @@ class TestEndpointPathEnforcement:
 
     @patch("addons.policy_engine.http.Response.make", side_effect=make_mock_response)
     @patch("addons.policy_engine.get_container_config")
-    @patch("addons.policy_engine.ctx")
+    @patch("addons.policy_engine.logger")
     def test_pull_review_subpath_allowed(
-        self, mock_ctx, mock_get_config, mock_response_make,
+        self, mock_logger, mock_get_config, mock_response_make,
         policy_engine_with_config, mock_container_config
     ):
         """Nested review subpaths remain allowed via ** matching."""
         mock_get_config.return_value = mock_container_config
-        mock_ctx.log = Mock()
+
         flow = self._make_flow(
             "GET",
             "api.github.com",
@@ -1465,14 +1465,14 @@ class TestEndpointPathEnforcement:
 
     @patch("addons.policy_engine.http.Response.make", side_effect=make_mock_response)
     @patch("addons.policy_engine.get_container_config")
-    @patch("addons.policy_engine.ctx")
+    @patch("addons.policy_engine.logger")
     def test_branch_protection_path_blocked(
-        self, mock_ctx, mock_get_config, mock_response_make,
+        self, mock_logger, mock_get_config, mock_response_make,
         policy_engine_with_config, mock_container_config
     ):
         """Branch protection mutation endpoint is blocked."""
         mock_get_config.return_value = mock_container_config
-        mock_ctx.log = Mock()
+
         flow = self._make_flow(
             "PUT",
             "api.github.com",
@@ -1487,14 +1487,14 @@ class TestEndpointPathEnforcement:
 
     @patch("addons.policy_engine.http.Response.make", side_effect=make_mock_response)
     @patch("addons.policy_engine.get_container_config")
-    @patch("addons.policy_engine.ctx")
+    @patch("addons.policy_engine.logger")
     def test_branch_protection_nested_branch_blocked(
-        self, mock_ctx, mock_get_config, mock_response_make,
+        self, mock_logger, mock_get_config, mock_response_make,
         policy_engine_with_config, mock_container_config
     ):
         """Branch protection endpoint with encoded slash branch is blocked."""
         mock_get_config.return_value = mock_container_config
-        mock_ctx.log = Mock()
+
         flow = self._make_flow(
             "PUT",
             "api.github.com",
@@ -1509,14 +1509,14 @@ class TestEndpointPathEnforcement:
 
     @patch("addons.policy_engine.http.Response.make", side_effect=make_mock_response)
     @patch("addons.policy_engine.get_container_config")
-    @patch("addons.policy_engine.ctx")
+    @patch("addons.policy_engine.logger")
     def test_branch_rename_path_blocked(
-        self, mock_ctx, mock_get_config, mock_response_make,
+        self, mock_logger, mock_get_config, mock_response_make,
         policy_engine_with_config, mock_container_config
     ):
         """Branch rename endpoint is blocked."""
         mock_get_config.return_value = mock_container_config
-        mock_ctx.log = Mock()
+
         flow = self._make_flow(
             "POST",
             "api.github.com",
@@ -1531,14 +1531,14 @@ class TestEndpointPathEnforcement:
 
     @patch("addons.policy_engine.http.Response.make", side_effect=make_mock_response)
     @patch("addons.policy_engine.get_container_config")
-    @patch("addons.policy_engine.ctx")
+    @patch("addons.policy_engine.logger")
     def test_blocked_hooks_subpath(
-        self, mock_ctx, mock_get_config, mock_response_make,
+        self, mock_logger, mock_get_config, mock_response_make,
         policy_engine_with_config, mock_container_config
     ):
         """GET /repos/owner/repo/hooks/456 is denied (not in allowed paths)."""
         mock_get_config.return_value = mock_container_config
-        mock_ctx.log = Mock()
+
         flow = self._make_flow("GET", "api.github.com", "/repos/owner/repo/hooks/456")
 
         policy_engine_with_config.request(flow)
@@ -1612,14 +1612,14 @@ class TestBlockedPathsDefenseInDepth:
 
     @patch("addons.policy_engine.http.Response.make", side_effect=make_mock_response)
     @patch("addons.policy_engine.get_container_config")
-    @patch("addons.policy_engine.ctx")
+    @patch("addons.policy_engine.logger")
     def test_hooks_blocked_even_if_allowed(
-        self, mock_ctx, mock_get_config, mock_response_make,
+        self, mock_logger, mock_get_config, mock_response_make,
         engine_with_broad_allow, mock_container_config
     ):
         """blocked_paths denies hooks even when the pattern appears in allowed paths."""
         mock_get_config.return_value = mock_container_config
-        mock_ctx.log = Mock()
+
         flow = self._make_flow("POST", "api.github.com", "/repos/owner/repo/hooks")
 
         engine_with_broad_allow.request(flow)
@@ -1630,14 +1630,14 @@ class TestBlockedPathsDefenseInDepth:
 
     @patch("addons.policy_engine.http.Response.make", side_effect=make_mock_response)
     @patch("addons.policy_engine.get_container_config")
-    @patch("addons.policy_engine.ctx")
+    @patch("addons.policy_engine.logger")
     def test_secrets_blocked_even_if_allowed(
-        self, mock_ctx, mock_get_config, mock_response_make,
+        self, mock_logger, mock_get_config, mock_response_make,
         engine_with_broad_allow, mock_container_config
     ):
         """blocked_paths denies actions/secrets even when pattern is allowed."""
         mock_get_config.return_value = mock_container_config
-        mock_ctx.log = Mock()
+
         flow = self._make_flow("GET", "api.github.com", "/repos/owner/repo/actions/secrets/MY_SECRET")
 
         engine_with_broad_allow.request(flow)
@@ -1648,14 +1648,14 @@ class TestBlockedPathsDefenseInDepth:
 
     @patch("addons.policy_engine.http.Response.make", side_effect=make_mock_response)
     @patch("addons.policy_engine.get_container_config")
-    @patch("addons.policy_engine.ctx")
+    @patch("addons.policy_engine.logger")
     def test_branch_protection_blocked_even_if_allowed(
-        self, mock_ctx, mock_get_config, mock_response_make,
+        self, mock_logger, mock_get_config, mock_response_make,
         engine_with_broad_allow, mock_container_config
     ):
         """blocked_paths denies branch protection endpoints even with broad allow patterns."""
         mock_get_config.return_value = mock_container_config
-        mock_ctx.log = Mock()
+
         flow = self._make_flow(
             "PUT",
             "api.github.com",
@@ -1669,14 +1669,14 @@ class TestBlockedPathsDefenseInDepth:
         assert "blocked by policy" in decision["reason"]
 
     @patch("addons.policy_engine.get_container_config")
-    @patch("addons.policy_engine.ctx")
+    @patch("addons.policy_engine.logger")
     def test_pulls_allowed_not_in_blocked(
-        self, mock_ctx, mock_get_config,
+        self, mock_logger, mock_get_config,
         engine_with_broad_allow, mock_container_config
     ):
         """Pulls are allowed because they're in allowed paths and not in blocked_paths."""
         mock_get_config.return_value = mock_container_config
-        mock_ctx.log = Mock()
+
         flow = self._make_flow("GET", "api.github.com", "/repos/owner/repo/pulls/123")
 
         engine_with_broad_allow.request(flow)

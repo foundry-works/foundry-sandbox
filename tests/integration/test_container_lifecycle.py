@@ -17,6 +17,7 @@ import pytest
 # Add unified-proxy to path
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../../unified-proxy"))
 
+import registry as _registry_module
 from registry import ContainerRegistry
 from internal_api import create_app, rate_limiter
 
@@ -27,6 +28,29 @@ def reset_rate_limiter():
     rate_limiter._buckets.clear()
     yield
     rate_limiter._buckets.clear()
+
+
+@pytest.fixture
+def time_control():
+    """Controllable time mock for registry tests.
+
+    Replaces time.time() in the registry module so tests can
+    advance time instantly instead of sleeping.
+    """
+    _now = [time.time()]
+    _original = _registry_module.time.time
+
+    def _fake_time():
+        return _now[0]
+
+    def _advance(seconds):
+        _now[0] += seconds
+
+    _registry_module.time.time = _fake_time
+    try:
+        yield _advance
+    finally:
+        _registry_module.time.time = _original
 
 
 @pytest.fixture
@@ -241,7 +265,7 @@ class TestProxyRestartPreservesRegistrations:
             assert config.container_id == f"container-{i}"
         registry2.close()
 
-    def test_expired_registration_after_restart(self, temp_db):
+    def test_expired_registration_after_restart(self, temp_db, time_control):
         """Test expired registrations are rejected after restart."""
         # Register with very short TTL
         registry1 = ContainerRegistry(db_path=temp_db)
@@ -252,8 +276,8 @@ class TestProxyRestartPreservesRegistrations:
         )
         registry1.close()
 
-        # Wait for TTL to expire
-        time.sleep(1.5)
+        # Advance time past TTL
+        time_control(2.0)
 
         # Simulate restart
         registry2 = ContainerRegistry(db_path=temp_db)
@@ -288,7 +312,7 @@ class TestSandboxReconnectsAfterRestart:
         assert not config.is_expired
         registry2.close()
 
-    def test_container_must_reregister_after_ttl_expires(self, temp_db):
+    def test_container_must_reregister_after_ttl_expires(self, temp_db, time_control):
         """Test container must re-register after TTL expiration."""
         # Initial registration with short TTL
         registry1 = ContainerRegistry(db_path=temp_db)
@@ -299,8 +323,8 @@ class TestSandboxReconnectsAfterRestart:
         )
         registry1.close()
 
-        # Wait for TTL to expire
-        time.sleep(1.5)
+        # Advance time past TTL
+        time_control(2.0)
 
         # Simulate restart - container tries to make request
         registry2 = ContainerRegistry(db_path=temp_db)

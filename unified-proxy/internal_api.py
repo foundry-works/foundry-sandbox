@@ -276,7 +276,7 @@ def create_app(registry: Optional[ContainerRegistry] = None) -> Flask:
             logger.error(f"Health check failed: {e}")
             return jsonify({
                 "status": "unhealthy",
-                "error": str(e),
+                "error": "Health check failed",
             }), 503
 
     @app.route("/internal/containers", methods=["POST"])
@@ -286,7 +286,7 @@ def create_app(registry: Optional[ContainerRegistry] = None) -> Flask:
         Request body (JSON):
             container_id: Unique container identifier (required)
             ip_address: Container's IP address (required)
-            ttl_seconds: Time-to-live in seconds (optional, default 86400)
+            ttl_seconds: Time-to-live in seconds (optional, default 0 = no expiry)
             metadata: Optional metadata dictionary
 
         Returns:
@@ -333,11 +333,11 @@ def create_app(registry: Optional[ContainerRegistry] = None) -> Flask:
                 }), 400
 
             # Optional fields
-            ttl_seconds = data.get("ttl_seconds", 86400)
-            if not isinstance(ttl_seconds, int) or ttl_seconds < 1:
+            ttl_seconds = data.get("ttl_seconds", 0)
+            if not isinstance(ttl_seconds, int) or ttl_seconds < 0:
                 return jsonify({
                     "error": "Invalid ttl_seconds",
-                    "message": "ttl_seconds must be a positive integer",
+                    "message": "ttl_seconds must be a non-negative integer (0 = no expiry)",
                 }), 400
 
             metadata = data.get("metadata")
@@ -431,7 +431,7 @@ def create_app(registry: Optional[ContainerRegistry] = None) -> Flask:
 
         Returns:
             200 with container details if found.
-            404 if container was not found or expired.
+            404 if container was not found.
         """
         try:
             registry = get_registry()

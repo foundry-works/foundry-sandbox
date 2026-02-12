@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.13.0] - 2026-02-12
+
+### Changed
+- **Complete Python CLI migration** - Removed legacy `sandbox.sh` shell entrypoint and `lib/container_config.sh`; `cast` (Python CLI) is now the sole entry point
+- **CI simplified** - Removed shell/python matrix strategy from orchestration tests since only Python CLI remains
+- **Documentation updated** - All references to `sandbox.sh` replaced with `cast`/Python CLI across docs, compose files, CLAUDE.md, AGENTS.md, and README
+- **PyPI publishing** - Added package metadata (`authors`, `readme`, `classifiers`, `urls`) and automated publish-to-PyPI job in release workflow using trusted publishing
+
+### Removed
+- `sandbox.sh` - Legacy shell entrypoint (fully replaced by `cast`)
+- `lib/container_config.sh` - Shell-based container configuration (fully replaced by `foundry_sandbox/container_setup.py`)
+
 ## [0.12.0] - 2026-02-08
 
 ### Added
@@ -40,7 +52,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **MockHeaders helper** - Case-insensitive mock headers class in `conftest.py` for realistic mitmproxy header behavior in tests
 
 ### Fixed
-- **Git push/pull authentication** - `GIT_CREDENTIAL_TOKEN` is now passed through the sanitized subprocess environment in `build_clean_env()`, fixing authentication failures for git push/pull/fetch operations through the proxy
+- **Git push/pull authentication** - `FOUNDRY_PROXY_GIT_TOKEN` is now passed through the sanitized subprocess environment in `build_clean_env()`, fixing authentication failures for git push/pull/fetch operations through the proxy
 
 ## [0.11.0] - 2026-02-07
 
@@ -561,7 +573,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Tab completion for bash
 - macOS and Linux support
 
-[Unreleased]: https://github.com/foundry-works/foundry-sandbox/compare/v0.12.0...HEAD
+[Unreleased]: https://github.com/foundry-works/foundry-sandbox/compare/v0.13.0...HEAD
+[0.13.0]: https://github.com/foundry-works/foundry-sandbox/compare/v0.12.0...v0.13.0
 [0.12.0]: https://github.com/foundry-works/foundry-sandbox/compare/v0.11.1...v0.12.0
 [0.11.1]: https://github.com/foundry-works/foundry-sandbox/compare/v0.11.0...v0.11.1
 [0.11.0]: https://github.com/foundry-works/foundry-sandbox/compare/v0.10.0...v0.11.0

@@ -27,7 +27,7 @@ import os
 import sys
 from typing import Optional
 
-from mitmproxy import dns, ctx
+from mitmproxy import dns
 
 # Add parent directory to path for imports
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -103,8 +103,8 @@ class DNSFilterAddon:
 
     def load(self, loader):
         """Called when addon is loaded."""
-        ctx.log.info("DNS filter addon loaded")
-        ctx.log.info(f"DNS allowlist: {', '.join(self._allowlist)}")
+        logger.info("DNS filter addon loaded")
+        logger.info(f"DNS allowlist: {', '.join(self._allowlist)}")
 
     def dns_request(self, flow: dns.DNSFlow) -> None:
         """Process DNS request to enforce allowlist policy.
@@ -115,7 +115,7 @@ class DNSFilterAddon:
         # Get the DNS question
         question = flow.request.question
         if not question:
-            ctx.log.warn("DNS request without question")
+            logger.warning("DNS request without question")
             return
 
         query_name = question.name.decode() if isinstance(question.name, bytes) else question.name
@@ -124,7 +124,7 @@ class DNSFilterAddon:
         # Get source IP from client connection
         client_address = flow.client_conn.peername
         if client_address is None:
-            ctx.log.warn(f"DNS query for {query_name} with no client address")
+            logger.warning(f"DNS query for {query_name} with no client address")
             self._block_query(flow, query_name, query_type, "unknown", "no_client_address")
             return
 
@@ -134,7 +134,7 @@ class DNSFilterAddon:
         container_config = self.registry.get_by_ip(source_ip)
 
         if container_config is None:
-            ctx.log.warn(f"DNS query from unknown IP {source_ip} for {query_name}")
+            logger.warning(f"DNS query from unknown IP {source_ip} for {query_name}")
             self._block_query(flow, query_name, query_type, "unknown", "unknown_container")
             return
 
@@ -147,7 +147,7 @@ class DNSFilterAddon:
         if self._is_allowed(query_name):
             # Allow the query to proceed normally
             self._log_query(container_id, query_type, query_name, "allowed")
-            ctx.log.debug(f"DNS query allowed: {container_id} -> {query_name} ({query_type})")
+            logger.debug(f"DNS query allowed: {container_id} -> {query_name} ({query_type})")
         else:
             # Block the query with NXDOMAIN
             self._block_query(flow, query_name, query_type, container_id, "not_in_allowlist")
@@ -209,7 +209,7 @@ class DNSFilterAddon:
 
         # Log the blocked query
         self._log_query(container_id, query_type, query_name, "blocked", reason=reason)
-        ctx.log.info(f"DNS query blocked: {container_id} -> {query_name} ({query_type}): {reason}")
+        logger.info(f"DNS query blocked: {container_id} -> {query_name} ({query_type}): {reason}")
 
     def _log_query(
         self,
@@ -275,7 +275,7 @@ class DNSFilterAddon:
                         if isinstance(value, int) and value == query_type:
                             return attr
         except Exception:
-            pass
+            logger.debug("Failed to resolve DNS query type name")
 
         # Fall back to our mapping
         return type_names.get(query_type, str(query_type))
@@ -296,18 +296,18 @@ def load(loader):
 
     try:
         _registry = ContainerRegistry(db_path=db_path)
-        ctx.log.info(f"DNS filter using registry at {db_path}")
+        logger.info(f"DNS filter using registry at {db_path}")
     except Exception as e:
-        ctx.log.error(f"Failed to initialize container registry for DNS filter: {e}")
+        logger.error(f"Failed to initialize container registry for DNS filter: {e}")
         raise
 
     # Load allowlist configuration
     try:
         allowlist_config = load_allowlist_config()
         _allowlist_domains = allowlist_config.domains
-        ctx.log.info(f"DNS filter loaded {len(_allowlist_domains)} domains from config")
+        logger.info(f"DNS filter loaded {len(_allowlist_domains)} domains from config")
     except ConfigError as e:
-        ctx.log.error(
+        logger.error(
             f"DNS FILTER CONFIG ERROR: Failed to load allowlist config: {e}. "
             f"Falling back to DEFAULT_ALLOWLIST ({len(DEFAULT_ALLOWLIST)} domains). "
             f"This may mask a misconfiguration — verify allowlist.yaml exists and is valid. "
@@ -315,7 +315,7 @@ def load(loader):
         )
         _allowlist_domains = DEFAULT_ALLOWLIST
     except Exception as e:
-        ctx.log.error(
+        logger.error(
             f"DNS FILTER CONFIG ERROR: Unexpected error loading allowlist: {e}. "
             f"Falling back to DEFAULT_ALLOWLIST ({len(DEFAULT_ALLOWLIST)} domains). "
             f"This is likely a bug — check file permissions and YAML syntax."

@@ -16,7 +16,7 @@ import os
 import sys
 import time
 import threading
-from unittest.mock import Mock, MagicMock, patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -25,11 +25,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../../unified-proxy"
 
 
 # Mock mitmproxy before importing rate_limiter
-class MockHeaders(dict):
-    """Mock mitmproxy Headers class."""
-
-    def get(self, key, default=None):
-        return super().get(key, default)
+from tests.mocks import MockHeaders, MockResponse, MockCtx
 
 
 class MockRequest:
@@ -40,19 +36,6 @@ class MockRequest:
         self.headers = MockHeaders()
 
 
-class MockResponse:
-    """Mock mitmproxy Response class."""
-
-    def __init__(self, status_code, content, headers=None):
-        self.status_code = status_code
-        self.content = content
-        self.headers = headers or {}
-
-    @classmethod
-    def make(cls, status_code, content, headers=None):
-        return cls(status_code, content, headers)
-
-
 class MockHTTPFlow:
     """Mock mitmproxy HTTPFlow class."""
 
@@ -60,29 +43,6 @@ class MockHTTPFlow:
         self.request = MockRequest(pretty_host)
         self.response = None
         self.metadata = {}
-
-
-class MockCtxLog:
-    """Mock mitmproxy ctx.log."""
-
-    def info(self, msg):
-        pass
-
-    def warn(self, msg):
-        pass
-
-    def debug(self, msg):
-        pass
-
-    def error(self, msg):
-        pass
-
-
-class MockCtx:
-    """Mock mitmproxy ctx module."""
-
-    def __init__(self):
-        self.log = MockCtxLog()
 
 
 # Create test-specific mock objects for rate_limiter tests.
@@ -96,6 +56,7 @@ mock_http.HTTPFlow = MockHTTPFlow
 
 mock_ctx_instance = MockCtx()
 
+import addons.rate_limiter as _rl_module
 from addons.rate_limiter import TokenBucket, RateLimiterAddon, BUCKET_EXPIRY_SECONDS
 from registry import ContainerConfig
 
@@ -501,15 +462,16 @@ class TestRefillBehavior:
     """Tests for token refill over time."""
 
     @patch("addons.rate_limiter.get_container_config")
-    @patch("addons.rate_limiter.time")
     def test_tokens_refill_over_time(
-        self, mock_time, mock_get_config, addon, mock_flow, mock_container_config
+        self, mock_get_config, addon, mock_flow, mock_container_config, monkeypatch
     ):
         """Test tokens refill based on elapsed time."""
         mock_get_config.return_value = mock_container_config
 
-        # Start at t=0
+        # Patch time at the module level before any calls
+        mock_time = MagicMock()
         mock_time.time.return_value = 100.0
+        monkeypatch.setattr(_rl_module, "time", mock_time)
 
         # Consume all tokens
         for _ in range(10):
@@ -538,15 +500,16 @@ class TestRefillBehavior:
         assert mock_flow.response.status_code == 429
 
     @patch("addons.rate_limiter.get_container_config")
-    @patch("addons.rate_limiter.time")
     def test_full_refill_after_waiting(
-        self, mock_time, mock_get_config, addon, mock_flow, mock_container_config
+        self, mock_get_config, addon, mock_flow, mock_container_config, monkeypatch
     ):
         """Test bucket fully refills after sufficient time."""
         mock_get_config.return_value = mock_container_config
 
-        # Start at t=0
+        # Patch time at the module level before any calls
+        mock_time = MagicMock()
         mock_time.time.return_value = 100.0
+        monkeypatch.setattr(_rl_module, "time", mock_time)
 
         # Consume all tokens
         for _ in range(10):
@@ -567,15 +530,16 @@ class TestCleanup:
     """Tests for cleanup of stale buckets."""
 
     @patch("addons.rate_limiter.get_container_config")
-    @patch("addons.rate_limiter.time")
     def test_cleanup_triggered_after_interval(
-        self, mock_time, mock_get_config, addon, mock_flow, mock_container_config
+        self, mock_get_config, addon, mock_flow, mock_container_config, monkeypatch
     ):
         """Test cleanup is triggered after cleanup_interval."""
         mock_get_config.return_value = mock_container_config
 
-        # Start at t=0
+        # Patch time at the module level before any calls
+        mock_time = MagicMock()
         mock_time.time.return_value = 100.0
+        monkeypatch.setattr(_rl_module, "time", mock_time)
         addon.last_cleanup = 100.0
 
         # Make a request
@@ -651,6 +615,7 @@ class TestConcurrency:
         """Test concurrent requests from same container are thread-safe."""
         mock_get_config.return_value = mock_container_config
 
+        lock = threading.Lock()
         results = {"allowed": 0, "denied": 0}
         errors = []
 
@@ -660,10 +625,11 @@ class TestConcurrency:
 
                 addon.request(flow)
 
-                if flow.response is None:
-                    results["allowed"] += 1
-                else:
-                    results["denied"] += 1
+                with lock:
+                    if flow.response is None:
+                        results["allowed"] += 1
+                    else:
+                        results["denied"] += 1
             except Exception as e:
                 errors.append(e)
 
@@ -677,6 +643,8 @@ class TestConcurrency:
         # Should have no errors
         assert not errors
 
+        # All 20 requests should be accounted for
+        assert results["allowed"] + results["denied"] == 20
         # Should allow exactly 10, deny exactly 10
         assert results["allowed"] == 10
         assert results["denied"] == 10

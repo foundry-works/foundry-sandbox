@@ -21,11 +21,9 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../../unified-proxy"
 
 
 # Mock mitmproxy before importing git_proxy
-class MockHeaders(dict):
-    """Mock mitmproxy Headers class."""
-
-    def get(self, key, default=None):
-        return super().get(key, default)
+from tests.mocks import (
+    MockHeaders, MockResponse, MockClientConn, MockCtxLog,
+)
 
 
 class MockRequest:
@@ -37,26 +35,6 @@ class MockRequest:
         self.content = content
         self.headers = MockHeaders(headers or {})
         self.pretty_host = "github.com"
-
-
-class MockResponse:
-    """Mock mitmproxy Response class."""
-
-    def __init__(self, status_code, content, headers=None):
-        self.status_code = status_code
-        self.content = content
-        self.headers = headers or {}
-
-    @classmethod
-    def make(cls, status_code, content, headers=None):
-        return cls(status_code, content, headers)
-
-
-class MockClientConn:
-    """Mock mitmproxy client connection."""
-
-    def __init__(self, peername):
-        self.peername = peername
 
 
 class MockHTTPFlow:
@@ -72,43 +50,6 @@ class MockHTTPFlow:
         self.metadata = {}
 
 
-class MockCtxLog:
-    """Mock mitmproxy ctx.log with proper tracking."""
-
-    def __init__(self):
-        self.calls = []
-
-    def info(self, msg):
-        self.calls.append(("info", msg))
-
-    def warn(self, msg):
-        self.calls.append(("warn", msg))
-
-    def debug(self, msg):
-        self.calls.append(("debug", msg))
-
-    def error(self, msg):
-        self.calls.append(("error", msg))
-
-    def reset(self):
-        self.calls.clear()
-
-    def was_called_with_level(self, level):
-        return any(call[0] == level for call in self.calls)
-
-    def get_messages(self, level=None):
-        if level:
-            return [call[1] for call in self.calls if call[0] == level]
-        return [call[1] for call in self.calls]
-
-
-class MockCtx:
-    """Mock mitmproxy ctx module."""
-
-    def __init__(self):
-        self.log = MockCtxLog()
-
-
 # Create test-specific mock objects for git_proxy tests.
 # NOTE: We do NOT overwrite sys.modules["mitmproxy"] here because conftest.py
 # already installs proper mitmproxy mocks. Overwriting the top-level module
@@ -118,14 +59,14 @@ mock_http = MagicMock()
 mock_http.Response = MockResponse
 mock_http.HTTPFlow = MockHTTPFlow
 
-mock_ctx = MockCtx()
+mock_logger = MockCtxLog()
 
 # Add addons path and import git_proxy (uses conftest mitmproxy mocks)
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../../unified-proxy/addons"))
 import git_proxy
 
 # Replace the module-level mitmproxy references with our test-specific mocks
-git_proxy.ctx = mock_ctx
+git_proxy.logger = mock_logger
 git_proxy.http = mock_http
 
 # Import pktline for creating test data
@@ -139,13 +80,12 @@ from registry import ContainerConfig
 GIT_METADATA_KEY = "git_operation"
 @pytest.fixture(autouse=True)
 def reset_mock_ctx():
-    """Reset mock ctx before each test.
+    """Reset mock logger before each test.
 
-    Uses git_proxy.ctx (not local mock_ctx) to handle cross-file mock
+    Uses git_proxy.logger (not local mock_logger) to handle cross-file mock
     interference when pytest runs multiple test files in the same process.
     """
-    git_proxy.ctx = mock_ctx
-    mock_ctx.log.reset()
+    git_proxy.logger = mock_logger
     yield
 
 
@@ -354,7 +294,7 @@ class TestRepoAuthorization:
         addon.request(flow)
 
         # Should log warning but not set response (container_identity should have denied)
-        assert mock_ctx.log.was_called_with_level("warn")
+        assert mock_logger.was_called_with_level("warn")
 
 
 class TestBranchDeletionBlocking:
@@ -669,8 +609,8 @@ class TestLogging:
 
         addon.request(flow)
 
-        assert mock_ctx.log.was_called_with_level("info")
-        messages = mock_ctx.log.get_messages("info")
+        assert mock_logger.was_called_with_level("info")
+        messages = mock_logger.get_messages("info")
         assert any("ALLOW" in msg for msg in messages)
 
     def test_denied_operation_logs_warn(self):
@@ -684,8 +624,8 @@ class TestLogging:
 
         addon.request(flow)
 
-        assert mock_ctx.log.was_called_with_level("warn")
-        messages = mock_ctx.log.get_messages("warn")
+        assert mock_logger.was_called_with_level("warn")
+        messages = mock_logger.get_messages("warn")
         assert any("DENY" in msg for msg in messages)
 
     def test_push_logs_include_refs(self):
@@ -838,10 +778,10 @@ class TestProtectedBranchEnforcement:
     def test_bootstrap_creation_succeeds_then_blocked(self):
         """Test bootstrap creation to refs/heads/main succeeds once then blocked."""
         import tempfile
-        addon = git_proxy.GitProxyAddon()
+        git_proxy.GitProxyAddon()
 
         with tempfile.TemporaryDirectory() as tmpdir:
-            container = create_container_config(
+            create_container_config(
                 repos=["octocat/hello-world"],
                 git={"protected_branches": {"bare_repo_path": tmpdir}},
             )

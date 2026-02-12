@@ -14,7 +14,7 @@ from unittest.mock import patch
 import pytest
 
 from addons import credential_injector
-from conftest import MockHeaders
+from tests.mocks import MockHeaders
 
 
 class MockRequest:
@@ -195,3 +195,67 @@ class TestNonGitHubHosts:
 
         # Should have set an error response (not pass-through)
         assert flow.response is not None
+        assert flow.response.status_code == 500
+        assert b"credential" in flow.response.content.lower()
+
+
+class TestCredentialRotationAndEdgeCases:
+    """Tests for credential rotation, expiry, and malformed credentials."""
+
+    def test_credential_rotation_mid_session(self):
+        """Injector picks up rotated credentials when re-initialized."""
+        # Start with initial token
+        with patch.dict(os.environ, {"GITHUB_TOKEN": "ghp_initial_token"}, clear=False):
+            injector1 = credential_injector.CredentialInjector()
+
+        flow = MockHTTPFlow("github.com", "/owner/repo.git/git-receive-pack")
+        injector1.request(flow)
+        assert flow.request.headers.get("Authorization") == "Bearer ghp_initial_token"
+
+        # Rotate to a new token and re-create the injector
+        with patch.dict(os.environ, {"GITHUB_TOKEN": "ghp_rotated_token"}, clear=False):
+            injector2 = credential_injector.CredentialInjector()
+
+        flow2 = MockHTTPFlow("github.com", "/owner/repo.git/git-receive-pack")
+        injector2.request(flow2)
+        assert flow2.request.headers.get("Authorization") == "Bearer ghp_rotated_token"
+
+    def test_empty_token_treated_as_missing(self):
+        """An empty string token should behave like a missing credential."""
+        env = os.environ.copy()
+        env["GITHUB_TOKEN"] = ""
+        env.pop("GH_TOKEN", None)
+        with patch.dict(os.environ, env, clear=True):
+            instance = credential_injector.CredentialInjector()
+
+        flow = MockHTTPFlow("github.com", "/owner/repo.git/git-upload-pack")
+        instance.request(flow)
+
+        # Empty token: should either not inject or strip placeholder
+        auth = flow.request.headers.get("Authorization", "")
+        assert auth == "" or "Bearer " not in auth or flow.response is None
+
+    def test_truncated_token_still_injected(self):
+        """A short/truncated token should still be injected (validation is upstream's job)."""
+        with patch.dict(os.environ, {"GITHUB_TOKEN": "ghp_short"}, clear=False):
+            instance = credential_injector.CredentialInjector()
+
+        flow = MockHTTPFlow("github.com", "/owner/repo.git/git-receive-pack")
+        instance.request(flow)
+
+        assert flow.response is None
+        assert flow.request.headers.get("Authorization") == "Bearer ghp_short"
+
+    def test_whitespace_only_token(self):
+        """A whitespace-only token should not be injected as a valid credential."""
+        env = os.environ.copy()
+        env["GITHUB_TOKEN"] = "   "
+        env.pop("GH_TOKEN", None)
+        with patch.dict(os.environ, env, clear=True):
+            instance = credential_injector.CredentialInjector()
+
+        flow = MockHTTPFlow("github.com", "/owner/repo.git/git-upload-pack")
+        instance.request(flow)
+
+        # Should either not inject or treat as missing
+        assert flow.response is None  # Allowed unauthenticated

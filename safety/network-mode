@@ -205,13 +205,13 @@ enable_none() {
     echo "Enabling none mode (blocking all outbound traffic)..."
 
     # Flush OUTPUT chain
-    iptables -F OUTPUT
+    iptables -F OUTPUT || { echo -e "${RED}Error: iptables flush failed — network may not be isolated${NC}"; return 1; }
 
     # Allow loopback only
-    iptables -A OUTPUT -o lo -j ACCEPT
+    iptables -A OUTPUT -o lo -j ACCEPT || { echo -e "${RED}Error: iptables rule failed${NC}"; return 1; }
 
     # Drop everything else
-    iptables -A OUTPUT -j DROP
+    iptables -A OUTPUT -j DROP || { echo -e "${RED}Error: iptables DROP rule failed — network may not be isolated${NC}"; return 1; }
 
     # Also for IPv6 if available
     if command -v ip6tables &>/dev/null; then
@@ -246,29 +246,29 @@ enable_host_only() {
     echo "Enabling host-only mode (local network only)..."
 
     # Flush OUTPUT chain
-    iptables -F OUTPUT
+    iptables -F OUTPUT || { echo -e "${RED}Error: iptables flush failed — network may not be isolated${NC}"; return 1; }
 
     # Allow loopback
-    iptables -A OUTPUT -o lo -j ACCEPT
+    iptables -A OUTPUT -o lo -j ACCEPT || { echo -e "${RED}Error: iptables rule failed${NC}"; return 1; }
 
     # Allow established/related connections (for responses)
-    iptables -A OUTPUT -m state --state ESTABLISHED,RELATED -j ACCEPT
+    iptables -A OUTPUT -m state --state ESTABLISHED,RELATED -j ACCEPT || { echo -e "${RED}Error: iptables rule failed${NC}"; return 1; }
 
     # Get Docker gateway
     local gateway=$(ip route | grep default | awk '{print $3}')
     if [ -n "$gateway" ]; then
         echo "  Allowing Docker gateway: $gateway"
-        iptables -A OUTPUT -d "$gateway" -j ACCEPT
+        iptables -A OUTPUT -d "$gateway" -j ACCEPT || { echo -e "${RED}Error: iptables rule failed${NC}"; return 1; }
     fi
 
     # Allow common Docker/local subnets
     echo "  Allowing local subnets: 172.16.0.0/12, 10.0.0.0/8, 192.168.0.0/16"
-    iptables -A OUTPUT -d 172.16.0.0/12 -j ACCEPT
-    iptables -A OUTPUT -d 10.0.0.0/8 -j ACCEPT
-    iptables -A OUTPUT -d 192.168.0.0/16 -j ACCEPT
+    iptables -A OUTPUT -d 172.16.0.0/12 -j ACCEPT || { echo -e "${RED}Error: iptables rule failed${NC}"; return 1; }
+    iptables -A OUTPUT -d 10.0.0.0/8 -j ACCEPT || { echo -e "${RED}Error: iptables rule failed${NC}"; return 1; }
+    iptables -A OUTPUT -d 192.168.0.0/16 -j ACCEPT || { echo -e "${RED}Error: iptables rule failed${NC}"; return 1; }
 
     # Drop everything else
-    iptables -A OUTPUT -j DROP
+    iptables -A OUTPUT -j DROP || { echo -e "${RED}Error: iptables DROP rule failed — network may not be isolated${NC}"; return 1; }
 
     # Also for IPv6 if available
     if command -v ip6tables &>/dev/null; then

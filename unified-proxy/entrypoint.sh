@@ -58,11 +58,29 @@ drop_privileges_if_needed() {
         fi
     done
 
-    if command -v gosu >/dev/null 2>&1; then
-        log "Dropping privileges to ${user}"
+    # Use setpriv with ambient capabilities to preserve NET_BIND_SERVICE
+    # across the privilege drop. gosu uses setuid which drops all Linux
+    # capabilities, preventing mitmproxy from binding to port 53 (DNS).
+    # setpriv --ambient-caps keeps the capability in the ambient set so
+    # it is inherited by child processes (mitmdump).
+    local uid gid
+    uid="$(id -u "${user}")"
+    gid="$(id -g "${user}")"
+
+    if command -v setpriv >/dev/null 2>&1; then
+        log "Dropping privileges to ${user} (preserving NET_BIND_SERVICE)"
+        # setpriv does not update HOME (unlike gosu), so set it explicitly
+        # to the target user's home directory before re-executing.
+        export HOME
+        HOME="$(getent passwd "${user}" | cut -d: -f6)"
+        exec setpriv --reuid="${uid}" --regid="${gid}" --init-groups \
+            --inh-caps=+net_bind_service --ambient-caps=+net_bind_service \
+            -- "$0" "$@"
+    elif command -v gosu >/dev/null 2>&1; then
+        log "Warning: setpriv not found; falling back to gosu (DNS port 53 may fail)"
         exec gosu "${user}" "$0" "$@"
     else
-        log_error "gosu not found; continuing as root"
+        log_error "Neither setpriv nor gosu found; continuing as root"
     fi
 }
 
@@ -367,7 +385,7 @@ case "$1" in
         echo "protocol=https"
         echo "host=github.com"
         echo "username=x-access-token"
-        echo "password=${GIT_CREDENTIAL_TOKEN}"
+        echo "password=${FOUNDRY_PROXY_GIT_TOKEN}"
         echo ""
         ;;
 esac
@@ -375,9 +393,16 @@ HELPER_EOF
     chmod +x "${helper_script}"
 
     # Set the token as an env var for the helper and scope helper to github.com.
-    export GIT_CREDENTIAL_TOKEN="${token}"
+    export FOUNDRY_PROXY_GIT_TOKEN="${token}"
     git config --global --unset-all credential.helper 2>/dev/null || true
     git config --global credential.https://github.com.helper "${helper_script}"
+
+    # Rewrite SSH GitHub URLs to HTTPS so the credential helper is used.
+    # Bare repos may have SSH remotes (git@github.com:...) but the proxy
+    # authenticates via HTTPS token, not SSH keys.
+    git config --global --unset-all url."https://github.com/".insteadOf 2>/dev/null || true
+    git config --global --add url."https://github.com/".insteadOf "git@github.com:" 2>/dev/null || true
+    git config --global --add url."https://github.com/".insteadOf "ssh://git@github.com/" 2>/dev/null || true
 
     log "Git credential helper configured"
 }
@@ -494,15 +519,36 @@ start_mitmproxy() {
 
     log "mitmproxy args: ${args[*]}"
 
-    # Mark ready before starting (mitmproxy will be available shortly)
-    mark_ready
-
     # Start mitmproxy in background to capture PID
     mitmdump "${args[@]}" &
     MITM_PID=$!
     echo "${MITM_PID}" > "${PID_FILE}"
 
     log "mitmproxy started with PID ${MITM_PID}"
+
+    # Wait for mitmproxy to bind to HTTP proxy port before marking ready.
+    # This matches the pattern used by start_internal_api() and start_git_api().
+    # Without this check, the health check can pass (via internal API socket)
+    # while mitmproxy is still starting or has crashed on port binding.
+    local mitm_ready=false
+    for i in {1..30}; do
+        if python3 -c "import socket; s=socket.socket(); s.settimeout(0.5); s.connect(('127.0.0.1', 8080)); s.close()" 2>/dev/null; then
+            log "mitmproxy HTTP proxy ready on port 8080"
+            mark_ready
+            mitm_ready=true
+            break
+        fi
+        if ! kill -0 "${MITM_PID}" 2>/dev/null; then
+            log_error "mitmproxy exited before becoming ready"
+            exit 1
+        fi
+        sleep 0.5
+    done
+
+    if [[ "${mitm_ready}" != "true" ]]; then
+        log_error "mitmproxy did not bind to port 8080 within 15 seconds"
+        exit 1
+    fi
 
     # Wait for mitmproxy (this allows signal handling)
     wait "${MITM_PID}"

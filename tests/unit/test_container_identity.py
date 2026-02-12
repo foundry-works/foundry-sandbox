@@ -21,11 +21,9 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../../unified-proxy"
 
 
 # Mock mitmproxy before importing container_identity
-class MockHeaders(dict):
-    """Mock mitmproxy Headers class."""
-
-    def get(self, key, default=None):
-        return super().get(key, default)
+from tests.mocks import (
+    MockHeaders, MockResponse, MockClientConn, MockCtxLog,
+)
 
 
 class MockRequest:
@@ -34,26 +32,6 @@ class MockRequest:
     def __init__(self, headers=None):
         self.headers = MockHeaders(headers or {})
         self.pretty_host = "example.com"
-
-
-class MockResponse:
-    """Mock mitmproxy Response class."""
-
-    def __init__(self, status_code, content, headers=None):
-        self.status_code = status_code
-        self.content = content
-        self.headers = headers or {}
-
-    @classmethod
-    def make(cls, status_code, content, headers=None):
-        return cls(status_code, content, headers)
-
-
-class MockClientConn:
-    """Mock mitmproxy client connection."""
-
-    def __init__(self, peername):
-        self.peername = peername
 
 
 class MockHTTPFlow:
@@ -69,43 +47,6 @@ class MockHTTPFlow:
         self.metadata = {}
 
 
-class MockCtxLog:
-    """Mock mitmproxy ctx.log with proper tracking."""
-
-    def __init__(self):
-        self.calls = []
-
-    def info(self, msg):
-        self.calls.append(("info", msg))
-
-    def warn(self, msg):
-        self.calls.append(("warn", msg))
-
-    def debug(self, msg):
-        self.calls.append(("debug", msg))
-
-    def error(self, msg):
-        self.calls.append(("error", msg))
-
-    def reset(self):
-        self.calls.clear()
-
-    def was_called_with_level(self, level):
-        return any(call[0] == level for call in self.calls)
-
-    def get_messages(self, level=None):
-        if level:
-            return [call[1] for call in self.calls if call[0] == level]
-        return [call[1] for call in self.calls]
-
-
-class MockCtx:
-    """Mock mitmproxy ctx module."""
-
-    def __init__(self):
-        self.log = MockCtxLog()
-
-
 # Create test-specific mock objects for container_identity tests.
 # NOTE: We do NOT overwrite sys.modules["mitmproxy*"] here because conftest.py
 # already installs proper mitmproxy mocks.  Overwriting them would pollute the
@@ -115,7 +56,7 @@ mock_http = MagicMock()
 mock_http.Response = MockResponse
 mock_http.HTTPFlow = MockHTTPFlow
 
-mock_ctx = MockCtx()
+mock_logger = MockCtxLog()
 
 # Add addons path and import container_identity (uses conftest mitmproxy mocks)
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../../unified-proxy/addons"))
@@ -123,7 +64,7 @@ import container_identity
 
 # Replace the module-level mitmproxy references with our test-specific mocks
 # so that container_identity uses MockResponse/MockCtx defined above.
-container_identity.ctx = mock_ctx
+container_identity.logger = mock_logger
 container_identity.http = mock_http
 
 # Import registry directly (no mitmproxy dependency)
@@ -154,13 +95,6 @@ def addon(registry):
     """Create a ContainerIdentityAddon with a test registry."""
     addon_instance = container_identity.ContainerIdentityAddon(registry=registry)
     return addon_instance
-
-
-@pytest.fixture(autouse=True)
-def reset_mock_ctx():
-    """Reset mock ctx before each test."""
-    mock_ctx.log.reset()
-    yield
 
 
 def create_flow(source_ip, headers=None):
@@ -198,8 +132,8 @@ class TestUnknownSourceIP:
         addon.request(flow)
 
         # Verify warning was logged
-        assert mock_ctx.log.was_called_with_level("warn")
-        messages = mock_ctx.log.get_messages("warn")
+        assert mock_logger.was_called_with_level("warn")
+        messages = mock_logger.get_messages("warn")
         assert any("Unknown source IP" in msg for msg in messages)
 
     def test_unknown_ip_does_not_set_metadata(self, addon):
@@ -247,8 +181,8 @@ class TestMismatchedHeader:
 
         addon.request(flow)
 
-        assert mock_ctx.log.was_called_with_level("warn")
-        messages = mock_ctx.log.get_messages("warn")
+        assert mock_logger.was_called_with_level("warn")
+        messages = mock_logger.get_messages("warn")
         assert any("mismatch" in msg.lower() for msg in messages)
 
 
@@ -288,7 +222,7 @@ class TestExpiredRegistration:
         addon.request(flow)
 
         # Check that warning was logged (either expired or unknown)
-        assert mock_ctx.log.was_called_with_level("warn")
+        assert mock_logger.was_called_with_level("warn")
 
 
 class TestValidRegistration:
@@ -481,10 +415,17 @@ class TestEdgeCases:
 
 
 class TestPathTraversalValidation:
-    """Tests for path traversal protection in bare_repo_path enrichment."""
+    """Tests for path traversal protection in bare_repo_path enrichment.
 
-    def test_repo_with_dotdot_in_owner_returns_403(self, addon, registry):
-        """Test that '..' in owner component is rejected."""
+    The enrichment only applies to repos matching the exact 'owner/repo'
+    format (exactly two non-empty components separated by a single '/').
+    Repos with multiple slashes (absolute paths, nested paths) skip
+    enrichment entirely — no bare_repo_path is constructed, so there is
+    no path traversal risk.
+    """
+
+    def test_multi_slash_repo_skips_enrichment(self, addon, registry):
+        """Test that repos with multiple slashes skip enrichment safely."""
         registry.register(
             container_id="traversal-container",
             ip_address="172.17.0.20",
@@ -494,11 +435,14 @@ class TestPathTraversalValidation:
         flow = create_flow("172.17.0.20")
         addon.request(flow)
 
-        assert flow.response is not None
-        assert flow.response.status_code == 403
+        # Request proceeds (no bare_repo_path constructed, so no risk)
+        assert flow.response is None
+        config = container_identity.get_container_config(flow)
+        assert config is not None
+        assert "bare_repo_path" not in config.metadata
 
-    def test_repo_with_dotdot_in_repo_name_returns_403(self, addon, registry):
-        """Test that '..' in repo name component is rejected."""
+    def test_multi_slash_nested_path_skips_enrichment(self, addon, registry):
+        """Test that nested paths with '..' skip enrichment safely."""
         registry.register(
             container_id="traversal-container-2",
             ip_address="172.17.0.21",
@@ -506,6 +450,37 @@ class TestPathTraversalValidation:
         )
 
         flow = create_flow("172.17.0.21")
+        addon.request(flow)
+
+        # Request proceeds (no bare_repo_path constructed)
+        assert flow.response is None
+        config = container_identity.get_container_config(flow)
+        assert config is not None
+        assert "bare_repo_path" not in config.metadata
+
+    def test_dotdot_in_two_part_owner_returns_403(self, addon, registry):
+        """Test that '..' in owner of a two-part repo is rejected."""
+        registry.register(
+            container_id="traversal-2part-container",
+            ip_address="172.17.0.26",
+            metadata={"repo": "../passwd"},
+        )
+
+        flow = create_flow("172.17.0.26")
+        addon.request(flow)
+
+        assert flow.response is not None
+        assert flow.response.status_code == 403
+
+    def test_dotdot_in_two_part_repo_name_returns_403(self, addon, registry):
+        """Test that '..' in repo name of a two-part repo is rejected."""
+        registry.register(
+            container_id="traversal-2part-container-2",
+            ip_address="172.17.0.27",
+            metadata={"repo": "owner/..secret"},
+        )
+
+        flow = create_flow("172.17.0.27")
         addon.request(flow)
 
         assert flow.response is not None
@@ -529,25 +504,25 @@ class TestPathTraversalValidation:
         assert config.metadata["bare_repo_path"].endswith("owner/repo-name.git")
 
     def test_traversal_rejection_logs_warning(self, addon, registry):
-        """Test that path traversal rejection is logged."""
+        """Test that path traversal rejection is logged for two-part repos."""
         registry.register(
             container_id="traversal-log-container",
             ip_address="172.17.0.23",
-            metadata={"repo": "../../evil/path"},
+            metadata={"repo": "../evil"},
         )
 
         flow = create_flow("172.17.0.23")
         addon.request(flow)
 
-        assert mock_ctx.log.was_called_with_level("warn")
-        messages = mock_ctx.log.get_messages("warn")
+        assert mock_logger.was_called_with_level("warn")
+        messages = mock_logger.get_messages("warn")
         assert any("path traversal" in msg.lower() for msg in messages)
 
-    def test_slash_in_repo_name_returns_403(self, addon, registry):
-        """Test that '/' in repo_name (after initial split) is rejected.
+    def test_three_part_repo_skips_enrichment(self, addon, registry):
+        """Test that 'owner/repo/extra' skips enrichment (no 403).
 
-        The initial split on '/' gives owner and repo_name. If repo_name
-        itself contains '/', it could be used for path injection.
+        Repos with more than two path components don't match the
+        'owner/repo' format, so no bare_repo_path is constructed.
         """
         registry.register(
             container_id="slash-container",
@@ -558,8 +533,30 @@ class TestPathTraversalValidation:
         flow = create_flow("172.17.0.24")
         addon.request(flow)
 
-        assert flow.response is not None
-        assert flow.response.status_code == 403
+        assert flow.response is None
+        config = container_identity.get_container_config(flow)
+        assert config is not None
+        assert "bare_repo_path" not in config.metadata
+
+    def test_absolute_path_skips_enrichment(self, addon, registry):
+        """Test that absolute filesystem paths skip enrichment.
+
+        Test sandboxes use local paths like '/tmp/pytest-xxx/repo0'.
+        These should not trigger path traversal rejection.
+        """
+        registry.register(
+            container_id="abspath-container",
+            ip_address="172.17.0.28",
+            metadata={"repo": "/tmp/pytest-of-user/pytest-1/repo0"},
+        )
+
+        flow = create_flow("172.17.0.28")
+        addon.request(flow)
+
+        assert flow.response is None
+        config = container_identity.get_container_config(flow)
+        assert config is not None
+        assert "bare_repo_path" not in config.metadata
 
     def test_realpath_validation_blocks_escape(self, addon, registry):
         """Test that os.path.realpath validation blocks path escape attempts.

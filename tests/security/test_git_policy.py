@@ -23,11 +23,10 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../../unified-proxy"
 
 
 # Mock mitmproxy before importing git_proxy
-class MockHeaders(dict):
-    """Mock mitmproxy Headers class."""
-
-    def get(self, key, default=None):
-        return super().get(key, default)
+from tests.mocks import (
+    MockHeaders, MockResponse, MockClientConn, MockCtx,
+    install_mitmproxy_mocks,
+)
 
 
 class MockRequest:
@@ -39,26 +38,6 @@ class MockRequest:
         self.content = content
         self.headers = MockHeaders(headers or {})
         self.pretty_host = "github.com"
-
-
-class MockResponse:
-    """Mock mitmproxy Response class."""
-
-    def __init__(self, status_code, content, headers=None):
-        self.status_code = status_code
-        self.content = content
-        self.headers = headers or {}
-
-    @classmethod
-    def make(cls, status_code, content, headers=None):
-        return cls(status_code, content, headers)
-
-
-class MockClientConn:
-    """Mock mitmproxy client connection."""
-
-    def __init__(self, peername):
-        self.peername = peername
 
 
 class MockHTTPFlow:
@@ -74,48 +53,18 @@ class MockHTTPFlow:
         self.metadata = {}
 
 
-class MockCtxLog:
-    """Mock mitmproxy ctx.log."""
+# Install shared mitmproxy mocks, then layer on test-specific overrides
+install_mitmproxy_mocks()
 
-    def __init__(self):
-        self.calls = []
-
-    def info(self, msg):
-        self.calls.append(("info", msg))
-
-    def warn(self, msg):
-        self.calls.append(("warn", msg))
-
-    def debug(self, msg):
-        self.calls.append(("debug", msg))
-
-    def error(self, msg):
-        self.calls.append(("error", msg))
-
-    def reset(self):
-        self.calls.clear()
-
-
-class MockCtx:
-    """Mock mitmproxy ctx module."""
-
-    def __init__(self):
-        self.log = MockCtxLog()
-
-
-# Create and install mock modules
-mock_mitmproxy = MagicMock()
-mock_http = MagicMock()
+mock_http = sys.modules["mitmproxy.http"]
 mock_http.Response = MockResponse
 mock_http.HTTPFlow = MockHTTPFlow
-mock_ctx = MockCtx()
-mock_flow = MagicMock()
-mock_flow.Flow = MockHTTPFlow
 
-sys.modules["mitmproxy"] = mock_mitmproxy
-sys.modules["mitmproxy.http"] = mock_http
+mock_ctx = MockCtx()
 sys.modules["mitmproxy.ctx"] = mock_ctx
-sys.modules["mitmproxy.flow"] = mock_flow
+
+mock_flow = sys.modules["mitmproxy.flow"]
+mock_flow.Flow = MockHTTPFlow
 
 # Add addons path and import
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../../unified-proxy/addons"))
@@ -128,7 +77,17 @@ git_proxy.http = mock_http
 from pktline import ZERO_SHA
 from registry import ContainerConfig
 
-DEFAULT_TEST_BARE_REPO = "/tmp/foundry-test-bare.git"
+_MODULE_BARE_REPO: str | None = None
+
+
+@pytest.fixture(scope="module", autouse=True)
+def _set_module_bare_repo(tmp_path_factory):
+    """Create a module-scoped bare repo dir via pytest's tmp_path_factory.
+
+    Replaces the old tempfile.mkdtemp approach so pytest manages cleanup.
+    """
+    global _MODULE_BARE_REPO
+    _MODULE_BARE_REPO = str(tmp_path_factory.mktemp("foundry-test-bare"))
 
 
 @pytest.fixture(autouse=True)
@@ -139,7 +98,6 @@ def reset_mock_ctx():
     when pytest runs multiple test files in the same process.
     """
     git_proxy.ctx = mock_ctx
-    mock_ctx.log.reset()
     yield
 
 
@@ -156,16 +114,16 @@ def bypass_restricted_path_check(monkeypatch):
 def create_container_config(
     repos=None,
     auth_mode="normal",
-    bare_repo_path=DEFAULT_TEST_BARE_REPO,
+    bare_repo_path=None,
     **extra_metadata,
 ):
     """Create a ContainerConfig with given configuration."""
     import time
 
+    if bare_repo_path is None:
+        bare_repo_path = _MODULE_BARE_REPO
     metadata = {"repos": repos or [], "auth_mode": auth_mode}
     if bare_repo_path is not None:
-        if bare_repo_path == DEFAULT_TEST_BARE_REPO:
-            os.makedirs(bare_repo_path, exist_ok=True)
         metadata["bare_repo_path"] = bare_repo_path
     metadata.update(extra_metadata)
 

@@ -1,25 +1,36 @@
 # Strict allowlist - only these commands are permitted via sudo
 # No PASSWD:ALL fallback - unlisted commands are denied
+#
+# SECURITY: No wildcards — every allowed argument is enumerated explicitly.
+# Install dev tools at image build time; do not grant runtime apt-get install.
 
-# Package management (safe)
+# Audit logging — record all sudo I/O for incident investigation
+Defaults log_output
+Defaults logfile=/var/log/sudo-audit.log
+
+# Package management — update only (install packages at build time)
 ubuntu ALL=(ALL) NOPASSWD: /usr/bin/apt-get update
-ubuntu ALL=(ALL) NOPASSWD: /usr/bin/apt-get install *
 
-# Service management (safe)
-ubuntu ALL=(ALL) NOPASSWD: /usr/sbin/service * start
-ubuntu ALL=(ALL) NOPASSWD: /usr/sbin/service * stop
-ubuntu ALL=(ALL) NOPASSWD: /usr/sbin/service * restart
-ubuntu ALL=(ALL) NOPASSWD: /usr/sbin/service * status
+# Service management — enumerate allowed services explicitly
+ubuntu ALL=(ALL) NOPASSWD: /usr/sbin/service postgresql start
+ubuntu ALL=(ALL) NOPASSWD: /usr/sbin/service postgresql stop
+ubuntu ALL=(ALL) NOPASSWD: /usr/sbin/service postgresql restart
+ubuntu ALL=(ALL) NOPASSWD: /usr/sbin/service postgresql status
+ubuntu ALL=(ALL) NOPASSWD: /usr/sbin/service redis-server start
+ubuntu ALL=(ALL) NOPASSWD: /usr/sbin/service redis-server stop
+ubuntu ALL=(ALL) NOPASSWD: /usr/sbin/service redis-server restart
+ubuntu ALL=(ALL) NOPASSWD: /usr/sbin/service redis-server status
 
-# Network mode switching
+# Network mode switching — enumerate allowed modes
 ubuntu ALL=(ALL) NOPASSWD: /usr/local/bin/network-firewall.sh
-ubuntu ALL=(ALL) NOPASSWD: /usr/local/bin/network-mode *
+ubuntu ALL=(ALL) NOPASSWD: /usr/local/bin/network-mode status
+ubuntu ALL=(ALL) NOPASSWD: /usr/local/bin/network-mode limited
+ubuntu ALL=(ALL) NOPASSWD: /usr/local/bin/network-mode host-only
+ubuntu ALL=(ALL) NOPASSWD: /usr/local/bin/network-mode none
+ubuntu ALL=(ALL) NOPASSWD: /usr/local/bin/network-mode list
+ubuntu ALL=(ALL) NOPASSWD: /usr/local/bin/network-mode help
 
 # DNS configuration (for credential isolation gateway)
 ubuntu ALL=(ALL) NOPASSWD: /usr/bin/tee /etc/resolv.conf
-
-# Add other safe commands as needed:
-# ubuntu ALL=(ALL) NOPASSWD: /usr/bin/npm *
-# ubuntu ALL=(ALL) NOPASSWD: /usr/bin/pip *
 
 # NO fallback line - everything else is denied

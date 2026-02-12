@@ -28,7 +28,7 @@ from dataclasses import dataclass, field
 from io import BytesIO
 from typing import Dict, List, Optional
 
-from mitmproxy import ctx, http
+from mitmproxy import http
 from mitmproxy.flow import Flow
 
 # Add parent directory to path for imports
@@ -37,7 +37,10 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from addons.container_identity import get_container_config
 import git_policies
 from git_policies import check_protected_branches
+from logging_config import get_logger
 from pktline import PktLineRef, parse_pktline, read_pktline_prefix
+
+logger = get_logger(__name__)
 
 # Git path pattern: /<owner>/<repo>.git/<operation>
 # Matches paths like: /octocat/hello-world.git/info/refs
@@ -129,7 +132,7 @@ class GitProxyAddon:
 
     def load(self, loader):
         """Called when addon is loaded."""
-        ctx.log.info(f"Git proxy addon loaded (max_push_size={self._max_push_size})")
+        logger.info(f"Git proxy addon loaded (max_push_size={self._max_push_size})")
 
     def request(self, flow: http.HTTPFlow) -> None:
         """Process incoming request for git operations.
@@ -159,7 +162,7 @@ class GitProxyAddon:
         if container_config is None:
             # Container identity addon should have already denied the request
             # Log for debugging but don't create duplicate response
-            ctx.log.warn(
+            logger.warning(
                 f"Git request without container identity: "
                 f"{git_op.owner}/{git_op.repo}"
             )
@@ -261,7 +264,7 @@ class GitProxyAddon:
                     return
             else:
                 # Fail closed if bare_repo_path is missing or invalid
-                ctx.log.warn(
+                logger.warning(
                     "[restricted-path] check failed: bare_repo_path missing or invalid"
                 )
                 self._deny_request(
@@ -482,7 +485,7 @@ class GitProxyAddon:
         # Defensive size check: reject oversized pack data even if the caller
         # didn't enforce the limit (e.g., due to future refactoring of request()).
         if len(pack_data) > self._max_push_size:
-            ctx.log.warn(
+            logger.warning(
                 f"[restricted-path] pack_data exceeds max push size "
                 f"({len(pack_data)} > {self._max_push_size})"
             )
@@ -536,7 +539,7 @@ class GitProxyAddon:
                     cwd=tmp_dir,
                 )
                 if result.returncode != 0:
-                    ctx.log.warn(
+                    logger.warning(
                         f"[restricted-path] git unpack-objects failed: "
                         f"{result.stderr.decode(errors='replace')[:200]}"
                     )
@@ -557,7 +560,7 @@ class GitProxyAddon:
                     timeout=SUBPROCESS_TIMEOUT,
                 )
                 if diff_result.returncode != 0:
-                    ctx.log.warn(
+                    logger.warning(
                         f"[restricted-path] git diff-tree failed for {ref.refname}: "
                         f"{diff_result.stderr.decode(errors='replace')[:200]}"
                     )
@@ -567,7 +570,7 @@ class GitProxyAddon:
                 for line in changed_files:
                     for restricted in normalized_paths:
                         if line == restricted or line.startswith(restricted + "/"):
-                            ctx.log.info(
+                            logger.info(
                                 f"[restricted-path] Blocked push modifying "
                                 f"restricted path: {line} (matched {restricted})"
                             )
@@ -576,17 +579,17 @@ class GitProxyAddon:
             return None
 
         except subprocess.TimeoutExpired:
-            ctx.log.warn("[restricted-path] Subprocess timed out during restricted-path check")
+            logger.warning("[restricted-path] Subprocess timed out during restricted-path check")
             return "Push blocked by security policy"
         except Exception as exc:
-            ctx.log.warn(f"[restricted-path] Error during restricted-path check: {exc}")
+            logger.warning(f"[restricted-path] Error during restricted-path check: {exc}")
             return "Push blocked by security policy"
         finally:
             if tmp_dir and os.path.isdir(tmp_dir):
                 try:
                     shutil.rmtree(tmp_dir)
                 except OSError as cleanup_err:
-                    ctx.log.warn(
+                    logger.warning(
                         f"[restricted-path] Failed to clean up temp dir "
                         f"{tmp_dir}: {cleanup_err}"
                     )
@@ -602,7 +605,7 @@ class GitProxyAddon:
             allowed: Whether the operation was allowed.
         """
         decision = "ALLOW" if allowed else "DENY"
-        log_fn = ctx.log.info if allowed else ctx.log.warn
+        log_fn = logger.info if allowed else logger.warning
 
         log_fn(
             f"Git {decision}: {git_op.operation} {git_op.repo_path()} - "
@@ -629,7 +632,7 @@ class GitProxyAddon:
         """
         # Log the denial with git operation info
         git_op_info = flow.metadata.get(GIT_METADATA_KEY, {})
-        ctx.log.warn(
+        logger.warning(
             f"Git DENY: {reason} - "
             f"container={container_id or 'unknown'} - "
             f"repo={git_op_info.get('owner', '?')}/{git_op_info.get('repo', '?')} - "

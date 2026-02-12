@@ -25,6 +25,9 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../../unified-proxy"
 
 from registry import ContainerRegistry
 
+# All throughput tests are slow (multi-second measurement windows)
+pytestmark = pytest.mark.slow
+
 
 def measure_throughput(
     func: Callable,

@@ -15,7 +15,7 @@ services:
       - NET_RAW
 
     volumes:
-      # Workspace (set by sandbox.sh via WORKSPACE_PATH)
+      # Workspace (set by cast via WORKSPACE_PATH)
       - ${WORKSPACE_PATH:-.}:/workspace
 
     # Writable tmpfs mounts (RAM-backed, cleared on container stop)

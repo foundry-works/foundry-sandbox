@@ -1,4 +1,5 @@
 #!/bin/bash
+set -u
 
 # Create home directories (needed because /home/ubuntu is tmpfs with read-only root)
 # These would normally be created by Dockerfile but tmpfs is empty on each start
@@ -127,7 +128,7 @@ else
     echo '{"hasCompletedOnboarding": true}' > "$CLAUDE_JSON"
 fi
 
-# Note: Git worktree path fixes are handled by the host script (lib/container_config.sh)
+# Note: Git worktree path fixes are handled by the host script (foundry_sandbox/container_setup.py)
 # after copying the repos directory, ensuring the bare repo exists before fixing paths.
 
 # Network mode is applied AFTER plugin registration by the host setup script.
@@ -138,7 +139,7 @@ fi
 # Copy proxy stub files when in credential isolation mode
 # Stubs are in a named volume (populated by populate_stubs_volume) with original filenames
 # Volume mount avoids Docker Desktop VirtioFS/gRPC-FUSE staleness issues
-if [ "$SANDBOX_GATEWAY_ENABLED" = "true" ]; then
+if [ "${SANDBOX_GATEWAY_ENABLED:-}" = "true" ]; then
     if [ -f "/etc/proxy-stubs/stub-auth-codex.json" ]; then
         cp /etc/proxy-stubs/stub-auth-codex.json "$HOME/.codex/auth.json"
     fi
@@ -174,12 +175,16 @@ fi
 
 # Git hardening: disable hooks and fsmonitor to prevent malicious repos from executing code
 # Gate behind SANDBOX_GIT_HOOKS_ENABLED (default 0 = hooks disabled for security)
+# IMPORTANT: Use /usr/bin/git directly to bypass the git-wrapper.sh proxy.
+# The wrapper intercepts all commands when WORKDIR is /workspace and proxies them
+# to the git API, which rejects config writes (read-only policy). Using the real
+# git binary ensures hardening is applied to the sandbox user's global gitconfig.
 if [ "${SANDBOX_GIT_HOOKS_ENABLED:-0}" != "1" ]; then
-    git config --global core.hooksPath /dev/null
-    git config --global init.templateDir ''
-    git config --global core.fsmonitor false
-    git config --global core.fsmonitorHookVersion 0
-    git config --global receive.denyCurrentBranch refuse
+    /usr/bin/git config --global core.hooksPath /dev/null
+    /usr/bin/git config --global init.templateDir ''
+    /usr/bin/git config --global core.fsmonitor false
+    /usr/bin/git config --global core.fsmonitorHookVersion 0
+    /usr/bin/git config --global receive.denyCurrentBranch refuse
 fi
 
 # Git shadow mode: /workspace/.git is hidden from the sandbox
@@ -233,7 +238,7 @@ fi
 # This enables domain allowlisting - only approved domains can be resolved
 # Note: In credential-isolation mode, DNS is configured by entrypoint-root.sh (as root)
 # before this script runs. This block handles non-credential-isolation proxy mode.
-if [ "$SANDBOX_GATEWAY_ENABLED" = "true" ]; then
+if [ "${SANDBOX_GATEWAY_ENABLED:-}" = "true" ]; then
     # Check if DNS is already configured (by root wrapper)
     if grep -q "unified-proxy" /etc/resolv.conf 2>/dev/null || grep -q "172\." /etc/resolv.conf 2>/dev/null; then
         echo "DNS already configured for unified-proxy"
@@ -258,7 +263,7 @@ fi
 if [ -f "/certs/mitmproxy-ca.pem" ]; then
     echo "Configuring CA trust for proxy..."
 
-    if [ "${SANDBOX_CA_MODE}" = "combined" ]; then
+    if [ "${SANDBOX_CA_MODE:-}" = "combined" ]; then
         # Combined bundle mode (credential-isolation with read-only FS).
         # Env vars (NODE_EXTRA_CA_CERTS, REQUESTS_CA_BUNDLE, etc.) are set
         # via docker-compose.credential-isolation.yml.
