@@ -1,8 +1,10 @@
 name: Red Team Security Tests
 
 on:
-  schedule:
-    - cron: '0 8 * * 1'  # Weekly on Monday at 8am UTC
+  push:
+    branches: [main, 'tylerburleigh/**']
+  pull_request:
+    branches: [main]
   workflow_dispatch:
 
 concurrency:
