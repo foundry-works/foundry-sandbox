@@ -114,7 +114,7 @@ def _stage_setup_user(container_id: str) -> None:
         log_warn(f"Container home {CONTAINER_HOME} not ready after 5 attempts")
 
 
-def _stage_create_config_dirs(container_id: str) -> list[str]:
+def _stage_create_config_dirs(container_id: str, *, enable_ssh: bool = False) -> list[str]:
     """Stage 2: Create config directories. Returns the list for later chown."""
     log_step("Creating config directories")
     dirs = [
@@ -124,9 +124,12 @@ def _stage_create_config_dirs(container_id: str) -> list[str]:
         f"{CONTAINER_HOME}/.config/opencode",
         f"{CONTAINER_HOME}/.local/share/opencode",
         f"{CONTAINER_HOME}/.codex",
-        f"{CONTAINER_HOME}/.ssh",
-        f"{CONTAINER_HOME}/.ssh/sockets",
     ]
+    if enable_ssh:
+        dirs += [
+            f"{CONTAINER_HOME}/.ssh",
+            f"{CONTAINER_HOME}/.ssh/sockets",
+        ]
     for dir_path in dirs:
         subprocess.run(
             ["docker", "exec", "-u", CONTAINER_USER, container_id, "mkdir", "-p", dir_path],
@@ -568,7 +571,7 @@ def copy_configs_to_container(
     home = Path.home()
 
     _stage_setup_user(container_id)
-    dirs = _stage_create_config_dirs(container_id)
+    dirs = _stage_create_config_dirs(container_id, enable_ssh=enable_ssh)
     _stage_setup_claude_config(
         container_id, home,
         isolate_credentials=isolate_credentials,

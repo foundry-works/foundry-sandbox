@@ -87,10 +87,12 @@ run_tests() {
     info "Mounted volumes:"
     mount | grep -vE "^(proc|sysfs|tmpfs|devpts|mqueue|cgroup)" | sed 's/^/    /' | head -20
 
-    # Look for sensitive mounts
-    if mount | grep -qE "(credentials|secrets|\.ssh|\.gnupg)"; then
+    # Look for sensitive mounts (exclude known safe mounts from credential isolation:
+    # /run/secrets/sandbox-hmac is the HMAC auth secret for git API, read-only)
+    SENSITIVE_MOUNTS=$(mount | grep -E "(credentials|secrets|\.ssh|\.gnupg)" | grep -vE "(sandbox-hmac)" || true)
+    if [[ -n "$SENSITIVE_MOUNTS" ]]; then
         test_warn "Potentially sensitive mount detected"
-        mount | grep -E "(credentials|secrets|\.ssh|\.gnupg)" | sed 's/^/    /'
+        echo "$SENSITIVE_MOUNTS" | sed 's/^/    /'
     else
         test_pass "No obvious credential mounts"
     fi
