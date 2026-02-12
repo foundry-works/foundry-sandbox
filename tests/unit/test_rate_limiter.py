@@ -615,6 +615,7 @@ class TestConcurrency:
         """Test concurrent requests from same container are thread-safe."""
         mock_get_config.return_value = mock_container_config
 
+        lock = threading.Lock()
         results = {"allowed": 0, "denied": 0}
         errors = []
 
@@ -624,10 +625,11 @@ class TestConcurrency:
 
                 addon.request(flow)
 
-                if flow.response is None:
-                    results["allowed"] += 1
-                else:
-                    results["denied"] += 1
+                with lock:
+                    if flow.response is None:
+                        results["allowed"] += 1
+                    else:
+                        results["denied"] += 1
             except Exception as e:
                 errors.append(e)
 
@@ -641,6 +643,8 @@ class TestConcurrency:
         # Should have no errors
         assert not errors
 
+        # All 20 requests should be accounted for
+        assert results["allowed"] + results["denied"] == 20
         # Should allow exactly 10, deny exactly 10
         assert results["allowed"] == 10
         assert results["denied"] == 10
