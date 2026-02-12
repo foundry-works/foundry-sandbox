@@ -1,0 +1,74 @@
+name: Red Team Security Tests
+
+on:
+  schedule:
+    - cron: '0 8 * * 1'  # Weekly on Monday at 8am UTC
+  workflow_dispatch:
+
+concurrency:
+  group: redteam-tests-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  redteam:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+
+      - name: Install dependencies
+        run: pip install -e ".[dev,test-orchestration]"
+
+      - name: Verify Docker availability
+        run: docker info
+
+      - name: Create sandbox for red team testing
+        id: sandbox
+        run: |
+          RESULT=$(python3 -m foundry_sandbox.cli new . --skip-key-check 2>&1)
+          echo "$RESULT"
+          NAME=$(echo "$RESULT" | grep 'Setting up your sandbox:' | sed 's/.*Setting up your sandbox: //')
+          if [ -z "$NAME" ]; then
+            echo "::error::Failed to extract sandbox name"
+            exit 1
+          fi
+          echo "name=$NAME" >> "$GITHUB_OUTPUT"
+          # Find the container ID
+          CONTAINER=$(docker ps -q --filter "name=sandbox-${NAME}")
+          if [ -z "$CONTAINER" ]; then
+            echo "::error::No running container found for sandbox-${NAME}"
+            exit 1
+          fi
+          echo "container=$CONTAINER" >> "$GITHUB_OUTPUT"
+
+      - name: Run red team tests inside sandbox
+        run: |
+          docker cp tests/redteam/ ${{ steps.sandbox.outputs.container }}:/tmp/redteam/
+          docker exec ${{ steps.sandbox.outputs.container }} \
+            bash /tmp/redteam/runner.sh --output-format junit --output-dir /tmp/results
+
+      - name: Copy results from container
+        if: always()
+        run: |
+          docker cp ${{ steps.sandbox.outputs.container }}:/tmp/results/redteam-junit.xml . || true
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: redteam-results
+          path: redteam-junit.xml
+
+      - name: Destroy sandbox
+        if: always()
+        run: |
+          python3 -m foundry_sandbox.cli destroy ${{ steps.sandbox.outputs.name }} --force 2>/dev/null || true
+          docker ps -aq --filter "name=sandbox-" | xargs -r docker rm -f 2>/dev/null || true

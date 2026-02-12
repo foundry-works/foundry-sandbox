@@ -1,10 +1,11 @@
 """Performance latency tests for unified-proxy.
 
-Tests p99 latency budgets for critical proxy operations:
-- HTTP passthrough: p99 < 50ms
-- Credential injection: p99 < 10ms
-- DNS resolution: p99 < 50ms
-- Registry lookup: p99 < 1ms
+Tests p99 latency budgets for critical proxy operations using the actual
+addon code paths rather than simulations:
+- HTTP passthrough (normalize_path, normalize_host, _check_github_blocklist): p99 < 50ms
+- Credential injection (_has_credential_placeholder, PROVIDER_MAP lookup): p99 < 10ms
+- DNS resolution (DNSFilterAddon._is_allowed with DEFAULT_ALLOWLIST): p99 < 50ms
+- Registry lookup (ContainerRegistry.get_by_ip): p99 < 1ms
 
 These tests validate that the proxy adds acceptable overhead to request
 processing and can maintain performance under load.
@@ -24,6 +25,27 @@ import pytest
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../../unified-proxy"))
 
 from registry import ContainerRegistry
+
+# Import real addon functions for performance testing
+from addons.policy_engine import (
+    normalize_path,
+    normalize_host,
+    GITHUB_MERGE_PR_PATTERN,
+    GITHUB_CREATE_RELEASE_PATTERN,
+    GITHUB_GIT_REFS_ROOT_PATTERN,
+    GITHUB_GIT_REFS_SUBPATH_PATTERN,
+    GITHUB_AUTO_MERGE_PATTERN,
+    GITHUB_DELETE_REVIEW_PATTERN,
+    GITHUB_PATCH_PR_PATTERN,
+    GITHUB_PATCH_ISSUE_PATTERN,
+    GITHUB_PR_REVIEW_PATTERN,
+)
+from addons.credential_injector import (
+    _has_credential_placeholder,
+    _has_opencode_placeholder,
+    PROVIDER_MAP,
+)
+from addons.dns_filter import DNSFilterAddon, DEFAULT_ALLOWLIST
 
 
 def percentile(data: List[float], p: float) -> float:
@@ -255,95 +277,133 @@ class TestRegistryLookupLatency:
 class TestCredentialInjectionLatency:
     """Credential injection latency tests: p99 < 10ms target (2x in CI).
 
-    Tests the overhead of credential injection logic without actual network I/O.
+    Tests the overhead of real credential injection functions from
+    addons/credential_injector.py without actual network I/O.
     """
 
     LATENCY_TARGET_P99_MS = 10.0
 
-    def test_header_injection_latency(self):
-        """Test credential header injection p99 latency."""
-        # Simulate credential injection logic
-        credentials = {
-            "Authorization": "Bearer test-token-12345",
-            "X-Api-Key": "sk-ant-test-key-67890",
-        }
-
-        headers = {
-            "Content-Type": "application/json",
-            "User-Agent": "test-client/1.0",
-            "Accept": "application/json",
-        }
-
-        def inject_credentials():
-            # Simulate the injection process
-            result = dict(headers)
-            for key, value in credentials.items():
-                if value.startswith("CREDENTIAL_PROXY_PLACEHOLDER"):
-                    # Would look up real credential
-                    result[key] = "injected-value"
-                else:
-                    result[key] = value
-            return result
-
-        stats = measure_latency(inject_credentials, iterations=1000)
-        print(f"\nCredential injection latency stats: {stats}")
-
-        assert stats["p99"] < self.LATENCY_TARGET_P99_MS, (
-            f"Credential injection p99 ({stats['p99']:.3f}ms) exceeds "
-            f"target ({self.LATENCY_TARGET_P99_MS}ms)"
-        )
+    @property
+    def effective_target(self):
+        return self.LATENCY_TARGET_P99_MS * _ci_multiplier()
 
     def test_placeholder_detection_latency(self):
-        """Test placeholder detection p99 latency."""
-        import re
+        """Test _has_credential_placeholder() p99 latency.
 
-        placeholder_pattern = re.compile(
-            r"CREDENTIAL_PROXY_PLACEHOLDER|PROXY_PLACEHOLDER_\w+"
-        )
+        Uses the real placeholder detection function from credential_injector.
+        """
         test_values = [
             "CREDENTIAL_PROXY_PLACEHOLDER",
+            "CRED_PROXY_abcdef1234567890",
             "sk-ant-api03-realkey",
-            "Bearer PROXY_PLACEHOLDER_OAUTH",
+            "Bearer CREDENTIAL_PROXY_PLACEHOLDER",
             "normal-header-value",
+            "ghp_xxxxxxxxxxxxxxxxxxxx",
+            "",
         ]
-
         idx = [0]
 
         def detect_placeholder():
             value = test_values[idx[0] % len(test_values)]
             idx[0] += 1
-            return bool(placeholder_pattern.search(value))
+            return _has_credential_placeholder(value)
 
         stats = measure_latency(detect_placeholder, iterations=10000)
         print(f"\nPlaceholder detection latency stats: {stats}")
 
-        # Detection should be very fast (sub-millisecond)
-        assert stats["p99"] < 1.0, (
-            f"Placeholder detection p99 ({stats['p99']:.3f}ms) exceeds 1ms"
+        assert stats["p99"] < 1.0 * _ci_multiplier(), (
+            f"Placeholder detection p99 ({stats['p99']:.3f}ms) exceeds "
+            f"{1.0 * _ci_multiplier()}ms"
         )
 
-    def test_credential_lookup_simulation_latency(self):
-        """Test simulated credential lookup latency."""
-        # Simulate credential store lookup
-        credential_store = {
-            "anthropic": "sk-ant-test-key",
-            "openai": "sk-openai-test-key",
-            "github": "ghp_testtoken",
-        }
-
-        providers = list(credential_store.keys())
+    def test_opencode_placeholder_detection_latency(self):
+        """Test _has_opencode_placeholder() p99 latency."""
+        test_values = [
+            "PROXY_PLACEHOLDER_OPENCODE",
+            "CRED_PROXY_abcdef1234567890",
+            "Bearer real-token",
+            "normal-value",
+        ]
         idx = [0]
 
-        def lookup_credential():
-            provider = providers[idx[0] % len(providers)]
+        def detect():
+            value = test_values[idx[0] % len(test_values)]
             idx[0] += 1
-            return credential_store.get(provider)
+            return _has_opencode_placeholder(value)
 
-        stats = measure_latency(lookup_credential, iterations=10000)
-        print(f"\nCredential lookup simulation latency stats: {stats}")
+        stats = measure_latency(detect, iterations=10000)
+        print(f"\nOpenCode placeholder detection latency stats: {stats}")
 
-        assert stats["p99"] < 1.0, (
-            f"Credential lookup p99 ({stats['p99']:.3f}ms) should be under 1ms"
+        assert stats["p99"] < 1.0 * _ci_multiplier(), (
+            f"OpenCode placeholder detection p99 ({stats['p99']:.3f}ms) exceeds "
+            f"{1.0 * _ci_multiplier()}ms"
+        )
+
+    def test_provider_map_lookup_latency(self):
+        """Test PROVIDER_MAP host-to-credential lookup p99 latency.
+
+        Uses the real PROVIDER_MAP from credential_injector to look up
+        credential config by host, matching the hot path in _load_credentials.
+        """
+        test_hosts = [
+            "api.anthropic.com",
+            "api.openai.com",
+            "api.github.com",
+            "generativelanguage.googleapis.com",
+            "api.tavily.com",
+            "unknown-host.example.com",
+            "api.perplexity.ai",
+            "uploads.github.com",
+        ]
+        idx = [0]
+
+        def lookup_provider():
+            host = test_hosts[idx[0] % len(test_hosts)]
+            idx[0] += 1
+            config = PROVIDER_MAP.get(host)
+            if config:
+                # Simulate the credential resolution path
+                _ = config["header"]
+                _ = config.get("fallback_env_var")
+                _ = config.get("alt_env_var")
+            return config
+
+        stats = measure_latency(lookup_provider, iterations=10000)
+        print(f"\nProvider map lookup latency stats: {stats}")
+
+        assert stats["p99"] < self.effective_target, (
+            f"Provider map lookup p99 ({stats['p99']:.3f}ms) exceeds "
+            f"target ({self.effective_target}ms)"
+        )
+
+    def test_combined_credential_check_latency(self):
+        """Test combined placeholder detection + provider lookup p99 latency.
+
+        Mirrors the real request() hot path: check for placeholder, then
+        look up the host in PROVIDER_MAP.
+        """
+        test_cases = [
+            ("api.anthropic.com", "CRED_PROXY_abc123"),
+            ("api.openai.com", "Bearer real-token"),
+            ("api.github.com", "CREDENTIAL_PROXY_PLACEHOLDER"),
+            ("unknown.com", "normal-value"),
+            ("api.tavily.com", "CRED_PROXY_def456"),
+        ]
+        idx = [0]
+
+        def combined_check():
+            host, auth = test_cases[idx[0] % len(test_cases)]
+            idx[0] += 1
+            is_placeholder = _has_credential_placeholder(auth)
+            config = PROVIDER_MAP.get(host)
+            return is_placeholder, config
+
+        stats = measure_latency(combined_check, iterations=10000)
+        print(f"\nCombined credential check latency stats: {stats}")
+
+        assert stats["p99"] < self.effective_target, (
+            f"Combined credential check p99 ({stats['p99']:.3f}ms) exceeds "
+            f"target ({self.effective_target}ms)"
         )
 
 
@@ -351,109 +411,109 @@ class TestCredentialInjectionLatency:
 class TestDNSResolutionLatency:
     """DNS resolution latency tests: p99 < 50ms target (2x in CI).
 
-    Tests DNS filtering and allowlist checking without actual DNS queries.
+    Tests DNS filtering using the real DNSFilterAddon._is_allowed() method
+    with the production DEFAULT_ALLOWLIST.
     """
 
     LATENCY_TARGET_P99_MS = 50.0
 
-    def test_allowlist_check_latency(self):
-        """Test domain allowlist checking p99 latency."""
-        import re
+    @property
+    def effective_target(self):
+        return self.LATENCY_TARGET_P99_MS * _ci_multiplier()
 
-        # Simulate allowlist patterns
-        allowlist_patterns = [
-            re.compile(r"^api\.anthropic\.com$"),
-            re.compile(r"^.*\.github\.com$"),
-            re.compile(r"^api\.openai\.com$"),
-            re.compile(r"^.*\.googleapis\.com$"),
-            re.compile(r"^registry\.npmjs\.org$"),
-        ]
+    def test_allowlist_check_latency(self):
+        """Test DNSFilterAddon._is_allowed() p99 latency with DEFAULT_ALLOWLIST.
+
+        Uses the real allowlist checking method from dns_filter.py which
+        performs case-insensitive exact and wildcard pattern matching.
+        """
+        addon = DNSFilterAddon(allowlist=DEFAULT_ALLOWLIST)
 
         test_domains = [
-            "api.anthropic.com",
-            "github.com",
-            "api.github.com",
-            "evil.com",
-            "api.openai.com",
-            "storage.googleapis.com",
-            "malicious.xyz",
+            "api.anthropic.com",       # not in default list
+            "github.com",              # exact match
+            "api.github.com",          # wildcard *.github.com
+            "evil-exfiltration.com",   # blocked
+            "pypi.org",                # exact match
+            "files.pythonhosted.org",  # exact match
+            "storage.googleapis.com",  # not in default list
+            "malicious.xyz",           # blocked
+            "registry.npmjs.org",      # exact match
+            "raw.githubusercontent.com",  # exact match
         ]
-
         idx = [0]
 
         def check_allowlist():
             domain = test_domains[idx[0] % len(test_domains)]
             idx[0] += 1
-            for pattern in allowlist_patterns:
-                if pattern.match(domain):
-                    return True
-            return False
+            return addon._is_allowed(domain)
 
         stats = measure_latency(check_allowlist, iterations=10000)
         print(f"\nDNS allowlist check latency stats: {stats}")
 
-        # Allowlist check should be fast (local operation)
-        assert stats["p99"] < 5.0, (
-            f"DNS allowlist check p99 ({stats['p99']:.3f}ms) exceeds 5ms"
+        assert stats["p99"] < 5.0 * _ci_multiplier(), (
+            f"DNS allowlist check p99 ({stats['p99']:.3f}ms) exceeds "
+            f"{5.0 * _ci_multiplier()}ms"
         )
 
-    def test_wildcard_pattern_matching_latency(self):
-        """Test wildcard pattern matching p99 latency."""
-        import fnmatch
+    def test_wildcard_matching_latency(self):
+        """Test wildcard pattern matching via _is_allowed() p99 latency.
 
-        wildcard_patterns = [
-            "*.github.com",
-            "*.googleapis.com",
-            "api.*.anthropic.com",
-            "*.openai.com",
-        ]
+        Exercises the wildcard code path (*.domain.com) in the real addon.
+        """
+        addon = DNSFilterAddon(allowlist=DEFAULT_ALLOWLIST)
 
+        # Mix of domains that trigger wildcard matching
         test_domains = [
-            "api.github.com",
-            "raw.githubusercontent.com",
-            "storage.googleapis.com",
-            "api.v1.anthropic.com",
-            "example.com",
+            "api.github.com",            # *.github.com wildcard
+            "raw.github.com",            # *.github.com wildcard
+            "sub.deep.github.com",       # *.github.com wildcard
+            "files.pypi.org",            # *.pypi.org wildcard
+            "cdn.npmjs.org",             # *.npmjs.org wildcard
+            "not-in-allowlist.evil.com", # no match
         ]
-
         idx = [0]
 
         def match_wildcards():
             domain = test_domains[idx[0] % len(test_domains)]
             idx[0] += 1
-            for pattern in wildcard_patterns:
-                if fnmatch.fnmatch(domain, pattern):
-                    return True
-            return False
+            return addon._is_allowed(domain)
 
         stats = measure_latency(match_wildcards, iterations=10000)
-        print(f"\nWildcard matching latency stats: {stats}")
+        print(f"\nDNS wildcard matching latency stats: {stats}")
 
-        assert stats["p99"] < 1.0, (
-            f"Wildcard matching p99 ({stats['p99']:.3f}ms) exceeds 1ms"
+        assert stats["p99"] < 1.0 * _ci_multiplier(), (
+            f"Wildcard matching p99 ({stats['p99']:.3f}ms) exceeds "
+            f"{1.0 * _ci_multiplier()}ms"
         )
 
-    def test_dns_cache_simulation_latency(self):
-        """Test simulated DNS cache lookup latency."""
-        # Simulate DNS cache (domain -> IP mapping)
-        dns_cache = {
-            f"domain-{i}.example.com": f"192.168.{i // 256}.{i % 256}"
-            for i in range(1000)
-        }
+    def test_case_insensitive_matching_latency(self):
+        """Test case-insensitive matching overhead in _is_allowed().
 
-        domains = list(dns_cache.keys())
+        The real addon lowercases both domain and pattern per RFC 4343.
+        """
+        addon = DNSFilterAddon(allowlist=DEFAULT_ALLOWLIST)
+
+        test_domains = [
+            "GitHub.COM",
+            "API.GITHUB.COM",
+            "PyPI.org",
+            "REGISTRY.NPMJS.ORG",
+            "Evil.Example.COM",
+        ]
         idx = [0]
 
-        def cache_lookup():
-            domain = domains[idx[0] % len(domains)]
+        def case_check():
+            domain = test_domains[idx[0] % len(test_domains)]
             idx[0] += 1
-            return dns_cache.get(domain)
+            return addon._is_allowed(domain)
 
-        stats = measure_latency(cache_lookup, iterations=10000)
-        print(f"\nDNS cache lookup latency stats: {stats}")
+        stats = measure_latency(case_check, iterations=10000)
+        print(f"\nDNS case-insensitive matching latency stats: {stats}")
 
-        assert stats["p99"] < 1.0, (
-            f"DNS cache lookup p99 ({stats['p99']:.3f}ms) exceeds 1ms"
+        assert stats["p99"] < 1.0 * _ci_multiplier(), (
+            f"Case-insensitive matching p99 ({stats['p99']:.3f}ms) exceeds "
+            f"{1.0 * _ci_multiplier()}ms"
         )
 
 
@@ -461,187 +521,261 @@ class TestDNSResolutionLatency:
 class TestHTTPPassthroughLatency:
     """HTTP passthrough latency tests: p99 < 50ms target (2x in CI).
 
-    Tests proxy processing overhead without actual network I/O.
+    Tests real proxy processing functions from addons/policy_engine.py:
+    - normalize_path(): URL path normalization with security rules
+    - normalize_host(): Host normalization
+    - GitHub blocklist pattern matching with production regex patterns
     """
 
     LATENCY_TARGET_P99_MS = 50.0
 
-    def test_request_processing_overhead(self):
-        """Test request processing overhead p99 latency."""
-        # Simulate request processing pipeline
-        def process_request():
-            # 1. Parse headers
-            headers = {
-                "Content-Type": "application/json",
-                "Authorization": "Bearer test",
-                "User-Agent": "test/1.0",
-            }
-            parsed = dict(headers)
+    @property
+    def effective_target(self):
+        return self.LATENCY_TARGET_P99_MS * _ci_multiplier()
 
-            # 2. Check policy
-            allowed = True
-            for key in parsed:
-                if key.lower() == "x-blocked":
-                    allowed = False
+    def test_normalize_path_latency(self):
+        """Test normalize_path() p99 latency.
 
-            # 3. Transform if needed
-            if allowed:
-                parsed["X-Proxy-Processed"] = "true"
-
-            # 4. Build response structure
-            return {"headers": parsed, "allowed": allowed}
-
-        stats = measure_latency(process_request, iterations=1000)
-        print(f"\nRequest processing overhead latency stats: {stats}")
-
-        # Processing overhead should be minimal
-        assert stats["p99"] < 5.0, (
-            f"Request processing p99 ({stats['p99']:.3f}ms) exceeds 5ms"
-        )
-
-    def test_policy_evaluation_latency(self):
-        """Test policy evaluation p99 latency."""
-        import re
-
-        # Simulate policy rules
-        blocked_patterns = [
-            re.compile(r"/repos/.+/pulls/\d+/merge"),
-            re.compile(r"/repos/.+/releases$"),
-            re.compile(r"/user/keys$"),
-        ]
-
+        Uses the real path normalizer which does URL parsing, decoding,
+        double-encoding detection, slash collapsing, and .. resolution.
+        """
         test_paths = [
             "/repos/owner/repo/pulls/1/merge",
-            "/repos/owner/repo/contents/file.txt",
-            "/user/repos",
+            "/repos/owner/repo/contents/src/main.py?ref=main",
+            "/v1/messages",
             "/repos/owner/repo/releases",
-            "/api/v1/messages",
+            "/user/repos?page=2&per_page=100",
+            "/repos/owner/repo/git/refs/heads/main",
+            "/repos/owner/repo/issues/42",
+            "/api/v1/chat/completions",
+            "/repos/owner/repo/../../../etc/passwd",  # traversal attempt
+            "//repos///owner//repo",  # repeated slashes
         ]
-
         idx = [0]
 
-        def evaluate_policy():
+        def normalize():
             path = test_paths[idx[0] % len(test_paths)]
             idx[0] += 1
-            for pattern in blocked_patterns:
-                if pattern.match(path):
-                    return False
-            return True
+            return normalize_path(path)
 
-        stats = measure_latency(evaluate_policy, iterations=10000)
-        print(f"\nPolicy evaluation latency stats: {stats}")
+        stats = measure_latency(normalize, iterations=10000)
+        print(f"\nnormalize_path latency stats: {stats}")
 
-        assert stats["p99"] < 1.0, (
-            f"Policy evaluation p99 ({stats['p99']:.3f}ms) exceeds 1ms"
+        assert stats["p99"] < 5.0 * _ci_multiplier(), (
+            f"normalize_path p99 ({stats['p99']:.3f}ms) exceeds "
+            f"{5.0 * _ci_multiplier()}ms"
         )
 
-    def test_response_header_modification_latency(self):
-        """Test response header modification p99 latency."""
-        base_headers = {
-            "Content-Type": "application/json",
-            "Cache-Control": "no-cache",
-            "X-Request-Id": "abc123",
-            "Server": "nginx/1.0",
-        }
+    def test_normalize_host_latency(self):
+        """Test normalize_host() p99 latency."""
+        test_hosts = [
+            "api.github.com",
+            "API.ANTHROPIC.COM",
+            "generativelanguage.googleapis.com.",  # trailing dot
+            "api.openai.com",
+            "UPLOADS.GITHUB.COM.",
+        ]
+        idx = [0]
 
-        def modify_headers():
-            headers = dict(base_headers)
-            # Add proxy headers
-            headers["X-Proxy-Version"] = "1.0"
-            headers["X-Processed-At"] = str(time.time())
-            # Remove sensitive headers
-            headers.pop("Server", None)
-            return headers
+        def normalize():
+            host = test_hosts[idx[0] % len(test_hosts)]
+            idx[0] += 1
+            return normalize_host(host)
 
-        stats = measure_latency(modify_headers, iterations=10000)
-        print(f"\nResponse header modification latency stats: {stats}")
+        stats = measure_latency(normalize, iterations=10000)
+        print(f"\nnormalize_host latency stats: {stats}")
 
-        assert stats["p99"] < 1.0, (
-            f"Header modification p99 ({stats['p99']:.3f}ms) exceeds 1ms"
+        assert stats["p99"] < 1.0 * _ci_multiplier(), (
+            f"normalize_host p99 ({stats['p99']:.3f}ms) exceeds "
+            f"{1.0 * _ci_multiplier()}ms"
+        )
+
+    def test_github_blocklist_latency(self):
+        """Test GitHub blocklist pattern matching p99 latency.
+
+        Runs all production regex patterns from policy_engine.py against
+        realistic GitHub API paths.
+        """
+        # All production patterns to check per request
+        all_patterns = [
+            ("PUT", GITHUB_MERGE_PR_PATTERN),
+            ("POST", GITHUB_CREATE_RELEASE_PATTERN),
+            ("POST", GITHUB_GIT_REFS_ROOT_PATTERN),
+            ("PATCH", GITHUB_GIT_REFS_SUBPATH_PATTERN),
+            ("DELETE", GITHUB_GIT_REFS_SUBPATH_PATTERN),
+            ("PUT", GITHUB_AUTO_MERGE_PATTERN),
+            ("DELETE", GITHUB_AUTO_MERGE_PATTERN),
+            ("DELETE", GITHUB_DELETE_REVIEW_PATTERN),
+            ("PATCH", GITHUB_PATCH_PR_PATTERN),
+            ("PATCH", GITHUB_PATCH_ISSUE_PATTERN),
+            ("POST", GITHUB_PR_REVIEW_PATTERN),
+        ]
+
+        test_requests = [
+            ("PUT", "/repos/owner/repo/pulls/1/merge"),        # blocked
+            ("GET", "/repos/owner/repo/contents/file.txt"),     # allowed
+            ("POST", "/repos/owner/repo/releases"),             # blocked
+            ("GET", "/user/repos"),                             # allowed
+            ("PATCH", "/repos/owner/repo/pulls/42"),            # body-inspected
+            ("POST", "/repos/owner/repo/pulls/42/reviews"),     # body-inspected
+            ("DELETE", "/repos/owner/repo/git/refs/heads/main"), # blocked
+            ("GET", "/repos/owner/repo/commits"),               # allowed
+        ]
+        idx = [0]
+
+        def check_blocklist():
+            method, path = test_requests[idx[0] % len(test_requests)]
+            idx[0] += 1
+            for pattern_method, pattern in all_patterns:
+                if method == pattern_method and pattern.match(path):
+                    return True
+            return False
+
+        stats = measure_latency(check_blocklist, iterations=10000)
+        print(f"\nGitHub blocklist check latency stats: {stats}")
+
+        assert stats["p99"] < 1.0 * _ci_multiplier(), (
+            f"GitHub blocklist check p99 ({stats['p99']:.3f}ms) exceeds "
+            f"{1.0 * _ci_multiplier()}ms"
+        )
+
+    def test_combined_policy_pipeline_latency(self):
+        """Test combined normalize + blocklist check p99 latency.
+
+        Mirrors the real policy engine hot path: normalize_host,
+        normalize_path, then check blocklist.
+        """
+        test_requests = [
+            ("GET", "API.GITHUB.COM.", "/repos/owner/repo/contents/file.txt?ref=main"),
+            ("PUT", "api.github.com", "/repos/owner/repo/pulls/1/merge"),
+            ("POST", "api.anthropic.com", "/v1/messages"),
+            ("PATCH", "api.github.com", "/repos/owner/repo/pulls/42"),
+            ("GET", "api.openai.com", "/v1/chat/completions"),
+        ]
+        idx = [0]
+
+        def policy_pipeline():
+            method, host, path = test_requests[idx[0] % len(test_requests)]
+            idx[0] += 1
+            # 1. Normalize host
+            norm_host = normalize_host(host)
+            # 2. Normalize path
+            norm_path = normalize_path(path)
+            # 3. Check blocklist (only for GitHub)
+            blocked = None
+            if norm_host == "api.github.com" and norm_path is not None:
+                if method == "PUT" and GITHUB_MERGE_PR_PATTERN.match(norm_path):
+                    blocked = "merge blocked"
+                elif method == "POST" and GITHUB_CREATE_RELEASE_PATTERN.match(norm_path):
+                    blocked = "release blocked"
+            return norm_host, norm_path, blocked
+
+        stats = measure_latency(policy_pipeline, iterations=10000)
+        print(f"\nCombined policy pipeline latency stats: {stats}")
+
+        assert stats["p99"] < self.effective_target, (
+            f"Combined policy pipeline p99 ({stats['p99']:.3f}ms) exceeds "
+            f"target ({self.effective_target}ms)"
         )
 
 
 @pytest.mark.slow
 class TestCombinedLatencyBudget:
-    """Test combined latency budget across all operations."""
+    """Test combined latency budget across all real operations."""
 
-    def test_full_request_pipeline_simulation(self, populated_registry):
-        """Test full request pipeline stays within overall budget."""
-        import re
+    @property
+    def effective_target(self):
+        return 100.0 * _ci_multiplier()
 
-        # Simulate complete request processing
-        allowlist_patterns = [
-            re.compile(r"^api\.anthropic\.com$"),
-            re.compile(r"^.*\.github\.com$"),
+    def test_full_request_pipeline(self, populated_registry):
+        """Test full request pipeline using real addon functions.
+
+        Exercises the complete per-request hot path:
+        1. Registry lookup (real ContainerRegistry)
+        2. DNS allowlist check (real DNSFilterAddon._is_allowed)
+        3. Path normalization (real normalize_path)
+        4. GitHub blocklist (real regex patterns)
+        5. Credential placeholder detection (real _has_credential_placeholder)
+        """
+        dns_addon = DNSFilterAddon(allowlist=DEFAULT_ALLOWLIST)
+
+        test_scenarios = [
+            ("172.17.0.1", "api.github.com", "GET", "/repos/owner/repo/contents", "CRED_PROXY_abc"),
+            ("172.17.0.2", "api.anthropic.com", "POST", "/v1/messages", "Bearer real-key"),
+            ("172.17.0.3", "api.github.com", "PUT", "/repos/owner/repo/pulls/1/merge", "CREDENTIAL_PROXY_PLACEHOLDER"),
+            ("172.17.0.4", "evil.com", "GET", "/steal-data", "normal-value"),
+            ("172.17.0.5", "github.com", "GET", "/repos/owner/repo", "CRED_PROXY_def"),
         ]
-
-        blocked_patterns = [
-            re.compile(r"/repos/.+/pulls/\d+/merge"),
-        ]
-
-        credentials = {"Authorization": "Bearer placeholder"}
-        test_domains = ["api.anthropic.com", "api.github.com"]
-        test_paths = ["/v1/messages", "/repos/owner/repo/contents"]
-        test_ips = [f"172.17.{i // 256}.{i % 256}" for i in range(10)]
-
         idx = [0]
 
         def full_pipeline():
-            i = idx[0]
+            ip, host, method, path, auth = test_scenarios[idx[0] % len(test_scenarios)]
             idx[0] += 1
 
-            # 1. Registry lookup (identify container)
-            ip = test_ips[i % len(test_ips)]
+            # 1. Registry lookup
             config = populated_registry.get_by_ip(ip)
 
-            # 2. DNS/allowlist check
-            domain = test_domains[i % len(test_domains)]
-            allowed = any(p.match(domain) for p in allowlist_patterns)
+            # 2. DNS allowlist check
+            dns_allowed = dns_addon._is_allowed(host)
 
-            # 3. Policy check
-            path = test_paths[i % len(test_paths)]
-            policy_ok = not any(p.match(path) for p in blocked_patterns)
+            # 3. Path normalization
+            norm_path = normalize_path(path)
 
-            # 4. Credential injection
-            result_headers = dict(credentials)
-            if result_headers.get("Authorization", "").endswith("placeholder"):
-                result_headers["Authorization"] = "Bearer injected-value"
+            # 4. GitHub blocklist check
+            blocked = None
+            if normalize_host(host) == "api.github.com" and norm_path:
+                if method == "PUT" and GITHUB_MERGE_PR_PATTERN.match(norm_path):
+                    blocked = "merge blocked"
+
+            # 5. Credential placeholder detection
+            needs_injection = _has_credential_placeholder(auth)
 
             return {
                 "container": config.container_id if config else None,
-                "allowed": allowed and policy_ok,
-                "headers": result_headers,
+                "dns_allowed": dns_allowed,
+                "path": norm_path,
+                "blocked": blocked,
+                "needs_injection": needs_injection,
             }
 
         stats = measure_latency(full_pipeline, iterations=1000)
         print(f"\nFull pipeline latency stats: {stats}")
 
-        # Combined budget: registry (1ms) + DNS (50ms) + policy (1ms) + injection (10ms)
-        # Total budget: ~62ms, use 100ms as safe margin
-        assert stats["p99"] < 100.0, (
-            f"Full pipeline p99 ({stats['p99']:.3f}ms) exceeds 100ms budget"
+        assert stats["p99"] < self.effective_target, (
+            f"Full pipeline p99 ({stats['p99']:.3f}ms) exceeds "
+            f"{self.effective_target}ms budget"
         )
 
     def test_concurrent_pipeline_latency(self, populated_registry):
         """Test pipeline latency under concurrent load."""
+        dns_addon = DNSFilterAddon(allowlist=DEFAULT_ALLOWLIST)
         test_ips = [f"172.17.{i // 256}.{i % 256}" for i in range(100)]
+        test_domains = ["github.com", "api.github.com", "pypi.org", "evil.com"]
+        test_paths = ["/repos/owner/repo", "/v1/messages", "/simple/requests"]
         idx = [0]
         lock = threading.Lock()
 
-        def concurrent_lookup():
+        def concurrent_pipeline():
             with lock:
-                ip = test_ips[idx[0] % len(test_ips)]
+                i = idx[0]
                 idx[0] += 1
-            return populated_registry.get_by_ip(ip)
+            ip = test_ips[i % len(test_ips)]
+            domain = test_domains[i % len(test_domains)]
+            path = test_paths[i % len(test_paths)]
+
+            populated_registry.get_by_ip(ip)
+            dns_addon._is_allowed(domain)
+            normalize_path(path)
+            return True
 
         stats = measure_concurrent_latency(
-            concurrent_lookup, iterations=1000, concurrency=50
+            concurrent_pipeline, iterations=1000, concurrency=50
         )
         print(f"\nConcurrent pipeline latency stats: {stats}")
 
-        # Under high concurrency, allow 2x budget
-        assert stats["p99"] < 200.0, (
-            f"Concurrent pipeline p99 ({stats['p99']:.3f}ms) exceeds 200ms budget"
+        assert stats["p99"] < 200.0 * _ci_multiplier(), (
+            f"Concurrent pipeline p99 ({stats['p99']:.3f}ms) exceeds "
+            f"{200.0 * _ci_multiplier()}ms budget"
         )
 
 

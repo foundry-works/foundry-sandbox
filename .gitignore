@@ -13,3 +13,5 @@ __pycache__/
 *.coverage
 .env
 PLAN*.md
+tests/redteam/results/*.tap
+tests/redteam/results/*.xml

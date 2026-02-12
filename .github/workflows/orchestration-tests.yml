@@ -54,8 +54,12 @@ jobs:
           SANDBOX_CLI: ${{ matrix.entrypoint.cli }}
         run: bash tests/run.sh
 
+      - name: Run pip install integration tests
+        if: steps.orchestration.outcome == 'success'
+        run: bash tests/test-pip-install-integration.sh
+
       - name: Run security integration tests
-        if: always()
+        if: steps.orchestration.outcome == 'success'
         env:
           SANDBOX_CLI: ${{ matrix.entrypoint.cli }}
         run: pytest tests/security/ -v --tb=short -m '' --junitxml=junit-security-${{ matrix.entrypoint.name }}.xml
