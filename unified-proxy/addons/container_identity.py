@@ -11,7 +11,7 @@ Security Model:
 - Header stripping: X-Container-Id is removed before forwarding to prevent leakage
 
 Error Responses:
-- 403 Forbidden: Unknown source IP, mismatched header, or expired registration
+- 403 Forbidden: Unknown source IP, mismatched header, or expired registration (if TTL enabled)
 """
 
 import os

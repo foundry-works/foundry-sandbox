@@ -68,7 +68,7 @@ class TestBasicCRUD:
         )
         assert config.container_id == "test-container"
         assert config.ip_address == "172.17.0.2"
-        assert config.ttl_seconds == 86400  # default
+        assert config.ttl_seconds == 0  # default (no expiry)
 
     def test_register_with_custom_ttl(self, registry):
         """Test registering with custom TTL."""
@@ -214,6 +214,16 @@ class TestCacheConsistency:
         assert removed == 2
         assert registry.count() == 1
         assert registry.get_by_container_id("fresh") is not None
+
+    def test_cleanup_expired_skips_no_ttl(self, registry, time_control):
+        """Test cleanup_expired does not remove entries with TTL=0."""
+        registry.register(container_id="permanent", ip_address="172.17.0.28")
+        registry.register(container_id="expiring", ip_address="172.17.0.29", ttl_seconds=1)
+        time_control(1.5)
+        removed = registry.cleanup_expired()
+        assert removed == 1
+        assert registry.get_by_container_id("permanent") is not None
+        assert registry.get_by_container_id("expiring") is None
 
     def test_persistence_across_instances(self, temp_db):
         """Test data persists across registry instances."""
@@ -369,8 +379,17 @@ class TestStressTest:
 class TestContainerConfig:
     """Tests for ContainerConfig dataclass."""
 
+    def test_is_expired_false_default_no_ttl(self, registry):
+        """Test is_expired returns False with default TTL (0 = no expiry)."""
+        config = registry.register(
+            container_id="no-ttl",
+            ip_address="172.17.0.49",
+        )
+        assert not config.is_expired
+        assert config.ttl_seconds == 0
+
     def test_is_expired_false(self, registry):
-        """Test is_expired returns False for fresh registration."""
+        """Test is_expired returns False for fresh registration with TTL."""
         config = registry.register(
             container_id="fresh",
             ip_address="172.17.0.50",

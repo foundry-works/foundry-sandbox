@@ -378,7 +378,7 @@ POST /internal/containers
 {
   "container_id": "sandbox-abc123",
   "ip_address": "172.17.0.2",
-  "ttl_seconds": 86400,
+  "ttl_seconds": 0,
   "metadata": {
     "sandbox_name": "my-project",
     "repo": "owner/repo",
@@ -389,7 +389,7 @@ POST /internal/containers
 }
 ```
 
-Registrations persist in SQLite with TTL-based expiration.
+Registrations persist in SQLite. TTL-based expiration is disabled by default (`ttl_seconds: 0`); registrations are removed explicitly on sandbox destroy.
 
 ### Git API Server (Shadow Mode)
 

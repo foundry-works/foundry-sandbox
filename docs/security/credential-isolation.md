@@ -194,7 +194,7 @@ The following capabilities were evaluated and **explicitly excluded** from the i
 **Accepted Risks:**
 - A compromised orchestrator could register many containers (mitigated by: orchestrator is trusted)
 - A single sandbox could make many git requests (mitigated by: GitHub rate limits, container resource limits)
-- Registry could grow large (mitigated by: TTL-based expiration and cleanup in SQLite registry)
+- Registry could grow large (mitigated by: explicit unregistration on destroy, optional TTL-based cleanup)
 
 ### Custom Seccomp/AppArmor Profiles - NOT IMPLEMENTED
 
@@ -266,7 +266,7 @@ The following capabilities were evaluated and **explicitly excluded** from the i
 
 4. **Existing Mitigations Are Sufficient**:
    - Container registration with IP binding
-   - TTL-based expiration (24h default, stored in SQLite)
+   - Explicit unregistration on sandbox destroy (optional TTL if configured)
    - Network isolation via Docker bridge + iptables
    - Read-only filesystem prevents persistent attacker presence
 
@@ -274,7 +274,7 @@ The following capabilities were evaluated and **explicitly excluded** from the i
 
 **Accepted Risks:**
 - Network-level MITM on Docker bridge (mitigated by: network isolation, attacker would need container escape first)
-- Registration data interception in transit (mitigated by: IP binding, TTLs, network isolation)
+- Registration data interception in transit (mitigated by: IP binding, network isolation)
 
 ---
 
@@ -295,9 +295,9 @@ This section documents what IS implemented to address the primary threats.
 
 | Control | Implementation | Threat Addressed |
 |---------|----------------|------------------|
-| Container registry | SQLite-backed registry (`registry.py`) with TTL | Container identity management |
+| Container registry | SQLite-backed registry (`registry.py`) | Container identity management |
 | IP binding | Registrations bound to container IP | Registration reuse from other IPs |
-| TTL expiration | Registrations expire after 24h (configurable) | Stale registration abuse |
+| Explicit unregistration | Registrations removed on sandbox destroy | Stale registration abuse |
 | Internal API | Unix socket only (`/var/run/proxy/internal.sock`) | Unauthorized registration |
 
 ### Layer 3: Credential Proxying
@@ -372,7 +372,7 @@ This section documents what IS implemented to address the primary threats.
 
 **Response:**
 1. Attacker uses registration from different IP -> rejected by IP binding
-2. Attacker waits for registration to expire -> registration expires via TTL
+2. Attacker waits for registration to expire -> registration removed on sandbox destroy
 3. Attacker attempts to create new registration -> requires orchestrator access (Unix socket only)
 4. Attack fails, IP binding prevents registration reuse
 
@@ -449,7 +449,7 @@ ping -c 1 unified-proxy
 - IP binding via container registry provides strong protection within isolated Docker networks
 - Container registrations are managed by the orchestrator (trusted component)
 - Network isolation prevents external access to the isolation network
-- TTL-based expiration limits exposure window
+- Explicit unregistration on sandbox destroy limits exposure window
 
 ---
 

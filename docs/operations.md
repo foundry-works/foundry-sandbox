@@ -255,7 +255,7 @@ docker exec "$PROXY_CONTAINER" curl -s --unix-socket /var/run/proxy/internal.soc
 PROXY_CONTAINER="sandbox-<sandbox-name>-unified-proxy-1"
 docker exec "$PROXY_CONTAINER" curl -X POST --unix-socket /var/run/proxy/internal.sock \
   -H "Content-Type: application/json" \
-  -d '{"container_id":"sandbox-123","ip_address":"172.17.0.2","ttl_seconds":86400}' \
+  -d '{"container_id":"sandbox-123","ip_address":"172.17.0.2"}' \
   http://localhost/internal/containers
 ```
 

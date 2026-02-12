@@ -13,7 +13,7 @@ Container identity implemented in `unified-proxy/addons/container_identity.py`:
 - **IP-based identity** - Primary identification via source IP from socket inspection
 - **Optional header validation** - X-Container-Id header for additional verification
 - **SQLite registry** - Persistent storage with write-through cache (`registry.py`)
-- **TTL-based expiration** - Default 24-hour TTL with auto-cleanup
+- **Explicit unregistration** - Registrations removed on sandbox destroy (optional TTL available)
 - **Internal API** - RESTful registration via Unix socket (`internal_api.py`)
 
 ## Context
@@ -113,17 +113,13 @@ Subsequent requests use IP-based lookup (header optional)
 
 #### 2. TTL and Renewal
 
-Registrations have a configurable TTL (default: 24 hours):
+TTL-based expiration is disabled by default (`ttl_seconds: 0`). Registrations are removed explicitly on sandbox destroy via `proxy_unregister()`. An optional TTL can be configured per-registration if needed.
 
+When TTL is enabled (non-zero):
 - **TTL clock starts:** When container is registered
 - **TTL reset:** On each request from that IP, update `last_seen` timestamp
 - **TTL expiration:** If `now - last_seen > TTL`, mark registration as stale
 - **Cleanup:** Stale registrations are removed on next garbage collection run
-
-TTL rationale:
-- Long enough for normal container lifecycle (run, attach, detach, reattach)
-- Short enough to detect orphaned containers (crashed, not properly stopped)
-- Prevents IP reuse attacks: Ensure enough grace period to detect old IP being reused
 
 #### 3. Container Restart
 
@@ -133,7 +129,7 @@ When a container restarts (e.g., `docker compose restart` or `cast start`):
 Container stops
     ↓
 Old IP released back to Docker network pool
-Old registration marked for expiration (TTL stops being renewed)
+Old registration removed on destroy (or expires if TTL configured)
     ↓
 Container restarts
     ↓
@@ -144,7 +140,7 @@ Container makes request with NEW session token (generated at startup)
 Proxy sees new IP + new token
     ↓
 Creates new registration
-Previous registration eventually garbage collected
+Previous registration removed on destroy
 ```
 
 This design allows:
@@ -226,7 +222,7 @@ This explicit signal is more reliable than inferring from IP changes alone.
 - **Defense in depth:** Header-based verification provides additional security layer
 - **Auditability:** Session tokens and start times provide clear audit trail
 - **Graceful restart handling:** Containers can restart and obtain new identity without manual intervention
-- **Passive safety:** TTL ensures registrations eventually clean up even if proxy crashes or containers die unexpectedly
+- **Passive safety:** Optional TTL can provide cleanup even if proxy crashes or containers die unexpectedly
 - **Clear signals:** Container restart is explicitly detectable via `container-start-time` change
 - **Persistence:** SQLite-backed registry survives proxy restarts without losing container registrations
 
@@ -237,14 +233,14 @@ This explicit signal is more reliable than inferring from IP changes alone.
 - **Token generation:** Requires entrypoint.sh to generate cryptographically secure tokens (adds dependency on `/dev/urandom` or similar)
 - **Registration overhead:** Each new container adds registry entry and requires first request before identity is known
 - **Clock skew:** Verifying `container-start-time` requires proxy and containers to have synchronized clocks (or accept skew tolerance)
-- **TTL tuning:** TTL value is configuration-dependent; too short causes false expiration, too long delays cleanup
+- **TTL tuning:** When TTL is enabled, value is configuration-dependent; too short causes false expiration, too long delays cleanup
 - **Restart ambiguity:** Without header validation, cannot distinguish between "container restarted" vs. "network reassigned IP"
 
 ### Neutral
 
 - **Session tokens:** Generated fresh each startup; doesn't impact existing authentication mechanisms
 - **Dual-layer approach:** Complexity is only incurred if both IP + header validation are used; simple deployments can use IP alone
-- **Logging:** Registration events (create, renew, expire, remove) add to logs but provide valuable audit trail
+- **Logging:** Registration events (create, renew, remove) add to logs but provide valuable audit trail
 
 ## Alternatives Considered
 

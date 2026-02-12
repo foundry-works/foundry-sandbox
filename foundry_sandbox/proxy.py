@@ -29,7 +29,7 @@ from foundry_sandbox.errors import ProxyError
 from foundry_sandbox.utils import log_debug, log_error, log_warn
 
 # Constants
-DEFAULT_TTL_SECONDS = 86400
+DEFAULT_TTL_SECONDS = 0  # 0 = no expiry (disabled by default)
 INTERNAL_SOCKET_PATH = "/var/run/proxy/internal.sock"
 DEFAULT_NETWORK = "credential-isolation"
 
@@ -155,7 +155,7 @@ def proxy_register(
     Args:
         container_id: The container ID
         ip_address: The container's IP address
-        ttl_seconds: TTL in seconds (default: 86400 = 24 hours)
+        ttl_seconds: TTL in seconds (0 = no expiry)
         metadata: Optional metadata as dict
 
     Returns:
