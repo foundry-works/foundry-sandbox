@@ -883,7 +883,7 @@ class TestProxyRegister:
         call_data = mock_curl.call_args[0][2]
         assert call_data["container_id"] == "abc"
         assert call_data["ip_address"] == "10.0.0.1"
-        assert call_data["ttl_seconds"] == 86400
+        assert call_data["ttl_seconds"] == 0  # DEFAULT_TTL_SECONDS (no expiry)
 
     @patch("foundry_sandbox.proxy.proxy_curl")
     def test_registration_with_metadata(self, mock_curl):
