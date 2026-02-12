@@ -44,10 +44,10 @@ jobs:
             exit 1
           fi
           echo "name=$NAME" >> "$GITHUB_OUTPUT"
-          # Find the container ID
-          CONTAINER=$(docker ps -q --filter "name=sandbox-${NAME}")
+          # Find the dev container ID (compose creates multiple services)
+          CONTAINER=$(docker ps -q --filter "name=sandbox-${NAME}-dev-1")
           if [ -z "$CONTAINER" ]; then
-            echo "::error::No running container found for sandbox-${NAME}"
+            echo "::error::No running container found for sandbox-${NAME}-dev-1"
             exit 1
           fi
           echo "container=$CONTAINER" >> "$GITHUB_OUTPUT"

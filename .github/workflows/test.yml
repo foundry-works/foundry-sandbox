@@ -98,7 +98,9 @@ jobs:
         run: |
           sudo apt-get install -y -qq shellcheck 2>/dev/null
           # No exclusions needed for core scripts
-          shellcheck sandbox.sh entrypoint.sh entrypoint-root.sh stubs/git-wrapper.sh tests/run.sh
+          shellcheck sandbox.sh entrypoint.sh entrypoint-root.sh stubs/git-wrapper.sh
+          # SC2163: export -f for functions, not patterns (false positive)
+          shellcheck -e SC2163 tests/run.sh
           # SC2317: cleanup() with trap always exits (false positive)
           # SC2034: PID vars set in functions, read in trap handler
           shellcheck -e SC2317,SC2034 unified-proxy/entrypoint.sh
@@ -113,9 +115,6 @@ jobs:
           shellcheck -e SC2163 safety/credential-redaction.sh
           # SC2015: intentional `cmd && echo || true` pattern for optional logging
           shellcheck -e SC2015 safety/network-firewall.sh
-          # SC1091: sourced lib/ modules; SC2317: conditional exit pattern
-          # SC2034: counter vars used in sourced functions; SC2088: intentional tilde-in-quotes for test data
-          shellcheck -e SC1091,SC2317,SC2034,SC2088 tests/test-pip-requirements.sh
 
   docker-build:
     runs-on: ubuntu-latest
