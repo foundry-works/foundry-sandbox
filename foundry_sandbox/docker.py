@@ -264,6 +264,49 @@ def get_compose_command(
 # ============================================================================
 
 
+def _wait_for_proxy_health(container_name: str, timeout: int = 55) -> bool:
+    """Poll a proxy container's health status until healthy or timeout."""
+    import time as _time
+
+    deadline = _time.monotonic() + timeout
+    while _time.monotonic() < deadline:
+        try:
+            result = subprocess.run(
+                ["docker", "inspect", "--format", "{{.State.Health.Status}}", container_name],
+                capture_output=True, text=True, check=False, timeout=5,
+            )
+            status = result.stdout.strip()
+            if status == "healthy":
+                return True
+            if status == "exited" or (
+                result.returncode != 0 and "No such" in result.stderr
+            ):
+                return False
+            # Also check if the container process exited
+            state_result = subprocess.run(
+                ["docker", "inspect", "--format", "{{.State.Running}}", container_name],
+                capture_output=True, text=True, check=False, timeout=5,
+            )
+            if state_result.stdout.strip() == "false":
+                return False
+        except (OSError, subprocess.TimeoutExpired):
+            pass
+        _time.sleep(2)
+    return False
+
+
+def _capture_container_logs(container_name: str) -> str:
+    """Capture logs from a container for diagnostic purposes."""
+    try:
+        result = subprocess.run(
+            ["docker", "logs", "--tail", "100", container_name],
+            capture_output=True, text=True, check=False, timeout=10,
+        )
+        return (result.stdout + result.stderr).strip()
+    except (OSError, subprocess.TimeoutExpired):
+        return "(failed to capture container logs)"
+
+
 def compose_up(
     worktree_path: str,
     claude_config_path: str,
@@ -342,6 +385,40 @@ def compose_up(
         env["SANDBOX_PROXY_IP"] = proxy_ip
 
     compose_cmd = get_compose_command(override_file, isolate_credentials)
+
+    if isolate_credentials:
+        # Two-phase startup: start proxy first so we can capture its logs
+        # on failure. A single `up -d` removes all containers on health
+        # check failure, making diagnosis impossible.
+        proxy_cmd = compose_cmd + ["-p", container, "up", "-d", "--no-deps", "unified-proxy"]
+        if get_sandbox_verbose():
+            print(f"+ {' '.join(proxy_cmd)}", file=sys.stderr)
+        proxy_result = subprocess.run(
+            proxy_cmd, env=env, check=False,
+            capture_output=True, timeout=TIMEOUT_DOCKER_COMPOSE,
+        )
+        if proxy_result.returncode != 0:
+            stderr_text = proxy_result.stderr.decode() if isinstance(proxy_result.stderr, bytes) else (proxy_result.stderr or "")
+            raise subprocess.CalledProcessError(
+                proxy_result.returncode, proxy_cmd, output=proxy_result.stdout, stderr=stderr_text,
+            )
+
+        # Wait for proxy health (matches compose healthcheck: start_period=30s + retries=5 * interval=5s)
+        proxy_container = f"{container}-unified-proxy-1"
+        proxy_healthy = _wait_for_proxy_health(proxy_container, timeout=55)
+        if not proxy_healthy:
+            # Capture proxy logs for diagnosis before cleanup
+            logs = _capture_container_logs(proxy_container)
+            # Stop the proxy so compose down can clean up
+            subprocess.run(
+                ["docker", "rm", "-f", proxy_container],
+                capture_output=True, check=False, timeout=TIMEOUT_DOCKER_QUERY,
+            )
+            raise subprocess.CalledProcessError(
+                1, proxy_cmd,
+                stderr=f"unified-proxy failed health check.\n--- Proxy Logs ---\n{logs}",
+            )
+
     cmd = compose_cmd + ["-p", container, "up", "-d"]
 
     if get_sandbox_verbose():
