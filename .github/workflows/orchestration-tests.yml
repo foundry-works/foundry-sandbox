@@ -45,6 +45,16 @@ jobs:
       - name: Build sandbox Docker image
         run: docker build -t foundry-sandbox:latest .
 
+      - name: Build unified-proxy Docker image
+        run: docker build -t foundry-unified-proxy:latest unified-proxy/
+
+      - name: Create placeholder auth files for credential isolation
+        run: |
+          mkdir -p ~/.codex ~/.local/share/opencode ~/.gemini
+          echo '{}' > ~/.codex/auth.json
+          echo '{}' > ~/.local/share/opencode/auth.json
+          echo '{}' > ~/.gemini/oauth_creds.json
+
       - name: Run orchestration tests
         id: orchestration
         env:

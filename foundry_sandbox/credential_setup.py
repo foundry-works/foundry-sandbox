@@ -410,6 +410,25 @@ def _stage_setup_git_config(container_id: str, home: Path, host_user: str) -> No
     else:
         log_debug("~/.gitconfig not found, skipping")
 
+    # Re-apply git security hardening after host gitconfig copy.
+    # The entrypoint sets these in ~/.gitconfig, but the host copy above
+    # overwrites the file, so we must re-apply them here.
+    log_step("Applying git security hardening")
+    _git_cfg = "/usr/bin/git"
+    for key, value in [
+        ("core.hooksPath", "/dev/null"),
+        ("init.templateDir", ""),
+        ("core.fsmonitor", "false"),
+        ("core.fsmonitorHookVersion", "0"),
+        ("receive.denyCurrentBranch", "refuse"),
+    ]:
+        try:
+            docker_exec_text(
+                container_id, _git_cfg, "config", "--global", key, value,
+            )
+        except subprocess.CalledProcessError:
+            log_warn(f"Failed to set git hardening: {key}={value}")
+
     log_step("Copying sandbox repos")
     sandbox_home = get_sandbox_home()
     repos_dir = Path(sandbox_home) / "repos"

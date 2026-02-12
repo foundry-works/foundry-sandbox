@@ -1806,6 +1806,14 @@ copy_configs_to_container() {
         prefetch_opencode_npm_plugins "$container_id"
     fi
     file_exists ~/.gitconfig && copy_file_to_container "$container_id" ~/.gitconfig "$CONTAINER_HOME/.gitconfig"
+    # Re-apply git security hardening after host gitconfig copy.
+    # The entrypoint sets these in ~/.gitconfig, but the host copy above
+    # overwrites the file, so we must re-apply them here.
+    docker exec -u "$CONTAINER_USER" "$container_id" /usr/bin/git config --global core.hooksPath /dev/null 2>/dev/null || true
+    docker exec -u "$CONTAINER_USER" "$container_id" /usr/bin/git config --global init.templateDir '' 2>/dev/null || true
+    docker exec -u "$CONTAINER_USER" "$container_id" /usr/bin/git config --global core.fsmonitor false 2>/dev/null || true
+    docker exec -u "$CONTAINER_USER" "$container_id" /usr/bin/git config --global core.fsmonitorHookVersion 0 2>/dev/null || true
+    docker exec -u "$CONTAINER_USER" "$container_id" /usr/bin/git config --global receive.denyCurrentBranch refuse 2>/dev/null || true
     if [ "$enable_ssh" = "1" ]; then
         local ssh_agent_sock=""
         ssh_agent_sock=$(resolve_ssh_agent_sock) || ssh_agent_sock=""
