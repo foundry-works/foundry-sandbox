@@ -99,7 +99,7 @@ RUN if [ "$INCLUDE_OPENCODE" = "1" ]; then \
     fi
 
 # Install Python packages globally (to /usr/local/lib/python3)
-RUN pip3 install foundry-mcp pytest-asyncio hypothesis cc-context-stats pyright
+RUN pip3 install foundry-mcp pypdf pytest-asyncio hypothesis cc-context-stats pyright
 
 # Install tavily-mcp globally (npm package for web search MCP server)
 # Baked into image because npm is blocked in credential isolation mode
