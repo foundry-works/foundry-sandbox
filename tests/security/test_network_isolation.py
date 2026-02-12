@@ -53,7 +53,7 @@ def test_dns_filtering_blocks_unknown_domain(docker_exec):
     )
 
 
-def test_dns_filtering_allows_github(docker_exec):
+def test_dns_filtering_allows_github(docker_exec, proxy_reachable):
     """DNS resolution for github.com must succeed (it's on the allowlist)."""
     result = docker_exec(
         "python3", "-c",

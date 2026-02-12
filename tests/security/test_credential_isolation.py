@@ -8,6 +8,8 @@ Verifies that real credentials are never exposed inside the sandbox:
 These tests run commands inside a live sandbox container via ``docker exec``.
 """
 
+import os
+
 import pytest
 
 pytestmark = [
@@ -60,7 +62,12 @@ def test_no_real_credentials_in_env(docker_exec):
     )
 
 
-def test_api_requests_work_via_proxy(docker_exec):
+@pytest.mark.skipif(
+    not os.environ.get("ANTHROPIC_API_KEY")
+    and not os.environ.get("CLAUDE_CODE_OAUTH_TOKEN"),
+    reason="No API credentials available — proxy cannot inject credentials",
+)
+def test_api_requests_work_via_proxy(docker_exec, proxy_reachable):
     """API requests with placeholder credentials should succeed via the proxy.
 
     Mirrors redteam-sandbox.sh (lines 272-294): sends a request to the

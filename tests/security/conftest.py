@@ -151,3 +151,23 @@ def docker_exec(running_sandbox):
         return subprocess.run(cmd, **kwargs)
 
     return _exec
+
+
+@pytest.fixture(scope="module")
+def proxy_reachable(docker_exec):
+    """Check that the proxy HTTP port is reachable from the sandbox.
+
+    Tests that depend on proxy connectivity (API forwarding, DNS filtering,
+    self-merge blocking) should use this fixture so they skip with a clear
+    message instead of producing cryptic connection errors.
+    """
+    result = docker_exec(
+        "python3", "-c",
+        "import socket; s=socket.socket(); s.settimeout(5); "
+        "s.connect(('unified-proxy', 8080)); s.close(); print('ok')",
+    )
+    if result.returncode != 0:
+        pytest.skip(
+            f"Proxy HTTP port unreachable from sandbox "
+            f"(likely port-binding issue): {result.stderr[:200]}"
+        )

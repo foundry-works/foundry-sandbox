@@ -494,15 +494,36 @@ start_mitmproxy() {
 
     log "mitmproxy args: ${args[*]}"
 
-    # Mark ready before starting (mitmproxy will be available shortly)
-    mark_ready
-
     # Start mitmproxy in background to capture PID
     mitmdump "${args[@]}" &
     MITM_PID=$!
     echo "${MITM_PID}" > "${PID_FILE}"
 
     log "mitmproxy started with PID ${MITM_PID}"
+
+    # Wait for mitmproxy to bind to HTTP proxy port before marking ready.
+    # This matches the pattern used by start_internal_api() and start_git_api().
+    # Without this check, the health check can pass (via internal API socket)
+    # while mitmproxy is still starting or has crashed on port binding.
+    local mitm_ready=false
+    for i in {1..30}; do
+        if python3 -c "import socket; s=socket.socket(); s.settimeout(0.5); s.connect(('127.0.0.1', 8080)); s.close()" 2>/dev/null; then
+            log "mitmproxy HTTP proxy ready on port 8080"
+            mark_ready
+            mitm_ready=true
+            break
+        fi
+        if ! kill -0 "${MITM_PID}" 2>/dev/null; then
+            log_error "mitmproxy exited before becoming ready"
+            exit 1
+        fi
+        sleep 0.5
+    done
+
+    if [[ "${mitm_ready}" != "true" ]]; then
+        log_error "mitmproxy did not bind to port 8080 within 15 seconds"
+        exit 1
+    fi
 
     # Wait for mitmproxy (this allows signal handling)
     wait "${MITM_PID}"

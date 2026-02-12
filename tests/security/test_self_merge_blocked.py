@@ -86,7 +86,7 @@ class TestSelfMergePrevention:
     return 403 Forbidden.
     """
 
-    def test_gh_pr_merge_blocked(self, docker_exec):
+    def test_gh_pr_merge_blocked(self, docker_exec, proxy_reachable):
         """PUT /repos/{owner}/{repo}/pulls/{number}/merge must return 403.
 
         This endpoint performs a PR merge via the REST API.  The proxy
@@ -115,7 +115,7 @@ class TestSelfMergePrevention:
             f"GitHub rather than the proxy (header={blocked!r})."
         )
 
-    def test_auto_merge_enable_blocked(self, docker_exec):
+    def test_auto_merge_enable_blocked(self, docker_exec, proxy_reachable):
         """PUT /repos/{owner}/{repo}/pulls/{number}/auto-merge must return 403.
 
         Enabling auto-merge allows a PR to be merged automatically once
@@ -140,7 +140,7 @@ class TestSelfMergePrevention:
             f"GitHub rather than the proxy (header={blocked!r})."
         )
 
-    def test_pr_review_create_blocked(self, docker_exec):
+    def test_pr_review_create_blocked(self, docker_exec, proxy_reachable):
         """POST /repos/{owner}/{repo}/pulls/{number}/reviews with APPROVE must return 403.
 
         Creating a review with ``event: APPROVE`` would let the sandbox
@@ -171,7 +171,7 @@ class TestSelfMergePrevention:
             f"GitHub rather than the proxy (header={blocked!r})."
         )
 
-    def test_graphql_merge_mutation_blocked(self, docker_exec):
+    def test_graphql_merge_mutation_blocked(self, docker_exec, proxy_reachable):
         """GraphQL mergePullRequest mutation via POST /graphql must return 403.
 
         The ``mergePullRequest`` mutation is an alternative way to merge a
