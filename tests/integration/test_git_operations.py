@@ -11,6 +11,7 @@ without requiring actual git servers or network access.
 """
 
 import os
+import subprocess
 import sys
 from typing import Optional
 from unittest import mock
@@ -21,6 +22,7 @@ import pytest
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../../unified-proxy"))
 
 from addons.git_proxy import GitProxyAddon, GIT_PATH_PATTERN
+from pktline import PktLineRef, ZERO_SHA
 
 
 class MockContainerConfig:
@@ -98,8 +100,10 @@ def create_pktline_refs(*refs) -> bytes:
 
 
 @pytest.fixture(autouse=True)
-def bypass_restricted_path_check(monkeypatch):
+def bypass_restricted_path_check(monkeypatch, request):
     """Integration tests here focus on auth/policy flow, not pack path scanning."""
+    if "TestRestrictedPathIntegration" in request.node.nodeid:
+        return
     monkeypatch.setattr(
         GitProxyAddon,
         "_check_restricted_paths",
@@ -513,6 +517,113 @@ class TestNonGitRequests:
         # Non-git requests should pass through
         assert flow.response is None
         assert not flow.killed
+
+
+class TestRestrictedPathIntegration:
+    """Integration test for _check_restricted_paths using real git operations.
+
+    Unlike the unit tests (which mock subprocess.run), this creates a real
+    git repo, commits a file under .github/workflows/, generates pack data,
+    and verifies _check_restricted_paths blocks it.
+    """
+
+    @pytest.fixture
+    def git_env(self):
+        """Clean git environment for subprocess calls."""
+        return {
+            "PATH": os.environ.get("PATH", "/usr/local/bin:/usr/bin:/bin"),
+            "HOME": os.environ.get("HOME", "/tmp"),
+            "GIT_AUTHOR_NAME": "Test",
+            "GIT_AUTHOR_EMAIL": "test@test.com",
+            "GIT_COMMITTER_NAME": "Test",
+            "GIT_COMMITTER_EMAIL": "test@test.com",
+        }
+
+    @pytest.fixture
+    def bare_repo(self, tmp_path, git_env):
+        """Create a bare git repo with an initial commit."""
+        bare = tmp_path / "bare.git"
+        work = tmp_path / "work"
+
+        subprocess.run(
+            ["git", "init", "--bare", str(bare)],
+            env=git_env, capture_output=True, check=True,
+        )
+        subprocess.run(
+            ["git", "clone", str(bare), str(work)],
+            env=git_env, capture_output=True, check=True,
+        )
+
+        # Initial commit so main branch exists
+        readme = work / "README.md"
+        readme.write_text("init\n")
+        subprocess.run(
+            ["git", "add", "README.md"],
+            cwd=str(work), env=git_env, capture_output=True, check=True,
+        )
+        subprocess.run(
+            ["git", "commit", "-m", "init"],
+            cwd=str(work), env=git_env, capture_output=True, check=True,
+        )
+        subprocess.run(
+            ["git", "push", "origin", "HEAD"],
+            cwd=str(work), env=git_env, capture_output=True, check=True,
+        )
+
+        return bare, work
+
+    def test_restricted_path_blocks_workflow_push(self, bare_repo, git_env):
+        """A push containing .github/workflows/ changes must be blocked."""
+        bare, work = bare_repo
+
+        # Get current HEAD sha (will be old_sha)
+        old_sha_result = subprocess.run(
+            ["git", "rev-parse", "HEAD"],
+            cwd=str(work), env=git_env, capture_output=True, text=True, check=True,
+        )
+        old_sha = old_sha_result.stdout.strip()
+
+        # Commit a workflow file
+        wf_dir = work / ".github" / "workflows"
+        wf_dir.mkdir(parents=True, exist_ok=True)
+        (wf_dir / "evil.yml").write_text("name: evil\n")
+        subprocess.run(
+            ["git", "add", ".github/workflows/evil.yml"],
+            cwd=str(work), env=git_env, capture_output=True, check=True,
+        )
+        subprocess.run(
+            ["git", "commit", "-m", "add workflow"],
+            cwd=str(work), env=git_env, capture_output=True, check=True,
+        )
+
+        new_sha_result = subprocess.run(
+            ["git", "rev-parse", "HEAD"],
+            cwd=str(work), env=git_env, capture_output=True, text=True, check=True,
+        )
+        new_sha = new_sha_result.stdout.strip()
+
+        # Generate pack data: git pack-objects of the new commit
+        pack_result = subprocess.run(
+            ["git", "pack-objects", "--stdout", "--revs"],
+            input=f"{new_sha}\n^{old_sha}\n".encode(),
+            cwd=str(work), env=git_env, capture_output=True, check=True,
+        )
+        pack_data = pack_result.stdout
+
+        # Build the ref update
+        refs = [PktLineRef(old_sha=old_sha, new_sha=new_sha, refname="refs/heads/main")]
+
+        addon = GitProxyAddon()
+        result = addon._check_restricted_paths(
+            refs=refs,
+            bare_repo_path=str(bare),
+            pack_data=pack_data,
+            restricted_paths=[".github/workflows", ".github/actions"],
+        )
+
+        assert result is not None, (
+            "_check_restricted_paths should block push with .github/workflows/ changes"
+        )
 
 
 if __name__ == "__main__":

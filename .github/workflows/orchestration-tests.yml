@@ -46,7 +46,7 @@ jobs:
         id: orchestration
         env:
           SANDBOX_CLI: ${{ matrix.entrypoint.cli }}
-        run: pytest tests/orchestration/ -v --tb=short --junitxml=junit-orchestration-${{ matrix.entrypoint.name }}.xml
+        run: pytest tests/orchestration/ -v --tb=short -m '' --junitxml=junit-orchestration-${{ matrix.entrypoint.name }}.xml
 
       - name: Run CLI smoke tests
         if: always()
@@ -58,7 +58,7 @@ jobs:
         if: always()
         env:
           SANDBOX_CLI: ${{ matrix.entrypoint.cli }}
-        run: pytest tests/security/ -v --tb=short --junitxml=junit-security-${{ matrix.entrypoint.name }}.xml
+        run: pytest tests/security/ -v --tb=short -m '' --junitxml=junit-security-${{ matrix.entrypoint.name }}.xml
 
       - name: Upload test results
         if: always()

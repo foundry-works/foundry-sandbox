@@ -98,7 +98,6 @@ def reset_mock_ctx():
     when pytest runs multiple test files in the same process.
     """
     git_proxy.ctx = mock_ctx
-    mock_ctx.log.reset()
     yield
 
 

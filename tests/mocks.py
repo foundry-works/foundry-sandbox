@@ -75,11 +75,15 @@ class MockClientConn:
         self.peername = peername
 
 
+_mock_loggers: list["MockCtxLog"] = []
+
+
 class MockCtxLog:
     """Mock mitmproxy ctx.log with call tracking and query helpers."""
 
     def __init__(self):
         self.calls = []
+        _mock_loggers.append(self)
 
     def info(self, msg, **kwargs):
         self.calls.append(("info", msg))
@@ -106,6 +110,12 @@ class MockCtxLog:
         if level:
             return [call[1] for call in self.calls if call[0] == level]
         return [call[1] for call in self.calls]
+
+
+def reset_all_mock_loggers() -> None:
+    """Reset all tracked MockCtxLog instances."""
+    for logger in _mock_loggers:
+        logger.reset()
 
 
 class MockCtx:

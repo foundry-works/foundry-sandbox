@@ -97,13 +97,6 @@ def addon(registry):
     return addon_instance
 
 
-@pytest.fixture(autouse=True)
-def reset_mock_logger():
-    """Reset mock logger before each test."""
-    mock_logger.reset()
-    yield
-
-
 def create_flow(source_ip, headers=None):
     """Create a test HTTP flow with the specified source IP.
 

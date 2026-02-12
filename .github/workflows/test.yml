@@ -75,17 +75,13 @@ jobs:
   lint:
     runs-on: ubuntu-latest
     timeout-minutes: 10
-    strategy:
-      fail-fast: false
-      matrix:
-        python-version: ["3.10", "3.12"]
     steps:
       - uses: actions/checkout@v4
 
-      - name: Set up Python ${{ matrix.python-version }}
+      - name: Set up Python 3.12
         uses: actions/setup-python@v5
         with:
-          python-version: ${{ matrix.python-version }}
+          python-version: '3.12'
           cache: pip
 
       - name: Install dependencies
@@ -98,7 +94,6 @@ jobs:
         run: ruff check .
 
       - name: Run shellcheck
-        if: matrix.python-version == '3.12'
         run: |
           sudo apt-get install -y -qq shellcheck 2>/dev/null
           shellcheck sandbox.sh entrypoint.sh entrypoint-root.sh stubs/git-wrapper.sh tests/run.sh

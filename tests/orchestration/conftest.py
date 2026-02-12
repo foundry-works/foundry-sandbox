@@ -2,11 +2,49 @@
 
 Provides:
     sandbox_name - unique sandbox name with automatic teardown
+    poll         - retry/polling helper for async assertions
 """
 
+import time
 import uuid
+from typing import Callable
 
 import pytest
+
+
+def wait_for(
+    condition: Callable[[], bool],
+    *,
+    timeout: float = 30.0,
+    interval: float = 1.0,
+    description: str = "condition",
+) -> None:
+    """Poll *condition* until it returns True or *timeout* seconds elapse.
+
+    Args:
+        condition: Zero-arg callable that returns True when ready.
+        timeout: Maximum wall-clock seconds to wait.
+        interval: Seconds between polls.
+        description: Human-readable label for error messages.
+
+    Raises:
+        TimeoutError: If the condition is not met within *timeout*.
+    """
+    deadline = time.monotonic() + timeout
+    while True:
+        if condition():
+            return
+        if time.monotonic() >= deadline:
+            raise TimeoutError(
+                f"Timed out after {timeout}s waiting for: {description}"
+            )
+        time.sleep(interval)
+
+
+@pytest.fixture
+def poll():
+    """Expose :func:`wait_for` as a pytest fixture."""
+    return wait_for
 
 
 @pytest.fixture

@@ -24,7 +24,7 @@ if unified_proxy_dir not in sys.path:
 _SKIP_MOCKS = os.environ.get("MITMPROXY_NO_MOCK") == "1"
 
 if not _SKIP_MOCKS:
-    from tests.mocks import install_mitmproxy_mocks
+    from tests.mocks import install_mitmproxy_mocks, reset_all_mock_loggers
 
     _MOCK_KWARGS = {"include_dns": False}
 
@@ -34,4 +34,5 @@ if not _SKIP_MOCKS:
     def ensure_mitmproxy_mocks():
         """Reapply mitmproxy mocks before each test to avoid cross-test leakage."""
         install_mitmproxy_mocks(**_MOCK_KWARGS)
+        reset_all_mock_loggers()
         yield

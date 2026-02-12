@@ -86,7 +86,6 @@ def reset_mock_ctx():
     interference when pytest runs multiple test files in the same process.
     """
     git_proxy.logger = mock_logger
-    mock_logger.reset()
     yield
 
 
