@@ -36,11 +36,11 @@ jobs:
       - name: Create sandbox for red team testing
         id: sandbox
         run: |
-          RESULT=$(python3 -m foundry_sandbox.cli new . --skip-key-check 2>&1)
+          RESULT=$(python3 -m foundry_sandbox.cli new . --skip-key-check 2>&1) || true
           echo "$RESULT"
           NAME=$(echo "$RESULT" | grep 'Setting up your sandbox:' | sed 's/.*Setting up your sandbox: //')
           if [ -z "$NAME" ]; then
-            echo "::error::Failed to extract sandbox name"
+            echo "::error::Failed to extract sandbox name from output above"
             exit 1
           fi
           echo "name=$NAME" >> "$GITHUB_OUTPUT"

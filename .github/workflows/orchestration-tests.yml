@@ -42,6 +42,9 @@ jobs:
       - name: Verify Docker availability
         run: docker info
 
+      - name: Build sandbox Docker image
+        run: docker build -t foundry-sandbox:latest .
+
       - name: Run orchestration tests
         id: orchestration
         env:
