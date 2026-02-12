@@ -30,6 +30,9 @@ jobs:
       - name: Verify Docker availability
         run: docker info
 
+      - name: Build sandbox Docker image
+        run: docker build -t foundry-sandbox:latest .
+
       - name: Create sandbox for red team testing
         id: sandbox
         run: |
