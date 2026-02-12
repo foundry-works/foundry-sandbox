@@ -637,6 +637,12 @@ def new(
             raise
         except Exception as exc:
             log_error(f"Sandbox creation failed: {exc}")
+            # Surface Docker Compose stderr (CalledProcessError.stderr) so CI
+            # logs show the actual failure reason instead of just the exit code.
+            stderr = getattr(exc, "stderr", None)
+            if stderr:
+                import textwrap
+                log_error(textwrap.indent(stderr.strip(), "  "))
             log_info("Cleaning up partial sandbox resources...")
             _rollback_new(worktree_path, claude_config_path, container, override_file)
             sys.exit(1)

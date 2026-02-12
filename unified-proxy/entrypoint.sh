@@ -58,11 +58,25 @@ drop_privileges_if_needed() {
         fi
     done
 
-    if command -v gosu >/dev/null 2>&1; then
-        log "Dropping privileges to ${user}"
+    # Use setpriv with ambient capabilities to preserve NET_BIND_SERVICE
+    # across the privilege drop. gosu uses setuid which drops all Linux
+    # capabilities, preventing mitmproxy from binding to port 53 (DNS).
+    # setpriv --ambient-caps keeps the capability in the ambient set so
+    # it is inherited by child processes (mitmdump).
+    local uid gid
+    uid="$(id -u "${user}")"
+    gid="$(id -g "${user}")"
+
+    if command -v setpriv >/dev/null 2>&1; then
+        log "Dropping privileges to ${user} (preserving NET_BIND_SERVICE)"
+        exec setpriv --reuid="${uid}" --regid="${gid}" --init-groups \
+            --inh-caps=+net_bind_service --ambient-caps=+net_bind_service \
+            -- "$0" "$@"
+    elif command -v gosu >/dev/null 2>&1; then
+        log "Warning: setpriv not found; falling back to gosu (DNS port 53 may fail)"
         exec gosu "${user}" "$0" "$@"
     else
-        log_error "gosu not found; continuing as root"
+        log_error "Neither setpriv nor gosu found; continuing as root"
     fi
 }
 
