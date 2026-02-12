@@ -15,16 +15,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
 
-    strategy:
-      fail-fast: false
-      matrix:
-        entrypoint:
-          - name: shell
-            cli: "./sandbox.sh"
-          - name: python
-            cli: "python3 -m foundry_sandbox.cli"
-
-    name: orchestration (${{ matrix.entrypoint.name }})
+    name: orchestration
 
     steps:
       - name: Checkout code
@@ -57,8 +48,6 @@ jobs:
 
       - name: Smoke-test sandbox creation
         id: smoke
-        env:
-          SANDBOX_CLI: ${{ matrix.entrypoint.cli }}
         run: |
           NAME="ci-smoke-$(head -c4 /dev/urandom | xxd -p)"
           echo "name=$NAME" >> "$GITHUB_OUTPUT"
@@ -77,27 +66,21 @@ jobs:
 
       - name: Run orchestration tests
         id: orchestration
-        env:
-          SANDBOX_CLI: ${{ matrix.entrypoint.cli }}
-        run: pytest tests/orchestration/ -v --tb=short -m '' --junitxml=junit-orchestration-${{ matrix.entrypoint.name }}.xml
+        run: pytest tests/orchestration/ -v --tb=short -m '' --junitxml=junit-orchestration.xml
 
       - name: Run CLI smoke tests
         if: always()
-        env:
-          SANDBOX_CLI: ${{ matrix.entrypoint.cli }}
         run: bash tests/run.sh
 
       - name: Run security integration tests
         if: steps.orchestration.outcome == 'success'
-        env:
-          SANDBOX_CLI: ${{ matrix.entrypoint.cli }}
-        run: pytest tests/security/ -v --tb=short -m '' --junitxml=junit-security-${{ matrix.entrypoint.name }}.xml
+        run: pytest tests/security/ -v --tb=short -m '' --junitxml=junit-security.xml
 
       - name: Upload test results
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: orchestration-results-${{ matrix.entrypoint.name }}
+          name: orchestration-results
           path: junit-*.xml
 
       - name: Cleanup orphaned test sandboxes

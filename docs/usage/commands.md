@@ -2,7 +2,7 @@
 
 Complete reference for all `cast` commands.
 
-> **Two entrypoints:** Commands can be run via the `cast` alias (shell entrypoint) or via the Python CLI: `python3 -m foundry_sandbox.cli <command>`. Both support the same commands and options. The Python CLI uses Click for argument parsing and falls back to the shell entrypoint for any commands not yet migrated.
+> The `cast` CLI is installed via `pip install -e .` and can also be invoked as `python3 -m foundry_sandbox.cli`.
 
 ## cast new
 

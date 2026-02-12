@@ -43,7 +43,7 @@ Finally, in addition to providing tight security guardrails, this sandbox is des
 | tmux | 3.x+ | `tmux -V` |
 | Python | 3.10+ | `python3 --version` |
 
-Linux and macOS supported natively. Windows users need WSL2. macOS ships Bash 3.2—install Bash 4+ via `brew install bash`. Python is required for the Python CLI (`python3 -m foundry_sandbox.cli`); the shell entrypoint (`sandbox.sh`) works without it.
+Linux and macOS supported natively. Windows users need WSL2. macOS ships Bash 3.2—install Bash 4+ via `brew install bash`. Python 3.10+ is required.
 
 ## Installation
 

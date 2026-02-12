@@ -301,6 +301,21 @@ os.makedirs(os.path.dirname(plugins_file), exist_ok=True)
 with open(plugins_file, "w") as f:
     json.dump(installed, f, indent=2)
     f.write("\\n")
+
+# Ensure enabledPlugins in settings.json (settings merge may fail)
+settings_file = f"{{home}}/.claude/settings.json"
+try:
+    with open(settings_file) as f:
+        settings = json.load(f)
+except (FileNotFoundError, json.JSONDecodeError):
+    settings = {{}}
+
+settings.setdefault("enabledPlugins", {{}})
+settings["enabledPlugins"]["pyright-lsp@claude-plugins-official"] = True
+
+with open(settings_file, "w") as f:
+    json.dump(settings, f, indent=2)
+    f.write("\\n")
 '''
 
         result = subprocess.run(

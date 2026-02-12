@@ -208,7 +208,7 @@ services:
 Or set the environment variable when starting the sandbox:
 
 ```bash
-PROXY_ENABLE_DNS=false ./sandbox.sh new myproject
+PROXY_ENABLE_DNS=false cast new myproject
 ```
 
 **Note:** Disabling DNS filtering reduces defense in depth. Use only when necessary for debugging.

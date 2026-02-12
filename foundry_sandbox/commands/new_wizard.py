@@ -14,7 +14,7 @@ from pathlib import Path
 import click
 
 from foundry_sandbox.constants import TIMEOUT_GIT_QUERY
-from foundry_sandbox.tui import tui_choose, tui_confirm, tui_input
+from foundry_sandbox.tui import tui_choose, tui_confirm, tui_header, tui_input, tui_step, tui_summary
 
 
 def _wizard_repo() -> tuple[str, str, str, str]:
@@ -25,9 +25,7 @@ def _wizard_repo() -> tuple[str, str, str, str]:
     """
     from foundry_sandbox.commands.new_resolver import _resolve_repo_input
 
-    click.echo()
-    click.echo("  Step 1/7: Repository")
-    click.echo()
+    tui_step(1, 7, "Repository")
 
     # Check if current directory is a git repo
     current_result = subprocess.run(
@@ -81,9 +79,7 @@ def _wizard_branch(repo_root: str, current_branch: str) -> tuple[str, str, bool]
     """
     from foundry_sandbox.commands.new_resolver import _get_local_branches
 
-    click.echo()
-    click.echo("  Step 2/7: Branch")
-    click.echo()
+    tui_step(2, 7, "Branch")
 
     choice = tui_choose("Branch strategy", ["Create new branch", "Checkout existing branch"])
 
@@ -159,9 +155,7 @@ def _wizard_working_dir(repo_root: str) -> str:
     Returns:
         Working directory path (relative, empty for repo root).
     """
-    click.echo()
-    click.echo("  Step 3/7: Working directory")
-    click.echo()
+    tui_step(3, 7, "Working directory")
 
     if repo_root:
         cwd = os.getcwd()
@@ -208,9 +202,7 @@ def _wizard_sparse(working_dir: str) -> bool:
     Returns:
         True to enable sparse checkout.
     """
-    click.echo()
-    click.echo("  Step 4/7: Sparse checkout")
-    click.echo()
+    tui_step(4, 7, "Sparse checkout")
 
     if not working_dir:
         return False
@@ -227,9 +219,7 @@ def _wizard_deps() -> str:
     Returns:
         Pip requirements path or 'auto' or empty.
     """
-    click.echo()
-    click.echo("  Step 5/7: Dependencies")
-    click.echo()
+    tui_step(5, 7, "Dependencies")
 
     choice = tui_choose("Python dependencies", ["None", "Auto-detect", "Provide path"])
 
@@ -256,9 +246,7 @@ def _wizard_pr() -> bool:
     Returns:
         True to allow PR operations.
     """
-    click.echo()
-    click.echo("  Step 6/7: PR access")
-    click.echo()
+    tui_step(6, 7, "PR access")
 
     return tui_confirm(
         "Allow PR operations? (Create PRs, add comments, request reviews - increases risk)",
@@ -288,11 +276,7 @@ def _wizard_summary(
         pip_req: Pip requirements path.
         allow_pr: True if allowing PR operations.
     """
-    click.echo()
-    click.echo("  Step 7/7: Review")
-    click.echo()
-    click.echo("  Here's what we'll create:")
-    click.echo()
+    tui_step(7, 7, "Review")
 
     action_display = "Create new branch" if create_branch else "Checkout existing"
     branch_display = branch if branch else "(auto-generated)"
@@ -301,16 +285,21 @@ def _wizard_summary(
     pip_display = pip_req if pip_req else "no"
     pr_display = "yes" if allow_pr else "no"
 
-    click.echo(f"  Repository:   {repo_display}")
-    click.echo(f"  Action:       {action_display}")
-    click.echo(f"  Branch:       {branch_display}")
+    lines = [
+        f"Repository:   {repo_display}",
+        f"Action:       {action_display}",
+        f"Branch:       {branch_display}",
+    ]
     if create_branch:
-        click.echo(f"  Based on:     {from_branch or 'main'}")
-    click.echo(f"  Directory:    {dir_display}")
-    click.echo(f"  Sparse clone: {sparse_display}")
-    click.echo(f"  Python deps:  {pip_display}")
-    click.echo(f"  PR access:    {pr_display}")
-    click.echo()
+        lines.append(f"Based on:     {from_branch or 'main'}")
+    lines.extend([
+        f"Directory:    {dir_display}",
+        f"Sparse clone: {sparse_display}",
+        f"Python deps:  {pip_display}",
+        f"PR access:    {pr_display}",
+    ])
+
+    tui_summary("Here's what we'll create:", "\n".join(lines))
 
 
 def _guided_new() -> tuple[str, str, str, str, bool, str, bool]:
@@ -319,9 +308,7 @@ def _guided_new() -> tuple[str, str, str, str, bool, str, bool]:
     Returns:
         Tuple of wizard results to pass to cmd_new logic, or raises SystemExit.
     """
-    click.echo()
-    click.echo("  Let's set up your sandbox")
-    click.echo()
+    tui_header("Let's set up your sandbox")
 
     repo_url, repo_root, repo_display, current_branch = _wizard_repo()
     branch, from_branch, create_branch = _wizard_branch(repo_root, current_branch)

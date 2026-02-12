@@ -3,8 +3,7 @@
 Migrated from commands/info.sh. Combines the output of config and status
 commands into a single view, supporting both text and JSON output formats.
 
-Calls the Python config and status commands directly via Click's ctx.invoke()
-rather than shelling out to sandbox.sh.
+Calls the Python config and status commands directly via Click's ctx.invoke().
 """
 
 from __future__ import annotations

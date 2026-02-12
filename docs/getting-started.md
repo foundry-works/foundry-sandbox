@@ -8,7 +8,7 @@ This guide walks you through installing Foundry Sandbox and creating your first 
 - **Git** - Version control
 - **Bash** - Shell (Linux/macOS default, WSL2 on Windows)
 - **tmux** - Terminal multiplexer (usually pre-installed)
-- **Python** - 3.10+ (for the Python CLI; the shell entrypoint works without Python)
+- **Python** - 3.10+
 
 Verify your setup:
 
@@ -38,22 +38,7 @@ After installation, reload your shell:
 source ~/.bashrc  # or ~/.zshrc
 ```
 
-### Python CLI (Optional)
-
-The Python CLI provides the same commands as the shell entrypoint with improved argument parsing via Click. To install it:
-
-```bash
-cd ~/.foundry-sandbox  # or wherever you cloned the repo
-pip install -e .
-```
-
-Once installed, you can invoke it via:
-
-```bash
-python3 -m foundry_sandbox.cli <command>
-```
-
-The `cast` alias uses the shell entrypoint (`sandbox.sh`) by default. Both entrypoints support identical commands and options.
+The `cast` CLI is installed automatically by `install.sh` via `pip install -e .` (using the entry point defined in `pyproject.toml`).
 
 ## Creating Your First Sandbox
 

@@ -128,7 +128,7 @@ else
     echo '{"hasCompletedOnboarding": true}' > "$CLAUDE_JSON"
 fi
 
-# Note: Git worktree path fixes are handled by the host script (lib/container_config.sh)
+# Note: Git worktree path fixes are handled by the host script (foundry_sandbox/container_setup.py)
 # after copying the repos directory, ensuring the bare repo exists before fixing paths.
 
 # Network mode is applied AFTER plugin registration by the host setup script.

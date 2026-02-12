@@ -35,9 +35,9 @@ def requires_docker(has_docker):
 def cli():
     """Return a callable that invokes the sandbox CLI.
 
-    Reads SANDBOX_CLI env var (default ``./sandbox.sh``) and splits it with
-    ``shlex.split`` so multi-token entrypoints like
-    ``python3 -m foundry_sandbox.cli`` work correctly.
+    Reads SANDBOX_CLI env var (default ``python3 -m foundry_sandbox.cli``)
+    and splits it with ``shlex.split`` so multi-token entrypoints work
+    correctly.
 
     Session-scoped because the callable is stateless.
 
@@ -46,7 +46,7 @@ def cli():
         result = cli("list")
         result = cli("new", "--name", "foo", capture_output=True)
     """
-    entrypoint = shlex.split(os.environ.get("SANDBOX_CLI", "./sandbox.sh"))
+    entrypoint = shlex.split(os.environ.get("SANDBOX_CLI", "python3 -m foundry_sandbox.cli"))
 
     def _run(*args, **kwargs):
         cmd = entrypoint + list(args)

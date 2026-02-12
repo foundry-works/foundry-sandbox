@@ -98,7 +98,7 @@ jobs:
         run: |
           sudo apt-get install -y -qq shellcheck 2>/dev/null
           # No exclusions needed for core scripts
-          shellcheck sandbox.sh entrypoint.sh entrypoint-root.sh stubs/git-wrapper.sh
+          shellcheck entrypoint.sh entrypoint-root.sh stubs/git-wrapper.sh
           # SC2163: export -f for functions, not patterns (false positive)
           shellcheck -e SC2163 tests/run.sh
           # SC2317: cleanup() with trap always exits (false positive)

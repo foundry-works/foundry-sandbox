@@ -8,7 +8,7 @@ This document explains the technical design of Foundry Sandbox: how components f
 ┌─────────────────────────────────────────────────────────────┐
 │                       HOST SYSTEM                           │
 │                                                             │
-│  sandbox.sh ──► foundry_sandbox.cli ──► commands/*.py       │
+│  cast ──► foundry_sandbox.cli ──► commands/*.py              │
 │       │                                                     │
 │       ▼                                                     │
 │  ┌─────────────────────────────────────────────────────┐   │
@@ -199,20 +199,12 @@ Execute passed command (default: /bin/bash)
 
 ### Git Path Translation
 
-Worktrees reference the bare repo by absolute path. Since host and container have different paths, the **host script** (`lib/container_config.sh`) fixes these paths after copying the repos directory—not the container entrypoint.
+Worktrees reference the bare repo by absolute path. Since host and container have different paths, the **host script** (`foundry_sandbox/container_setup.py`) fixes these paths after copying the repos directory—not the container entrypoint.
 
 ## Code Organization
 
-The orchestration layer has been rewritten from shell to Python using a
-strangler-fig migration pattern. `sandbox.sh` is now a thin wrapper that
-delegates to the Python CLI (`foundry_sandbox.cli`).
-
-See `docs/parity-diffs.md` for the behavioral equivalence contract between
-the old shell commands and the new Python implementations.
-
 ```
 foundry-sandbox/
-├── sandbox.sh              # Thin wrapper → python3 -m foundry_sandbox.cli
 ├── Dockerfile              # Container image definition
 ├── docker-compose.yml      # Container runtime config
 ├── entrypoint.sh           # Container startup script (user)
@@ -286,8 +278,7 @@ User runs: cast new owner/repo
               │
               ▼
 ┌─────────────────────────────────┐
-│ sandbox.sh → python3 -m         │
-│   foundry_sandbox.cli           │
+│ cast → foundry_sandbox.cli      │
 │  - Click CLI dispatch           │
 │  - validate_environment         │
 │  - dispatch to commands/new.py  │

@@ -4,8 +4,8 @@ Docker-based sandbox environment for running Claude Code with isolated credentia
 
 ## Development
 
-- `sandbox.sh` - Main entry point for sandbox management
-- `lib/` - Shell library modules
+- `foundry_sandbox/` - Python CLI package (`cast` entry point via pyproject.toml)
+- `unified-proxy/` - Credential isolation proxy (mitmproxy addons, git API)
 - `stubs/` - Stub files injected into sandboxes (CLAUDE.md, etc.)
 - `tests/` - Test scripts including security red-team tests
 

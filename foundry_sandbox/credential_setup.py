@@ -225,17 +225,17 @@ def _stage_setup_claude_config(
     # Marketplace plugins
     if not skip_plugins:
         log_step("Copying marketplace plugins")
-        marketplace_plugins = home / ".claude" / "marketplace_plugins"
-        if marketplace_plugins.exists():
+        marketplace_dir = home / ".claude" / "plugins" / "marketplaces" / "claude-plugins-official"
+        if marketplace_dir.exists():
             copy_dir_to_container(
-                container_id, str(marketplace_plugins),
-                f"{CONTAINER_HOME}/.claude/marketplace_plugins",
+                container_id, str(marketplace_dir),
+                f"{CONTAINER_HOME}/.claude/plugins/marketplaces/claude-plugins-official",
             )
         else:
-            log_debug("marketplace_plugins dir not found, skipping")
+            log_debug("marketplace dir not found, skipping")
 
         log_step("Syncing marketplace manifests")
-        sync_marketplace_manifests(container_id, f"{CONTAINER_HOME}/.claude/marketplace_plugins")
+        sync_marketplace_manifests(container_id, f"{CONTAINER_HOME}/.claude/plugins")
     else:
         log_debug("Skipping marketplace plugins (skip_plugins=True)")
 
@@ -698,7 +698,13 @@ def sync_runtime_credentials(
     ensure_claude_statusline(container_id, quiet=True)
 
     # Sync marketplace manifests (quiet)
-    sync_marketplace_manifests(container_id, f"{CONTAINER_HOME}/.claude/marketplace_plugins", quiet=True)
+    marketplace_dir = home / ".claude" / "plugins" / "marketplaces" / "claude-plugins-official"
+    if marketplace_dir.exists():
+        copy_dir_to_container_quiet(
+            container_id, str(marketplace_dir),
+            f"{CONTAINER_HOME}/.claude/plugins/marketplaces/claude-plugins-official",
+        )
+    sync_marketplace_manifests(container_id, f"{CONTAINER_HOME}/.claude/plugins", quiet=True)
 
     # Copy real credentials only when NOT in isolation mode
     if not isolate_credentials:

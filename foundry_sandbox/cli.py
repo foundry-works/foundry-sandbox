@@ -27,9 +27,7 @@ ALIASES: dict[str, tuple[str, list[str]]] = {
     "refresh-creds": ("refresh-credentials", []),
 }
 
-# All commands known to sandbox.sh (used to decide whether a fallback is
-# reasonable vs. an outright typo).  Kept in sync with the case-statement
-# in sandbox.sh.
+# All known commands (used for typo detection and alias resolution).
 
 # ---------------------------------------------------------------------------
 # Custom Click Group
