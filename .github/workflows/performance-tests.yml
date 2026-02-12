@@ -1,8 +1,10 @@
 name: Performance Tests
 
 on:
-  schedule:
-    - cron: "0 7 * * *"
+  push:
+    branches: [main, 'tylerburleigh/**']
+  pull_request:
+    branches: [main]
   workflow_dispatch:
   workflow_call:
 
