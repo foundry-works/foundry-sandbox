@@ -18,7 +18,6 @@ from unittest import mock
 import pytest
 
 # Mock mitmproxy before importing the addon
-mock_ctx = mock.MagicMock()
 mock_http_module = mock.MagicMock()
 
 
@@ -85,10 +84,8 @@ if "addons.credential_injector" in sys.modules:
 # Create a mock mitmproxy module that returns our mock modules when accessed as attributes
 mock_mitmproxy = mock.MagicMock()
 mock_mitmproxy.http = mock_http_module
-mock_mitmproxy.ctx = mock_ctx
 sys.modules["mitmproxy"] = mock_mitmproxy
 sys.modules["mitmproxy.http"] = mock_http_module
-sys.modules["mitmproxy.ctx"] = mock_ctx
 sys.modules["addons.container_identity"] = mock_container_identity
 sys.modules["addons.oauth_managers"] = mock.MagicMock()
 sys.modules["addons.oauth_managers.codex"] = mock.MagicMock()

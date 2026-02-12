@@ -22,7 +22,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../../unified-proxy"
 
 # Mock mitmproxy before importing git_proxy
 from tests.mocks import (
-    MockHeaders, MockResponse, MockClientConn, MockCtx, MockCtxLog,
+    MockHeaders, MockResponse, MockClientConn, MockCtxLog,
 )
 
 
@@ -59,7 +59,6 @@ mock_http = MagicMock()
 mock_http.Response = MockResponse
 mock_http.HTTPFlow = MockHTTPFlow
 
-mock_ctx = MockCtx()
 mock_logger = MockCtxLog()
 
 # Add addons path and import git_proxy (uses conftest mitmproxy mocks)
