@@ -122,7 +122,7 @@ def running_sandbox(cli, has_docker, module_local_repo):
     cli("destroy", name, "--force")
 
 
-@pytest.fixture
+@pytest.fixture(scope="module")
 def docker_exec(running_sandbox):
     """Return a callable that executes a command inside the running sandbox container.
 
