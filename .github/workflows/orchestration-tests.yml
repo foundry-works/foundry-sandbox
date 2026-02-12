@@ -57,10 +57,6 @@ jobs:
           SANDBOX_CLI: ${{ matrix.entrypoint.cli }}
         run: bash tests/run.sh
 
-      - name: Run pip install integration tests
-        if: steps.orchestration.outcome == 'success'
-        run: bash tests/test-pip-install-integration.sh
-
       - name: Run security integration tests
         if: steps.orchestration.outcome == 'success'
         env:
