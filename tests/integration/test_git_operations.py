@@ -22,7 +22,7 @@ import pytest
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../../unified-proxy"))
 
 from addons.git_proxy import GitProxyAddon, GIT_PATH_PATTERN
-from pktline import PktLineRef, ZERO_SHA
+from pktline import PktLineRef
 
 
 class MockContainerConfig:
