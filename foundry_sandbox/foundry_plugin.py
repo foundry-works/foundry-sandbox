@@ -405,10 +405,15 @@ for path in paths:
             changed = True
 
     if changed:
-        os.makedirs(os.path.dirname(path), exist_ok=True)
-        with open(path, "w") as f:
-            json.dump(data, f, indent=2)
-            f.write("\\n")
+        try:
+            os.makedirs(os.path.dirname(path), exist_ok=True)
+            with open(path, "w") as f:
+                json.dump(data, f, indent=2)
+                f.write("\\n")
+        except PermissionError:
+            import sys
+            print(f"Warning: cannot write {path} (PermissionError), skipping", file=sys.stderr)
+            continue
 '''
 
     # Get SANDBOX_ENABLE_TAVILY from environment

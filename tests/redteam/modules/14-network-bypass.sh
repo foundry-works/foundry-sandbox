@@ -88,7 +88,14 @@ run_tests() {
         if [[ -f "$path" ]]; then
             # File exists - check if it has real credentials
             if grep -qE "(access_token|refresh_token|oauth_token)" "$path" 2>/dev/null; then
-                test_fail "OAuth credentials found at $path"
+                # Distinguish proxy stubs (placeholders) from real OAuth credentials.
+                # In credential isolation mode, stub files intentionally contain
+                # access_token/refresh_token fields with CREDENTIAL_PROXY_PLACEHOLDER values.
+                if grep -qE "CREDENTIAL_PROXY_PLACEHOLDER|PROXY_PLACEHOLDER" "$path" 2>/dev/null; then
+                    test_pass "Proxy stub at $path (placeholder credentials only)"
+                else
+                    test_fail "OAuth credentials found at $path"
+                fi
             else
                 test_warn "File exists at $path (check contents)"
             fi

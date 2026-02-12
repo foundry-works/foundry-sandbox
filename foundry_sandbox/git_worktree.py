@@ -462,5 +462,16 @@ def remove_worktree(worktree_path: str | Path) -> None:
             if attempt < 2:
                 time.sleep(0.5)
                 continue
-            raise  # Final attempt — propagate the error
+            # Final shutil attempt failed — try sudo rm -rf as last resort.
+            # Docker containers may create files owned by a different uid
+            # (e.g. uid 1000 inside container vs uid 1001 on CI runner).
+            try:
+                subprocess.run(
+                    ["sudo", "rm", "-rf", str(wt_p)],
+                    check=True,
+                    capture_output=True,
+                    timeout=30,
+                )
+            except (OSError, subprocess.SubprocessError):
+                raise  # Propagate original OSError if sudo also fails
         return  # Success

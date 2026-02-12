@@ -46,7 +46,11 @@ run_tests() {
         "https://api.github.com/" 2>&1)
     if [[ "$CURL_HTTPS_RESP" =~ ^(200|301|302|403|404|429) ]]; then
         test_pass "HTTPS request succeeded through proxy (HTTP $CURL_HTTPS_RESP)"
-    elif [[ "$CURL_HTTPS_RESP" =~ ^(000|60|77) ]]; then
+    elif [[ "$CURL_HTTPS_RESP" == "000" ]]; then
+        # Code 000 = no HTTP response received. This is ambiguous: could be proxy
+        # unreachable OR a CA/TLS handshake failure. Don't report as CA trust issue.
+        test_warn "HTTPS proxy unreachable (code: 000) - cannot verify CA trust"
+    elif [[ "$CURL_HTTPS_RESP" =~ ^(60|77) ]]; then
         test_fail "HTTPS request failed - CA trust issue (code: $CURL_HTTPS_RESP)"
     else
         info "HTTPS response code: $CURL_HTTPS_RESP"

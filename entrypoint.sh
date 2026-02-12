@@ -175,12 +175,16 @@ fi
 
 # Git hardening: disable hooks and fsmonitor to prevent malicious repos from executing code
 # Gate behind SANDBOX_GIT_HOOKS_ENABLED (default 0 = hooks disabled for security)
+# IMPORTANT: Use /usr/bin/git directly to bypass the git-wrapper.sh proxy.
+# The wrapper intercepts all commands when WORKDIR is /workspace and proxies them
+# to the git API, which rejects config writes (read-only policy). Using the real
+# git binary ensures hardening is applied to the sandbox user's global gitconfig.
 if [ "${SANDBOX_GIT_HOOKS_ENABLED:-0}" != "1" ]; then
-    git config --global core.hooksPath /dev/null
-    git config --global init.templateDir ''
-    git config --global core.fsmonitor false
-    git config --global core.fsmonitorHookVersion 0
-    git config --global receive.denyCurrentBranch refuse
+    /usr/bin/git config --global core.hooksPath /dev/null
+    /usr/bin/git config --global init.templateDir ''
+    /usr/bin/git config --global core.fsmonitor false
+    /usr/bin/git config --global core.fsmonitorHookVersion 0
+    /usr/bin/git config --global receive.denyCurrentBranch refuse
 fi
 
 # Git shadow mode: /workspace/.git is hidden from the sandbox

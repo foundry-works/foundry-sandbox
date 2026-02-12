@@ -160,8 +160,16 @@ def destroy(name: str, keep_worktree: bool, force: bool, yes: bool) -> None:
         try:
             log_info("Removing Claude config...")
             shutil.rmtree(claude_config_path)
-        except Exception as exc:
-            log_warn(f"Could not remove config directory: {exc}")
+        except OSError:
+            # Try sudo as fallback for uid-mismatch files (Docker creates
+            # files as uid 1000 which CI runner uid 1001 can't delete).
+            try:
+                subprocess.run(
+                    ["sudo", "rm", "-rf", str(claude_config_path)],
+                    check=True, capture_output=True, timeout=30,
+                )
+            except (OSError, subprocess.SubprocessError) as exc:
+                log_warn(f"Could not remove config directory: {exc}")
 
     # ------------------------------------------------------------------
     # 9. Remove worktree (unless --keep-worktree)

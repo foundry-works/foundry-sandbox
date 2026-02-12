@@ -47,7 +47,15 @@ for path in paths:
         data["autoCompactEnabled"] = False
         changed = True
     if changed or not os.path.exists(path):
-        os.makedirs(os.path.dirname(path), exist_ok=True)
-        with open(path, "w") as f:
-            json.dump(data, f, indent=2)
-            f.write("\n")
+        try:
+            os.makedirs(os.path.dirname(path), exist_ok=True)
+            with open(path, "w") as f:
+                json.dump(data, f, indent=2)
+                f.write("\n")
+        except PermissionError:
+            # In some environments (CI, Docker read-only overlays), the
+            # secondary path ~/.claude/.claude.json may not be writable.
+            # The primary ~/.claude.json is sufficient for Claude to work.
+            import sys
+            print(f"Warning: cannot write {path} (PermissionError), skipping", file=sys.stderr)
+            continue

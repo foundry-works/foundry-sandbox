@@ -158,7 +158,10 @@ def _stage_setup_claude_config(
     claude_json = home / ".claude.json"
     if claude_json.exists():
         copy_file_to_container(container_id, str(claude_json), f"{CONTAINER_HOME}/.claude.json")
-        copy_file_to_container(container_id, str(claude_json), f"{CONTAINER_HOME}/.claude/.claude.json")
+        try:
+            copy_file_to_container(container_id, str(claude_json), f"{CONTAINER_HOME}/.claude/.claude.json")
+        except (OSError, subprocess.SubprocessError):
+            log_debug("Could not copy .claude.json to secondary path (non-fatal)")
     else:
         log_debug("~/.claude.json not found, skipping")
 
