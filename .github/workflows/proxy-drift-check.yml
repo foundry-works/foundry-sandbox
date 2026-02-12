@@ -2,9 +2,7 @@ name: Proxy Drift Check
 
 on:
   push:
-    branches: [main, 'tylerburleigh/**']
   pull_request:
-    branches: [main]
   workflow_dispatch:
 
 jobs:

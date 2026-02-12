@@ -2,9 +2,7 @@ name: Red Team Security Tests
 
 on:
   push:
-    branches: [main, 'tylerburleigh/**']
   pull_request:
-    branches: [main]
   workflow_dispatch:
 
 concurrency:

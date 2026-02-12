@@ -2,9 +2,7 @@ name: Orchestration Tests (Full)
 
 on:
   push:
-    branches: [main, 'tylerburleigh/**']
   pull_request:
-    branches: [main]
   workflow_dispatch:
   workflow_call:
 
