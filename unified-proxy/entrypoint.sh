@@ -69,6 +69,10 @@ drop_privileges_if_needed() {
 
     if command -v setpriv >/dev/null 2>&1; then
         log "Dropping privileges to ${user} (preserving NET_BIND_SERVICE)"
+        # setpriv does not update HOME (unlike gosu), so set it explicitly
+        # to the target user's home directory before re-executing.
+        export HOME
+        HOME="$(getent passwd "${user}" | cut -d: -f6)"
         exec setpriv --reuid="${uid}" --regid="${gid}" --init-groups \
             --inh-caps=+net_bind_service --ambient-caps=+net_bind_service \
             -- "$0" "$@"

@@ -397,6 +397,13 @@ def compose_down(
         except OSError as exc:
             log_debug(f"Could not detect credential isolation via docker ps: {exc}")
 
+    if isolate_credentials:
+        # Set placeholder values for compose file variable substitution.
+        # These are only needed to suppress "variable is not set" warnings;
+        # compose down does not create networks so the values are unused.
+        env.setdefault("SANDBOX_SUBNET", "10.0.0.0/24")
+        env.setdefault("SANDBOX_PROXY_IP", "10.0.0.2")
+
     compose_cmd = get_compose_command(override_file, isolate_credentials)
     cmd = compose_cmd + ["-p", container, "down"]
     if remove_volumes:

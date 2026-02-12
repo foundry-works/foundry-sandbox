@@ -55,6 +55,26 @@ jobs:
           echo '{}' > ~/.local/share/opencode/auth.json
           echo '{}' > ~/.gemini/oauth_creds.json
 
+      - name: Smoke-test sandbox creation
+        id: smoke
+        env:
+          SANDBOX_CLI: ${{ matrix.entrypoint.cli }}
+        run: |
+          NAME="ci-smoke-$(head -c4 /dev/urandom | xxd -p)"
+          echo "name=$NAME" >> "$GITHUB_OUTPUT"
+          python3 -m foundry_sandbox.cli new . --skip-key-check --name "$NAME" 2>&1 || true
+          # Dump proxy logs for diagnosis regardless of outcome
+          docker logs "sandbox-${NAME}-unified-proxy-1" 2>&1 || true
+          # Check if dev container is running
+          if docker ps -q --filter "name=sandbox-${NAME}-dev-1" | grep -q .; then
+            echo "Smoke sandbox created successfully"
+            python3 -m foundry_sandbox.cli destroy "$NAME" --force 2>/dev/null || true
+          else
+            echo "::warning::Smoke sandbox creation failed — see proxy logs above"
+            docker ps -a --filter "name=sandbox-${NAME}" 2>&1 || true
+            docker rm -f "sandbox-${NAME}-unified-proxy-1" "sandbox-${NAME}-dev-1" 2>/dev/null || true
+          fi
+
       - name: Run orchestration tests
         id: orchestration
         env:

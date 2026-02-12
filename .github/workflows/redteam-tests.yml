@@ -56,6 +56,11 @@ jobs:
             exit 1
           fi
           echo "name=$NAME" >> "$GITHUB_OUTPUT"
+          # Dump proxy logs for diagnosis regardless of outcome
+          echo "=== Unified Proxy Logs ==="
+          docker logs "sandbox-${NAME}-unified-proxy-1" 2>&1 || echo "(no proxy container logs)"
+          echo "=== Container Status ==="
+          docker ps -a --filter "name=sandbox-${NAME}" 2>&1 || true
           # Find the dev container ID (compose creates multiple services)
           CONTAINER=$(docker ps -q --filter "name=sandbox-${NAME}-dev-1")
           if [ -z "$CONTAINER" ]; then
