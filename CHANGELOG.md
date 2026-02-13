@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.15.2] - 2026-02-13
+
+### Fixed
+- **`claude-zai` 403 "Request denied by policy engine"** - Proxy allowlist used `/*` (single-segment) path patterns for `api.z.ai` and `open.bigmodel.cn`, but `claude-zai` sends requests to multi-segment paths like `/api/anthropic/v1/messages`; changed to `/**` to allow all paths
+- **Settings merge silently skipped in container** - `claude_settings.py` was missing its `__main__` block after migration from `lib/python/`, so `python3 -m foundry_sandbox.claude_settings merge ...` imported the module but never executed the merge
+
 ## [0.15.1] - 2026-02-13
 
 ### Fixed
