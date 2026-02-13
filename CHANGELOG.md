@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.14.0] - 2026-02-13
+
+### Added
+- **IDE launch macOS fallback** - When an IDE CLI command fails, automatically falls back to `open -a` on macOS for Cursor, Zed, and VS Code; surfaces CLI stderr to the user
+- **Auto-select current branch in wizard** - The "Base it on?" prompt in `cast new` guided mode now pre-selects the current branch via a new `default` parameter on `tui_choose`
+- **Legacy shell alias migration** - Installer detects and removes stale `alias cast=…sandbox.sh`, `_sb()` completion functions, and old `completion.bash` source lines from shell rc files
+- **ZAI stub function** - Sandboxes created with `--with-zai` but missing `ZHIPU_API_KEY` at runtime now get a `claude-zai` stub that prints a helpful error instead of "command not found"
+
+### Changed
+- **`--with-zai` fails early** - `cast new --with-zai` now exits with an error if `ZHIPU_API_KEY` is not set, instead of silently skipping ZAI setup
+- **Default ZAI models updated** - `claude-zai` alias now uses GLM-5 (was GLM-4.7/GLM-4.5-Air)
+- **Default OpenCode model updated** - Bumped to `openai/gpt-5.3-codex` (was `gpt-5.2-codex`)
+- **CI simplified** - Release workflow no longer gates on test/orchestration/performance/drift-check jobs; test matrix reduced to Python 3.12 only
+- **Removed unused `sandbox_name` parameter** from `prompt_ide_selection()` in IDE module
+
+### Fixed
+- **Installer migration message** - Tells the user to `unalias cast` after legacy alias is removed so the current shell picks up the pip-installed `cast`
+
 ## [0.13.0] - 2026-02-12
 
 ### Changed
@@ -573,7 +591,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Tab completion for bash
 - macOS and Linux support
 
-[Unreleased]: https://github.com/foundry-works/foundry-sandbox/compare/v0.13.0...HEAD
+[Unreleased]: https://github.com/foundry-works/foundry-sandbox/compare/v0.14.0...HEAD
+[0.14.0]: https://github.com/foundry-works/foundry-sandbox/compare/v0.13.0...v0.14.0
 [0.13.0]: https://github.com/foundry-works/foundry-sandbox/compare/v0.12.0...v0.13.0
 [0.12.0]: https://github.com/foundry-works/foundry-sandbox/compare/v0.11.1...v0.12.0
 [0.11.1]: https://github.com/foundry-works/foundry-sandbox/compare/v0.11.0...v0.11.1
