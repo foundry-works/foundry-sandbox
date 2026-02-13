@@ -2,6 +2,8 @@ name: Red Team Security Tests
 
 on:
   push:
+    tags-ignore:
+      - 'v*'
   pull_request:
   workflow_dispatch:
 
