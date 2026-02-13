@@ -137,8 +137,8 @@ def setup_credential_placeholders() -> CredentialPlaceholders:
         log_debug(f"Could not read Gemini settings: {exc}")
     gemini_key = "" if gemini_is_oauth else _credential_placeholder()
 
-    # OpenCode/Zhipu: Only set placeholder if OpenCode is explicitly enabled
-    if os.environ.get("SANDBOX_ENABLE_OPENCODE", "0") == "1":
+    # Zhipu: Set placeholder if OpenCode or ZAI is enabled (both use ZHIPU_API_KEY)
+    if os.environ.get("SANDBOX_ENABLE_OPENCODE", "0") == "1" or os.environ.get("SANDBOX_ENABLE_ZAI", "0") == "1":
         zhipu_key = _credential_placeholder()
     else:
         zhipu_key = ""

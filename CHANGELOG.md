@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.15.1] - 2026-02-13
+
+### Fixed
+- **`claude-zai` broken with credential isolation** - `ZHIPU_API_KEY` placeholder was only injected when OpenCode was enabled, not when ZAI was enabled via `--with-zai`; the dev container received an empty key even though the proxy had the real one
+- **Feature flags always saved as `true` in metadata** - `bool("0")` evaluates to `True` in Python, so `enable_opencode` and `enable_zai` were always stored as `true` in sandbox metadata regardless of actual flags passed to `cast new`
+
 ## [0.15.0] - 2026-02-13
 
 ### Added

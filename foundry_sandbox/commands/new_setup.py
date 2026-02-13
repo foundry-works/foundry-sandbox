@@ -206,8 +206,8 @@ def _new_setup(
         network_mode=network_mode or "",
         sync_ssh=1 if sync_ssh_enabled else 0,
         ssh_mode=ssh_mode,
-        enable_opencode=bool(enable_opencode_flag),
-        enable_zai=bool(enable_zai_flag),
+        enable_opencode=enable_opencode_flag == "1",
+        enable_zai=enable_zai_flag == "1",
         mounts=list(mounts),
         copies=list(copies),
     )
