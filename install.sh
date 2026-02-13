@@ -433,26 +433,50 @@ fi
 echo ""
 
 # Migrate from old bash-based installation
-# Remove legacy alias that shadows the pip-installed entry point
-migrate_legacy_alias() {
+# Remove legacy aliases and stale references from the shell-script era
+
+# Patterns to remove from rc files (extended regex)
+LEGACY_PATTERNS=(
+    'alias cast=.*sandbox\.sh'
+    "source.*Documents/GitHub/foundry-sandbox/completion\.bash"
+)
+
+migrate_legacy_rc() {
     local rc_file="$1"
-    if grep -q "alias cast=.*sandbox\.sh" "$rc_file" 2>/dev/null; then
-        echo -e "  ${YELLOW}⚠${NC} Found legacy alias in $rc_file — removing"
-        sed -i.bak '/alias cast=.*sandbox\.sh/d' "$rc_file"
+    local found=false
+
+    [ -f "$rc_file" ] || return 1
+
+    for pattern in "${LEGACY_PATTERNS[@]}"; do
+        if grep -qE "$pattern" "$rc_file" 2>/dev/null; then
+            echo -e "  ${YELLOW}⚠${NC} Removing legacy line from $rc_file: $pattern"
+            # Use | as sed delimiter to avoid conflicts with / in paths
+            sed -i.bak "\|$pattern|d" "$rc_file"
+            rm -f "${rc_file}.bak"
+            found=true
+        fi
+    done
+
+    # Remove the _sb() completion function block if present
+    if grep -q '^_sb()' "$rc_file" 2>/dev/null; then
+        echo -e "  ${YELLOW}⚠${NC} Removing legacy _sb() function from $rc_file"
+        sed -i.bak '/^_sb()/,/^}/d' "$rc_file"
         rm -f "${rc_file}.bak"
-        return 0
+        found=true
     fi
-    return 1
+
+    [ "$found" = "true" ]
 }
 
 MIGRATED=false
-for rc in "$HOME/.bashrc" "$HOME/.bash_profile" "$HOME/.zshrc"; do
-    if migrate_legacy_alias "$rc"; then
+# Scan standard rc files plus common custom rc files sourced from them
+for rc in "$HOME/.bashrc" "$HOME/.bash_profile" "$HOME/.zshrc" "$HOME/.custom_zshrc" "$HOME/.aliases"; do
+    if migrate_legacy_rc "$rc"; then
         MIGRATED=true
     fi
 done
 if [ "$MIGRATED" = "true" ]; then
-    echo -e "  ${GREEN}✓${NC} Legacy alias removed (cast is now installed via pip)"
+    echo -e "  ${GREEN}✓${NC} Legacy references removed (cast is now installed via pip)"
 fi
 
 # Install Python package (provides `cast` entry point via pyproject.toml)
@@ -466,6 +490,12 @@ COMPLETION_LINE="source '$INSTALL_DIR/completion.bash'"
 add_to_shell_rc() {
     local line="$1"
     local description="$2"
+
+    # Clean up orphaned "# Foundry Sandbox" comment lines (empty blocks from prior installs)
+    if [ -f "$SHELL_RC" ]; then
+        sed -i.bak '/^# Foundry Sandbox$/{ N; /^# Foundry Sandbox\n$/d; /^# Foundry Sandbox\n# Foundry Sandbox$/d; }' "$SHELL_RC"
+        rm -f "${SHELL_RC}.bak"
+    fi
 
     if grep -qF "$line" "$SHELL_RC" 2>/dev/null; then
         echo -e "  ${GREEN}✓${NC} $description (already configured)"
