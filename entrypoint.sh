@@ -66,7 +66,8 @@ if [ "${SANDBOX_ENABLE_ZAI:-0}" = "1" ]; then
         fi
     fi
 fi
-if [ "${SANDBOX_ENABLE_ZAI:-0}" = "1" ] && [ -n "${ZHIPU_API_KEY:-}" ]; then
+if [ "${SANDBOX_ENABLE_ZAI:-0}" = "1" ]; then
+    if [ -n "${ZHIPU_API_KEY:-}" ]; then
 cat >> ~/.bashrc << 'CLAUDE_ZAI_ALIAS'
 claude-zai() {
     GLOBAL_AGENT_HTTP_PROXY="http://unified-proxy:8080" \
@@ -83,6 +84,15 @@ claude-zai() {
     claude "$@"
 }
 CLAUDE_ZAI_ALIAS
+    else
+cat >> ~/.bashrc << 'CLAUDE_ZAI_STUB'
+claude-zai() {
+    echo "Error: claude-zai requires ZHIPU_API_KEY but it was not configured."
+    echo "Recreate this sandbox with ZHIPU_API_KEY set in your host environment."
+    return 1
+}
+CLAUDE_ZAI_STUB
+    fi
 fi
 
 # Wrapper for gh CLI to handle auth status in credential isolation mode

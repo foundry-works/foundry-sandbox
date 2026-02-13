@@ -6,9 +6,11 @@ selection for attaching editors to sandbox worktrees.
 
 from __future__ import annotations
 
+import platform
 import shutil
 import subprocess
 import sys
+import time
 
 import click
 
@@ -22,6 +24,13 @@ _DISPLAY_NAMES: dict[str, str] = {
     "cursor": "Cursor",
     "zed": "Zed",
     "code": "VS Code",
+}
+
+# macOS application names for `open -a` fallback
+_MACOS_APP_NAMES: dict[str, str] = {
+    "cursor": "Cursor",
+    "zed": "Zed",
+    "code": "Visual Studio Code",
 }
 
 
@@ -44,8 +53,33 @@ def ide_display_name(ide: str) -> str:
     return _DISPLAY_NAMES.get(ide, ide)
 
 
+def _try_macos_open(ide: str, path: str) -> bool:
+    """Try to launch an IDE via macOS ``open -a`` as a fallback.
+
+    Returns True if the app was opened successfully.
+    """
+    if platform.system() != "Darwin":
+        return False
+    app_name = _MACOS_APP_NAMES.get(ide)
+    if not app_name:
+        return False
+    try:
+        ret = subprocess.call(
+            ["open", "-a", app_name, path],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            timeout=5,
+        )
+        return ret == 0
+    except (OSError, subprocess.TimeoutExpired):
+        return False
+
+
 def launch_ide(ide: str, path: str) -> None:
     """Launch an IDE with the given path in the background.
+
+    Tries the IDE CLI command first. If it exits quickly with an error,
+    falls back to macOS ``open -a`` for known IDEs.
 
     Args:
         ide: IDE command name (e.g., "cursor", "code").
@@ -57,15 +91,31 @@ def launch_ide(ide: str, path: str) -> None:
         proc = subprocess.Popen(
             [ide, path],
             stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
+            stderr=subprocess.PIPE,
             start_new_session=True,
         )
-        # Fire-and-forget: the IDE runs in its own session and we intentionally
-        # never wait on it.  Setting returncode silences Python's ResourceWarning
-        # on GC; poll() would also return None immediately since the IDE is still
-        # starting up, so we explicitly mark it as "not our problem".
-        proc.returncode = 0  # intentional: suppress ResourceWarning for detached process
+        # Give the CLI a moment — most IDE CLIs exit quickly on error.
+        time.sleep(0.5)
+        ret = proc.poll()
+        if ret is not None and ret != 0:
+            # CLI exited with an error — surface it and try fallback.
+            stderr_out = ""
+            if proc.stderr:
+                stderr_out = proc.stderr.read().decode("utf-8", errors="replace").strip()
+                proc.stderr.close()
+            if stderr_out:
+                click.echo(f"  {display} CLI error: {stderr_out}", err=True)
+            if _try_macos_open(ide, path):
+                return
+            click.echo(f"Failed to launch {display}.", err=True)
+        else:
+            # Still running or exited 0 — detach and move on.
+            if proc.stderr:
+                proc.stderr.close()
+            proc.returncode = 0  # suppress ResourceWarning for detached process
     except (OSError, FileNotFoundError):
+        if _try_macos_open(ide, path):
+            return
         click.echo(f"Failed to launch {display}.", err=True)
 
 
@@ -91,7 +141,7 @@ def auto_launch_ide(ide_name: str, path: str) -> bool:
     return False
 
 
-def prompt_ide_selection(path: str, sandbox_name: str) -> bool:
+def prompt_ide_selection(path: str) -> bool:
     """Interactive IDE selection prompt.
 
     Detects available IDEs and prompts the user to select one.
@@ -99,7 +149,6 @@ def prompt_ide_selection(path: str, sandbox_name: str) -> bool:
 
     Args:
         path: Path to open in the IDE.
-        sandbox_name: Sandbox name (for display).
 
     Returns:
         True if an IDE was launched, False otherwise.

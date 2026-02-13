@@ -114,19 +114,18 @@ def _launch_ide(ide_name: str, worktree_path: str) -> bool:
     return auto_launch_ide(ide_name, worktree_path)
 
 
-def _prompt_ide_selection(worktree_path: str, name: str) -> bool:
+def _prompt_ide_selection(worktree_path: str) -> bool:
     """Prompt for IDE selection.
 
     Args:
         worktree_path: Path to worktree.
-        name: Sandbox name.
 
     Returns:
         True if IDE was launched.
     """
     from foundry_sandbox.ide import prompt_ide_selection
 
-    return prompt_ide_selection(worktree_path, name)
+    return prompt_ide_selection(worktree_path)
 
 
 def _resolve_sandbox_name(name: str | None, use_last: bool) -> str:
@@ -205,7 +204,7 @@ def _handle_ide_options(
         return False
 
     if ide_only == "auto":
-        if _prompt_ide_selection(worktree_path, name):
+        if _prompt_ide_selection(worktree_path):
             click.echo("")
             click.echo("  Run this in your IDE's terminal to connect:")
             click.echo("")
@@ -214,7 +213,7 @@ def _handle_ide_options(
             return True
 
     if with_ide == "auto":
-        _prompt_ide_selection(worktree_path, name)
+        _prompt_ide_selection(worktree_path)
 
     return False
 

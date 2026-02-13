@@ -45,7 +45,7 @@ from foundry_sandbox.commands.new_setup import _SetupError, _new_setup, _rollbac
 from foundry_sandbox.commands.new_wizard import _guided_new
 from foundry_sandbox.commands.new_resolver import _resolve_repo_input, _generate_branch_name
 from foundry_sandbox.commands.new_validation import _validate_preconditions, _validate_working_dir, _validate_mounts
-from foundry_sandbox.api_keys import has_opencode_key
+from foundry_sandbox.api_keys import has_opencode_key, has_zai_key
 from foundry_sandbox.paths import derive_sandbox_paths
 from foundry_sandbox.state import save_last_cast_new, save_cast_preset, load_last_cast_new, load_cast_preset, save_last_attach
 from foundry_sandbox import tmux
@@ -307,7 +307,7 @@ def _handle_new_ide_and_attach(
             else:
                 input("Press Enter to launch... ")
         elif ide_only:
-            prompt_ide_selection(worktree_path, name)
+            prompt_ide_selection(worktree_path)
             skip_terminal = True
             click.echo()
             click.echo("  Run this in your IDE's terminal to connect:")
@@ -315,7 +315,7 @@ def _handle_new_ide_and_attach(
             click.echo(f"    cast attach {name}")
             click.echo()
         else:
-            ide_was_launched = prompt_ide_selection(worktree_path, name)
+            ide_was_launched = prompt_ide_selection(worktree_path)
             if ide_was_launched:
                 click.echo()
                 click.echo("  Run this in your IDE's terminal to connect:")
@@ -581,10 +581,12 @@ def new(
             log_warn("OpenCode requested but auth file not found; skipping OpenCode setup.")
 
     if with_zai:
-        if os.environ.get("ZHIPU_API_KEY"):
+        if has_zai_key():
             enable_zai_flag = "1"
         else:
-            log_warn("ZAI requested but ZHIPU_API_KEY not set; skipping ZAI setup.")
+            log_error("--with-zai requires ZHIPU_API_KEY to be set in your environment.")
+            click.echo("  Set it with: export ZHIPU_API_KEY=<your-key>")
+            sys.exit(1)
 
     # Build scoped env updates
     _scope_env: dict[str, str] = {
