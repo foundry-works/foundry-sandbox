@@ -149,7 +149,7 @@ class TestConstantsRuntimeFlags:
         (get_sandbox_network_mode, "SANDBOX_NETWORK_MODE", "limited"),
         (get_sandbox_ssh_mode, "SANDBOX_SSH_MODE", "always"),
         (get_sandbox_opencode_plugin_dir, "SANDBOX_OPENCODE_PLUGIN_DIR", ""),
-        (get_sandbox_opencode_default_model, "SANDBOX_OPENCODE_DEFAULT_MODEL", "openai/gpt-5.2-codex"),
+        (get_sandbox_opencode_default_model, "SANDBOX_OPENCODE_DEFAULT_MODEL", "openai/gpt-5.3-codex"),
     ])
     def test_str_flag_default(self, monkeypatch, getter, env_var, default):
         monkeypatch.delenv(env_var, raising=False)

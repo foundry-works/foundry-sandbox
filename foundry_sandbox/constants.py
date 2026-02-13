@@ -248,9 +248,9 @@ def get_sandbox_opencode_default_model() -> str:
     """Get OpenCode default model from environment.
 
     Returns:
-        Default model (default: "openai/gpt-5.2-codex")
+        Default model (default: "openai/gpt-5.3-codex")
     """
-    return os.environ.get("SANDBOX_OPENCODE_DEFAULT_MODEL", "openai/gpt-5.2-codex")
+    return os.environ.get("SANDBOX_OPENCODE_DEFAULT_MODEL", "openai/gpt-5.3-codex")
 
 
 def get_sandbox_tmux_scrollback() -> int:

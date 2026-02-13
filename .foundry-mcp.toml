@@ -195,7 +195,7 @@ cache_ttl = 3600
 # Provider priority list - first available provider wins
 # Update order to match your preferred providers/models.
 priority = [
-    "[cli]codex:gpt-5.2-codex",
+    "[cli]codex:gpt-5.3-codex",
     "[cli]gemini:pro",
     "[cli]claude:opus",
     "[cli]opencode:zai-coding-plan/glm-4.7",
@@ -204,7 +204,7 @@ priority = [
 
 # Per-provider overrides (optional)
 # [consultation.overrides]
-# "[cli]opencode:openai/gpt-5.2-codex" = { timeout = 600 }
+# "[cli]opencode:openai/gpt-5.3-codex" = { timeout = 600 }
 
 # Per-workflow overrides
 [consultation.workflows.fidelity_review]
@@ -240,7 +240,7 @@ default_provider = "[cli]gemini:pro"
 # Use the providers you have installed.
 consensus_providers = [
     "[cli]gemini:pro",
-    "[cli]codex:gpt-5.2-codex",
+    "[cli]codex:gpt-5.3-codex",
     "[cli]claude:opus",
     "[cli]opencode:zai-coding-plan/glm-4.7",
     "[cli]claude-zai:opus"
@@ -315,8 +315,8 @@ deep_research_refinement_timeout = 600.0  # Gap identification
 # Supports ProviderSpec format for model selection:
 #   "[cli]gemini:pro"
 #   "[cli]claude:opus"
-#   "[cli]opencode:openai/gpt-5.2-codex"
-#   "[cli]codex:gpt-5.2-codex"
+#   "[cli]opencode:openai/gpt-5.3-codex"
+#   "[cli]codex:gpt-5.3-codex"
 
 deep_research_planning_provider = "[cli]gemini:flash"
 deep_research_analysis_provider = "[cli]gemini:pro"
@@ -352,7 +352,7 @@ deep_research_analysis_providers = [
 # Synthesis phase: report generation (may benefit from stronger models)
 deep_research_synthesis_providers = [
     "[cli]gemini:pro",
-    "[cli]codex:gpt-5.2-codex",
+    "[cli]codex:gpt-5.3-codex",
     "[cli]claude:opus",
     "[cli]opencode:zai-coding-plan/glm-4.7",
     "[cli]claude-zai:opus"
@@ -361,7 +361,7 @@ deep_research_synthesis_providers = [
 # Refinement phase: gap identification
 deep_research_refinement_providers = [
     "[cli]gemini:pro",
-    "[cli]codex:gpt-5.2-codex",
+    "[cli]codex:gpt-5.3-codex",
     "[cli]claude:opus",
     "[cli]opencode:zai-coding-plan/glm-4.7",
     "[cli]claude-zai:opus"
