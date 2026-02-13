@@ -13,7 +13,7 @@ handled and must be justified in KNOWN_ASYMMETRIES.
 
 import importlib
 import json
-from unittest.mock import Mock, patch, MagicMock
+from unittest.mock import Mock, patch
 
 import pytest
 
@@ -104,10 +104,10 @@ class TestDualLayerConsistency:
         return flow
 
     @pytest.mark.parametrize("op_name,op_spec", BLOCKED_OPERATIONS.items())
-    @patch.object(github_api_filter, "ctx")
-    def test_api_filter_blocks(self, mock_ctx, op_name, op_spec, api_filter):
+    @patch.object(github_api_filter, "logger")
+    def test_api_filter_blocks(self, mock_logger, op_name, op_spec, api_filter):
         """Test that GitHubAPIFilter blocks each operation."""
-        mock_ctx.log = Mock()
+
         flow = self._make_api_filter_flow(op_spec["method"], op_spec["path"])
 
         api_filter.request(flow)
@@ -146,7 +146,7 @@ class TestDualLayerConsistency:
 
         # Layer 1: GitHubAPIFilter
         api_filter_flow = self._make_api_filter_flow(method, path)
-        with patch.object(github_api_filter, "ctx"):
+        with patch.object(github_api_filter, "logger"):
             api_filter.request(api_filter_flow)
 
         # Layer 2: PolicyEngine
@@ -178,14 +178,14 @@ class TestKnownAsymmetries:
         engine._domains = ["api.github.com"]
         return engine
 
-    @patch.object(github_api_filter, "ctx")
-    def test_graphql_add_review_blocked_in_api_filter(self, mock_ctx, api_filter):
+    @patch.object(github_api_filter, "logger")
+    def test_graphql_add_review_blocked_in_api_filter(self, mock_logger, api_filter):
         """GitHubAPIFilter blocks addPullRequestReview at GraphQL level.
 
         Documented asymmetry: Cannot inspect GraphQL arguments to selectively
         allow COMMENT/REQUEST_CHANGES while blocking APPROVE. Blocks entirely.
         """
-        mock_ctx.log = Mock()
+
         flow = Mock()
         flow.request = Mock()
         flow.request.host = "api.github.com"
@@ -302,10 +302,10 @@ class TestAPIFilterBlockedPatterns:
     def api_filter(self):
         return GitHubAPIFilter()
 
-    @patch.object(github_api_filter, "ctx")
-    def test_api_filter_has_blocklist(self, mock_ctx, api_filter):
+    @patch.object(github_api_filter, "logger")
+    def test_api_filter_has_blocklist(self, mock_logger, api_filter):
         """GitHubAPIFilter must have BLOCKED_PATTERNS defined."""
-        mock_ctx.log = Mock()
+
         # Access the module's BLOCKED_PATTERNS to verify it exists
         assert hasattr(github_api_filter, "BLOCKED_PATTERNS"), (
             "github-api-filter.py must export BLOCKED_PATTERNS"
@@ -314,10 +314,10 @@ class TestAPIFilterBlockedPatterns:
             "BLOCKED_PATTERNS must not be empty"
         )
 
-    @patch.object(github_api_filter, "ctx")
-    def test_api_filter_repo_delete_blocked(self, mock_ctx, api_filter):
+    @patch.object(github_api_filter, "logger")
+    def test_api_filter_repo_delete_blocked(self, mock_logger, api_filter):
         """Repository deletion must be blocked."""
-        mock_ctx.log = Mock()
+
         flow = Mock()
         flow.request = Mock()
         flow.request.host = "api.github.com"
@@ -329,10 +329,10 @@ class TestAPIFilterBlockedPatterns:
         api_filter.request(flow)
         assert flow.response is not None, "GitHubAPIFilter should block repo deletion"
 
-    @patch.object(github_api_filter, "ctx")
-    def test_api_filter_release_delete_blocked(self, mock_ctx, api_filter):
+    @patch.object(github_api_filter, "logger")
+    def test_api_filter_release_delete_blocked(self, mock_logger, api_filter):
         """Release deletion must be blocked."""
-        mock_ctx.log = Mock()
+
         flow = Mock()
         flow.request = Mock()
         flow.request.host = "api.github.com"
@@ -408,10 +408,10 @@ class TestLayerIsolation:
         engine._domains = ["api.github.com"]
         return engine
 
-    @patch.object(github_api_filter, "ctx")
-    def test_api_filter_blocks_independently(self, mock_ctx, api_filter):
+    @patch.object(github_api_filter, "logger")
+    def test_api_filter_blocks_independently(self, mock_logger, api_filter):
         """GitHubAPIFilter blocks requests even if PolicyEngine is not in chain."""
-        mock_ctx.log = Mock()
+
         flow = Mock()
         flow.request = Mock()
         flow.request.host = "api.github.com"

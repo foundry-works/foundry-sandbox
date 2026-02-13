@@ -332,7 +332,7 @@ class TestReadPktLinePrefix:
         """Test max_bytes limit."""
         data = create_pktline_data([("a" * 40, "b" * 40, "refs/heads/main")])
         # Add more data after flush to trigger reading
-        stream = io.BytesIO(data + b"x" * 1000)
+        io.BytesIO(data + b"x" * 1000)
 
         # Set max_bytes smaller than the actual data
         buf, pktline_end, err = read_pktline_prefix(

@@ -38,7 +38,7 @@ Implement a single **unified-proxy** service that handles all proxy responsibili
 
 ### Components
 
-- **Container Registry** (`registry.py`) — SQLite-backed identity storage with TTL and WAL mode
+- **Container Registry** (`registry.py`) — SQLite-backed identity storage with WAL mode (optional TTL)
 - **Internal API** (`internal_api.py`) — Flask REST API for container registration and health checks
 - **Addon Chain** — 7 mitmproxy addons handling:
   - Container identity (`container_identity.py`)

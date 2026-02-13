@@ -19,21 +19,24 @@ if [ "$SANDBOX_GATEWAY_ENABLED" = "true" ]; then
     # Resolve the proxy IP (DNS is pre-configured via compose dns:/extra_hosts:)
     PROXY_IP=$(getent hosts unified-proxy | awk '{print $1}' | head -1)
 
-    if [ -n "$PROXY_IP" ]; then
-        echo "Unified proxy IP: $PROXY_IP"
-
-        # Block DNS bypass - only allow DNS to unified-proxy
-        # This prevents dig @8.8.8.8 and similar direct DNS queries to external resolvers
-        echo "Setting up DNS firewall rules..."
-        iptables -A OUTPUT -p udp --dport 53 -d "$PROXY_IP" -j ACCEPT
-        iptables -A OUTPUT -p tcp --dport 53 -d "$PROXY_IP" -j ACCEPT
-        # Block DNS to all other destinations (including Docker's 127.0.0.11)
-        iptables -A OUTPUT -p udp --dport 53 -j DROP
-        iptables -A OUTPUT -p tcp --dport 53 -j DROP
-        echo "DNS firewall rules applied"
-    else
-        echo "Warning: Could not resolve unified-proxy hostname, using default DNS"
+    # Validate IPv4 format before inserting into iptables rules
+    if ! [[ "$PROXY_IP" =~ ^[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}$ ]]; then
+        echo "FATAL: Cannot resolve unified-proxy to valid IPv4 address (got: '${PROXY_IP:-<empty>}')" >&2
+        echo "       DNS firewall rules cannot be applied. Aborting." >&2
+        exit 1
     fi
+
+    echo "Unified proxy IP: $PROXY_IP"
+
+    # Block DNS bypass - only allow DNS to unified-proxy
+    # This prevents dig @8.8.8.8 and similar direct DNS queries to external resolvers
+    echo "Setting up DNS firewall rules..."
+    iptables -A OUTPUT -p udp --dport 53 -d "$PROXY_IP" -j ACCEPT || { echo "FATAL: iptables rule failed (udp accept)" >&2; exit 1; }
+    iptables -A OUTPUT -p tcp --dport 53 -d "$PROXY_IP" -j ACCEPT || { echo "FATAL: iptables rule failed (tcp accept)" >&2; exit 1; }
+    # Block DNS to all other destinations (including Docker's 127.0.0.11)
+    iptables -A OUTPUT -p udp --dport 53 -j DROP || { echo "FATAL: iptables rule failed (udp drop)" >&2; exit 1; }
+    iptables -A OUTPUT -p tcp --dport 53 -j DROP || { echo "FATAL: iptables rule failed (tcp drop)" >&2; exit 1; }
+    echo "DNS firewall rules applied"
 fi
 
 # Drop privileges and run the regular entrypoint

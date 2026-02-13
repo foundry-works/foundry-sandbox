@@ -20,12 +20,17 @@ class ContainerConfig:
     ip_address: str
     registered_at: float
     last_seen: float
-    ttl_seconds: int = 86400  # 24 hours default
+    ttl_seconds: int = 0  # 0 = no expiry (disabled by default)
     metadata: Optional[dict] = None
 
     @property
     def is_expired(self) -> bool:
-        """Check if the registration has expired based on TTL."""
+        """Check if the registration has expired based on TTL.
+
+        A TTL of 0 means no expiry (disabled).
+        """
+        if self.ttl_seconds <= 0:
+            return False
         return time.time() > (self.last_seen + self.ttl_seconds)
 
     def to_dict(self) -> dict:
@@ -104,7 +109,7 @@ class ContainerRegistry:
                     ip_address TEXT NOT NULL UNIQUE,
                     registered_at REAL NOT NULL,
                     last_seen REAL NOT NULL,
-                    ttl_seconds INTEGER NOT NULL DEFAULT 86400,
+                    ttl_seconds INTEGER NOT NULL DEFAULT 0,
                     metadata TEXT
                 )
             """)
@@ -245,7 +250,7 @@ class ContainerRegistry:
         self,
         container_id: str,
         ip_address: str,
-        ttl_seconds: int = 86400,
+        ttl_seconds: int = 0,
         metadata: Optional[dict] = None,
     ) -> ContainerConfig:
         """Register a new container or update existing registration.
@@ -255,7 +260,7 @@ class ContainerRegistry:
         Args:
             container_id: Unique container identifier.
             ip_address: Container's IP address.
-            ttl_seconds: Time-to-live in seconds (default 24 hours).
+            ttl_seconds: Time-to-live in seconds (0 = no expiry).
             metadata: Optional metadata dictionary.
 
         Returns:
@@ -389,6 +394,8 @@ class ContainerRegistry:
     def cleanup_expired(self) -> int:
         """Remove all expired registrations.
 
+        Skips entries with ttl_seconds <= 0 (no expiry).
+
         Returns:
             Number of expired registrations removed.
         """
@@ -399,7 +406,7 @@ class ContainerRegistry:
             cursor = conn.execute(
                 """
                 DELETE FROM containers
-                WHERE (last_seen + ttl_seconds) < ?
+                WHERE ttl_seconds > 0 AND (last_seen + ttl_seconds) < ?
                 """,
                 (now,),
             )

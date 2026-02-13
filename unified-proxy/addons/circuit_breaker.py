@@ -40,8 +40,7 @@ from enum import Enum
 from threading import Lock
 from typing import Dict, Optional
 
-from mitmproxy import http, ctx
-from mitmproxy.flow import Flow
+from mitmproxy import http
 
 # Add parent directory to path for logging import
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -146,7 +145,7 @@ class CircuitBreakerAddon:
 
     def load(self, loader):
         """Called when addon is loaded."""
-        ctx.log.info(
+        logger.info(
             f"Circuit breaker addon loaded: "
             f"failure_threshold={self.failure_threshold}, "
             f"recovery_timeout={self.recovery_timeout}s, "
@@ -231,7 +230,7 @@ class CircuitBreakerAddon:
             },
         )
 
-        ctx.log.info(
+        logger.info(
             f"Circuit breaker [{upstream}]: {old_state.value} -> {new_state.value} "
             f"(reason: {reason})"
         )
@@ -384,7 +383,7 @@ class CircuitBreakerAddon:
             del self._circuits[upstream]
 
         if stale_upstreams:
-            ctx.log.info(
+            logger.info(
                 f"Circuit breaker: cleaned up {len(stale_upstreams)} stale circuits"
             )
 
@@ -427,7 +426,7 @@ class CircuitBreakerAddon:
                     },
                 )
 
-                ctx.log.warn(
+                logger.warning(
                     f"Circuit breaker: blocking request to {upstream} (circuit OPEN)"
                 )
 
@@ -486,7 +485,7 @@ class CircuitBreakerAddon:
                     },
                 )
 
-                ctx.log.warn(
+                logger.warning(
                     f"Circuit breaker: failure for {upstream} "
                     f"(status={flow.response.status_code}, "
                     f"failures={status.failure_count}/{self.failure_threshold})"
@@ -516,7 +515,7 @@ class CircuitBreakerAddon:
                 },
             )
 
-            ctx.log.error(
+            logger.error(
                 f"Circuit breaker: connection error for {upstream} "
                 f"(failures={status.failure_count}/{self.failure_threshold})"
             )

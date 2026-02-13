@@ -13,6 +13,7 @@ Uses httpx with proxy=None to bypass mitmproxy for token refresh.
 import base64
 import json
 import os
+import secrets
 import time
 import threading
 from datetime import datetime
@@ -228,12 +229,31 @@ class OAuthTokenManager:
         Generate a placeholder token response for intercepted refresh requests.
 
         Returns:
-            Dict mimicking OAuth token response with placeholder values.
-            access_token must be valid JWT format to pass Codex CLI validation.
+            Dict mimicking OAuth token response with per-request randomized
+            placeholder values. access_token is valid JWT format to pass Codex
+            CLI validation. Contains CREDENTIAL_PROXY_PLACEHOLDER marker for
+            detection by credential injector.
         """
+        # Build a per-request JWT with random jti and signature to prevent
+        # fingerprinting. The sub claim contains the detection marker.
+        header = {"alg": "RS256", "typ": "JWT"}
+        payload = {
+            "iss": "https://auth.openai.com/",
+            "sub": "CREDENTIAL_PROXY_PLACEHOLDER",
+            "aud": OPENAI_CLIENT_ID,
+            "exp": 4102444800,  # 2100-01-01
+            "iat": int(time.time()),
+            "jti": secrets.token_hex(16),
+        }
+        h = base64.urlsafe_b64encode(json.dumps(header).encode()).rstrip(b"=").decode()
+        p = base64.urlsafe_b64encode(json.dumps(payload).encode()).rstrip(b"=").decode()
+        # Signature contains the detection marker so _has_credential_placeholder()
+        # can find it as a literal substring in the Authorization header value.
+        s = f"CREDENTIAL_PROXY_PLACEHOLDER_{secrets.token_hex(8)}"
+        nonce = secrets.token_hex(8)
         return {
-            "access_token": "eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJodHRwczovL2F1dGgub3BlbmFpLmNvbS8iLCJzdWIiOiJDUkVERU5USUFMX1BST1hZX1BMQUNFSE9MREVSIiwiYXVkIjoiYXBwX0VNb2FtRUVaNzNmMENrWGFYcDdocmFubiIsImV4cCI6NDEwMjQ0NDgwMCwiaWF0IjoxNzAwMDAwMDAwfQ.CREDENTIAL_PROXY_PLACEHOLDER_SIGNATURE",
-            "refresh_token": "rt_CREDENTIAL_PROXY_PLACEHOLDER.CREDENTIAL_PROXY_PLACEHOLDER",
+            "access_token": f"{h}.{p}.{s}",
+            "refresh_token": f"rt_CREDENTIAL_PROXY_PLACEHOLDER.{nonce}",
             "expires_in": 86400,
             "token_type": "Bearer",
         }

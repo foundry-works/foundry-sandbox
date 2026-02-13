@@ -169,18 +169,18 @@ class TestRateLimiting:
         container_config = MockContainerConfig()
 
         with mock.patch("addons.rate_limiter.get_container_config", return_value=container_config):
-            # Send requests to exceed limit (capacity=2)
-            blocked = False
+            # Send all 5 requests and collect responses
+            responses = []
             for i in range(5):
                 flow = MockFlow(host="api.anthropic.com")
                 rate_limiter.request(flow)
+                responses.append(flow.response)
 
-                if flow.response and flow.response.status_code == 429:
-                    blocked = True
-                    break
-
-            # Should have been rate limited
-            assert blocked, "Expected to be rate limited after exceeding capacity"
+            # First 2 should pass (capacity=2), rest should be 429
+            passed = [r for r in responses if r is None]
+            blocked = [r for r in responses if r is not None and r.status_code == 429]
+            assert len(passed) == 2, f"Expected 2 requests to pass (capacity=2), got {len(passed)}"
+            assert len(blocked) == 3, f"Expected 3 requests blocked (5 total - 2 capacity), got {len(blocked)}"
 
 
 class TestCircuitBreaker:
@@ -206,18 +206,24 @@ class TestCircuitBreaker:
 
     def test_circuit_opens_after_failures(self, circuit_breaker):
         """Test circuit opens after repeated failures."""
-        # Simulate failures - circuit breaker doesn't use container identity
+        # Simulate failures - circuit breaker uses host:port as upstream key,
+        # so we must set port explicitly to ensure all flows share the same circuit.
         for i in range(3):
             flow = MockFlow(host="api.anthropic.com")
+            flow.request.port = 443
+            circuit_breaker.request(flow)
             flow.response = mock.MagicMock()
             flow.response.status_code = 500
             circuit_breaker.response(flow)
 
-        # Next request should be blocked
+        # Next request should be blocked (circuit is open)
         flow = MockFlow(host="api.anthropic.com")
+        flow.request.port = 443
         circuit_breaker.request(flow)
 
-        # Circuit may be open now (implementation dependent)
+        # Verify circuit is open: response should be set to 503
+        assert flow.response is not None
+        assert flow.response.status_code == 503
 
 
 if __name__ == "__main__":

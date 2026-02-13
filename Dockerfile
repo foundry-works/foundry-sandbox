@@ -99,7 +99,7 @@ RUN if [ "$INCLUDE_OPENCODE" = "1" ]; then \
     fi
 
 # Install Python packages globally (to /usr/local/lib/python3)
-RUN pip3 install foundry-mcp pytest-asyncio hypothesis cc-context-stats pyright
+RUN pip3 install foundry-mcp pypdf pytest-asyncio hypothesis cc-context-stats pyright
 
 # Install tavily-mcp globally (npm package for web search MCP server)
 # Baked into image because npm is blocked in credential isolation mode
@@ -157,6 +157,12 @@ RUN rm -rf /root/.bash_history /root/.bashrc /root/.profile \
 
 USER $USERNAME
 WORKDIR /workspace
+
+# Explicitly set HOME so docker exec inherits the correct value even when
+# docker-compose overrides "user: root" (credential isolation mode).
+# Without this, docker exec -u ubuntu may inherit HOME=/root from the
+# container config, causing git config --global to read/write the wrong file.
+ENV HOME="/home/ubuntu"
 
 # Set up paths for user (use /home/ubuntu for compatibility - symlinked if different user)
 ENV PATH="/usr/local/go/bin:/home/ubuntu/go/bin:/home/ubuntu/.local/bin:$PATH"

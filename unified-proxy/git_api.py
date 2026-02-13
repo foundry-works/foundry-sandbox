@@ -88,7 +88,11 @@ class SecretStore:
         secret_path = os.path.join(self._path, sandbox_id)
         try:
             with open(secret_path, "rb") as f:
-                secret = f.read().strip()
+                # Preserve binary secrets exactly; only trim a trailing newline
+                # that may come from text-based secret provisioning.
+                secret = f.read()
+                if secret.endswith(b"\n"):
+                    secret = secret[:-1]
             if secret:
                 with self._lock:
                     self._cache[sandbox_id] = secret
@@ -525,7 +529,7 @@ def create_git_api(
                 if config:
                     return config.metadata
         except Exception:
-            logger.debug(
+            logger.warning(
                 "Could not load metadata for sandbox %s", sandbox_id
             )
         return None

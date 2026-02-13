@@ -64,8 +64,14 @@ class _MockRegistry:
 
 @pytest.fixture
 def hmac_secret():
-    """Generate a test HMAC secret."""
-    return os.urandom(32)
+    """Generate a test HMAC secret.
+
+    Uses rstrip to remove any trailing newline bytes, matching the
+    behaviour of SecretStore.get_secret() which strips a trailing \\n
+    from on-disk secrets.  Without this, a random secret ending in 0x0a
+    would cause an HMAC mismatch (~1/256 chance per test).
+    """
+    return os.urandom(32).rstrip(b"\n")
 
 
 @pytest.fixture
@@ -343,7 +349,7 @@ class TestHMACAuthenticationFlow:
     def test_replayed_nonce_rejected(self, client, hmac_secret):
         """Request with replayed nonce should be rejected."""
         # First request should succeed (past auth, may fail on git exec)
-        response1 = make_authenticated_request(
+        make_authenticated_request(
             client,
             sandbox_id="test-sandbox",
             hmac_secret=hmac_secret,

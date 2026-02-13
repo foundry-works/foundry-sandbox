@@ -1,0 +1,95 @@
+name: Red Team Security Tests
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: redteam-tests-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  redteam:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.head_ref || github.ref }}
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+
+      - name: Install dependencies
+        run: pip install -e ".[dev,test-orchestration]"
+
+      - name: Verify Docker availability
+        run: docker info
+
+      - name: Build sandbox Docker image
+        run: docker build -t foundry-sandbox:latest .
+
+      - name: Build unified-proxy Docker image
+        run: docker build -t foundry-unified-proxy:latest unified-proxy/
+
+      - name: Create placeholder auth files for credential isolation
+        run: |
+          mkdir -p ~/.codex ~/.local/share/opencode ~/.gemini
+          echo '{}' > ~/.codex/auth.json
+          echo '{}' > ~/.local/share/opencode/auth.json
+          echo '{}' > ~/.gemini/oauth_creds.json
+
+      - name: Create sandbox for red team testing
+        id: sandbox
+        run: |
+          RESULT=$(python3 -m foundry_sandbox.cli new . --skip-key-check 2>&1) || true
+          echo "$RESULT"
+          NAME=$(echo "$RESULT" | grep 'Setting up your sandbox:' | sed 's/.*Setting up your sandbox: //')
+          if [ -z "$NAME" ]; then
+            echo "::error::Failed to extract sandbox name from output above"
+            exit 1
+          fi
+          echo "name=$NAME" >> "$GITHUB_OUTPUT"
+          # Dump proxy logs for diagnosis regardless of outcome
+          echo "=== Unified Proxy Logs ==="
+          docker logs "sandbox-${NAME}-unified-proxy-1" 2>&1 || echo "(no proxy container logs)"
+          echo "=== Container Status ==="
+          docker ps -a --filter "name=sandbox-${NAME}" 2>&1 || true
+          # Find the dev container ID (compose creates multiple services)
+          CONTAINER=$(docker ps -q --filter "name=sandbox-${NAME}-dev-1")
+          if [ -z "$CONTAINER" ]; then
+            echo "::error::No running container found for sandbox-${NAME}-dev-1"
+            exit 1
+          fi
+          echo "container=$CONTAINER" >> "$GITHUB_OUTPUT"
+
+      - name: Run red team tests inside sandbox
+        run: |
+          # docker cp fails on read-only rootfs; use tar+exec to write to tmpfs
+          tar -C tests -cf - redteam/ | docker exec -i ${{ steps.sandbox.outputs.container }} tar -C /tmp -xf -
+          docker exec -u ubuntu ${{ steps.sandbox.outputs.container }} \
+            bash /tmp/redteam/runner.sh --output-format junit --output-dir /tmp/results
+
+      - name: Copy results from container
+        if: always()
+        run: |
+          docker exec ${{ steps.sandbox.outputs.container }} cat /tmp/results/redteam-junit.xml > redteam-junit.xml 2>/dev/null || true
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: redteam-results
+          path: redteam-junit.xml
+
+      - name: Destroy sandbox
+        if: always()
+        run: |
+          python3 -m foundry_sandbox.cli destroy ${{ steps.sandbox.outputs.name }} --force 2>/dev/null || true
+          docker ps -aq --filter "name=sandbox-" | xargs -r docker rm -f 2>/dev/null || true

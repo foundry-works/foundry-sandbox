@@ -41,8 +41,9 @@ Finally, in addition to providing tight security guardrails, this sandbox is des
 | Git | 2.x+ | `git --version` |
 | Bash | 4.x+ | `bash --version` |
 | tmux | 3.x+ | `tmux -V` |
+| Python | 3.10+ | `python3 --version` |
 
-Linux and macOS supported natively. Windows users need WSL2. macOS ships Bash 3.2—install Bash 4+ via `brew install bash`.
+Linux and macOS supported natively. Windows users need WSL2. macOS ships Bash 3.2—install Bash 4+ via `brew install bash`. Python 3.10+ is required.
 
 ## Installation
 

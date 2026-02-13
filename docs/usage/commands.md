@@ -2,6 +2,8 @@
 
 Complete reference for all `cast` commands.
 
+> The `cast` CLI is installed via `pip install -e .` and can also be invoked as `python3 -m foundry_sandbox.cli`.
+
 ## cast new
 
 Create a new sandbox from a repository.
@@ -721,6 +723,7 @@ These environment variables affect `cast` behavior:
 | `SANDBOX_DEBUG` | Enable debug output | `0` |
 | `SANDBOX_VERBOSE` | Enable verbose output | `0` |
 | `SANDBOX_ASSUME_YES` | Skip confirmations | `0` |
+| `SANDBOX_NONINTERACTIVE` | Suppress all interactive prompts (for CI); implies `SANDBOX_ASSUME_YES` behavior | `0` |
 | `SANDBOX_NETWORK_MODE` | Default network mode | `limited` |
 | `SANDBOX_ALLOWED_DOMAINS` | Extra domains for limited mode (comma-separated) | - |
 | `SANDBOX_SYNC_ON_ATTACH` | Sync runtime credentials on `cast attach` | `0` |

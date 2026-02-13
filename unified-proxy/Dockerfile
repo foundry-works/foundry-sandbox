@@ -43,8 +43,7 @@ COPY logging_config.py /opt/proxy/logging_config.py
 COPY internal_api.py /opt/proxy/internal_api.py
 COPY pktline.py /opt/proxy/pktline.py
 
-# Copy legacy credential injection scripts (still used by entrypoint)
-COPY inject-credentials.py /opt/proxy/inject-credentials.py
+# Copy token manager modules (used by credential_injector addon)
 COPY codex-token-manager.py /opt/proxy/codex_token_manager.py
 COPY opencode-token-manager.py /opt/proxy/opencode_token_manager.py
 COPY gemini-token-manager.py /opt/proxy/gemini_token_manager.py
@@ -57,7 +56,11 @@ COPY github_config.py /opt/proxy/github_config.py
 COPY git_api.py /opt/proxy/git_api.py
 COPY git_operations.py /opt/proxy/git_operations.py
 COPY git_policies.py /opt/proxy/git_policies.py
+COPY branch_types.py /opt/proxy/branch_types.py
 COPY branch_isolation.py /opt/proxy/branch_isolation.py
+COPY branch_output_filter.py /opt/proxy/branch_output_filter.py
+COPY git_command_validation.py /opt/proxy/git_command_validation.py
+COPY git_subprocess.py /opt/proxy/git_subprocess.py
 
 # Copy addon modules (mitmproxy addons)
 COPY addons/ /opt/proxy/addons/

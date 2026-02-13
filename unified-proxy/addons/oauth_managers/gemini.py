@@ -15,8 +15,10 @@ For this implementation, automatic refresh is skipped - tokens from
 when they expire.
 """
 
+import base64
 import json
 import os
+import secrets
 import time
 import threading
 from typing import Optional
@@ -113,15 +115,32 @@ class GeminiTokenManager:
         Generate a placeholder token response for intercepted refresh requests.
 
         Returns:
-            Dict mimicking OAuth token response with placeholder values
+            Dict mimicking Google OAuth token response with per-request
+            randomized placeholder values. Contains CREDENTIAL_PROXY_PLACEHOLDER
+            marker for detection by credential injector.
         """
-        # Use far-future expiry (Jan 1, 2100 in seconds for expires_in) to prevent
-        # client-side refresh attempts. Google OAuth response format.
+        nonce = secrets.token_hex(8)
+        # Build a per-request id_token JWT with random jti and signature
+        header = {"alg": "RS256", "typ": "JWT"}
+        payload = {
+            "iss": "https://accounts.google.com",
+            "azp": "CREDENTIAL_PROXY_PLACEHOLDER",
+            "aud": "CREDENTIAL_PROXY_PLACEHOLDER",
+            "sub": "00000000000000000000",
+            "email": "sandbox@credential-proxy.local",
+            "email_verified": True,
+            "iat": int(time.time()),
+            "exp": 4102444800,
+            "jti": secrets.token_hex(16),
+        }
+        h = base64.urlsafe_b64encode(json.dumps(header).encode()).rstrip(b"=").decode()
+        p = base64.urlsafe_b64encode(json.dumps(payload).encode()).rstrip(b"=").decode()
+        s = secrets.token_urlsafe(32)
         return {
-            "access_token": "ya29.CREDENTIAL_PROXY_PLACEHOLDER",
-            "refresh_token": "1//CREDENTIAL_PROXY_PLACEHOLDER",
+            "access_token": f"ya29.CREDENTIAL_PROXY_PLACEHOLDER_{nonce}",
+            "refresh_token": f"1//CREDENTIAL_PROXY_PLACEHOLDER_{nonce}",
             "expires_in": 2147483647,  # Max int32 seconds (~68 years)
-            "id_token": "eyJhbGciOiAiUlMyNTYiLCAidHlwIjogIkpXVCJ9.eyJpc3MiOiAiaHR0cHM6Ly9hY2NvdW50cy5nb29nbGUuY29tIiwgImF6cCI6ICJDUkVERU5USUFMX1BST1hZX1BMQUNFSE9MREVSIiwgImF1ZCI6ICJDUkVERU5USUFMX1BST1hZX1BMQUNFSE9MREVSIiwgInN1YiI6ICIwMDAwMDAwMDAwMDAwMDAwMDAwMDAiLCAiZW1haWwiOiAic2FuZGJveEBjcmVkZW50aWFsLXByb3h5LmxvY2FsIiwgImVtYWlsX3ZlcmlmaWVkIjogdHJ1ZSwgImlhdCI6IDE3MDAwMDAwMDAsICJleHAiOiA0MTAyNDQ0ODAwfQ.CREDENTIAL_PROXY_PLACEHOLDER_SIGNATURE",
+            "id_token": f"{h}.{p}.{s}",
             "scope": self._scope or "https://www.googleapis.com/auth/cloud-platform https://www.googleapis.com/auth/generative-language.retriever",
             "token_type": "Bearer",
         }

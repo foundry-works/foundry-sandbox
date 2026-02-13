@@ -151,7 +151,7 @@ In credential isolation mode, sandboxes cannot directly access the `.git` direct
 
 #### Git HTTPS Credential Injection
 
-For remote git operations (`git push`, `git pull`), the unified-proxy injects `GIT_CREDENTIAL_TOKEN` into HTTPS requests to GitHub. The sandbox never receives the real GitHub token — it is held exclusively by the proxy container and injected at the network level during credential interception.
+For remote git operations (`git push`, `git pull`), the unified-proxy injects `FOUNDRY_PROXY_GIT_TOKEN` into HTTPS requests to GitHub. The sandbox never receives the real GitHub token — it is held exclusively by the proxy container and injected at the network level during credential interception.
 
 #### Branch Isolation
 
@@ -257,7 +257,7 @@ Attackers could attempt to steal session tokens and use them from other location
 |-------|---------|--------|
 | Primary | IP binding | Sessions only valid from originating container IP |
 | Secondary | CAP_NET_RAW dropped | Cannot spoof source IP addresses |
-| Tertiary | TTL expiration | Sessions expire after 24h inactivity, 7d absolute |
+| Tertiary | Explicit unregistration | Sessions removed on sandbox destroy; optional TTL if configured |
 | Network | ICC=false | Cannot access other containers to reuse their sessions |
 
 **Why This Works:** Even if an attacker obtains a session token, it's bound to the container's IP address. Using it from another location fails validation. IP spoofing would require CAP_NET_RAW, which is dropped. See [Session Token Scenario](credential-isolation.md#scenario-4-session-token-theft-and-reuse) in the credential isolation threat model for the complete analysis.

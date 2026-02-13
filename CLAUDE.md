@@ -4,8 +4,8 @@ Docker-based sandbox environment for running Claude Code with isolated credentia
 
 ## Development
 
-- `sandbox.sh` - Main entry point for sandbox management
-- `lib/` - Shell library modules
+- `foundry_sandbox/` - Python CLI package (`cast` entry point via pyproject.toml)
+- `unified-proxy/` - Credential isolation proxy (mitmproxy addons, git API)
 - `stubs/` - Stub files injected into sandboxes (CLAUDE.md, etc.)
 - `tests/` - Test scripts including security red-team tests
 
@@ -27,3 +27,12 @@ Docker-based sandbox environment for running Claude Code with isolated credentia
 **Important:** Read `docs/security/sandbox-threats.md` to understand the threat model and security boundaries before making changes to sandbox isolation.
 
 **Important:** Read docs in `docs/adr` for decision records on architecture.
+
+<sandbox-context>
+## Sandbox Context
+- **Repository**: foundry-works/foundry-sandbox
+- **Branch**: `tyler/foundry-sandbox-20260209-0718`
+- **Based on**: `tylerburleigh/hardening-and-rewrite`
+
+When creating PRs, target `tylerburleigh/hardening-and-rewrite` as the base branch.
+</sandbox-context>

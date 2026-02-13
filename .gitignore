@@ -8,6 +8,15 @@ specs/.plans
 specs/.notes
 specs/.research
 __pycache__/
+.hypothesis/
 .claude-tmp/
 *.coverage
 .env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+PLAN*.md
+tests/redteam/results/*.tap
+tests/redteam/results/*.xml

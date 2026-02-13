@@ -19,7 +19,6 @@ import pytest
 
 
 # Create mocks before any imports
-mock_ctx = mock.MagicMock()
 mock_http_module = mock.MagicMock()
 
 
@@ -134,7 +133,6 @@ mock_prometheus.Gauge.side_effect = gauge_factory
 # Patch the dependencies before importing metrics
 sys.modules["mitmproxy"] = mock.MagicMock()
 sys.modules["mitmproxy.http"] = mock_http_module
-sys.modules["mitmproxy.ctx"] = mock_ctx
 sys.modules["prometheus_client"] = mock_prometheus
 sys.modules["addons.container_identity"] = mock_container_identity
 sys.modules["logging_config"] = mock_logging_config

@@ -7,7 +7,7 @@ Tests the GitHubAPIFilter class for blocking:
 
 import importlib
 import json
-from unittest.mock import Mock, patch, MagicMock
+from unittest.mock import Mock, patch
 
 import pytest
 
@@ -254,8 +254,8 @@ class TestNonBlockedRequests:
         flow.response = None
         return flow
 
-    @patch.object(github_api_filter, "ctx")
-    def test_allowed_get_pr(self, mock_ctx, api_filter):
+    @patch.object(github_api_filter, "logger")
+    def test_allowed_get_pr(self, mock_logger, api_filter):
         """Test that GET /repos/owner/repo/pulls/123 is allowed."""
         flow = self._make_flow("GET", "/repos/owner/repo/pulls/123")
 
@@ -263,10 +263,10 @@ class TestNonBlockedRequests:
 
         # Should not be blocked (response is None)
         assert flow.response is None
-        assert mock_ctx.log.info.called
+        assert mock_logger.info.called
 
-    @patch.object(github_api_filter, "ctx")
-    def test_allowed_get_user(self, mock_ctx, api_filter):
+    @patch.object(github_api_filter, "logger")
+    def test_allowed_get_user(self, mock_logger, api_filter):
         """Test that GET /user is allowed."""
         flow = self._make_flow("GET", "/user")
 
@@ -274,10 +274,10 @@ class TestNonBlockedRequests:
 
         # Should not be blocked
         assert flow.response is None
-        assert mock_ctx.log.info.called
+        assert mock_logger.info.called
 
-    @patch.object(github_api_filter, "ctx")
-    def test_allowed_graphql_query(self, mock_ctx, api_filter):
+    @patch.object(github_api_filter, "logger")
+    def test_allowed_graphql_query(self, mock_logger, api_filter):
         """Test that GraphQL query (not mutation) is allowed."""
         flow = Mock()
         flow.request = Mock()
@@ -293,10 +293,10 @@ class TestNonBlockedRequests:
 
         # Should not be blocked (queries are allowed, only mutations)
         assert flow.response is None
-        assert mock_ctx.log.info.called
+        assert mock_logger.info.called
 
-    @patch.object(github_api_filter, "ctx")
-    def test_non_github_request_not_filtered(self, mock_ctx, api_filter):
+    @patch.object(github_api_filter, "logger")
+    def test_non_github_request_not_filtered(self, mock_logger, api_filter):
         """Test that non-GitHub requests pass through unfiltered."""
         flow = Mock()
         flow.request = Mock()
@@ -310,8 +310,8 @@ class TestNonBlockedRequests:
         # Should not be filtered (not a GitHub host)
         assert flow.response is None
         # No logging should occur for non-GitHub requests
-        assert not mock_ctx.log.warn.called
-        assert not mock_ctx.log.info.called
+        assert not mock_logger.warning.called
+        assert not mock_logger.info.called
 
 
 class TestEdgeCases:
@@ -381,8 +381,8 @@ class TestEdgeCases:
         assert flow.response is not None
         assert flow.response.status_code == 403
 
-    @patch.object(github_api_filter, "ctx")
-    def test_uploads_github_com_host(self, mock_ctx, api_filter):
+    @patch.object(github_api_filter, "logger")
+    def test_uploads_github_com_host(self, mock_logger, api_filter):
         """Test that uploads.github.com is also filtered.
 
         uploads.github.com is in GITHUB_API_HOSTS for release asset uploads.
@@ -398,7 +398,7 @@ class TestEdgeCases:
 
         # Should be allowed (GET on release assets is permitted)
         assert flow.response is None
-        assert mock_ctx.log.info.called
+        assert mock_logger.info.called
 
 
 class TestGraphQLCommentBypass:
@@ -447,8 +447,8 @@ class TestGraphQLCommentBypass:
         assert flow.response is not None
         assert flow.response.status_code == 403
 
-    @patch.object(github_api_filter, "ctx")
-    def test_comment_in_safe_query_still_allowed(self, mock_ctx, api_filter):
+    @patch.object(github_api_filter, "logger")
+    def test_comment_in_safe_query_still_allowed(self, mock_logger, api_filter):
         """Test that comments in safe queries don't cause false positives."""
         flow = Mock()
         flow.request = Mock()
@@ -542,8 +542,8 @@ class TestHTTPMethodNormalization:
         assert flow.response is not None
         assert flow.response.status_code == 403
 
-    @patch.object(github_api_filter, "ctx")
-    def test_lowercase_get_allowed(self, mock_ctx, api_filter):
+    @patch.object(github_api_filter, "logger")
+    def test_lowercase_get_allowed(self, mock_logger, api_filter):
         """Test that lowercase 'get' method for safe endpoint is allowed."""
         flow = Mock()
         flow.request = Mock()

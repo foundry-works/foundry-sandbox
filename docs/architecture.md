@@ -8,7 +8,7 @@ This document explains the technical design of Foundry Sandbox: how components f
 ┌─────────────────────────────────────────────────────────────┐
 │                       HOST SYSTEM                           │
 │                                                             │
-│  sandbox.sh ──► lib/*.sh ──► commands/*.sh                  │
+│  cast ──► foundry_sandbox.cli ──► commands/*.py              │
 │       │                                                     │
 │       ▼                                                     │
 │  ┌─────────────────────────────────────────────────────┐   │
@@ -199,37 +199,48 @@ Execute passed command (default: /bin/bash)
 
 ### Git Path Translation
 
-Worktrees reference the bare repo by absolute path. Since host and container have different paths, the **host script** (`lib/container_config.sh`) fixes these paths after copying the repos directory—not the container entrypoint.
+Worktrees reference the bare repo by absolute path. Since host and container have different paths, the **host script** (`foundry_sandbox/container_setup.py`) fixes these paths after copying the repos directory—not the container entrypoint.
 
 ## Code Organization
 
 ```
 foundry-sandbox/
-├── sandbox.sh              # Main entry point
 ├── Dockerfile              # Container image definition
 ├── docker-compose.yml      # Container runtime config
 ├── entrypoint.sh           # Container startup script (user)
 ├── entrypoint-root.sh      # Root wrapper (credential isolation)
 ├── install.sh              # Installation script
 ├── completion.bash         # Bash tab completion
+├── pyproject.toml          # Python package definition (entry point: cast)
 │
-├── lib/                    # Library modules
-│   ├── constants.sh        # Global variables
-│   ├── utils.sh            # Helper functions
-│   ├── git.sh              # Git operations
-│   ├── git_worktree.sh     # Worktree management
-│   ├── docker.sh           # Docker/compose helpers
-│   ├── state.sh            # Sandbox state management
-│   ├── proxy.sh            # Unified proxy registration
-│   ├── container_config.sh # Container setup (git path fixes)
-│   └── ...                 # Other modules
-│
-├── commands/               # Command implementations
-│   ├── new.sh              # cast new
-│   ├── attach.sh           # cast attach
-│   ├── list.sh             # cast list
-│   ├── destroy.sh          # cast destroy
-│   └── ...                 # Other commands
+├── foundry_sandbox/        # Python package (orchestration layer)
+│   ├── cli.py              # Click CLI group with alias resolution
+│   ├── _bridge.py          # JSON envelope dispatcher for shell→Python calls
+│   ├── legacy_bridge.py    # Compatibility adapter for _bridge_* commands
+│   ├── constants.py        # Configuration defaults (replaces lib/constants.sh)
+│   ├── config.py           # JSON config I/O utilities
+│   ├── models.py           # Pydantic data models
+│   ├── paths.py            # Path resolution (SandboxPaths)
+│   ├── utils.py            # Logging/formatting helpers
+│   ├── docker.py           # Docker/compose operations
+│   ├── git.py              # Git operations with retry
+│   ├── git_worktree.py     # Worktree management
+│   ├── state.py            # Metadata persistence (JSON, atomic writes)
+│   ├── network.py          # Docker network configuration
+│   ├── proxy.py            # Unified proxy registration
+│   ├── validate.py         # Input validation
+│   ├── credential_setup.py # Container credential provisioning
+│   ├── container_io.py     # Container I/O primitives
+│   ├── container_setup.py  # Container setup orchestration
+│   ├── tool_configs.py     # Tool configuration (Claude, Codex, etc.)
+│   ├── foundry_plugin.py   # Foundry MCP plugin setup
+│   ├── permissions.py      # Workspace permission rules
+│   └── commands/           # Click command implementations
+│       ├── new.py          # cast new
+│       ├── attach.py       # cast attach
+│       ├── list_cmd.py     # cast list
+│       ├── destroy.py      # cast destroy
+│       └── ...             # Other commands
 │
 ├── unified-proxy/              # Credential isolation proxy
 │   ├── addons/                 # mitmproxy addons
@@ -267,16 +278,15 @@ User runs: cast new owner/repo
               │
               ▼
 ┌─────────────────────────────────┐
-│ sandbox.sh                      │
-│  - source lib/*.sh              │
-│  - export_docker_env            │
+│ cast → foundry_sandbox.cli      │
+│  - Click CLI dispatch           │
 │  - validate_environment         │
-│  - dispatch to commands/new.sh  │
+│  - dispatch to commands/new.py  │
 └─────────────────────────────────┘
               │
               ▼
 ┌─────────────────────────────────┐
-│ commands/new.sh                 │
+│ commands/new.py                 │
 │  - validate repo URL, API keys  │
 │  - ensure bare repo exists      │
 │  - create worktree              │
@@ -294,13 +304,14 @@ User runs: cast new owner/repo
               │
               ▼
 ┌─────────────────────────────────┐
-│ commands/new.sh (continued)     │
-│  - setup unified-proxy session        │
+│ commands/new.py (continued)     │
+│  - setup unified-proxy session  │
 │    (if credential isolation)    │
 │  - copy configs to container    │
 │  - install workspace perms      │
 │  - apply network restrictions   │ ← after container starts
 │  - attach via tmux              │
+│  - rollback on failure          │
 └─────────────────────────────────┘
               │
               ▼
@@ -367,7 +378,7 @@ POST /internal/containers
 {
   "container_id": "sandbox-abc123",
   "ip_address": "172.17.0.2",
-  "ttl_seconds": 86400,
+  "ttl_seconds": 0,
   "metadata": {
     "sandbox_name": "my-project",
     "repo": "owner/repo",
@@ -378,7 +389,7 @@ POST /internal/containers
 }
 ```
 
-Registrations persist in SQLite with TTL-based expiration.
+Registrations persist in SQLite. TTL-based expiration is disabled by default (`ttl_seconds: 0`); registrations are removed explicitly on sandbox destroy.
 
 ### Git API Server (Shadow Mode)
 

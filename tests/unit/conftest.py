@@ -4,12 +4,14 @@ Pytest configuration for unit tests.
 Sets up mitmproxy mocking before test imports to allow testing addons
 that depend on mitmproxy without having mitmproxy installed.
 
-Pattern based on tests/integration/conftest.py.
+Set MITMPROXY_NO_MOCK=1 to skip mock installation (used by the proxy
+drift check workflow to test against real mitmproxy).
 """
 
 import os
 import sys
-from unittest import mock
+
+import pytest
 
 # Add unified-proxy to path
 unified_proxy_dir = os.path.join(
@@ -19,59 +21,18 @@ unified_proxy_dir = os.path.join(
 if unified_proxy_dir not in sys.path:
     sys.path.insert(0, unified_proxy_dir)
 
+_SKIP_MOCKS = os.environ.get("MITMPROXY_NO_MOCK") == "1"
 
-class MockHeaders(dict):
-    """Mock mitmproxy Headers that supports case-insensitive get/set/del."""
+if not _SKIP_MOCKS:
+    from tests.mocks import install_mitmproxy_mocks, reset_all_mock_loggers
 
-    def get(self, key, default=""):
-        for k, v in self.items():
-            if k.lower() == key.lower():
-                return v
-        return default
+    _MOCK_KWARGS = {"include_dns": False}
 
-    def __contains__(self, key):
-        return any(k.lower() == key.lower() for k in self.keys())
+    install_mitmproxy_mocks(**_MOCK_KWARGS)
 
-    def __delitem__(self, key):
-        for k in list(self.keys()):
-            if k.lower() == key.lower():
-                super().__delitem__(k)
-                return
-        raise KeyError(key)
-
-    def __setitem__(self, key, value):
-        # Remove existing key with same name (case-insensitive) first
-        for k in list(self.keys()):
-            if k.lower() == key.lower():
-                super().__delitem__(k)
-        super().__setitem__(key, value)
-
-
-class MockHTTPResponse:
-    """Mock mitmproxy HTTP Response that tracks status_code correctly."""
-
-    @staticmethod
-    def make(status_code: int, body: bytes, headers: dict):
-        resp = mock.MagicMock()
-        resp.status_code = status_code
-        resp.content = body
-        resp.headers = headers
-        return resp
-
-
-# Set up mitmproxy mocks if not already done
-if "mitmproxy" not in sys.modules:
-    mock_http_module = mock.MagicMock()
-    mock_http_module.Response = MockHTTPResponse
-
-    mock_ctx = mock.MagicMock()
-    mock_ctx.log = mock.MagicMock()
-
-    mock_mitmproxy = mock.MagicMock()
-    mock_mitmproxy.http = mock_http_module
-    mock_mitmproxy.ctx = mock_ctx
-
-    sys.modules["mitmproxy"] = mock_mitmproxy
-    sys.modules["mitmproxy.http"] = mock_http_module
-    sys.modules["mitmproxy.ctx"] = mock_ctx
-    sys.modules["mitmproxy.flow"] = mock.MagicMock()
+    @pytest.fixture(autouse=True)
+    def ensure_mitmproxy_mocks():
+        """Reapply mitmproxy mocks before each test to avoid cross-test leakage."""
+        install_mitmproxy_mocks(**_MOCK_KWARGS)
+        reset_all_mock_loggers()
+        yield

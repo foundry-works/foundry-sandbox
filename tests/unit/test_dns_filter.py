@@ -18,108 +18,10 @@ import pytest
 # Add unified-proxy to path for registry import
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../../unified-proxy"))
 
-
-# Mock mitmproxy DNS components before importing dns_filter
-class MockDNSQuestion:
-    """Mock DNS question in a DNS request."""
-
-    def __init__(self, name, query_type=1):
-        """Initialize DNS question.
-
-        Args:
-            name: Domain name being queried (str or bytes).
-            query_type: Query type (1=A, 28=AAAA, 5=CNAME).
-        """
-        self.name = name
-        self.type = query_type
-
-
-class MockDNSRequest:
-    """Mock DNS request."""
-
-    def __init__(self, question):
-        self.question = question
-
-    def fail(self, response_code):
-        """Create a failed DNS response.
-
-        Args:
-            response_code: DNS response code (e.g., NXDOMAIN).
-
-        Returns:
-            MockDNSResponse with the failure code.
-        """
-        return MockDNSResponse(response_code)
-
-
-class MockDNSResponse:
-    """Mock DNS response."""
-
-    def __init__(self, response_code):
-        self.response_code = response_code
-
-
-class MockDNSClientConn:
-    """Mock DNS client connection."""
-
-    def __init__(self, peername):
-        self.peername = peername
-
-
-class MockDNSFlow:
-    """Mock mitmproxy DNSFlow class."""
-
-    def __init__(self, domain, source_ip, query_type=1):
-        """Create a DNS flow.
-
-        Args:
-            domain: Domain being queried (str).
-            source_ip: Source IP address (or None).
-            query_type: DNS query type (default: 1 for A record).
-        """
-        self.request = MockDNSRequest(MockDNSQuestion(domain, query_type))
-        if source_ip is None:
-            self.client_conn = MockDNSClientConn(None)
-        else:
-            self.client_conn = MockDNSClientConn((source_ip, 12345))
-        self.response = None
-
-
-class MockCtxLog:
-    """Mock mitmproxy ctx.log with proper tracking."""
-
-    def __init__(self):
-        self.calls = []
-
-    def info(self, msg):
-        self.calls.append(("info", msg))
-
-    def warn(self, msg):
-        self.calls.append(("warn", msg))
-
-    def debug(self, msg):
-        self.calls.append(("debug", msg))
-
-    def error(self, msg):
-        self.calls.append(("error", msg))
-
-    def reset(self):
-        self.calls.clear()
-
-    def was_called_with_level(self, level):
-        return any(call[0] == level for call in self.calls)
-
-    def get_messages(self, level=None):
-        if level:
-            return [call[1] for call in self.calls if call[0] == level]
-        return [call[1] for call in self.calls]
-
-
-class MockCtx:
-    """Mock mitmproxy ctx module."""
-
-    def __init__(self):
-        self.log = MockCtxLog()
+from tests.mocks import (
+    MockCtxLog,
+    MockDNSFlow,
+)
 
 
 # Create test-specific mock objects for dns_filter tests.
@@ -132,7 +34,7 @@ mock_dns.DNSFlow = MockDNSFlow
 mock_dns.response_codes = MagicMock()
 mock_dns.response_codes.NXDOMAIN = 3  # Standard DNS NXDOMAIN code
 
-mock_ctx = MockCtx()
+mock_logger = MockCtxLog()
 
 # Register dns sub-module in sys.modules (does not overwrite mitmproxy top-level)
 sys.modules["mitmproxy.dns"] = mock_dns
@@ -142,7 +44,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../../unified-proxy/
 import dns_filter
 
 # Replace the module-level mitmproxy references with our test-specific mocks
-dns_filter.ctx = mock_ctx
+dns_filter.logger = mock_logger
 dns_filter.dns = mock_dns
 
 # Import registry directly (no mitmproxy dependency)
@@ -179,13 +81,6 @@ def addon_custom_allowlist(registry):
         allowlist=custom_allowlist,
     )
     return addon_instance
-
-
-@pytest.fixture(autouse=True)
-def reset_mock_ctx():
-    """Reset mock ctx before each test."""
-    mock_ctx.log.reset()
-    yield
 
 
 def create_dns_flow(domain, source_ip, query_type=1):
@@ -300,8 +195,8 @@ class TestAllowedDomainResolves:
         addon.dns_request(flow)
 
         # Check debug log contains 'allowed'
-        assert mock_ctx.log.was_called_with_level("debug")
-        messages = mock_ctx.log.get_messages("debug")
+        assert mock_logger.was_called_with_level("debug")
+        messages = mock_logger.get_messages("debug")
         assert any("allowed" in msg.lower() for msg in messages)
 
     def test_multiple_allowed_queries(self, addon, registry):
@@ -346,8 +241,8 @@ class TestBlockedDomainNXDOMAIN:
         addon.dns_request(flow)
 
         # Should log at info level with 'blocked'
-        assert mock_ctx.log.was_called_with_level("info")
-        messages = mock_ctx.log.get_messages("info")
+        assert mock_logger.was_called_with_level("info")
+        messages = mock_logger.get_messages("info")
         assert any("blocked" in msg.lower() for msg in messages)
 
     def test_blocked_query_reason_not_in_allowlist(self, addon, registry):
@@ -360,7 +255,7 @@ class TestBlockedDomainNXDOMAIN:
         flow = create_dns_flow("unauthorized.org", "172.17.0.12")
         addon.dns_request(flow)
 
-        messages = mock_ctx.log.get_messages("info")
+        messages = mock_logger.get_messages("info")
         assert any("not_in_allowlist" in msg for msg in messages)
 
     def test_subdomain_not_matching_wildcard_blocked(self, addon, registry):
@@ -409,8 +304,11 @@ class TestContainerIdentification:
         flow = create_dns_flow("github.com", "10.0.0.99")
         addon.dns_request(flow)
 
-        assert mock_ctx.log.was_called_with_level("warn")
-        messages = mock_ctx.log.get_messages("warn")
+        assert mock_logger.was_called_with_level("warn")
+        messages = mock_logger.get_messages("warn")
+        assert len(messages) > 0, "Expected at least one warning log message"
+        assert any("unknown IP" in msg for msg in messages)
+        messages = mock_logger.get_messages("warn")
         assert any("unknown IP" in msg for msg in messages)
 
     def test_unknown_ip_reason_unknown_container(self, addon, registry):
@@ -418,7 +316,7 @@ class TestContainerIdentification:
         flow = create_dns_flow("github.com", "172.16.0.50")
         addon.dns_request(flow)
 
-        messages = mock_ctx.log.get_messages("info")
+        messages = mock_logger.get_messages("info")
         assert any("unknown_container" in msg for msg in messages)
 
     def test_no_client_address_returns_nxdomain(self, addon):
@@ -434,8 +332,11 @@ class TestContainerIdentification:
         flow = create_dns_flow("github.com", None)
         addon.dns_request(flow)
 
-        assert mock_ctx.log.was_called_with_level("warn")
-        messages = mock_ctx.log.get_messages("warn")
+        assert mock_logger.was_called_with_level("warn")
+        messages = mock_logger.get_messages("warn")
+        assert len(messages) > 0, "Expected at least one warning log message"
+        assert any("no client address" in msg for msg in messages)
+        messages = mock_logger.get_messages("warn")
         assert any("no client address" in msg for msg in messages)
 
     def test_no_client_address_reason(self, addon):
@@ -443,7 +344,7 @@ class TestContainerIdentification:
         flow = create_dns_flow("github.com", None)
         addon.dns_request(flow)
 
-        messages = mock_ctx.log.get_messages("info")
+        messages = mock_logger.get_messages("info")
         assert any("no_client_address" in msg for msg in messages)
 
 
@@ -576,7 +477,9 @@ class TestEdgeCases:
         addon.dns_request(flow)
 
         # Should log warning and return early (no response set)
-        assert mock_ctx.log.was_called_with_level("warn")
+        assert mock_logger.was_called_with_level("warn")
+        messages = mock_logger.get_messages("warn")
+        assert len(messages) > 0, "Expected at least one warning log message for missing question"
 
     def test_registry_not_initialized_raises(self):
         """Test that accessing registry without initialization raises."""
@@ -628,7 +531,7 @@ class TestLogging:
         addon.dns_request(flow)
 
         # Verify logging was called (context set/cleared)
-        messages = mock_ctx.log.get_messages()
+        messages = mock_logger.get_messages()
         assert len(messages) > 0
 
     def test_blocked_query_logs_reason(self, addon, registry):
@@ -641,7 +544,7 @@ class TestLogging:
         flow = create_dns_flow("blocked.com", "172.17.0.61")
         addon.dns_request(flow)
 
-        info_messages = mock_ctx.log.get_messages("info")
+        info_messages = mock_logger.get_messages("info")
         assert any("not_in_allowlist" in msg for msg in info_messages)
 
     def test_query_type_logged(self, addon, registry):
@@ -655,7 +558,7 @@ class TestLogging:
         addon.dns_request(flow)
 
         # AAAA query should be logged
-        messages = mock_ctx.log.get_messages()
+        messages = mock_logger.get_messages()
         assert any("AAAA" in msg for msg in messages)
 
 

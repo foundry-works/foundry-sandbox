@@ -16,7 +16,31 @@ import pytest
 # Add unified-proxy to path
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../../unified-proxy"))
 
-from registry import ContainerConfig, ContainerRegistry
+import registry as _registry_module
+from registry import ContainerRegistry
+
+
+@pytest.fixture
+def time_control():
+    """Controllable time mock for registry tests.
+
+    Replaces time.time() in the registry module so tests can advance
+    time instantly instead of sleeping.
+    """
+    _now = [1000.0]
+    _original = _registry_module.time.time
+
+    def _fake_time():
+        return _now[0]
+
+    def _advance(seconds):
+        _now[0] += seconds
+
+    _registry_module.time.time = _fake_time
+    try:
+        yield _advance
+    finally:
+        _registry_module.time.time = _original
 
 
 @pytest.fixture
@@ -44,7 +68,7 @@ class TestBasicCRUD:
         )
         assert config.container_id == "test-container"
         assert config.ip_address == "172.17.0.2"
-        assert config.ttl_seconds == 86400  # default
+        assert config.ttl_seconds == 0  # default (no expiry)
 
     def test_register_with_custom_ttl(self, registry):
         """Test registering with custom TTL."""
@@ -98,11 +122,11 @@ class TestBasicCRUD:
         """Test unregistering non-existent container returns False."""
         assert registry.unregister("nonexistent") is False
 
-    def test_renew(self, registry):
+    def test_renew(self, registry, time_control):
         """Test renewing registration updates last_seen."""
         registry.register(container_id="renewable", ip_address="172.17.0.8")
         original = registry.get_by_container_id("renewable")
-        time.sleep(0.1)
+        time_control(0.1)
         renewed = registry.renew("renewable")
         assert renewed is not None
         assert renewed.last_seen > original.last_seen
@@ -170,26 +194,36 @@ class TestCacheConsistency:
         assert registry.get_by_ip("172.17.0.22") is None
         assert registry.get_by_ip("172.17.0.23") is not None
 
-    def test_expired_entry_removed_from_cache(self, registry):
+    def test_expired_entry_removed_from_cache(self, registry, time_control):
         """Test expired entries are removed on access."""
         registry.register(
             container_id="expiring",
             ip_address="172.17.0.24",
             ttl_seconds=1,
         )
-        time.sleep(1.5)
+        time_control(1.5)
         assert registry.get_by_ip("172.17.0.24") is None
 
-    def test_cleanup_expired(self, registry):
+    def test_cleanup_expired(self, registry, time_control):
         """Test cleanup_expired removes all expired entries."""
         registry.register(container_id="old1", ip_address="172.17.0.25", ttl_seconds=1)
         registry.register(container_id="old2", ip_address="172.17.0.26", ttl_seconds=1)
         registry.register(container_id="fresh", ip_address="172.17.0.27", ttl_seconds=3600)
-        time.sleep(1.5)
+        time_control(1.5)
         removed = registry.cleanup_expired()
         assert removed == 2
         assert registry.count() == 1
         assert registry.get_by_container_id("fresh") is not None
+
+    def test_cleanup_expired_skips_no_ttl(self, registry, time_control):
+        """Test cleanup_expired does not remove entries with TTL=0."""
+        registry.register(container_id="permanent", ip_address="172.17.0.28")
+        registry.register(container_id="expiring", ip_address="172.17.0.29", ttl_seconds=1)
+        time_control(1.5)
+        removed = registry.cleanup_expired()
+        assert removed == 1
+        assert registry.get_by_container_id("permanent") is not None
+        assert registry.get_by_container_id("expiring") is None
 
     def test_persistence_across_instances(self, temp_db):
         """Test data persists across registry instances."""
@@ -345,8 +379,17 @@ class TestStressTest:
 class TestContainerConfig:
     """Tests for ContainerConfig dataclass."""
 
+    def test_is_expired_false_default_no_ttl(self, registry):
+        """Test is_expired returns False with default TTL (0 = no expiry)."""
+        config = registry.register(
+            container_id="no-ttl",
+            ip_address="172.17.0.49",
+        )
+        assert not config.is_expired
+        assert config.ttl_seconds == 0
+
     def test_is_expired_false(self, registry):
-        """Test is_expired returns False for fresh registration."""
+        """Test is_expired returns False for fresh registration with TTL."""
         config = registry.register(
             container_id="fresh",
             ip_address="172.17.0.50",

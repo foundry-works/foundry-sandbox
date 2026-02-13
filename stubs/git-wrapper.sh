@@ -15,6 +15,10 @@
 
 set -euo pipefail
 
+# Restrict file creation permissions — ensures mktemp files (which may contain
+# git output or auth responses) are created with 0600 instead of default umask.
+umask 077
+
 # ---------------------------------------------------------------------------
 # Dependency Check
 # ---------------------------------------------------------------------------
@@ -44,9 +48,9 @@ PROXY_TIMEOUT=30
 # Signal handling: exit with 128 + signal_number
 # ---------------------------------------------------------------------------
 
+# shellcheck disable=SC2317  # invoked indirectly via trap
 cleanup() {
     local sig="$1"
-    # Kill any background curl process
     if [[ -n "${CURL_PID:-}" ]]; then
         kill "$CURL_PID" 2>/dev/null || true
     fi
@@ -358,9 +362,9 @@ STDOUT_B64=$(echo "$RESPONSE" | jq -r '.stdout_b64 // ""' 2>/dev/null || true)
 
 # Fall back to stdout_b64 when stdout is empty
 if [[ -z "$STDOUT" && -n "$STDOUT_B64" ]]; then
-    STDOUT=$(printf '%s' "$STDOUT_B64" | python3 - <<'PY' 2>/dev/null || true
-import base64, sys
-data = sys.stdin.read().strip()
+    STDOUT=$(STDOUT_B64="$STDOUT_B64" python3 <<'PY' 2>/dev/null || true
+import base64, sys, os
+data = os.environ.get("STDOUT_B64", "").strip()
 try:
     decoded = base64.b64decode(data)
     sys.stdout.write(decoded.decode("utf-8", errors="replace"))

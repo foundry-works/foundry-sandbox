@@ -127,7 +127,7 @@ Sensitive operations require **human approval**:
 | ANTHROPIC_API_KEY | Yes | Placeholder |
 | OPENAI_API_KEY | Yes | Placeholder |
 | Other API Keys | Yes | Placeholder |
-| GIT_CREDENTIAL_TOKEN | Yes (subprocess env only) | No (never exposed) |
+| FOUNDRY_PROXY_GIT_TOKEN | Yes (subprocess env only) | No (never exposed) |
 
 The unified proxy holds all real credentials and injects them into outbound requests. Sandboxes never receive real tokens.
 
