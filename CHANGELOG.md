@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.15.0] - 2026-02-13
+
+### Added
+- **PyPI update checker** - CLI now checks PyPI for newer versions after commands, with 24-hour cache, and prints an upgrade notice to stderr when a newer release is available
+  - Automatically disabled in CI, non-interactive mode, or via `CAST_DISABLE_UPDATE_CHECK=1`
+  - Skipped when running `cast upgrade` to avoid redundant checks
+- **Local CI script** - `scripts/ci-local.sh` runs ruff, mypy, shellcheck, and pytest locally to catch CI failures before committing
+  - `--all` flag includes integration tests, `--no-fail-fast` shows all results
+
+### Fixed
+- **macOS symlink path validation** - `validate_git_url` now checks both expanded and resolved paths for sensitive locations, fixing false negatives on macOS where `/etc` symlinks to `/private/etc`
+- **Linting** - Added `# noqa: E402` to unified-proxy addon imports after `sys.path.insert()` calls; added `lib/python/**` to ruff per-file E402 ignores
+
 ## [0.14.0] - 2026-02-13
 
 ### Added
@@ -591,7 +604,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Tab completion for bash
 - macOS and Linux support
 
-[Unreleased]: https://github.com/foundry-works/foundry-sandbox/compare/v0.14.0...HEAD
+[Unreleased]: https://github.com/foundry-works/foundry-sandbox/compare/v0.15.0...HEAD
+[0.15.0]: https://github.com/foundry-works/foundry-sandbox/compare/v0.14.0...v0.15.0
 [0.14.0]: https://github.com/foundry-works/foundry-sandbox/compare/v0.13.0...v0.14.0
 [0.13.0]: https://github.com/foundry-works/foundry-sandbox/compare/v0.12.0...v0.13.0
 [0.12.0]: https://github.com/foundry-works/foundry-sandbox/compare/v0.11.1...v0.12.0
