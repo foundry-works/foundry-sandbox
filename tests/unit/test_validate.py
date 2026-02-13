@@ -12,6 +12,7 @@ from __future__ import annotations
 from pathlib import Path
 from unittest.mock import Mock, mock_open, patch
 
+import pytest
 
 from foundry_sandbox import api_keys, docker, validate
 
@@ -382,6 +383,11 @@ class TestCheckDockerRunning:
 
 class TestSubnetGeneration:
     """Tests for generate_sandbox_subnet()."""
+
+    @pytest.fixture(autouse=True)
+    def _mock_docker_subnets(self):
+        with patch("foundry_sandbox.docker._get_existing_docker_subnets", return_value=set()):
+            yield
 
     def test_deterministic(self):
         """Same project name should produce same subnet."""
