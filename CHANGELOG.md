@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.15.3] - 2026-02-13
+
+### Fixed
+- **Zed editor not launching on macOS** - IDE launcher now prefers `open -a` on macOS for reliable app activation, falling back to CLI command; previously the `zed` CLI would exit 0 without actually opening the app
+
 ## [0.15.2] - 2026-02-13
 
 ### Fixed

@@ -75,18 +75,11 @@ def _try_macos_open(ide: str, path: str) -> bool:
         return False
 
 
-def launch_ide(ide: str, path: str) -> None:
-    """Launch an IDE with the given path in the background.
+def _launch_via_cli(ide: str, path: str) -> bool:
+    """Launch an IDE using its CLI command.
 
-    Tries the IDE CLI command first. If it exits quickly with an error,
-    falls back to macOS ``open -a`` for known IDEs.
-
-    Args:
-        ide: IDE command name (e.g., "cursor", "code").
-        path: Path to open in the IDE.
+    Returns True if the process started successfully.
     """
-    display = ide_display_name(ide)
-    click.echo(f"Launching {display}...")
     try:
         proc = subprocess.Popen(
             [ide, path],
@@ -98,25 +91,49 @@ def launch_ide(ide: str, path: str) -> None:
         time.sleep(0.5)
         ret = proc.poll()
         if ret is not None and ret != 0:
-            # CLI exited with an error — surface it and try fallback.
             stderr_out = ""
             if proc.stderr:
                 stderr_out = proc.stderr.read().decode("utf-8", errors="replace").strip()
                 proc.stderr.close()
             if stderr_out:
+                display = ide_display_name(ide)
                 click.echo(f"  {display} CLI error: {stderr_out}", err=True)
-            if _try_macos_open(ide, path):
-                return
-            click.echo(f"Failed to launch {display}.", err=True)
-        else:
-            # Still running or exited 0 — detach and move on.
-            if proc.stderr:
-                proc.stderr.close()
-            proc.returncode = 0  # suppress ResourceWarning for detached process
+            return False
+        # Still running or exited 0 — detach and move on.
+        if proc.stderr:
+            proc.stderr.close()
+        proc.returncode = 0  # suppress ResourceWarning for detached process
+        return True
     except (OSError, FileNotFoundError):
+        return False
+
+
+def launch_ide(ide: str, path: str) -> None:
+    """Launch an IDE with the given path.
+
+    On macOS, prefers ``open -a`` which reliably activates the application.
+    Falls back to the CLI command. On Linux, uses the CLI command directly.
+
+    Args:
+        ide: IDE command name (e.g., "cursor", "code").
+        path: Path to open in the IDE.
+    """
+    display = ide_display_name(ide)
+    click.echo(f"Launching {display}...")
+
+    if platform.system() == "Darwin":
+        # macOS: prefer `open -a` — more reliable app activation
         if _try_macos_open(ide, path):
             return
-        click.echo(f"Failed to launch {display}.", err=True)
+        # Fall back to CLI
+        if _launch_via_cli(ide, path):
+            return
+    else:
+        # Linux: use CLI, no `open -a` equivalent
+        if _launch_via_cli(ide, path):
+            return
+
+    click.echo(f"Failed to launch {display}.", err=True)
 
 
 def auto_launch_ide(ide_name: str, path: str) -> bool:
