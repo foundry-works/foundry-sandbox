@@ -135,12 +135,13 @@ def tui_confirm(prompt: str, default_yes: bool = True) -> bool:
     return click.confirm(prompt, default=default_yes)
 
 
-def tui_choose(prompt: str, options: list[str]) -> str:
+def tui_choose(prompt: str, options: list[str], default: Optional[str] = None) -> str:
     """Display options and prompt user to choose one.
 
     Args:
         prompt: The prompt message to display.
         options: List of options to choose from.
+        default: Optional default/pre-selected option.
 
     Returns:
         The selected option string.
@@ -152,11 +153,17 @@ def tui_choose(prompt: str, options: list[str]) -> str:
         raise ValueError("Cannot choose from empty options list")
 
     if _is_noninteractive():
+        if default and default in options:
+            return default
         return options[0]
 
     if _has_gum():
         click.echo()
-        ok, value = _run_gum("choose", "--header", prompt, *options)
+        gum_args = ["choose", "--header", prompt]
+        if default and default in options:
+            gum_args.extend(["--selected", default])
+        gum_args.extend(options)
+        ok, value = _run_gum(*gum_args)
         if ok and value in options:
             click.echo(f"  > {value}")
             return value
@@ -164,14 +171,17 @@ def tui_choose(prompt: str, options: list[str]) -> str:
     # Click fallback: numbered options
     click.echo()
     click.echo(prompt)
+    default_index = 1
     for i, option in enumerate(options, start=1):
         click.echo(f"  {i}. {option}")
+        if default and option == default:
+            default_index = i
     click.echo()
 
     choice = click.prompt(
         "Enter number",
         type=click.IntRange(1, len(options)),
-        default=1
+        default=default_index
     )
 
     return options[int(choice) - 1]

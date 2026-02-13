@@ -105,7 +105,7 @@ def _wizard_branch(repo_root: str, current_branch: str) -> tuple[str, str, bool]
             local_branches = _get_local_branches(repo_root)
             if local_branches:
                 options = local_branches + ["Type manually..."]
-                base_choice = tui_choose("Base it on?", options)
+                base_choice = tui_choose("Base it on?", options, default=default_base)
                 if base_choice == "Type manually...":
                     from_branch = tui_input("Base it on?", default=default_base)
                 else:
