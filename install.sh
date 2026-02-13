@@ -432,6 +432,29 @@ fi
 
 echo ""
 
+# Migrate from old bash-based installation
+# Remove legacy alias that shadows the pip-installed entry point
+migrate_legacy_alias() {
+    local rc_file="$1"
+    if grep -q "alias cast=.*sandbox\.sh" "$rc_file" 2>/dev/null; then
+        echo -e "  ${YELLOW}⚠${NC} Found legacy alias in $rc_file — removing"
+        sed -i.bak '/alias cast=.*sandbox\.sh/d' "$rc_file"
+        rm -f "${rc_file}.bak"
+        return 0
+    fi
+    return 1
+}
+
+MIGRATED=false
+for rc in "$HOME/.bashrc" "$HOME/.bash_profile" "$HOME/.zshrc"; do
+    if migrate_legacy_alias "$rc"; then
+        MIGRATED=true
+    fi
+done
+if [ "$MIGRATED" = "true" ]; then
+    echo -e "  ${GREEN}✓${NC} Legacy alias removed (cast is now installed via pip)"
+fi
+
 # Install Python package (provides `cast` entry point via pyproject.toml)
 echo -e "${BLUE}Installing Python package...${NC}"
 pip install -e "$INSTALL_DIR" >/dev/null 2>&1 && \
