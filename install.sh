@@ -537,8 +537,13 @@ echo -e "${GREEN}Installation complete!${NC}"
 echo ""
 echo "To get started:"
 echo ""
-echo "  1. Reload your shell:"
-echo -e "     ${BLUE}source $SHELL_RC${NC}"
+if [ "$MIGRATED" = "true" ]; then
+    echo "  1. Clear the stale alias from your current shell and reload:"
+    echo -e "     ${BLUE}unalias cast 2>/dev/null; source $SHELL_RC${NC}"
+else
+    echo "  1. Reload your shell:"
+    echo -e "     ${BLUE}source $SHELL_RC${NC}"
+fi
 echo ""
 echo "  2. Create your first sandbox:"
 echo -e "     ${BLUE}cast new owner/repo${NC}"
