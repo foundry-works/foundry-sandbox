@@ -43,14 +43,14 @@ from mitmproxy.flow import Flow
 # Add parent directory to path for imports
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from addons.container_identity import get_container_config
-from config import (
+from addons.container_identity import get_container_config  # noqa: E402
+from config import (  # noqa: E402
     load_allowlist_config,
     AllowlistConfig,
     ConfigError,
     segment_match,
 )
-from logging_config import get_logger
+from logging_config import get_logger  # noqa: E402
 
 logger = get_logger(__name__)
 

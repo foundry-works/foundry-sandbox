@@ -185,6 +185,18 @@ def _validate_lazy_commands() -> None:
             ) from exc
 
 
+def _maybe_check_for_update() -> None:
+    """Run the PyPI version check unless the current command is 'upgrade'."""
+    try:
+        if len(sys.argv) > 1 and sys.argv[1] == "upgrade":
+            return
+        from foundry_sandbox.version_check import check_for_update
+
+        check_for_update()
+    except Exception:  # noqa: BLE001
+        pass
+
+
 def main() -> None:
     """Entry point for the CLI.
 
@@ -210,6 +222,9 @@ def main() -> None:
         # (usage error from nested invocations) to 1 for shell parity.
         code = exc.code if isinstance(exc.code, int) else 1
         sys.exit(1 if code == 2 else code)
+
+    _maybe_check_for_update()
+
     # If a migrated command returned an integer exit code, honour it.
     if isinstance(result, int):
         sys.exit(result)

@@ -34,11 +34,11 @@ from mitmproxy.flow import Flow
 # Add parent directory to path for imports
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from addons.container_identity import get_container_config
-import git_policies
-from git_policies import check_protected_branches
-from logging_config import get_logger
-from pktline import PktLineRef, parse_pktline, read_pktline_prefix
+from addons.container_identity import get_container_config  # noqa: E402
+import git_policies  # noqa: E402
+from git_policies import check_protected_branches  # noqa: E402
+from logging_config import get_logger  # noqa: E402
+from pktline import PktLineRef, parse_pktline, read_pktline_prefix  # noqa: E402
 
 logger = get_logger(__name__)
 

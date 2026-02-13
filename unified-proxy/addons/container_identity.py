@@ -26,7 +26,7 @@ from logging_config import get_logger
 # Add parent directory to path for registry import
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from registry import ContainerConfig, ContainerRegistry
+from registry import ContainerConfig, ContainerRegistry  # noqa: E402
 
 logger = get_logger(__name__)
 

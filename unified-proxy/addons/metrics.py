@@ -30,8 +30,8 @@ from mitmproxy import http
 # Add parent directory to path for imports
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from addons.container_identity import get_container_config
-from logging_config import get_logger
+from addons.container_identity import get_container_config  # noqa: E402
+from logging_config import get_logger  # noqa: E402
 
 # Try to import prometheus_client - provide helpful error if missing
 try:
