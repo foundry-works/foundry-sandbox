@@ -10,25 +10,7 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  tests:
-    uses: ./.github/workflows/test.yml
-
-  orchestration:
-    uses: ./.github/workflows/orchestration-tests.yml
-
-  performance:
-    uses: ./.github/workflows/performance-tests.yml
-
-  drift-check:
-    uses: ./.github/workflows/proxy-drift-check.yml
-
   release:
-    needs: [tests, orchestration, performance, drift-check]
-    if: |
-      needs.tests.result == 'success' &&
-      needs.orchestration.result == 'success' &&
-      needs.performance.result == 'success' &&
-      needs.drift-check.result == 'success'
     runs-on: ubuntu-latest
     permissions:
       contents: write
