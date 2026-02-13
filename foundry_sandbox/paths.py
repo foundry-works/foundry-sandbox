@@ -183,6 +183,15 @@ def path_last_attach() -> Path:
     return get_sandbox_home() / ".last-attach.json"
 
 
+def path_version_check() -> Path:
+    """Get the path to the version-check cache file.
+
+    Returns:
+        Path to .version-check.json in sandbox home
+    """
+    return get_sandbox_home() / ".version-check.json"
+
+
 def path_presets_dir() -> Path:
     """Get the path to the presets directory.
 

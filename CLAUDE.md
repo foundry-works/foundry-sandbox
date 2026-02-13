@@ -9,10 +9,15 @@ Docker-based sandbox environment for running Claude Code with isolated credentia
 - `stubs/` - Stub files injected into sandboxes (CLAUDE.md, etc.)
 - `tests/` - Test scripts including security red-team tests
 
+## Pre-commit
+
+Always run `./scripts/ci-local.sh` before committing to catch CI failures locally. Use `--all` to include integration tests, `--no-fail-fast` to see all results.
+
 ## Testing
 
 ```bash
-./tests/redteam-sandbox.sh  # Security validation (run inside sandbox)
+./scripts/ci-local.sh        # Local CI validation (run before commit)
+./tests/redteam-sandbox.sh   # Security validation (run inside sandbox)
 ```
 
 ## Documentation

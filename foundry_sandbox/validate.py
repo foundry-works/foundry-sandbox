@@ -256,10 +256,13 @@ def validate_git_url(url: str) -> tuple[bool, str]:
 
     # Local filesystem paths (absolute or relative)
     if url.startswith(("/", "./", "~/")) or url == ".":
-        resolved = os.path.realpath(os.path.expanduser(url))
-        for prefix in _SENSITIVE_PREFIXES:
-            if resolved == prefix or resolved.startswith(prefix + "/"):
-                return False, f"Invalid repository path (sensitive location): {url}"
+        expanded = os.path.expanduser(url)
+        resolved = os.path.realpath(expanded)
+        # Check both original and resolved paths — on macOS /etc -> /private/etc
+        for check_path in (expanded, resolved):
+            for prefix in _SENSITIVE_PREFIXES:
+                if check_path == prefix or check_path.startswith(prefix + "/"):
+                    return False, f"Invalid repository path (sensitive location): {url}"
         return True, ""
 
     # Org/repo shorthand: "owner/repo" (GitHub shorthand)

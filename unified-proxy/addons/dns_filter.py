@@ -32,9 +32,9 @@ from mitmproxy import dns
 # Add parent directory to path for imports
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from registry import ContainerRegistry
-from logging_config import get_logger, set_context, clear_context
-from config import load_allowlist_config, ConfigError
+from registry import ContainerRegistry  # noqa: E402
+from logging_config import get_logger, set_context, clear_context  # noqa: E402
+from config import load_allowlist_config, ConfigError  # noqa: E402
 
 # Global registry instance (initialized in load())
 _registry: Optional[ContainerRegistry] = None

@@ -45,7 +45,7 @@ from mitmproxy import http
 # Add parent directory to path for logging import
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from logging_config import get_logger
+from logging_config import get_logger  # noqa: E402
 
 # Get logger for this module
 logger = get_logger(__name__)

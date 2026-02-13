@@ -31,8 +31,8 @@ from mitmproxy import http
 import sys
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from addons.container_identity import get_container_config
-from logging_config import get_logger
+from addons.container_identity import get_container_config  # noqa: E402
+from logging_config import get_logger  # noqa: E402
 
 # Configuration from environment
 RATE_LIMIT_CAPACITY = float(os.environ.get("RATE_LIMIT_CAPACITY", "100"))
