@@ -47,6 +47,8 @@ Linux and macOS supported natively. Windows users need WSL2. macOS ships Bash 3.
 
 ## Installation
 
+### Full install (recommended)
+
 ```bash
 curl -fsSL https://raw.githubusercontent.com/foundry-works/foundry-sandbox/main/install.sh | bash
 ```
@@ -54,6 +56,18 @@ curl -fsSL https://raw.githubusercontent.com/foundry-works/foundry-sandbox/main/
 This will clone to `~/.foundry-sandbox`, add the `cast` alias to your shell, enable tab completion, and build the Docker image.
 
 For manual installation or uninstall instructions, see [Getting Started](docs/getting-started.md).
+
+### PyPI package
+
+`foundry-sandbox` is published on PyPI and provides the `cast` Python entry point:
+
+```bash
+pipx install foundry-sandbox
+# or
+pip install foundry-sandbox
+```
+
+Important: full sandbox operation still requires repository runtime assets (`docker-compose.yml`, `docker-compose.credential-isolation.yml`, `unified-proxy/`, `stubs/`). Use the installer above (or clone the repo and run `pip install -e .`) for a complete setup.
 
 ## Quick Start
 

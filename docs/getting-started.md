@@ -40,6 +40,18 @@ source ~/.bashrc  # or ~/.zshrc
 
 The `cast` CLI is installed automatically by `install.sh` via `pip install -e .` (using the entry point defined in `pyproject.toml`).
 
+### PyPI package
+
+`foundry-sandbox` is published on PyPI and provides the `cast` Python entry point:
+
+```bash
+pipx install foundry-sandbox
+# or
+pip install foundry-sandbox
+```
+
+Important: full sandbox operation still requires repository runtime assets (`docker-compose.yml`, `docker-compose.credential-isolation.yml`, `unified-proxy/`, `stubs/`). Use the installer above (or clone the repo and run `pip install -e .`) for a complete setup.
+
 ## Creating Your First Sandbox
 
 Run `cast new` with no arguments to launch the guided setup (gum if available, read-based fallback).
