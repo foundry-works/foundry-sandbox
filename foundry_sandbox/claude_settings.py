@@ -9,6 +9,8 @@ Migrated from lib/python/merge_claude_settings.py.
 
 from __future__ import annotations
 
+import sys
+
 from foundry_sandbox.config import deep_merge, load_json, write_json
 
 # Keys that should be preserved from container defaults, not overwritten by host
@@ -46,3 +48,16 @@ def merge_claude_settings(container_path: str, host_path: str) -> None:
     merged.pop("extraKnownMarketplaces", None)
 
     write_json(container_path, merged)
+
+
+if __name__ == "__main__":
+    # Called from settings_merge.py via:
+    #   python3 -m foundry_sandbox.claude_settings merge <container_path> <host_path>
+    if len(sys.argv) != 4 or sys.argv[1] != "merge":
+        print(
+            "Usage: python3 -m foundry_sandbox.claude_settings merge <container_settings> <host_settings>",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+
+    merge_claude_settings(sys.argv[2], sys.argv[3])

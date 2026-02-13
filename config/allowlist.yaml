@@ -210,15 +210,16 @@ http_endpoints:
     paths:
       - "/repos/*/*/releases/*/assets"
 
-  # Zhipu AI (OpenCode)
+  # Zhipu AI (OpenCode + claude-zai)
+  # Uses multi-segment paths: /api/paas/v4/... and /api/anthropic/v1/...
   - host: open.bigmodel.cn
     methods: [POST, GET]
     paths:
-      - "/*"
+      - "/**"
   - host: api.z.ai
     methods: [POST, GET]
     paths:
-      - "/*"
+      - "/**"
 
   # Semantic Scholar
   - host: api.semanticscholar.org
