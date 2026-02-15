@@ -48,6 +48,7 @@ from foundry_sandbox.docker import (
     repair_hmac_secret_permissions,
 )
 from foundry_sandbox.foundry_plugin import prepopulate_foundry_global
+from foundry_sandbox.git import ensure_bare_repo
 from foundry_sandbox.git_path_fixer import fix_proxy_worktree_paths
 from foundry_sandbox.image import check_image_freshness
 from foundry_sandbox.network import (
@@ -56,7 +57,7 @@ from foundry_sandbox.network import (
     add_timezone_to_override,
     ensure_override_from_metadata,
 )
-from foundry_sandbox.paths import derive_sandbox_paths, ensure_dir, path_claude_home
+from foundry_sandbox.paths import derive_sandbox_paths, ensure_dir, path_claude_home, repo_url_to_bare_path
 from foundry_sandbox.proxy import setup_proxy_registration
 from foundry_sandbox.state import load_sandbox_metadata
 from foundry_sandbox.utils import environment_scope, log_error, log_info, log_step, log_warn
@@ -439,6 +440,14 @@ def start(ctx: click.Context, name: str) -> None:
         # 5. Log credential warnings
         # --------------------------------------------------------------
         _log_credential_warnings(uses_isolation, enable_opencode, enable_zai)
+
+        # --------------------------------------------------------------
+        # 5b. Refresh bare repo so base branch stays current
+        # --------------------------------------------------------------
+        repo_url = _string_value(metadata.get("repo_url", ""))
+        if repo_url:
+            bare_path = repo_url_to_bare_path(repo_url)
+            ensure_bare_repo(repo_url, bare_path)
 
         # --------------------------------------------------------------
         # 6. Setup override file and Claude home directory
