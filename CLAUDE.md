@@ -35,6 +35,15 @@ Run `./scripts/ci-local.sh` before pushing to catch CI failures early.
 
 **Important:** Read docs in `docs/adr` for decision records on architecture.
 
+## Releasing
+
+1. Bump the version in `pyproject.toml`
+2. Add a new section to `CHANGELOG.md` with the version and date
+3. Commit, push to `main`
+4. Create a git tag: `git tag v<version> && git push origin v<version>`
+
+The `.github/workflows/release.yml` workflow triggers on `v*` tags and handles both the GitHub release and PyPI publish automatically. **Do not** create the GitHub release manually with `gh release create` — the workflow does this and will fail if the release already exists.
+
 <sandbox-context>
 ## Sandbox Context
 - **Repository**: foundry-works/foundry-sandbox
