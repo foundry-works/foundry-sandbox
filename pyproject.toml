@@ -41,6 +41,7 @@ Documentation = "https://github.com/foundry-works/foundry-sandbox/tree/main/docs
 
 [project.scripts]
 cast = "foundry_sandbox.cli:main"
+git-mode = "foundry_sandbox.commands.git_mode:git_mode_shim"
 
 [project.optional-dependencies]
 dev = [

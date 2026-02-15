@@ -218,3 +218,13 @@ def git_mode(name: str | None, mode: str) -> None:
     target_worktree = str(worktree_path) if mode == "host" else "/git-workspace"
     click.echo(f"Applied git mode '{mode}' for sandbox: {name}")
     click.echo(f"  core.worktree={target_worktree}")
+
+
+def git_mode_shim() -> None:
+    """Entrypoint used by the `git-mode` script to avoid Click errors for GitHub CLI."""
+    args = sys.argv[1:]
+    if "--mode" not in args:
+        # GitHub CLI (and similar) may call `git mode` without arguments; treat as no-op.
+        return
+    # Delegate to the Click command for real work.
+    git_mode.main()
