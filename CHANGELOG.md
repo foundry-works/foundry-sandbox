@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.15.5] - 2026-02-15
+
+### Added
+- **Git-mode helper** — `cast git-mode <name> --mode <host|sandbox>` lets you switch a sandbox worktree between host-friendly and sandbox proxy layouts, updating the `.git` config and syncing the running proxy for immediate effect.
+  - The command now shows up in `cast help`, validates sandbox names, and ensures worktree/bare paths stay within the expected roots before touching git config.
+
+### Fixed
+- **Graceful metadata reads** — `cast list`, `cast status`, and `cast info` skip sandboxes whose metadata lock cannot be created (e.g., due to restrictive permissions) so they no longer crash with `PermissionError(13)`; the loader logs the skip and continues with available sandboxes.
+
 ## [0.15.4] - 2026-02-15
 
 ### Fixed

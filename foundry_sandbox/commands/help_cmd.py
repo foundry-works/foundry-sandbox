@@ -33,6 +33,7 @@ Commands:
   status [name] [--json]                Show sandbox status
   info [--json]                         Show config + status
   refresh-credentials [name]            Refresh credentials in running sandbox
+  git-mode [name] --mode <host|sandbox> Toggle git path mode for host/sandbox
   upgrade [--local]                     Upgrade to latest version
   help                                  Show this help
 

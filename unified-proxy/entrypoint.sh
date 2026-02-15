@@ -85,6 +85,7 @@ drop_privileges_if_needed() {
 }
 
 # Graceful shutdown handler
+# shellcheck disable=SC2329  # invoked indirectly via trap
 cleanup() {
     log "Received shutdown signal, cleaning up..."
 

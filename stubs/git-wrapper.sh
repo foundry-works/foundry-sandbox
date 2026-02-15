@@ -48,7 +48,7 @@ PROXY_TIMEOUT=30
 # Signal handling: exit with 128 + signal_number
 # ---------------------------------------------------------------------------
 
-# shellcheck disable=SC2317  # invoked indirectly via trap
+# shellcheck disable=SC2317,SC2329  # invoked indirectly via trap
 cleanup() {
     local sig="$1"
     if [[ -n "${CURL_PID:-}" ]]; then

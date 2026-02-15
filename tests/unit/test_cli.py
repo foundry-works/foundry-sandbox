@@ -42,11 +42,11 @@ class TestCLIGroup:
         assert "Usage" in result.output
 
     def test_all_migrated_commands_registered(self) -> None:
-        """All 16 migrated commands are available via the CLI group."""
+        """All 17 migrated commands are available via the CLI group."""
         expected = {
             "attach", "build", "config", "destroy", "destroy-all",
             "help", "info", "list", "new", "preset", "prune",
-            "refresh-credentials", "start", "status", "stop", "upgrade",
+            "refresh-credentials", "git-mode", "start", "status", "stop", "upgrade",
         }
         ctx = click.Context(cli)
         registered = set(cli.list_commands(ctx))
@@ -104,7 +104,7 @@ class TestUnknownCommandValidation:
         required = {
             "new", "list", "attach", "start", "stop", "destroy",
             "build", "help", "status", "config", "prune", "info",
-            "upgrade", "preset", "refresh-credentials", "destroy-all",
+            "upgrade", "preset", "refresh-credentials", "git-mode", "destroy-all",
         }
         ctx = click.Context(cli)
         registered = set(cli.list_commands(ctx))

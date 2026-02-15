@@ -509,3 +509,99 @@ class TestUpgradeCommand:
 
         result = runner.invoke(self._get_cmd(), ["--local"])
         assert result.exit_code != 0
+
+
+# =========================================================================
+# git-mode
+# =========================================================================
+
+
+class TestGitModeCommand:
+
+    def _get_cmd(self):
+        from foundry_sandbox.commands.git_mode import git_mode
+        return git_mode
+
+    def test_rejects_invalid_name(self, runner: click.testing.CliRunner) -> None:
+        result = runner.invoke(self._get_cmd(), ["../bad", "--mode", "host"])
+        assert result.exit_code != 0
+
+    @patch("foundry_sandbox.commands.git_mode._apply_git_mode")
+    @patch("foundry_sandbox.commands.git_mode._validate_git_paths")
+    @patch("foundry_sandbox.commands.git_mode._resolve_git_paths")
+    @patch("foundry_sandbox.commands.git_mode.derive_sandbox_paths")
+    @patch("foundry_sandbox.commands.git_mode.validate_existing_sandbox_name")
+    def test_explicit_name_host_mode(
+        self,
+        mock_validate_name: MagicMock,
+        mock_paths: MagicMock,
+        mock_resolve_paths: MagicMock,
+        mock_validate_paths: MagicMock,
+        mock_apply_mode: MagicMock,
+        runner: click.testing.CliRunner,
+        tmp_path: Path,
+    ) -> None:
+        mock_validate_name.return_value = (True, "")
+        worktree_path = tmp_path / "wt"
+        worktree_path.mkdir()
+        mock_paths.return_value = MagicMock(worktree_path=worktree_path)
+
+        gitdir = tmp_path / "gitdir"
+        bare_dir = tmp_path / "bare"
+        mock_resolve_paths.return_value = (gitdir, bare_dir)
+
+        result = runner.invoke(self._get_cmd(), ["test-sb", "--mode", "host"])
+
+        assert result.exit_code == 0
+        mock_apply_mode.assert_called_once_with(
+            mode="host",
+            name="test-sb",
+            worktree_path=worktree_path,
+            gitdir=gitdir,
+            bare_dir=bare_dir,
+        )
+
+    @patch("foundry_sandbox.commands.git_mode._apply_git_mode")
+    @patch("foundry_sandbox.commands.git_mode._validate_git_paths")
+    @patch("foundry_sandbox.commands.git_mode._resolve_git_paths")
+    @patch("foundry_sandbox.commands.git_mode.derive_sandbox_paths")
+    @patch("foundry_sandbox.commands.git_mode.validate_existing_sandbox_name")
+    @patch("foundry_sandbox.commands.git_mode._auto_detect_sandbox")
+    def test_auto_detect_name_when_omitted(
+        self,
+        mock_auto_detect: MagicMock,
+        mock_validate_name: MagicMock,
+        mock_paths: MagicMock,
+        mock_resolve_paths: MagicMock,
+        mock_validate_paths: MagicMock,
+        mock_apply_mode: MagicMock,
+        runner: click.testing.CliRunner,
+        tmp_path: Path,
+    ) -> None:
+        mock_auto_detect.return_value = "auto-sb"
+        mock_validate_name.return_value = (True, "")
+
+        worktree_path = tmp_path / "wt"
+        worktree_path.mkdir()
+        mock_paths.return_value = MagicMock(worktree_path=worktree_path)
+        mock_resolve_paths.return_value = (tmp_path / "gitdir", tmp_path / "bare")
+
+        result = runner.invoke(self._get_cmd(), ["--mode", "sandbox"])
+
+        assert result.exit_code == 0
+        assert "Auto-detected sandbox: auto-sb" in result.output
+
+    @patch("foundry_sandbox.commands.git_mode._list_sandbox_names_shared", return_value=[])
+    @patch("foundry_sandbox.commands.git_mode._auto_detect_sandbox", return_value=None)
+    def test_missing_name_without_auto_detect_exits(
+        self,
+        mock_auto_detect: MagicMock,
+        mock_list_names: MagicMock,
+        runner: click.testing.CliRunner,
+    ) -> None:
+        result = runner.invoke(self._get_cmd(), ["--mode", "host"])
+
+        assert result.exit_code != 0
+        assert "Usage: cast git-mode" in result.output
+        assert "No sandboxes found." in result.output
+
