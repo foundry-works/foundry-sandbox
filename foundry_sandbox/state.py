@@ -26,7 +26,7 @@ from foundry_sandbox.atomic_io import (
 )
 from foundry_sandbox.config import load_json
 from foundry_sandbox.constants import get_claude_configs_dir
-from foundry_sandbox.utils import flag_enabled as _flag_enabled, log_warn
+from foundry_sandbox.utils import flag_enabled as _flag_enabled, log_debug, log_warn
 from foundry_sandbox.models import CastNewPreset, SandboxMetadata
 from foundry_sandbox.paths import (
     ensure_dir,
@@ -218,8 +218,14 @@ def load_sandbox_metadata(name: str) -> dict[str, Any] | None:
     if json_path.exists():
         if not metadata_is_secure(json_path):
             return None
-        with _state_lock(json_path, shared=True):
-            data = load_json(str(json_path))
+        try:
+            with _state_lock(json_path, shared=True):
+                data = load_json(str(json_path))
+        except OSError as exc:
+            # Read-only callers (list/status/info) should degrade gracefully when
+            # lock creation/acquisition is not permitted for a given sandbox.
+            log_debug(f"Skipping metadata for '{name}': lock unavailable ({exc})")
+            return None
         if data:
             # Auto-derive ssh_mode if missing
             if not data.get("ssh_mode"):
@@ -240,45 +246,49 @@ def load_sandbox_metadata(name: str) -> dict[str, Any] | None:
         if not metadata_is_secure(legacy_path):
             return None
 
-        with _state_lock(json_path):
-            # Double-check: another process may have migrated while we waited
-            if json_path.exists():
-                return load_sandbox_metadata(name)
+        try:
+            with _state_lock(json_path):
+                # Double-check: another process may have migrated while we waited
+                if json_path.exists():
+                    return load_sandbox_metadata(name)
 
-            try:
-                data = _parse_legacy_metadata(legacy_path)
-            except (OSError, ValueError):
-                return None
+                try:
+                    data = _parse_legacy_metadata(legacy_path)
+                except (OSError, ValueError):
+                    return None
 
-            # Auto-derive ssh_mode
-            if not data.get("ssh_mode"):
-                data["ssh_mode"] = "always" if str(data.get("sync_ssh", "0")) == "1" else "disabled"
+                # Auto-derive ssh_mode
+                if not data.get("ssh_mode"):
+                    data["ssh_mode"] = "always" if str(data.get("sync_ssh", "0")) == "1" else "disabled"
 
-            # Migrate to JSON format (use _secure_write_unlocked to avoid
-            # deadlock — we already hold the exclusive lock on json_path)
-            model = SandboxMetadata(
-                repo_url=data.get("repo_url", ""),
-                branch=data.get("branch", ""),
-                from_branch=data.get("from_branch", ""),
-                network_mode=data.get("network_mode", ""),
-                sync_ssh=int(data.get("sync_ssh", 0)),
-                ssh_mode=data.get("ssh_mode", ""),
-                working_dir=data.get("working_dir", ""),
-                sparse_checkout=bool(data.get("sparse_checkout")),
-                pip_requirements=data.get("pip_requirements", ""),
-                allow_pr=bool(data.get("allow_pr")),
-                enable_opencode=bool(data.get("enable_opencode")),
-                enable_zai=bool(data.get("enable_zai")),
-                mounts=data.get("mounts", []),
-                copies=data.get("copies", []),
-            )
-            content = json.dumps(model.model_dump()) + "\n"
-            _secure_write_unlocked(json_path, content)
-            # Remove legacy file after successful migration
-            try:
-                legacy_path.unlink()
-            except OSError:
-                pass
+                # Migrate to JSON format (use _secure_write_unlocked to avoid
+                # deadlock — we already hold the exclusive lock on json_path)
+                model = SandboxMetadata(
+                    repo_url=data.get("repo_url", ""),
+                    branch=data.get("branch", ""),
+                    from_branch=data.get("from_branch", ""),
+                    network_mode=data.get("network_mode", ""),
+                    sync_ssh=int(data.get("sync_ssh", 0)),
+                    ssh_mode=data.get("ssh_mode", ""),
+                    working_dir=data.get("working_dir", ""),
+                    sparse_checkout=bool(data.get("sparse_checkout")),
+                    pip_requirements=data.get("pip_requirements", ""),
+                    allow_pr=bool(data.get("allow_pr")),
+                    enable_opencode=bool(data.get("enable_opencode")),
+                    enable_zai=bool(data.get("enable_zai")),
+                    mounts=data.get("mounts", []),
+                    copies=data.get("copies", []),
+                )
+                content = json.dumps(model.model_dump()) + "\n"
+                _secure_write_unlocked(json_path, content)
+                # Remove legacy file after successful migration
+                try:
+                    legacy_path.unlink()
+                except OSError:
+                    pass
+        except OSError as exc:
+            log_debug(f"Skipping legacy metadata for '{name}': lock unavailable ({exc})")
+            return None
 
         return data
 
