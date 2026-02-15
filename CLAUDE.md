@@ -37,6 +37,15 @@ Run `./scripts/ci-local.sh` before pushing to catch CI failures early.
 
 **Important:** Read docs in `docs/adr` for decision records on architecture.
 
+## Git Mode
+
+`cast git-mode <sandbox-name> --mode <host|sandbox>` toggles a sandbox's git config between host-friendly and proxy-compatible layouts:
+
+- **`--mode host`** — sets `core.worktree` to the real host path so IDE and shell tools work normally
+- **`--mode sandbox`** — sets `core.worktree` to `/git-workspace` (container path) for proxy-routed git operations
+
+The command validates paths, updates `.git/config.worktree`, and syncs the running proxy container immediately. The sandbox name is auto-detected if you run it from inside a worktree.
+
 ## Releasing
 
 1. Bump the version in `pyproject.toml`
