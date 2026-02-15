@@ -9,6 +9,8 @@ Docker-based sandbox environment for running Claude Code with isolated credentia
 - `stubs/` - Stub files injected into sandboxes (CLAUDE.md, etc.)
 - `tests/` - Test scripts including security red-team tests
 
+**Important:** Never commit `CLAUDE.md` if it contains `<sandbox-context>` tags. These are injected at runtime by the sandbox and are specific to a session — they must not be checked into any branch.
+
 ## Pre-commit
 
 Always run `./scripts/ci-local.sh` before committing to catch CI failures locally. Use `--all` to include integration tests, `--no-fail-fast` to see all results.
@@ -43,12 +45,3 @@ Run `./scripts/ci-local.sh` before pushing to catch CI failures early.
 4. Create a git tag: `git tag v<version> && git push origin v<version>`
 
 The `.github/workflows/release.yml` workflow triggers on `v*` tags and handles both the GitHub release and PyPI publish automatically. **Do not** create the GitHub release manually with `gh release create` — the workflow does this and will fail if the release already exists.
-
-<sandbox-context>
-## Sandbox Context
-- **Repository**: foundry-works/foundry-sandbox
-- **Branch**: `tyler/foundry-sandbox-20260209-0718`
-- **Based on**: `tylerburleigh/hardening-and-rewrite`
-
-When creating PRs, target `tylerburleigh/hardening-and-rewrite` as the base branch.
-</sandbox-context>
