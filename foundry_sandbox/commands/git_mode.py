@@ -223,7 +223,9 @@ def git_mode(name: str | None, mode: str) -> None:
 def git_mode_shim() -> None:
     """Entrypoint used by the `git-mode` script to avoid Click errors for GitHub CLI."""
     args = sys.argv[1:]
-    if "--mode" not in args:
+    has_mode_flag = "--mode" in args
+    has_mode_value = any(arg in {"host", "sandbox"} for arg in args)
+    if not has_mode_flag and not has_mode_value:
         # GitHub CLI (and similar) may call `git mode` without arguments; treat as no-op.
         return
     # Delegate to the Click command for real work.
