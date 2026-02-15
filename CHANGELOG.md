@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.15.6] - 2026-02-15
+
+### Fixed
+- **ChatGPT API 403 "Request denied by policy engine"** - Proxy allowlist used `/*` (single-segment) path patterns for `chatgpt.com`, but Codex sends requests to multi-segment paths like `/backend-api/codex/responses/compact`; changed to `/**` to allow all sub-paths
+
 ## [0.15.5] - 2026-02-15
 
 ### Added

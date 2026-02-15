@@ -160,8 +160,8 @@ http_endpoints:
   - host: chatgpt.com
     methods: [POST, GET]
     paths:
-      - "/backend-api/codex/*"
-      - "/backend-api/*"
+      - "/backend-api/codex/**"
+      - "/backend-api/**"
 
   # Google AI API
   - host: generativelanguage.googleapis.com
