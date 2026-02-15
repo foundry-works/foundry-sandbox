@@ -382,16 +382,37 @@ def validate_command(
     if not args:
         return ValidationError("Empty command")
 
-    # Check global blocked flags across ALL args (not just pre-subcommand).
-    # This catches blocked flags appearing after the subcommand, e.g.
-    # ["status", "--git-dir=/etc"] which would otherwise be missed.
-    for arg in args:
+    # Extract subcommand and args using shared helper (needed before flag
+    # checking so we can distinguish global options from subcommand args)
+    subcommand, subcommand_args, config_pairs = get_subcommand_args(args)
+
+    # Determine pre-subcommand args (true global options)
+    if subcommand is not None:
+        try:
+            sub_idx = args.index(subcommand)
+        except ValueError:
+            sub_idx = len(args)
+        pre_subcommand_args = args[:sub_idx]
+    else:
+        pre_subcommand_args = args
+
+    # Check global blocked flags in pre-subcommand args (true global options)
+    for arg in pre_subcommand_args:
         flag_name = arg.split("=", 1)[0]
         if flag_name in GLOBAL_BLOCKED_FLAGS:
             return ValidationError(f"Blocked flag: {flag_name}")
 
-    # Extract subcommand and args using shared helper
-    subcommand, subcommand_args, config_pairs = get_subcommand_args(args)
+    # Check global blocked flags in subcommand args too, EXCEPT for
+    # rev-parse which legitimately uses --git-dir/--work-tree as query flags
+    _REV_PARSE_SAFE_FLAGS = frozenset({"--git-dir", "--work-tree"})
+    blocked_in_subargs = GLOBAL_BLOCKED_FLAGS
+    if subcommand == "rev-parse":
+        blocked_in_subargs = GLOBAL_BLOCKED_FLAGS - _REV_PARSE_SAFE_FLAGS
+
+    for arg in subcommand_args:
+        flag_name = arg.split("=", 1)[0]
+        if flag_name in blocked_in_subargs:
+            return ValidationError(f"Blocked flag: {flag_name}")
     if subcommand is None:
         return ValidationError("No subcommand found")
 

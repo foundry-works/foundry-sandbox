@@ -232,6 +232,41 @@ class TestValidateCommand:
         assert err is not None
         assert "not allowed" in err.reason
 
+    # rev-parse --git-dir / --work-tree exemptions
+    def test_rev_parse_git_dir_allowed(self):
+        """Test rev-parse --git-dir is allowed (safe query flag)."""
+        err = validate_command(["rev-parse", "--git-dir"])
+        assert err is None
+
+    def test_rev_parse_work_tree_allowed(self):
+        """Test rev-parse --work-tree is allowed (safe query flag)."""
+        err = validate_command(["rev-parse", "--work-tree"])
+        assert err is None
+
+    def test_global_git_dir_still_blocked(self):
+        """Test --git-dir as a global option is still blocked."""
+        err = validate_command(["--git-dir=/tmp/evil", "status"])
+        assert err is not None
+        assert "Blocked flag" in err.reason
+
+    def test_git_dir_in_non_rev_parse_subcommand_blocked(self):
+        """Test --git-dir in a non-rev-parse subcommand is still blocked."""
+        err = validate_command(["status", "--git-dir=/tmp/evil"])
+        assert err is not None
+        assert "Blocked flag" in err.reason
+
+    def test_rev_parse_exec_still_blocked(self):
+        """Test --exec is still blocked even in rev-parse."""
+        err = validate_command(["rev-parse", "--exec"])
+        assert err is not None
+        assert "Blocked flag" in err.reason
+
+    def test_global_git_dir_with_rev_parse_blocked(self):
+        """Test --git-dir as global option before rev-parse is blocked."""
+        err = validate_command(["--git-dir=/tmp/evil", "rev-parse", "--git-dir"])
+        assert err is not None
+        assert "Blocked flag" in err.reason
+
 
 class TestConfigKeyValidation:
     """Tests for config key validation via -c flag."""
