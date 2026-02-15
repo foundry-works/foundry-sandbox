@@ -20,6 +20,8 @@ Always run `./scripts/ci-local.sh` before committing to catch CI failures locall
 ./tests/redteam-sandbox.sh   # Security validation (run inside sandbox)
 ```
 
+Run `./scripts/ci-local.sh` before pushing to catch CI failures early.
+
 ## Documentation
 
 - `docs/README.md` - Documentation index

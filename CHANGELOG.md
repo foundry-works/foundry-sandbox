@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.15.4] - 2026-02-15
+
+### Fixed
+- **Stale base branch on `cast start`** - `cast start` now fetches the latest refs from origin before starting containers, so the sandbox's view of the base branch stays current for PRs and rebasing
+- **`gh pr create` broken in sandbox** - `git rev-parse --git-dir` was blocked by the git proxy's global flag check; narrowed the exemption to only `rev-parse` subcommand args (read-only path queries) while keeping global `--git-dir` options blocked
+
 ## [0.15.3] - 2026-02-13
 
 ### Fixed
@@ -621,7 +627,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Tab completion for bash
 - macOS and Linux support
 
-[Unreleased]: https://github.com/foundry-works/foundry-sandbox/compare/v0.15.0...HEAD
+[Unreleased]: https://github.com/foundry-works/foundry-sandbox/compare/v0.15.4...HEAD
+[0.15.4]: https://github.com/foundry-works/foundry-sandbox/compare/v0.15.3...v0.15.4
+[0.15.3]: https://github.com/foundry-works/foundry-sandbox/compare/v0.15.2...v0.15.3
+[0.15.2]: https://github.com/foundry-works/foundry-sandbox/compare/v0.15.1...v0.15.2
+[0.15.1]: https://github.com/foundry-works/foundry-sandbox/compare/v0.15.0...v0.15.1
 [0.15.0]: https://github.com/foundry-works/foundry-sandbox/compare/v0.14.0...v0.15.0
 [0.14.0]: https://github.com/foundry-works/foundry-sandbox/compare/v0.13.0...v0.14.0
 [0.13.0]: https://github.com/foundry-works/foundry-sandbox/compare/v0.12.0...v0.13.0
