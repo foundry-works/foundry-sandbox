@@ -36,7 +36,7 @@ def file_lock(path: Path, *, shared: bool = False) -> Iterator[None]:
     Raises:
         OSError: If the lock cannot be acquired within the timeout.
     """
-    lock_path = path.with_suffix(path.suffix + ".lock")
+    lock_path = path.with_suffix(path.suffix + ".castlock")
     lock_path.parent.mkdir(parents=True, exist_ok=True)
     fd = os.open(str(lock_path), os.O_CREAT | os.O_RDWR, 0o600)
     acquired = False

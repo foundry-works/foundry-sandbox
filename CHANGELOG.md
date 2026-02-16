@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.15.7] - 2026-02-16
+
+### Fixed
+- **`cast git-mode` fails when sandbox is running** — Advisory lock sidecar used `.lock` suffix which collides with git's internal `config.lock` mechanism; renamed to `.castlock` to avoid the conflict
+- **Stale git lock files from `virtiofsd`** — `git config` writes now remove leftover `.lock` files held open by `virtiofsd` (the container filesystem daemon) before proceeding
+
 ## [0.15.6] - 2026-02-15
 
 ### Fixed

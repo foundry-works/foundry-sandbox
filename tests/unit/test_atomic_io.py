@@ -95,12 +95,12 @@ class TestFileLock:
     """Tests for file_lock() context manager."""
 
     def test_creates_sidecar_lock_file(self, tmp_path):
-        """Should create a .lock sidecar file."""
+        """Should create a .castlock sidecar file."""
         target = tmp_path / "data.json"
         target.write_text("{}")
 
         with file_lock(target):
-            lock_path = target.with_suffix(".json.lock")
+            lock_path = target.with_suffix(".json.castlock")
             assert lock_path.exists()
 
     def test_shared_locks_coexist(self, tmp_path):
@@ -132,7 +132,7 @@ class TestFileLock:
 
         target = tmp_path / "data.json"
         target.write_text("{}")
-        lock_path = target.with_suffix(".json.lock")
+        lock_path = target.with_suffix(".json.castlock")
 
         # Manually hold an exclusive lock on the sidecar file
         fd = os.open(str(lock_path), os.O_CREAT | os.O_RDWR, 0o600)
@@ -168,7 +168,7 @@ class TestAtomicWrite:
         """Should create a sidecar lock file."""
         target = tmp_path / "test.json"
         atomic_write(target, "{}")
-        assert target.with_suffix(".json.lock").exists()
+        assert target.with_suffix(".json.castlock").exists()
 
     def test_file_permissions(self, tmp_path):
         """Written file should have 0o600 permissions."""
