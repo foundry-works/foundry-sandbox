@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.15.8] - 2026-02-17
+
+### Added
+- **`--anthropic-base-url` option for `cast new`** — Override the Anthropic API base URL via CLI flag or `ANTHROPIC_BASE_URL` environment variable; CLI arg takes precedence over host env
+
 ## [0.15.7] - 2026-02-16
 
 ### Fixed
@@ -647,7 +652,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Tab completion for bash
 - macOS and Linux support
 
-[Unreleased]: https://github.com/foundry-works/foundry-sandbox/compare/v0.15.4...HEAD
+[Unreleased]: https://github.com/foundry-works/foundry-sandbox/compare/v0.15.8...HEAD
+[0.15.8]: https://github.com/foundry-works/foundry-sandbox/compare/v0.15.7...v0.15.8
+[0.15.7]: https://github.com/foundry-works/foundry-sandbox/compare/v0.15.6...v0.15.7
+[0.15.6]: https://github.com/foundry-works/foundry-sandbox/compare/v0.15.5...v0.15.6
+[0.15.5]: https://github.com/foundry-works/foundry-sandbox/compare/v0.15.4...v0.15.5
 [0.15.4]: https://github.com/foundry-works/foundry-sandbox/compare/v0.15.3...v0.15.4
 [0.15.3]: https://github.com/foundry-works/foundry-sandbox/compare/v0.15.2...v0.15.3
 [0.15.2]: https://github.com/foundry-works/foundry-sandbox/compare/v0.15.1...v0.15.2
