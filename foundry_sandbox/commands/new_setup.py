@@ -126,6 +126,7 @@ def _new_setup(
     pip_requirements: str,
     enable_opencode_flag: str,
     enable_zai_flag: str,
+    anthropic_base_url: str,
 ) -> None:
     """Inner setup logic for the ``new`` command, extracted for rollback."""
     # Clone/fetch bare repo
@@ -272,6 +273,7 @@ def _new_setup(
         isolate_credentials=isolate_credentials,
         repos_dir=str(get_repos_dir()) if isolate_credentials else "",
         sandbox_id=sandbox_id,
+        anthropic_base_url=anthropic_base_url,
     )
 
     # Register with proxy

@@ -360,6 +360,7 @@ def _handle_new_ide_and_attach(
 @click.option("--allow-dangerous-mount", is_flag=True, help="Bypass credential directory protection")
 @click.option("--from", "from_flag", metavar="BRANCH", help="Base branch (alias for from_branch arg)")
 @click.option("--name", "name_override", metavar="NAME", help="Override auto-generated sandbox name")
+@click.option("--anthropic-base-url", metavar="URL", help="Override Anthropic API base URL")
 @click.pass_context
 def new(
     ctx: click.Context,
@@ -387,6 +388,7 @@ def new(
     allow_dangerous_mount: bool,
     from_flag: str,
     name_override: str,
+    anthropic_base_url: str,
 ) -> None:
     """Create a new sandbox with worktree and container."""
 
@@ -629,6 +631,7 @@ def new(
                 pip_requirements=pip_requirements or "",
                 enable_opencode_flag=enable_opencode_flag,
                 enable_zai_flag=enable_zai_flag,
+                anthropic_base_url=anthropic_base_url or "",
             )
         except _SetupError as exc:
             log_error(str(exc))

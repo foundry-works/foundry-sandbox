@@ -57,6 +57,7 @@ services:
       - OPENCODE_DISABLE_SHARE=${OPENCODE_DISABLE_SHARE:-1}
       # Optional API keys if needed (Gemini uses OAuth in ~/.gemini/)
       - CLAUDE_CODE_OAUTH_TOKEN
+      - ANTHROPIC_BASE_URL=${ANTHROPIC_BASE_URL:-}
       # Deep research providers (foundry-mcp)
       - TAVILY_API_KEY
       - PERPLEXITY_API_KEY

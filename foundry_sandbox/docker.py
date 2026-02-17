@@ -315,6 +315,7 @@ def compose_up(
     isolate_credentials: bool = False,
     repos_dir: str = "",
     sandbox_id: str = "",
+    anthropic_base_url: str = "",
 ) -> None:
     """Start containers via docker compose up.
 
@@ -374,6 +375,12 @@ def compose_up(
             except OSError as exc:
                 log_debug(f"Could not read git user.email: {exc}")
 
+    # Anthropic base URL: CLI arg takes precedence over host env
+    base_url = anthropic_base_url or os.environ.get("ANTHROPIC_BASE_URL", "")
+    if base_url:
+        env["ANTHROPIC_BASE_URL"] = base_url
+
+    if isolate_credentials:
         # Git shadow mode: provision HMAC secret for git API authentication
         if sandbox_id:
             provision_hmac_secret(container, sandbox_id)
