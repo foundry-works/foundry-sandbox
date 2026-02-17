@@ -783,33 +783,35 @@ class TestMergeClaudeSettingsSafeTempFile:
 
 
 class TestMergeSettingsSilentFailure:
-    """_merge_claude_settings_in_container must return False on subprocess failure."""
+    """_merge_claude_settings_in_container must return False on copy-back failure."""
 
+    @patch("foundry_sandbox.settings_merge.copy_file_to_container",
+           side_effect=OSError("copy failed"))
     @patch("foundry_sandbox.settings_merge.subprocess.run")
-    @patch("foundry_sandbox.settings_merge.copy_file_to_container")
-    def test_returns_false_on_nonzero_exit(self, mock_cpf, mock_run):
-        """merge returns False when docker exec fails."""
+    def test_returns_false_on_copy_back_failure(self, mock_run, mock_cpf, tmp_path):
+        """merge returns False when copying merged result back fails."""
         from foundry_sandbox.credential_setup import _merge_claude_settings_in_container
 
-        # First call: docker exec merge fails
-        # Second call: cleanup rm
-        mock_run.side_effect = [
-            _completed(returncode=1, stderr="merge error"),
-            _completed(),  # cleanup rm
-        ]
+        host = tmp_path / "settings.json"
+        host.write_text(json.dumps({"theme": "dark"}))
 
-        result = _merge_claude_settings_in_container("container-123", "/host/settings.json")
+        mock_run.return_value = _completed(stdout='{}')
+
+        result = _merge_claude_settings_in_container("container-123", str(host))
         assert result is False
 
-    @patch("foundry_sandbox.settings_merge.subprocess.run")
     @patch("foundry_sandbox.settings_merge.copy_file_to_container")
-    def test_returns_true_on_success(self, mock_cpf, mock_run):
-        """merge returns True when docker exec succeeds."""
+    @patch("foundry_sandbox.settings_merge.subprocess.run")
+    def test_returns_true_on_success(self, mock_run, mock_cpf, tmp_path):
+        """merge returns True when merge and copy-back succeed."""
         from foundry_sandbox.credential_setup import _merge_claude_settings_in_container
 
-        mock_run.return_value = _completed(returncode=0)
+        host = tmp_path / "settings.json"
+        host.write_text(json.dumps({"theme": "dark"}))
 
-        result = _merge_claude_settings_in_container("container-123", "/host/settings.json")
+        mock_run.return_value = _completed(stdout='{"model": "opus"}')
+
+        result = _merge_claude_settings_in_container("container-123", str(host))
         assert result is True
 
 
