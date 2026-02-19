@@ -35,7 +35,9 @@ API Key Support (OpenCode CLI - zai-coding-plan):
 
 import json
 import os
+import re
 from typing import Optional
+from urllib.parse import urlparse
 
 from mitmproxy import http
 
@@ -178,6 +180,48 @@ class CredentialInjector:
         self._init_oauth_manager()
         self._init_opencode_manager()
         self._init_gemini_manager()
+        self.anthropic_custom_headers = self._parse_custom_headers(
+            os.environ.get("ANTHROPIC_CUSTOM_HEADERS", "")
+        )
+        self.anthropic_hosts = self._build_anthropic_hosts()
+        if self.anthropic_custom_headers:
+            logger.info(
+                f"Loaded {len(self.anthropic_custom_headers)} custom Anthropic header(s), "
+                f"targeting hosts: {self.anthropic_hosts}"
+            )
+
+    # Header names that must not be overridden by custom headers because
+    # they are managed by the credential injection logic.
+    _RESERVED_HEADER_NAMES = frozenset({"x-api-key", "authorization"})
+
+    def _build_anthropic_hosts(self) -> set[str]:
+        """Return the set of hosts that should receive custom Anthropic headers."""
+        hosts = {"api.anthropic.com"}
+        base_url = os.environ.get("ANTHROPIC_BASE_URL", "").strip()
+        if base_url:
+            parsed = urlparse(base_url)
+            if parsed.hostname:
+                hosts.add(parsed.hostname)
+        return hosts
+
+    def _parse_custom_headers(self, raw: str) -> list[tuple[str, str]]:
+        """Parse ANTHROPIC_CUSTOM_HEADERS env var into (name, value) pairs."""
+        if not raw:
+            return []
+        headers = []
+        for entry in re.split(r"[,\n]", raw):
+            entry = entry.strip()
+            if not entry or ":" not in entry:
+                continue
+            name, _, value = entry.partition(":")
+            name = name.strip()
+            if name.lower() in self._RESERVED_HEADER_NAMES:
+                logger.warning(
+                    f"Ignoring custom header '{name}': conflicts with credential injection"
+                )
+                continue
+            headers.append((name, value.strip()))
+        return headers
 
     def _load_credentials(self):
         """Load credentials from environment variables into cache."""
@@ -615,6 +659,15 @@ class CredentialInjector:
             f"Injected {header_name} for {host} "
             f"(container: {container_id or 'unknown'})"
         )
+
+        # Inject custom Anthropic headers if configured
+        if host in self.anthropic_hosts and self.anthropic_custom_headers:
+            for h_name, h_value in self.anthropic_custom_headers:
+                flow.request.headers[h_name] = h_value
+            logger.info(
+                f"Injected {len(self.anthropic_custom_headers)} custom header(s) for {host} "
+                f"(container: {container_id or 'unknown'})"
+            )
 
     def _strip_github_placeholder(self, flow: http.HTTPFlow) -> None:
         """Remove placeholder GitHub Authorization header to allow anonymous access."""

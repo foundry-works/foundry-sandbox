@@ -58,6 +58,7 @@ services:
       # Optional API keys if needed (Gemini uses OAuth in ~/.gemini/)
       - CLAUDE_CODE_OAUTH_TOKEN
       - ANTHROPIC_BASE_URL=${ANTHROPIC_BASE_URL:-}
+      - ANTHROPIC_CUSTOM_HEADERS
       # Deep research providers (foundry-mcp)
       - TAVILY_API_KEY
       - PERPLEXITY_API_KEY
