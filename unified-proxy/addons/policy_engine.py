@@ -209,7 +209,62 @@ class PolicyEngine:
             logger.error(f"Unexpected error loading allowlist: {e}")
             self._domains = []
 
+        # Dynamically allow custom ANTHROPIC_BASE_URL host so the policy
+        # engine doesn't block requests that the credential injector expects
+        # to forward.
+        self._add_anthropic_base_url_host()
+
         logger.info("Policy engine addon loaded (default-deny enabled)")
+
+    def _add_anthropic_base_url_host(self) -> None:
+        """Add ANTHROPIC_BASE_URL hostname to domain allowlist and endpoint config.
+
+        When users set a custom ANTHROPIC_BASE_URL (e.g. a proxy or staging
+        endpoint), the policy engine must allow requests to that host.
+        The credential injector already handles this via _build_anthropic_hosts();
+        this method mirrors that logic for the policy engine's domain allowlist
+        and adds matching http_endpoints entries so path enforcement works too.
+        """
+        base_url = os.environ.get("ANTHROPIC_BASE_URL", "").strip()
+        if not base_url:
+            return
+
+        parsed = urlparse(base_url)
+        hostname = parsed.hostname
+        if not hostname:
+            return
+
+        # Already in domain allowlist (e.g. api.anthropic.com)
+        if self._is_domain_allowed(normalize_host(hostname)):
+            return
+
+        # Add to domain allowlist
+        self._domains.append(hostname)
+        logger.info(
+            f"Added ANTHROPIC_BASE_URL host '{hostname}' to domain allowlist"
+        )
+
+        # Add http_endpoints entry mirroring the api.anthropic.com config
+        # so endpoint path enforcement allows the same paths.
+        if self._allowlist is not None:
+            # Find the existing api.anthropic.com endpoint config to mirror
+            anthropic_ep = None
+            for ep in self._allowlist.http_endpoints:
+                if normalize_host(ep.host) == "api.anthropic.com":
+                    anthropic_ep = ep
+                    break
+
+            if anthropic_ep is not None:
+                from config import HttpEndpointConfig
+                custom_ep = HttpEndpointConfig(
+                    host=hostname,
+                    methods=list(anthropic_ep.methods),
+                    paths=list(anthropic_ep.paths),
+                )
+                self._allowlist.http_endpoints.append(custom_ep)
+                logger.info(
+                    f"Added http_endpoints entry for ANTHROPIC_BASE_URL host '{hostname}'"
+                )
 
     def request(self, flow: http.HTTPFlow) -> None:
         """Evaluate policies for incoming request.

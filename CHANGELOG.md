@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.17.1] - 2026-02-19
+
+### Fixed
+- **`cast new` fails when current branch doesn't exist on remote** — Auto-detects whether the current branch is on the remote; falls back to the remote's default branch (e.g. `main`) instead of blindly using a local-only branch as the base
+- **`git worktree add` fails with cryptic error for missing base branch** — Added pre-check that verifies the `from_branch` ref exists before attempting worktree creation, with a clear error message suggesting `--from`
+- **Custom `ANTHROPIC_BASE_URL` blocked by policy engine** — The credential injector already forwarded requests to custom base URL hosts, but the policy engine's domain allowlist didn't include them; now dynamically adds the custom host and mirrors the `api.anthropic.com` endpoint config
+
 ## [0.17.0] - 2026-02-19
 
 ### Added

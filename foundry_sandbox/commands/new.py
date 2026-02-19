@@ -43,7 +43,12 @@ from foundry_sandbox.paths import (
 from foundry_sandbox.utils import flag_enabled as _saved_flag_enabled
 from foundry_sandbox.commands.new_setup import _SetupError, _new_setup, _rollback_new
 from foundry_sandbox.commands.new_wizard import _guided_new
-from foundry_sandbox.commands.new_resolver import _resolve_repo_input, _generate_branch_name
+from foundry_sandbox.commands.new_resolver import (
+    _resolve_repo_input,
+    _generate_branch_name,
+    _branch_exists_on_remote,
+    _detect_remote_default_branch,
+)
 from foundry_sandbox.commands.new_validation import _validate_preconditions, _validate_working_dir, _validate_mounts
 from foundry_sandbox.api_keys import has_opencode_key, has_zai_key
 from foundry_sandbox.paths import derive_sandbox_paths
@@ -491,7 +496,14 @@ def new(
             sys.exit(1)
 
         if not branch and not from_branch:
-            from_branch = current_branch
+            if _branch_exists_on_remote(repo_root, current_branch):
+                from_branch = current_branch
+            else:
+                from_branch = _detect_remote_default_branch(repo_root)
+                log_warn(
+                    f"Current branch '{current_branch}' not found on remote; "
+                    f"using '{from_branch}' as base."
+                )
 
     # Generate branch name if not provided
     if not branch:

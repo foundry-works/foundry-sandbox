@@ -240,6 +240,19 @@ def create_worktree(
             except RuntimeError as e:
                 log_info(f"Fetch failed (may already exist locally): {e}")
 
+            # Verify from_branch ref exists before attempting worktree add
+            ref_exists = subprocess.run(
+                ["git", "-C", str(bare_p), "rev-parse", "--verify", f"refs/heads/{from_branch}"],
+                capture_output=True,
+                check=False,
+                timeout=TIMEOUT_GIT_QUERY,
+            ).returncode == 0
+            if not ref_exists:
+                raise RuntimeError(
+                    f"Base branch '{from_branch}' not found in repository. "
+                    f"Ensure it exists on the remote, or specify a different base with --from."
+                )
+
             # Check if target branch already exists
             branch_exists = subprocess.run(
                 ["git", "-C", str(bare_p), "show-ref", "--verify", "--quiet", f"refs/heads/{branch}"],

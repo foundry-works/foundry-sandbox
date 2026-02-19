@@ -87,6 +87,60 @@ def _get_local_branches(repo_root: str) -> list[str]:
     return [line for line in result.stdout.strip().split("\n") if line]
 
 
+def _branch_exists_on_remote(repo_root: str, branch: str) -> bool:
+    """Check if a branch exists on the remote (origin).
+
+    Args:
+        repo_root: Path to the local repository.
+        branch: Branch name to check.
+
+    Returns:
+        True if refs/remotes/origin/{branch} exists.
+    """
+    result = subprocess.run(
+        ["git", "-C", repo_root, "rev-parse", "--verify", f"refs/remotes/origin/{branch}"],
+        capture_output=True,
+        check=False,
+        timeout=TIMEOUT_GIT_QUERY,
+    )
+    return result.returncode == 0
+
+
+def _detect_remote_default_branch(repo_root: str) -> str:
+    """Detect the remote's default branch from a local repo.
+
+    Tries ``git symbolic-ref refs/remotes/origin/HEAD`` first, then falls back
+    to checking for ``main`` and ``master`` on the remote.
+
+    Args:
+        repo_root: Path to the local repository.
+
+    Returns:
+        The detected default branch name, or ``"main"`` as a final fallback.
+    """
+    # Try symbolic-ref (e.g. "refs/remotes/origin/main")
+    result = subprocess.run(
+        ["git", "-C", repo_root, "symbolic-ref", "refs/remotes/origin/HEAD"],
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=TIMEOUT_GIT_QUERY,
+    )
+    if result.returncode == 0:
+        ref = result.stdout.strip()
+        # Strip "refs/remotes/origin/" prefix
+        prefix = "refs/remotes/origin/"
+        if ref.startswith(prefix):
+            return ref[len(prefix):]
+
+    # Fall back to checking common default branch names
+    for candidate in ("main", "master"):
+        if _branch_exists_on_remote(repo_root, candidate):
+            return candidate
+
+    return "main"
+
+
 def _generate_branch_name(repo_url: str, from_branch: str) -> str:
     """Generate a branch name for a new sandbox."""
     timestamp = datetime.now().strftime("%Y%m%d-%H%M")
