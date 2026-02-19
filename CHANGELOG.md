@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.17.2] - 2026-02-19
+
+### Fixed
+- **`ANTHROPIC_CUSTOM_HEADERS` not injected for custom `ANTHROPIC_BASE_URL` hosts** — The credential injector's `PROVIDER_MAP` only contained `api.anthropic.com`, so requests to a custom base URL (e.g. a LiteLLM proxy) short-circuited before credential or custom header injection; now registers the custom host in `PROVIDER_MAP` and `credentials_cache` at startup so it receives the same treatment as `api.anthropic.com`
+
 ## [0.17.1] - 2026-02-19
 
 ### Fixed

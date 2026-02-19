@@ -473,6 +473,100 @@ class TestProviderMapConfiguration:
             assert config["fallback_env_var"] == "GH_TOKEN"
 
 
+class TestCustomBaseURLRegistration:
+    """Tests for ANTHROPIC_BASE_URL host registration in PROVIDER_MAP."""
+
+    def teardown_method(self):
+        """Remove any custom hosts added to PROVIDER_MAP during tests."""
+        for host in list(PROVIDER_MAP.keys()):
+            if host not in (
+                "api.anthropic.com", "api.openai.com",
+                "generativelanguage.googleapis.com", "api.tavily.com",
+                "api.semanticscholar.org", "api.perplexity.ai", "api.z.ai",
+                "api.github.com", "uploads.github.com", "github.com",
+            ):
+                del PROVIDER_MAP[host]
+
+    def test_custom_base_url_registered_in_provider_map(self):
+        """Test that ANTHROPIC_BASE_URL host is added to PROVIDER_MAP."""
+        with mock.patch.dict(os.environ, {
+            "ANTHROPIC_API_KEY": "test-anthropic-key",
+            "ANTHROPIC_BASE_URL": "https://my-litellm.example.com/v1",
+        }, clear=True):
+            CredentialInjector()
+
+        assert "my-litellm.example.com" in PROVIDER_MAP
+        config = PROVIDER_MAP["my-litellm.example.com"]
+        assert config["header"] == "x-api-key"
+        assert config["env_var"] == "ANTHROPIC_API_KEY"
+
+    def test_custom_base_url_credentials_cached(self):
+        """Test that credentials are cached for custom base URL host."""
+        with mock.patch.dict(os.environ, {
+            "ANTHROPIC_API_KEY": "test-anthropic-key",
+            "ANTHROPIC_BASE_URL": "https://my-litellm.example.com/v1",
+        }, clear=True):
+            injector = CredentialInjector()
+
+        assert "my-litellm.example.com" in injector.credentials_cache
+        assert injector.credentials_cache["my-litellm.example.com"]["value"] == "test-anthropic-key"
+
+    def test_custom_base_url_credential_injection(self):
+        """Test that requests to custom base URL get credentials injected."""
+        with mock.patch.dict(os.environ, {
+            "ANTHROPIC_API_KEY": "test-anthropic-key",
+            "ANTHROPIC_BASE_URL": "https://my-litellm.example.com/v1",
+        }, clear=True):
+            injector = CredentialInjector()
+
+        flow = MockHTTPFlow("my-litellm.example.com", "/v1/messages")
+        flow.request.headers["x-api-key"] = "CRED_PROXY_placeholder"
+
+        injector.request(flow)
+
+        assert flow.response is None
+        assert flow.request.headers["x-api-key"] == "test-anthropic-key"
+
+    def test_custom_base_url_with_custom_headers(self):
+        """Test that custom headers are injected for custom base URL host."""
+        with mock.patch.dict(os.environ, {
+            "ANTHROPIC_API_KEY": "test-anthropic-key",
+            "ANTHROPIC_BASE_URL": "https://my-litellm.example.com/v1",
+            "ANTHROPIC_CUSTOM_HEADERS": "x-litellm-api-key: Bearer sk-1234",
+        }, clear=True):
+            injector = CredentialInjector()
+
+        flow = MockHTTPFlow("my-litellm.example.com", "/v1/messages")
+        flow.request.headers["x-api-key"] = "CRED_PROXY_placeholder"
+
+        injector.request(flow)
+
+        assert flow.response is None
+        assert flow.request.headers["x-api-key"] == "test-anthropic-key"
+        assert flow.request.headers["x-litellm-api-key"] == "Bearer sk-1234"
+
+    def test_no_custom_base_url_leaves_provider_map_unchanged(self):
+        """Test that PROVIDER_MAP is unchanged when no custom base URL is set."""
+        original_hosts = set(PROVIDER_MAP.keys())
+        with mock.patch.dict(os.environ, {
+            "ANTHROPIC_API_KEY": "test-anthropic-key",
+        }, clear=True):
+            CredentialInjector()
+
+        assert set(PROVIDER_MAP.keys()) == original_hosts
+
+    def test_api_anthropic_com_base_url_not_duplicated(self):
+        """Test that api.anthropic.com is not re-registered."""
+        with mock.patch.dict(os.environ, {
+            "ANTHROPIC_API_KEY": "test-anthropic-key",
+            "ANTHROPIC_BASE_URL": "https://api.anthropic.com",
+        }, clear=True):
+            CredentialInjector()
+
+        # Should still work normally, no duplication issues
+        assert "api.anthropic.com" in PROVIDER_MAP
+
+
 class TestContainerIdentityIntegration:
     """Tests for container identity integration."""
 

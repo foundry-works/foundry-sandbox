@@ -177,6 +177,7 @@ class CredentialInjector:
         self.opencode_manager: Optional[OpenCodeKeyManager] = None
         self.gemini_manager: Optional[GeminiTokenManager] = None
         self._load_credentials()
+        self._register_anthropic_base_url_host()
         self._init_oauth_manager()
         self._init_opencode_manager()
         self._init_gemini_manager()
@@ -193,6 +194,38 @@ class CredentialInjector:
     # Header names that must not be overridden by custom headers because
     # they are managed by the credential injection logic.
     _RESERVED_HEADER_NAMES = frozenset({"x-api-key", "authorization"})
+
+    def _register_anthropic_base_url_host(self) -> None:
+        """Register custom ANTHROPIC_BASE_URL host in PROVIDER_MAP and credentials_cache.
+
+        When users set a custom base URL (e.g. a LiteLLM proxy), the credential
+        injector must treat that host identically to api.anthropic.com — otherwise
+        `host not in PROVIDER_MAP` short-circuits and neither credentials nor
+        custom headers are injected.
+        """
+        base_url = os.environ.get("ANTHROPIC_BASE_URL", "").strip()
+        if not base_url:
+            return
+        parsed = urlparse(base_url)
+        hostname = parsed.hostname
+        if not hostname or hostname == "api.anthropic.com":
+            return
+
+        # Mirror api.anthropic.com's PROVIDER_MAP entry for this host
+        anthropic_config = PROVIDER_MAP["api.anthropic.com"]
+        PROVIDER_MAP[hostname] = dict(anthropic_config)
+        logger.info(
+            f"Registered ANTHROPIC_BASE_URL host '{hostname}' in PROVIDER_MAP"
+        )
+
+        # Copy credentials_cache entry so host-based injection works
+        if "api.anthropic.com" in self.credentials_cache:
+            self.credentials_cache[hostname] = dict(
+                self.credentials_cache["api.anthropic.com"]
+            )
+            logger.info(
+                f"Copied Anthropic credentials to cache for '{hostname}'"
+            )
 
     def _build_anthropic_hosts(self) -> set[str]:
         """Return the set of hosts that should receive custom Anthropic headers."""
