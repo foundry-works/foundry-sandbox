@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.17.0] - 2026-02-19
+
+### Added
+- **`ANTHROPIC_CUSTOM_HEADERS` environment variable** — Pass custom headers to Anthropic API requests via comma/newline-separated `Name: Value` pairs; the credential proxy injects them on outbound requests to `api.anthropic.com` (and any custom `ANTHROPIC_BASE_URL` host). Reserved headers (`x-api-key`, `authorization`) are blocked to prevent conflicts with credential injection.
+
 ## [0.16.0] - 2026-02-19
 
 ### Fixed
