@@ -20,6 +20,12 @@ from foundry_sandbox.constants import TIMEOUT_GIT_QUERY, TIMEOUT_GIT_TRANSFER
 from foundry_sandbox.paths import ensure_dir
 from foundry_sandbox.utils import log_info, log_step, log_warn
 
+# Git lockfile names that can become stale in a bare repo.
+_GIT_LOCK_NAMES = ("config.lock", "HEAD.lock")
+
+# Lockfiles older than this (seconds) are considered stale.
+_STALE_LOCK_AGE = 120
+
 
 # ============================================================================
 # Core Git Operations
@@ -100,6 +106,35 @@ def git_with_retry(
     raise RuntimeError(msg)
 
 
+def remove_stale_git_locks(repo_path: str | Path) -> None:
+    """Remove stale git lockfiles from a repository directory.
+
+    Git uses ``<file>.lock`` with ``O_CREAT|O_EXCL`` for atomic config writes.
+    If a process is interrupted mid-write (e.g. a sandbox container is killed),
+    the lockfile persists and blocks all subsequent git operations against the
+    repo — including other sandboxes sharing the same bare repo.
+
+    This function removes lockfiles older than ``_STALE_LOCK_AGE`` seconds.
+    """
+    rp = Path(repo_path)
+    if not rp.is_dir():
+        return
+
+    now = time.time()
+    for name in _GIT_LOCK_NAMES:
+        lock = rp / name
+        try:
+            age = now - lock.stat().st_mtime
+        except FileNotFoundError:
+            continue
+        if age >= _STALE_LOCK_AGE:
+            try:
+                lock.unlink()
+                log_warn(f"Removed stale git lockfile: {lock} (age {age:.0f}s)")
+            except OSError:
+                pass
+
+
 def ensure_bare_repo(repo_url: str, bare_path: str | Path) -> None:
     """Clone or update a bare repository.
 
@@ -118,6 +153,7 @@ def ensure_bare_repo(repo_url: str, bare_path: str | Path) -> None:
         git_with_retry(["clone", "--bare", repo_url, str(bp)])
     else:
         log_step("Fetching latest from origin...")
+        remove_stale_git_locks(bp)
         git_with_retry(["-C", str(bp), "fetch", "--all", "--prune"])
 
 

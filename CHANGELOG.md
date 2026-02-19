@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.15.9] - 2026-02-19
+
+### Fixed
+- **Stale git lockfiles block all sandboxes sharing a bare repo** — `cast start` now removes stale `config.lock` and `HEAD.lock` files (older than 2 minutes) from the shared bare repo before fetching, preventing a killed sandbox from blocking every other sandbox using the same repo
+
 ## [0.15.8] - 2026-02-17
 
 ### Added
@@ -652,7 +657,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Tab completion for bash
 - macOS and Linux support
 
-[Unreleased]: https://github.com/foundry-works/foundry-sandbox/compare/v0.15.8...HEAD
+[Unreleased]: https://github.com/foundry-works/foundry-sandbox/compare/v0.15.9...HEAD
+[0.15.9]: https://github.com/foundry-works/foundry-sandbox/compare/v0.15.8...v0.15.9
 [0.15.8]: https://github.com/foundry-works/foundry-sandbox/compare/v0.15.7...v0.15.8
 [0.15.7]: https://github.com/foundry-works/foundry-sandbox/compare/v0.15.6...v0.15.7
 [0.15.6]: https://github.com/foundry-works/foundry-sandbox/compare/v0.15.5...v0.15.6

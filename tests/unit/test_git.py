@@ -95,6 +95,53 @@ class TestGitWithRetry:
         assert sleep_calls == [1.0, 2.0, 4.0]
 
 
+class TestRemoveStaleGitLocks:
+    """Tests for remove_stale_git_locks()."""
+
+    def test_no_lockfiles_is_noop(self, tmp_path):
+        """No lockfiles present should do nothing."""
+        git.remove_stale_git_locks(tmp_path)  # should not raise
+
+    def test_nonexistent_dir_is_noop(self, tmp_path):
+        """Non-existent directory should do nothing."""
+        git.remove_stale_git_locks(tmp_path / "nonexistent")
+
+    def test_stale_config_lock_removed(self, tmp_path):
+        """config.lock older than threshold should be removed."""
+        lock = tmp_path / "config.lock"
+        lock.write_text("")
+        import os
+        # Set mtime to 5 minutes ago
+        old_time = __import__("time").time() - 300
+        os.utime(lock, (old_time, old_time))
+
+        git.remove_stale_git_locks(tmp_path)
+
+        assert not lock.exists()
+
+    def test_stale_head_lock_removed(self, tmp_path):
+        """HEAD.lock older than threshold should be removed."""
+        lock = tmp_path / "HEAD.lock"
+        lock.write_text("")
+        import os
+        old_time = __import__("time").time() - 300
+        os.utime(lock, (old_time, old_time))
+
+        git.remove_stale_git_locks(tmp_path)
+
+        assert not lock.exists()
+
+    def test_fresh_lock_preserved(self, tmp_path):
+        """config.lock younger than threshold should not be removed."""
+        lock = tmp_path / "config.lock"
+        lock.write_text("")
+        # mtime is now — well under the 120s threshold
+
+        git.remove_stale_git_locks(tmp_path)
+
+        assert lock.exists()
+
+
 class TestEnsureBareRepo:
     """Tests for ensure_bare_repo()."""
 
@@ -124,6 +171,23 @@ class TestEnsureBareRepo:
         assert "fetch" in args
         assert "--all" in args
         assert "--prune" in args
+
+    @patch("foundry_sandbox.git.git_with_retry")
+    def test_existing_repo_removes_stale_locks_before_fetch(self, mock_retry, tmp_path):
+        """Stale lockfiles should be cleaned before fetch."""
+        bare_path = tmp_path / "repo.git"
+        bare_path.mkdir()
+
+        lock = bare_path / "config.lock"
+        lock.write_text("")
+        import os
+        old_time = __import__("time").time() - 300
+        os.utime(lock, (old_time, old_time))
+
+        git.ensure_bare_repo("https://github.com/user/repo.git", bare_path)
+
+        assert not lock.exists()
+        mock_retry.assert_called_once()
 
 
 class TestEnsureRepoCheckout:

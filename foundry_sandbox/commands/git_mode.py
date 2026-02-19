@@ -20,6 +20,7 @@ from foundry_sandbox.commands._helpers import (
     list_sandbox_names as _list_sandbox_names_shared,
 )
 from foundry_sandbox.constants import TIMEOUT_GIT_QUERY, get_repos_dir, get_worktrees_dir
+from foundry_sandbox.git import remove_stale_git_locks
 from foundry_sandbox.git_path_fixer import fix_proxy_worktree_paths
 from foundry_sandbox.paths import derive_sandbox_paths
 from foundry_sandbox.utils import log_error
@@ -126,24 +127,9 @@ def _validate_git_paths(worktree_path: Path, gitdir: Path, bare_dir: Path) -> No
         raise RuntimeError(f"Bare repo path escapes repos root: {bare_dir}")
 
 
-def _remove_stale_git_lock(config_file: Path) -> None:
-    """Remove a stale git lock file if it exists.
-
-    Git uses ``<file>.lock`` with ``O_CREAT|O_EXCL`` for its own locking.
-    When ``virtiofsd`` (or another process) holds a leftover lock file open,
-    ``git config`` cannot proceed.  This helper removes the stale lock so
-    the subsequent ``git config`` call can succeed.
-    """
-    lock_file = config_file.parent / (config_file.name + ".lock")
-    try:
-        lock_file.unlink()
-    except FileNotFoundError:
-        pass
-
-
 def _git_config_set(config_file: Path, key: str, value: str) -> None:
     """Set one git config key in a specific config file."""
-    _remove_stale_git_lock(config_file)
+    remove_stale_git_locks(config_file.parent)
     try:
         subprocess.run(
             ["git", "config", "--file", str(config_file), key, value],
