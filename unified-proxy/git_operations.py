@@ -356,6 +356,19 @@ def _extract_push_args(args: List[str]) -> Optional[List[str]]:
     Returns the args after 'push' if the command is a push,
     or None if it's not a push command.
     """
+    idx = _find_push_index(args)
+    if idx is None:
+        return None
+    return args[idx + 1:]
+
+
+def _find_push_index(args: List[str]) -> Optional[int]:
+    """Return the index of ``"push"`` in a full git args list, or ``None``.
+
+    Skips global ``-c`` key=value pairs and other global flags to locate
+    the subcommand position.  Mirrors the skip logic of
+    :func:`_extract_push_args` but returns the index instead of the tail.
+    """
     idx = 0
     while idx < len(args):
         arg = args[idx]
@@ -372,9 +385,56 @@ def _extract_push_args(args: List[str]) -> Optional[List[str]]:
             continue
         # Found the subcommand
         if arg == "push":
-            return args[idx + 1:]
+            return idx
         return None
     return None
+
+
+def _normalize_push_args(
+    args: List[str], metadata: Optional[dict],
+) -> Tuple[List[str], bool]:
+    """Auto-expand bare ``git push`` with the sandbox branch as refspec.
+
+    When the sandbox AI runs ``git push`` or ``git push origin`` without a
+    refspec, the proxy rejects it because branch isolation requires explicit
+    targets.  Since the proxy always knows ``metadata["sandbox_branch"]``,
+    we can infer the intended target and append it.
+
+    Args:
+        args: Full git argument list (without the ``git`` binary itself).
+        metadata: Container metadata containing ``sandbox_branch``.
+
+    Returns:
+        ``(args, True)`` if the args were expanded, ``(args, False)`` otherwise.
+        The original *args* list is never mutated; a new list is returned
+        when expansion occurs.
+    """
+    if not metadata or not metadata.get("sandbox_branch"):
+        return args, False
+
+    push_idx = _find_push_index(args)
+    if push_idx is None:
+        return args, False
+
+    push_sub_args = args[push_idx + 1:]
+
+    # Don't interfere with broad push modes — existing validation handles them.
+    for flag in ("--tags", "--all", "--mirror"):
+        if _has_push_flag(push_sub_args, flag):
+            return args, False
+
+    positionals = _extract_push_positionals(push_sub_args)
+    sandbox_branch = metadata["sandbox_branch"]
+
+    if len(positionals) == 0:
+        # git push → git push origin <branch>
+        return list(args) + ["origin", sandbox_branch], True
+    elif len(positionals) == 1:
+        # git push origin → git push origin <branch>
+        return list(args) + [sandbox_branch], True
+    else:
+        # Already has remote + refspec(s)
+        return args, False
 
 
 def _detect_default_branch(bare_repo_path: str) -> Optional[str]:
@@ -626,6 +686,19 @@ def execute_git(
             request_id=req_id,
         )
         return None, err
+
+    # Auto-expand bare push commands with the sandbox branch
+    args, push_expanded = _normalize_push_args(args, metadata)
+    if push_expanded:
+        audit_log(
+            event="push_auto_expanded",
+            action="push",
+            decision="allow",
+            command_args=args,
+            reason="Bare push auto-expanded with sandbox branch",
+            matched_rule="push_normalization",
+            request_id=req_id,
+        )
 
     # Validate branch isolation
     err = validate_branch_isolation(args, metadata)

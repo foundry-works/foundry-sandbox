@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.17.3] - 2026-02-19
+
+### Fixed
+- **Bare `git push` blocked by branch isolation** — `git push` and `git push origin` (no refspec) were rejected because branch isolation requires explicit targets; the proxy now auto-expands these with the sandbox branch from container metadata, so the AI can push without specifying the branch name
+
 ## [0.17.2] - 2026-02-19
 
 ### Fixed

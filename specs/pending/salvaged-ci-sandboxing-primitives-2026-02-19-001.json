@@ -1,0 +1,635 @@
+{
+  "spec_id": "salvaged-ci-sandboxing-primitives-2026-02-19-001",
+  "title": "salvaged-ci-sandboxing-primitives",
+  "generated": "2026-02-19T23:43:05.431809Z",
+  "last_updated": "2026-02-19T23:45:01.407712Z",
+  "metadata": {
+    "description": "",
+    "mission": "Add allowlist layering, compose extensibility, streaming exec, and destroy extraction as generic platform primitives while dropping CI-specific product scope.",
+    "objectives": [],
+    "complexity": "low",
+    "estimated_hours": 0,
+    "assumptions": [
+      "All new parameters default to None/False, preserving existing behavior when not explicitly used",
+      "compose_extras and best_effort=False are internal-only APIs, not CLI-exposed",
+      "PROXY_ALLOWLIST_EXTRA_PATH is operator-trusted input; the host operator controls the environment"
+    ],
+    "owner": "",
+    "category": "implementation",
+    "template": "empty"
+  },
+  "progress_percentage": 0,
+  "status": "pending",
+  "current_phase": null,
+  "hierarchy": {
+    "spec-root": {
+      "type": "spec",
+      "title": "salvaged-ci-sandboxing-primitives",
+      "status": "pending",
+      "parent": null,
+      "children": [
+        "phase-1",
+        "phase-2",
+        "phase-3"
+      ],
+      "total_tasks": 20,
+      "completed_tasks": 0,
+      "metadata": {
+        "purpose": "",
+        "category": "implementation"
+      },
+      "dependencies": {
+        "blocks": [],
+        "blocked_by": [],
+        "depends": []
+      }
+    },
+    "phase-1": {
+      "type": "phase",
+      "title": "Allowlist Merge Foundation",
+      "status": "pending",
+      "parent": "spec-root",
+      "children": [
+        "task-1-1",
+        "task-1-2",
+        "task-1-3",
+        "task-1-4",
+        "task-1-5",
+        "verify-1-1"
+      ],
+      "total_tasks": 6,
+      "completed_tasks": 0,
+      "metadata": {
+        "purpose": "",
+        "description": "Implement the core allowlist layering mechanism in unified-proxy config loading. This is the security-critical foundation that all other extensibility builds on."
+      },
+      "dependencies": {
+        "blocks": [
+          "phase-2"
+        ],
+        "blocked_by": [],
+        "depends": []
+      }
+    },
+    "task-1-1": {
+      "type": "task",
+      "title": "Implement merge_allowlist_configs() pure function",
+      "status": "pending",
+      "parent": "phase-1",
+      "children": [],
+      "total_tasks": 1,
+      "completed_tasks": 0,
+      "metadata": {
+        "description": "Add a pure function merge_allowlist_configs(base: AllowlistConfig, extra: AllowlistConfig) -> AllowlistConfig that performs additive-only merge. No side effects, no env var awareness. Merge semantics: domains with ordered dedup (base first, extra appended, exact string match); HTTP endpoints same-host union methods (uppercased dedup) and paths (exact dedup); HTTP endpoints new-host append; blocked paths append (no per-host dedup). Merged result uses base config version. Output is fully determined by input ordering \u2014 no sorting or normalization beyond dedup rules.",
+        "file_path": "unified-proxy/config.py",
+        "acceptance_criteria": [
+          "Function signature: merge_allowlist_configs(base: AllowlistConfig, extra: AllowlistConfig) -> AllowlistConfig",
+          "Domains merged with ordered dedup (base entries first, extra appended)",
+          "Same-host HTTP endpoints: methods uppercased and deduped, paths deduped",
+          "New-host HTTP endpoints: appended preserving extra ordering",
+          "Blocked paths: extra appended after base (no per-host dedup)",
+          "Merged result uses base config version",
+          "Pure function \u2014 no side effects, no env var reads"
+        ],
+        "task_category": "implementation"
+      },
+      "dependencies": {
+        "blocks": [],
+        "blocked_by": [],
+        "depends": []
+      }
+    },
+    "task-1-2": {
+      "type": "task",
+      "title": "Add extra_path parameter to load_allowlist_config()",
+      "status": "pending",
+      "parent": "phase-1",
+      "children": [],
+      "total_tasks": 1,
+      "completed_tasks": 0,
+      "metadata": {
+        "description": "Add extra_path: str | None = None parameter to load_allowlist_config(). Precedence: explicit extra_path arg > PROXY_ALLOWLIST_EXTRA_PATH env var. When extra_path is None, resolve via env var using same indirection pattern as get_config_path() (extend it or add parallel helper \u2014 do not inline os.environ.get). When extra_path is explicitly passed (even empty string), env var is not consulted. When extra path resolves to unset/empty, skip extra loading (no behavior change). When extra path is set but file missing, raise ConfigError (fail-closed). If extra loading or validation fails, error propagates \u2014 proxy will not start with partially-configured allowlist.",
+        "file_path": "unified-proxy/config.py",
+        "acceptance_criteria": [
+          "New parameter: extra_path: str | None = None on load_allowlist_config()",
+          "Explicit extra_path arg takes priority over PROXY_ALLOWLIST_EXTRA_PATH env var",
+          "When extra_path is None, falls back to env var via get_config_path() pattern",
+          "When extra path is unset/empty, skips extra loading (current behavior preserved)",
+          "When extra path points to missing file, raises ConfigError (fail-closed)",
+          "Extra loading/validation errors propagate \u2014 no partial allowlist startup"
+        ],
+        "task_category": "implementation"
+      },
+      "dependencies": {
+        "blocks": [],
+        "blocked_by": [],
+        "depends": []
+      }
+    },
+    "task-1-3": {
+      "type": "task",
+      "title": "Implement extra file schema relaxation",
+      "status": "pending",
+      "parent": "phase-1",
+      "children": [],
+      "total_tasks": 1,
+      "completed_tasks": 0,
+      "metadata": {
+        "description": "Extra allowlist files may omit top-level keys non-empty in the base (e.g., extra with only http_endpoints is valid). version field is still required; validated (must be non-empty) but value ignored during merge. When domains is omitted, treat as empty list for merge purposes. Relaxation happens at parsing stage (before constructing AllowlistConfig); AllowlistConfig.__post_init__ validation only applies to merged result. Do not add flags or subclasses to AllowlistConfig to support partial construction.",
+        "file_path": "unified-proxy/config.py",
+        "acceptance_criteria": [
+          "Extra file may omit domains key (treated as empty list for merge)",
+          "Extra file may omit http_endpoints key (treated as empty list)",
+          "Extra file may omit blocked_paths key (treated as empty list)",
+          "version field is still required in extra file",
+          "Extra file version value is ignored during merge (base version used)",
+          "AllowlistConfig.__post_init__ validation applied only to merged result, not partial extra",
+          "No flags or subclasses added to AllowlistConfig"
+        ],
+        "task_category": "implementation"
+      },
+      "dependencies": {
+        "blocks": [],
+        "blocked_by": [],
+        "depends": []
+      }
+    },
+    "task-1-4": {
+      "type": "task",
+      "title": "Write allowlist merge tests",
+      "status": "pending",
+      "parent": "phase-1",
+      "children": [],
+      "total_tasks": 1,
+      "completed_tasks": 0,
+      "metadata": {
+        "description": "Comprehensive test suite for allowlist merge logic. Tests: valid merge produces expected combined config; missing extra file raises ConfigError; invalid extra schema raises ConfigError; domain dedup preserves base ordering; duplicate domain in extra not repeated; same-host endpoint union merges methods and paths; blocked path append ordering; blocked paths with same host in both base and extra are appended (not merged per-host); extra file with only http_endpoints (omitted domains) is valid; version mismatch uses base version; precedence: explicit extra_path overrides env var; precedence: env var fallback when extra_path is None; precedence: explicit empty string extra_path means no extra.",
+        "file_path": "unified-proxy/tests/unit/test_config_merge.py",
+        "acceptance_criteria": [
+          "Test: valid merge produces expected combined config",
+          "Test: missing extra file raises ConfigError",
+          "Test: invalid extra schema raises ConfigError",
+          "Test: domain dedup preserves base ordering",
+          "Test: duplicate domain in extra not repeated in merged result",
+          "Test: same-host endpoint union merges methods and paths",
+          "Test: blocked path append ordering",
+          "Test: same-host blocked paths in both base and extra are appended",
+          "Test: extra file with only http_endpoints (omitted domains) is valid",
+          "Test: version mismatch \u2014 merged result uses base version",
+          "Test: explicit extra_path arg overrides env var",
+          "Test: env var fallback when extra_path is None",
+          "Test: explicit empty string extra_path means no extra"
+        ],
+        "task_category": "implementation"
+      },
+      "dependencies": {
+        "blocks": [],
+        "blocked_by": [],
+        "depends": []
+      }
+    },
+    "task-1-5": {
+      "type": "task",
+      "title": "Write ADR-008: Allowlist Layering",
+      "status": "pending",
+      "parent": "phase-1",
+      "children": [],
+      "total_tasks": 1,
+      "completed_tasks": 0,
+      "metadata": {
+        "description": "Write ADR covering additive-only merge design and rationale. Document merge canonicalization rules (exact string match for domains and hosts, uppercase dedup for methods, ordered dedup for domains, append-only for blocked paths). Document precedence (explicit extra_path arg > env var; container env always uses container mount path). Document fail-closed failure policy (configured extra that is missing/invalid prevents startup). Follow existing ADR template (ADR-000 through ADR-007 exist).",
+        "file_path": "docs/adr/008-allowlist-layering.md",
+        "acceptance_criteria": [
+          "ADR follows existing template structure (Status, Context, Decision, Consequences)",
+          "Documents additive-only merge design and security rationale",
+          "Documents merge canonicalization rules (string match, uppercase methods, ordered dedup)",
+          "Documents precedence rules (arg > env var, container mount path)",
+          "Documents fail-closed failure policy"
+        ],
+        "task_category": "implementation"
+      },
+      "dependencies": {
+        "blocks": [],
+        "blocked_by": [],
+        "depends": []
+      }
+    },
+    "verify-1-1": {
+      "type": "verify",
+      "title": "Phase 1 fidelity review",
+      "status": "pending",
+      "parent": "phase-1",
+      "children": [],
+      "total_tasks": 1,
+      "completed_tasks": 0,
+      "metadata": {
+        "description": "Verify all Phase 1 tasks are implemented correctly. All merge tests pass. load_allowlist_config() with no extra path produces identical behavior to current code. ADR-008 is complete and follows template.",
+        "verification_type": "fidelity"
+      },
+      "dependencies": {
+        "blocks": [],
+        "blocked_by": [],
+        "depends": []
+      }
+    },
+    "phase-2": {
+      "type": "phase",
+      "title": "Runtime Refactor Primitives",
+      "status": "pending",
+      "parent": "spec-root",
+      "children": [
+        "task-2-1",
+        "task-2-2",
+        "task-2-3",
+        "task-2-4",
+        "task-2-5",
+        "task-2-6",
+        "task-2-7",
+        "task-2-8",
+        "verify-2-1"
+      ],
+      "total_tasks": 9,
+      "completed_tasks": 0,
+      "metadata": {
+        "purpose": "",
+        "description": "Add compose extensibility, streaming exec, destroy extraction, and container environment plumbing. These are independent runtime primitives that improve automation ergonomics."
+      },
+      "dependencies": {
+        "blocks": [
+          "phase-3"
+        ],
+        "blocked_by": [
+          "phase-1"
+        ],
+        "depends": []
+      }
+    },
+    "task-2-1": {
+      "type": "task",
+      "title": "Add compose_extras parameter to compose functions",
+      "status": "pending",
+      "parent": "phase-2",
+      "children": [],
+      "total_tasks": 1,
+      "completed_tasks": 0,
+      "metadata": {
+        "description": "Add compose_extras: list[str] | None = None to get_compose_command(), compose_up(), and compose_down(). Each entry is a path to a compose override file. Validated: each path must exist on disk and be a regular file (not directory or device); raise FileNotFoundError if not (TOCTOU acceptable for CLI). File ordering in -f chain: base (docker-compose.yml) \u2192 credential-isolation (if enabled) \u2192 override_file (if set) \u2192 compose_extras (in list order). None or empty list preserves current behavior exactly. This is an internal Python API (not CLI-exposed). Callers responsible for passing same extras to compose_down() if extras define new services; not required for extras that only add mounts/env to existing services.",
+        "file_path": "foundry_sandbox/docker.py",
+        "acceptance_criteria": [
+          "New parameter compose_extras: list[str] | None = None on get_compose_command()",
+          "New parameter compose_extras on compose_up() and compose_down()",
+          "Each extras path validated: must exist and be a regular file",
+          "FileNotFoundError raised for invalid/missing paths",
+          "File ordering: base \u2192 credential-isolation \u2192 override_file \u2192 compose_extras",
+          "None or empty list produces identical command to current behavior"
+        ],
+        "task_category": "implementation"
+      },
+      "dependencies": {
+        "blocks": [],
+        "blocked_by": [],
+        "depends": []
+      }
+    },
+    "task-2-2": {
+      "type": "task",
+      "title": "Implement exec_in_container_streaming()",
+      "status": "pending",
+      "parent": "phase-2",
+      "children": [],
+      "total_tasks": 1,
+      "completed_tasks": 0,
+      "metadata": {
+        "description": "Add exec_in_container_streaming(container_id: str, *args: str, timeout: int = 3600) -> int. Uses subprocess.Popen with inherited stdout/stderr (real-time streaming). Returns process exit code on normal completion. Timeout sequence: proc.terminate() (SIGTERM) \u2192 proc.wait(timeout=5) \u2192 on TimeoutExpired: proc.kill() (SIGKILL) + proc.wait() to reap. Best-effort docker stop --time 10 backstop on timeout (intentionally destructive \u2014 appropriate for ephemeral/automation use cases). Log warning with container ID on backstop failure. Return exit code 124 on timeout (coreutils convention). Does not replace existing exec_in_container().",
+        "file_path": "foundry_sandbox/docker.py",
+        "acceptance_criteria": [
+          "Function signature: exec_in_container_streaming(container_id, *args, timeout=3600) -> int",
+          "Uses subprocess.Popen with inherited stdout/stderr",
+          "Returns process exit code on normal completion",
+          "On timeout: SIGTERM \u2192 wait(5s) \u2192 SIGKILL \u2192 reap",
+          "On timeout: best-effort docker stop --time 10 backstop",
+          "Returns exit code 124 on timeout",
+          "Existing exec_in_container() unchanged"
+        ],
+        "task_category": "implementation"
+      },
+      "dependencies": {
+        "blocks": [],
+        "blocked_by": [],
+        "depends": []
+      }
+    },
+    "task-2-3": {
+      "type": "task",
+      "title": "Extract destroy_impl() from Click command",
+      "status": "pending",
+      "parent": "phase-2",
+      "children": [],
+      "total_tasks": 1,
+      "completed_tasks": 0,
+      "metadata": {
+        "description": "Extract destroy_impl(name: str, keep_worktree: bool = False, best_effort: bool = True, skip_tmux: bool = False, skip_branch_cleanup: bool = False) -> None. Uses best_effort (not force) for error-handling semantics. Default best_effort=True preserves current cast destroy behavior (tolerates partial state). Click wrapper maps: --force \u2192 skip confirmation AND best_effort=True; --yes and SANDBOX_NONINTERACTIVE only skip confirmation (do NOT imply best_effort). Keep existing log_info/log_warn calls inside destroy_impl; move remaining click.echo calls to Click wrapper. destroy_impl does not prompt. best_effort=False (strict mode): each cleanup step that currently catches/logs errors will re-raise instead. On first exception, cleanup stops. Strict mode is internal-only (not CLI-exposed). Gate tmux kill on skip_tmux, branch cleanup on skip_branch_cleanup. Preserve all existing cleanup steps and ordering.",
+        "file_path": "foundry_sandbox/commands/destroy.py",
+        "acceptance_criteria": [
+          "Function signature: destroy_impl(name, keep_worktree=False, best_effort=True, skip_tmux=False, skip_branch_cleanup=False)",
+          "Default best_effort=True preserves current behavior",
+          "Click wrapper maps --force to skip_confirm + best_effort=True",
+          "Click wrapper maps --yes/SANDBOX_NONINTERACTIVE to skip_confirm only",
+          "log_info/log_warn calls remain inside destroy_impl",
+          "click.echo calls moved to Click wrapper",
+          "destroy_impl does not prompt",
+          "best_effort=False re-raises on first cleanup failure",
+          "skip_tmux=True skips tmux kill",
+          "skip_branch_cleanup=True skips branch cleanup",
+          "All existing cleanup steps and ordering preserved"
+        ],
+        "task_category": "refactoring"
+      },
+      "dependencies": {
+        "blocks": [],
+        "blocked_by": [],
+        "depends": []
+      }
+    },
+    "task-2-4": {
+      "type": "task",
+      "title": "Thread PROXY_ALLOWLIST_EXTRA_PATH into container",
+      "status": "pending",
+      "parent": "phase-2",
+      "children": [],
+      "total_tasks": 1,
+      "completed_tasks": 0,
+      "metadata": {
+        "description": "In compose_up(): if host env var PROXY_ALLOWLIST_EXTRA_PATH is set, resolve to absolute path, validate exists (FileNotFoundError), validate is regular file, resolve symlinks via os.path.realpath(). Bind-mount the extra file read-only into container at /etc/unified-proxy/allowlist-extra.yml. Set PROXY_ALLOWLIST_EXTRA_PATH=/etc/unified-proxy/allowlist-extra.yml in container env. Inject via generated temp compose override file (tempfile.NamedTemporaryFile(delete=False)), appended through compose_extras. Clean up temp file in try/finally (SIGKILL leaks acceptable). If host env var unset/empty, no mount or env var added. If isolate_credentials=False (no proxy), silently ignore the env var. Trust model: operator-trusted input, mounted read-only.",
+        "file_path": "foundry_sandbox/docker.py",
+        "acceptance_criteria": [
+          "When PROXY_ALLOWLIST_EXTRA_PATH is set: resolves to absolute path",
+          "Validates file exists and is a regular file",
+          "Resolves symlinks via os.path.realpath()",
+          "Bind-mounts read-only to /etc/unified-proxy/allowlist-extra.yml",
+          "Sets container env PROXY_ALLOWLIST_EXTRA_PATH to container mount path",
+          "Injects via temp compose override file through compose_extras",
+          "Temp file cleaned up in try/finally",
+          "Unset/empty env var: no mount or env var added",
+          "isolate_credentials=False: env var silently ignored"
+        ],
+        "task_category": "implementation"
+      },
+      "dependencies": {
+        "blocks": [],
+        "blocked_by": [],
+        "depends": []
+      }
+    },
+    "task-2-5": {
+      "type": "task",
+      "title": "Write Phase 2 tests: compose extras",
+      "status": "pending",
+      "parent": "phase-2",
+      "children": [],
+      "total_tasks": 1,
+      "completed_tasks": 0,
+      "metadata": {
+        "description": "Test compose_extras parameter: correct -f ordering with all layers active (base + credential-isolation + override + extras); None preserves current behavior; invalid path raises FileNotFoundError; full 4-layer ordering verified; compose_down succeeds without allowlist extra override file present (lifecycle stability).",
+        "file_path": "tests/unit/test_compose_extras.py",
+        "acceptance_criteria": [
+          "Test: compose_extras appends -f args in correct order",
+          "Test: full 4-layer ordering (base + credential-isolation + override + extras)",
+          "Test: compose_extras=None produces same command as current",
+          "Test: invalid extras path raises FileNotFoundError",
+          "Test: compose_down succeeds without allowlist extra override file present"
+        ],
+        "task_category": "implementation"
+      },
+      "dependencies": {
+        "blocks": [],
+        "blocked_by": [],
+        "depends": []
+      }
+    },
+    "task-2-6": {
+      "type": "task",
+      "title": "Write Phase 2 tests: streaming exec",
+      "status": "pending",
+      "parent": "phase-2",
+      "children": [],
+      "total_tasks": 1,
+      "completed_tasks": 0,
+      "metadata": {
+        "description": "Test exec_in_container_streaming: normal completion returns exit code; timeout returns 124; timeout triggers SIGTERM then SIGKILL sequence; non-existent container returns docker exec exit code (immediate failure).",
+        "file_path": "tests/unit/test_streaming_exec.py",
+        "acceptance_criteria": [
+          "Test: normal completion returns process exit code",
+          "Test: timeout returns exit code 124",
+          "Test: timeout triggers SIGTERM \u2192 wait \u2192 SIGKILL sequence",
+          "Test: non-existent container returns docker exec exit code"
+        ],
+        "task_category": "implementation"
+      },
+      "dependencies": {
+        "blocks": [],
+        "blocked_by": [],
+        "depends": []
+      }
+    },
+    "task-2-7": {
+      "type": "task",
+      "title": "Write Phase 2 tests: destroy_impl",
+      "status": "pending",
+      "parent": "phase-2",
+      "children": [],
+      "total_tasks": 1,
+      "completed_tasks": 0,
+      "metadata": {
+        "description": "Test destroy_impl: skip_tmux=True skips tmux kill; skip_branch_cleanup=True skips branch cleanup; default best_effort=True logs and skips missing resources; explicit best_effort=False raises on missing resources; logging output verification (capture log_warn/log_info calls).",
+        "file_path": "tests/unit/test_destroy_impl.py",
+        "acceptance_criteria": [
+          "Test: skip_tmux=True skips tmux kill step",
+          "Test: skip_branch_cleanup=True skips branch cleanup",
+          "Test: default best_effort=True logs and skips missing resources",
+          "Test: explicit best_effort=False raises on first missing resource",
+          "Test: logging output verification (log_warn/log_info captured)"
+        ],
+        "task_category": "implementation"
+      },
+      "dependencies": {
+        "blocks": [],
+        "blocked_by": [],
+        "depends": []
+      }
+    },
+    "task-2-8": {
+      "type": "task",
+      "title": "Write Phase 2 tests: container plumbing",
+      "status": "pending",
+      "parent": "phase-2",
+      "children": [],
+      "total_tasks": 1,
+      "completed_tasks": 0,
+      "metadata": {
+        "description": "Test container env plumbing: PROXY_ALLOWLIST_EXTRA_PATH set generates override with read-only mount; unset produces no extra mount or env var; pointing to nonexistent file raises FileNotFoundError; temp override file cleaned up on success; temp override file cleaned up on failure (exception path).",
+        "file_path": "tests/unit/test_compose_extras.py",
+        "acceptance_criteria": [
+          "Test: PROXY_ALLOWLIST_EXTRA_PATH set generates override with read-only mount",
+          "Test: PROXY_ALLOWLIST_EXTRA_PATH unset produces no extra mount/env",
+          "Test: nonexistent file path raises FileNotFoundError",
+          "Test: temp override file cleaned up after compose_up succeeds",
+          "Test: temp override file cleaned up after compose_up fails"
+        ],
+        "task_category": "implementation"
+      },
+      "dependencies": {
+        "blocks": [],
+        "blocked_by": [],
+        "depends": []
+      }
+    },
+    "verify-2-1": {
+      "type": "verify",
+      "title": "Phase 2 fidelity review",
+      "status": "pending",
+      "parent": "phase-2",
+      "children": [],
+      "total_tasks": 1,
+      "completed_tasks": 0,
+      "metadata": {
+        "description": "Verify all Phase 2 tasks are implemented correctly. All new tests pass. Existing tests still pass. compose_up()/compose_down()/exec_in_container() with default parameters produce identical behavior.",
+        "verification_type": "fidelity"
+      },
+      "dependencies": {
+        "blocks": [],
+        "blocked_by": [],
+        "depends": []
+      }
+    },
+    "phase-3": {
+      "type": "phase",
+      "title": "Verification and Documentation",
+      "status": "pending",
+      "parent": "spec-root",
+      "children": [
+        "verify-3-1",
+        "verify-3-2",
+        "task-3-1",
+        "task-3-2",
+        "verify-3-3"
+      ],
+      "total_tasks": 5,
+      "completed_tasks": 0,
+      "metadata": {
+        "purpose": "",
+        "description": "Ensure no regressions, update docs for the retained generic features, and finalize the ADR."
+      },
+      "dependencies": {
+        "blocks": [],
+        "blocked_by": [
+          "phase-2"
+        ],
+        "depends": []
+      }
+    },
+    "verify-3-1": {
+      "type": "verify",
+      "title": "Run CI validation",
+      "status": "pending",
+      "parent": "phase-3",
+      "children": [],
+      "total_tasks": 1,
+      "completed_tasks": 0,
+      "metadata": {
+        "description": "Run ./scripts/ci-local.sh and confirm all checks pass with no regressions.",
+        "verification_type": "run-tests"
+      },
+      "dependencies": {
+        "blocks": [],
+        "blocked_by": [],
+        "depends": []
+      }
+    },
+    "verify-3-2": {
+      "type": "verify",
+      "title": "Manual smoke test",
+      "status": "pending",
+      "parent": "phase-3",
+      "children": [],
+      "total_tasks": 1,
+      "completed_tasks": 0,
+      "metadata": {
+        "description": "Run cast new, cast start, cast destroy with default options on local Docker. Verify each completes without error, destroy cleans up all resources (container, worktree, tmux session), and cast start proxy health check passes (compose logs show healthy status).",
+        "verification_type": "manual"
+      },
+      "dependencies": {
+        "blocks": [],
+        "blocked_by": [],
+        "depends": []
+      }
+    },
+    "task-3-1": {
+      "type": "task",
+      "title": "Update docs/configuration.md",
+      "status": "pending",
+      "parent": "phase-3",
+      "children": [],
+      "total_tasks": 1,
+      "completed_tasks": 0,
+      "metadata": {
+        "description": "Document PROXY_ALLOWLIST_EXTRA_PATH as a generic extension point with merge semantics (additive-only, fail-closed). Document compose_extras capability at a high level (internal API, file ordering). Do not add CI-specific content.",
+        "file_path": "docs/configuration.md",
+        "acceptance_criteria": [
+          "PROXY_ALLOWLIST_EXTRA_PATH documented with merge semantics",
+          "compose_extras documented at high level as internal API",
+          "No CI-specific content added"
+        ],
+        "task_category": "implementation"
+      },
+      "dependencies": {
+        "blocks": [],
+        "blocked_by": [],
+        "depends": []
+      }
+    },
+    "task-3-2": {
+      "type": "task",
+      "title": "Final ADR-008 review",
+      "status": "pending",
+      "parent": "phase-3",
+      "children": [],
+      "total_tasks": 1,
+      "completed_tasks": 0,
+      "metadata": {
+        "description": "Review ADR-008 for completeness. Verify it covers additive-only merge design, canonicalization rules, precedence, fail-closed policy, and follows the existing template structure.",
+        "file_path": "docs/adr/008-allowlist-layering.md",
+        "acceptance_criteria": [
+          "ADR covers all documented merge canonicalization rules",
+          "ADR covers precedence and failure policy",
+          "ADR follows existing template structure"
+        ],
+        "task_category": "implementation"
+      },
+      "dependencies": {
+        "blocks": [],
+        "blocked_by": [],
+        "depends": []
+      }
+    },
+    "verify-3-3": {
+      "type": "verify",
+      "title": "Phase 3 fidelity review",
+      "status": "pending",
+      "parent": "phase-3",
+      "children": [],
+      "total_tasks": 1,
+      "completed_tasks": 0,
+      "metadata": {
+        "description": "Verify all Phase 3 tasks complete. CI passes. Documentation is accurate and excludes CI-specific content. Only retained scope shipped \u2014 no cast ci, gate logic, or CI-specific files introduced.",
+        "verification_type": "fidelity"
+      },
+      "dependencies": {
+        "blocks": [],
+        "blocked_by": [],
+        "depends": []
+      }
+    }
+  },
+  "journal": []
+}

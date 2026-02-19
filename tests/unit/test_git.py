@@ -416,10 +416,11 @@ class TestCreateWorktree:
         bare.mkdir()
         wt = tmp_path / "worktree"
 
-        # prune, show-ref (not found), worktree add all succeed
+        # prune, rev-parse --verify (from_branch exists), show-ref (not found), worktree add
         mock_run.side_effect = [
             Mock(returncode=0, stdout="", stderr=""),  # prune
-            Mock(returncode=1, stdout="", stderr=""),  # show-ref (branch not found)
+            Mock(returncode=0, stdout="", stderr=""),  # rev-parse --verify (from_branch found)
+            Mock(returncode=1, stdout="", stderr=""),  # show-ref (target branch not found)
             Mock(returncode=0, stdout="", stderr=""),  # worktree add --no-checkout
         ]
 

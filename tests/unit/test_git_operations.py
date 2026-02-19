@@ -613,16 +613,28 @@ class TestProtectedBranchPushValidation:
         assert err is not None
         assert "wildcard" in err.reason.lower()
 
-    def test_execute_git_blocks_implicit_push_before_subprocess(self):
-        """Implicit push should be denied before running git subprocess."""
+    def test_execute_git_expands_implicit_push_with_sandbox_branch(self):
+        """Implicit push (no refspec) should be auto-expanded with sandbox branch.
+
+        The proxy auto-appends the sandbox branch so that downstream
+        validation (branch isolation, protected branches) can enforce policy.
+        """
         metadata = {"sandbox_branch": "test-branch"}
         request = GitExecRequest(args=["push", "origin"])
         with patch("git_operations.subprocess.run") as mock_run:
+            mock_run.return_value = MagicMock(
+                returncode=0, stdout=b"", stderr=b""
+            )
             response, err = execute_git(request, "/tmp", metadata=metadata)
-            assert response is None
-            assert err is not None
-            assert "explicit refspecs" in err.reason.lower()
-            mock_run.assert_not_called()
+            # Should succeed (not blocked) — the bare push is expanded
+            assert err is None
+            assert response is not None
+            # Verify subprocess was called with the expanded args
+            call_args = mock_run.call_args[0][0]
+            # The command list includes git binary + injected -c flags + translated args
+            assert "push" in call_args
+            assert "origin" in call_args
+            assert "test-branch" in call_args
 
     def test_execute_git_blocks_wildcard_refspec_before_subprocess(self):
         """Wildcard refspec push should be denied before running git subprocess.

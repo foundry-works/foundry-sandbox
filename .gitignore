@@ -7,6 +7,7 @@ specs/.plan-reviews
 specs/.plans
 specs/.notes
 specs/.research
+specs/.autonomy
 __pycache__/
 .hypothesis/
 .claude-tmp/
