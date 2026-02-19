@@ -276,14 +276,23 @@ def _is_allowed_ref(
                 _is_allowed_ref(p, sandbox_branch, base_branch) for p in parts if p
             )
 
+    # FETCH_HEAD is always blocked (could contain cross-branch data)
+    if ref == "FETCH_HEAD":
+        return False
+
+    # HEAD and @{} forms are always allowed.
+    # Check the original ref BEFORE stripping rev suffixes because
+    # @{u}, @{upstream}, @{push} etc. are entirely consumed by the
+    # suffix regex, leaving an empty string that would fail all checks.
+    # These are safe: config writes are blocked so tracking refs can
+    # only point to branches the sandbox already has push access to.
+    if ref == "HEAD" or ref.startswith("@{"):
+        return True
+
     # Strip revision suffixes
     base = _strip_rev_suffixes(ref)
 
-    # FETCH_HEAD is always blocked (could contain cross-branch data)
-    if base == "FETCH_HEAD":
-        return False
-
-    # HEAD and @{} forms are always allowed
+    # Post-strip HEAD check (e.g. HEAD~3 → HEAD)
     if base == "HEAD" or base.startswith("@{"):
         return True
 

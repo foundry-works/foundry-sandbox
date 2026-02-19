@@ -138,6 +138,8 @@ http_endpoints:
       - "/gists/*"
       - "/search/*"
       - "/rate_limit"
+      # GraphQL API (mutation filtering handled by github-api-filter.py)
+      - "/graphql"
 
   # Anthropic API
   - host: api.anthropic.com

@@ -256,6 +256,76 @@ def _synthesize_remote_verbose_output(
 
 
 # ---------------------------------------------------------------------------
+# Stale Lock Cleanup
+# ---------------------------------------------------------------------------
+
+# Git lockfile names that can become stale in a bare repo.
+_GIT_LOCK_NAMES = ("config.lock", "HEAD.lock")
+
+# Lockfiles older than this (seconds) are considered stale.
+_STALE_LOCK_AGE = 60
+
+
+def remove_stale_config_locks(repo_root: str) -> None:
+    """Remove stale git config.lock files from bare repo and worktree gitdir.
+
+    Git uses ``<file>.lock`` with ``O_CREAT|O_EXCL`` for atomic config writes.
+    If a process is interrupted mid-write (e.g. a container is killed), the
+    lockfile persists and blocks all subsequent config writes — including
+    ``git push -u`` which writes upstream tracking config.
+
+    Called before push commands to prevent stale locks from blocking the
+    tracking config write that ``-u`` triggers.
+
+    Args:
+        repo_root: The worktree or bare repo root path.
+    """
+    from branch_isolation import resolve_bare_repo_path
+
+    bare_repo = resolve_bare_repo_path(repo_root)
+    if not bare_repo:
+        return
+
+    now = time.time()
+    dirs_to_check = [bare_repo]
+
+    # Also check the worktree's gitdir (where config.worktree lives)
+    dot_git = os.path.join(os.path.realpath(repo_root), ".git")
+    if os.path.isfile(dot_git):
+        try:
+            with open(dot_git, "r") as f:
+                content = f.read().strip()
+            if content.startswith("gitdir:"):
+                gitdir = content[len("gitdir:"):].strip()
+                if not os.path.isabs(gitdir):
+                    gitdir = os.path.join(os.path.realpath(repo_root), gitdir)
+                gitdir = os.path.realpath(gitdir)
+                if os.path.isdir(gitdir) and gitdir != bare_repo:
+                    dirs_to_check.append(gitdir)
+        except OSError:
+            pass
+
+    for directory in dirs_to_check:
+        for name in _GIT_LOCK_NAMES:
+            lock_path = os.path.join(directory, name)
+            try:
+                age = now - os.stat(lock_path).st_mtime
+            except FileNotFoundError:
+                continue
+            except OSError:
+                continue
+            if age >= _STALE_LOCK_AGE:
+                try:
+                    os.unlink(lock_path)
+                    logger.warning(
+                        "Removed stale git lockfile: %s (age %.0fs)",
+                        lock_path, age,
+                    )
+                except OSError:
+                    pass
+
+
+# ---------------------------------------------------------------------------
 # Fetch Locking
 # ---------------------------------------------------------------------------
 

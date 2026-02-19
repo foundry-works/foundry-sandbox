@@ -60,6 +60,11 @@ if [ -f /git-workspace/.git ]; then
         case "$BARE_DIR" in /*) ;; *) BARE_DIR="$GITDIR_PATH/$BARE_DIR" ;; esac
         ls "$BARE_DIR" >/dev/null 2>&1 || true
         cat "$BARE_DIR/config" >/dev/null 2>&1 || true
+        # Remove stale config.lock if older than 60 seconds to prevent
+        # "could not lock config file" errors from interrupted writes.
+        if [ -f "$BARE_DIR/config.lock" ]; then
+            find "$BARE_DIR" -maxdepth 1 -name config.lock -mmin +1 -delete 2>/dev/null || true
+        fi
         git config --file "$BARE_DIR/config" extensions.worktreeConfig true
         REPO_VER=$(git config --file "$BARE_DIR/config" --get core.repositoryformatversion 2>/dev/null || echo 0)
         if [ "$REPO_VER" -lt 1 ] 2>/dev/null; then

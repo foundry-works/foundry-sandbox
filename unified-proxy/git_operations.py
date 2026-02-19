@@ -88,6 +88,7 @@ from git_subprocess import (  # noqa: F401
     _read_remote_urls_from_bare_config,
     _synthesize_remote_verbose_output,
     build_clean_env,
+    remove_stale_config_locks,
 )
 
 logger = logging.getLogger(__name__)
@@ -747,6 +748,12 @@ def execute_git(
                 request_id=req_id,
             )
 
+    # Stale lock cleanup: remove config.lock before push -u to prevent
+    # "could not lock config file" errors from stale locks left by
+    # interrupted config writes (e.g. fix_proxy_worktree_paths).
+    if subcommand == "push":
+        remove_stale_config_locks(resolved_cwd)
+
     # Execute (with optional fetch lock)
     try:
         ctx = fetch_lock_ctx or contextlib.nullcontext()
@@ -843,7 +850,7 @@ def execute_git(
                 stdout_b64 = None
                 exit_code = 0
                 stderr_str = ""
-        if stdout_str.strip() == "" and (sub_args and "-v" in sub_args):
+        if stdout_str.strip() == "" and (sub_args and ("-v" in sub_args or "--verbose" in sub_args)):
             synthesized = _synthesize_remote_verbose_output(
                 resolved_cwd, env, git_dir=bare_repo
             )

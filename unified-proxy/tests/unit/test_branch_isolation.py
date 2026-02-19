@@ -223,14 +223,15 @@ class TestIsAllowedRef:
         assert _is_allowed_ref("HEAD^2", SANDBOX) is True
 
     # --- @{} refs ---
-    # Standalone @{upstream}/@{u} are consumed entirely by _strip_rev_suffixes
-    # (the @{...} regex matches the whole string), so they are not allowed as
-    # bare refs.  Branch-qualified forms like HEAD@{1} are tested via stash.
+    # Standalone @{upstream}/@{u}/@{push} are allowed because they resolve
+    # to the sandbox's own tracking branch. Config writes are blocked so
+    # tracking refs can only point to branches the sandbox has push access to.
 
-    def test_standalone_at_ref_blocked(self):
-        # @{upstream} stripped to "" which is not a valid branch name
-        assert _is_allowed_ref("@{upstream}", SANDBOX) is False
-        assert _is_allowed_ref("@{u}", SANDBOX) is False
+    def test_standalone_at_ref_allowed(self):
+        assert _is_allowed_ref("@{upstream}", SANDBOX) is True
+        assert _is_allowed_ref("@{u}", SANDBOX) is True
+        assert _is_allowed_ref("@{push}", SANDBOX) is True
+        assert _is_allowed_ref("@{0}", SANDBOX) is True
 
     # --- Own branch ---
 

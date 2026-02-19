@@ -159,7 +159,7 @@ COMMAND_BLOCKED_FLAGS: Dict[str, FrozenSet[str]] = {
 # ---------------------------------------------------------------------------
 
 REMOTE_ALLOWED_SUBCOMMANDS: FrozenSet[str] = frozenset({
-    "-v", "show", "get-url",
+    "-v", "--verbose", "show", "get-url",
 })
 
 REMOTE_BLOCKED_SUBCOMMANDS: FrozenSet[str] = frozenset({

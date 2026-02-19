@@ -7,9 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [0.15.9] - 2026-02-19
+## [0.16.0] - 2026-02-19
 
 ### Fixed
+- **GitHub GraphQL API blocked despite `--allow-pr`** — `/graphql` was missing from the `api.github.com` endpoint paths in `allowlist.yaml`, causing `policy_engine.py` to reject all GraphQL requests before `github-api-filter.py` could apply its mutation filtering; `gh pr create`, `gh pr view`, and other GraphQL-based CLI commands now work when `--allow-pr` is enabled
+- **`@{u}` / `@{upstream}` / `@{push}` incorrectly blocked by branch isolation** — `_strip_rev_suffixes()` consumed the entire `@{...}` ref before the allowlist check could run; now checks the original ref for `@{...}` forms first
+- **`git remote --verbose` blocked by command validation** — only `-v` was in `REMOTE_ALLOWED_SUBCOMMANDS`, not `--verbose`
+- **`git push -u` fails with "could not lock config file"** — added stale `config.lock` cleanup before push execution in the proxy, and before config writes in `fix_proxy_worktree_paths()`
 - **Stale git lockfiles block all sandboxes sharing a bare repo** — `cast start` now removes stale `config.lock` and `HEAD.lock` files (older than 2 minutes) from the shared bare repo before fetching, preventing a killed sandbox from blocking every other sandbox using the same repo
 
 ## [0.15.8] - 2026-02-17
