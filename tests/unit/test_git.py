@@ -169,7 +169,7 @@ class TestEnsureBareRepo:
         mock_retry.assert_called_once()
         args = mock_retry.call_args[0][0]
         assert "fetch" in args
-        assert "--all" in args
+        assert "origin" in args
         assert "--prune" in args
 
     @patch("foundry_sandbox.git.git_with_retry")
@@ -408,9 +408,9 @@ class TestCreateWorktree:
         assert any("worktree" in str(c) and "add" in str(c) for c in calls)
 
     @patch("foundry_sandbox.git_worktree.configure_sparse_checkout")
-    @patch("foundry_sandbox.git_worktree.git_with_retry")
+    @patch("foundry_sandbox.git_worktree.fetch_bare_branch")
     @patch("foundry_sandbox.git_worktree.subprocess.run")
-    def test_new_worktree_with_from_branch_and_sparse(self, mock_run, mock_retry, mock_sparse, tmp_path):
+    def test_new_worktree_with_from_branch_and_sparse(self, mock_run, mock_fetch_branch, mock_sparse, tmp_path):
         """New worktree with from_branch and sparse should use --no-checkout."""
         bare = tmp_path / "bare.git"
         bare.mkdir()
@@ -428,6 +428,9 @@ class TestCreateWorktree:
             bare, wt, "sandbox-branch", from_branch="main",
             sparse_checkout=True, working_dir="src"
         )
+
+        # Should fetch the base branch
+        mock_fetch_branch.assert_called_once_with(bare, "main")
 
         # Should call configure_sparse_checkout
         mock_sparse.assert_called_once_with(bare, wt, "src")

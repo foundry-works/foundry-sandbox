@@ -139,7 +139,12 @@ def ensure_bare_repo(repo_url: str, bare_path: str | Path) -> None:
     """Clone or update a bare repository.
 
     If *bare_path* does not exist, clones *repo_url* as a bare repo.
-    Otherwise, fetches all refs with pruning.
+    Otherwise, fetches all remote objects so they are available locally.
+
+    Note: ``git clone --bare`` does not configure a fetch refspec, so
+    ``git fetch --all`` alone will NOT update ``refs/heads/*``.  Branch
+    refs are updated individually by :func:`fetch_bare_branch` when the
+    worktree is created.
 
     Args:
         repo_url: Remote repository URL.
@@ -154,7 +159,45 @@ def ensure_bare_repo(repo_url: str, bare_path: str | Path) -> None:
     else:
         log_step("Fetching latest from origin...")
         remove_stale_git_locks(bp)
-        git_with_retry(["-C", str(bp), "fetch", "--all", "--prune"])
+        # Fetch objects; branch refs updated later by fetch_bare_branch.
+        git_with_retry(["-C", str(bp), "fetch", "origin", "--prune"])
+
+
+def fetch_bare_branch(bare_path: str | Path, branch: str) -> None:
+    """Fetch a single branch into a bare repo, updating refs/heads/<branch>.
+
+    ``git clone --bare`` omits the fetch refspec and ``git fetch`` refuses
+    to update a ref that is checked out in any worktree.  This function
+    works around both issues by fetching to ``FETCH_HEAD`` and then using
+    ``update-ref`` to move the local branch pointer.
+
+    Args:
+        bare_path: Path to the bare repository.
+        branch: Remote branch name to fetch and update.
+    """
+    bp = str(bare_path)
+
+    # Fetch the branch — this always writes FETCH_HEAD regardless of
+    # whether refs/heads/<branch> is "checked out" somewhere.
+    git_with_retry(["-C", bp, "fetch", "origin", branch])
+
+    # Read the fetched commit SHA.
+    result = subprocess.run(
+        ["git", "-C", bp, "rev-parse", "FETCH_HEAD"],
+        capture_output=True,
+        text=True,
+        check=True,
+        timeout=TIMEOUT_GIT_QUERY,
+    )
+    sha = result.stdout.strip()
+
+    # Force-update the local branch ref (bypasses checked-out guard).
+    subprocess.run(
+        ["git", "-C", bp, "update-ref", f"refs/heads/{branch}", sha],
+        capture_output=True,
+        check=True,
+        timeout=TIMEOUT_GIT_QUERY,
+    )
 
 
 def ensure_repo_checkout(

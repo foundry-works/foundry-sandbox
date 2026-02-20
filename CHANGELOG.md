@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.17.4] - 2026-02-19
+
+### Fixed
+- **Sandbox worktrees created from stale branch refs** — `git clone --bare` omits the fetch refspec, so `git fetch --all` never updated `refs/heads/*` in the cached bare repo; additionally, the targeted fetch in `create_worktree` was silently blocked by git's "checked-out branch" guard. New `fetch_bare_branch()` fetches to `FETCH_HEAD` then uses `update-ref` to bypass both issues.
+
 ## [0.17.3] - 2026-02-19
 
 ### Fixed

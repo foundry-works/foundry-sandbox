@@ -18,7 +18,7 @@ import time
 from pathlib import Path
 
 from foundry_sandbox.constants import TIMEOUT_GIT_QUERY, TIMEOUT_GIT_TRANSFER
-from foundry_sandbox.git import git_with_retry
+from foundry_sandbox.git import fetch_bare_branch, git_with_retry
 from foundry_sandbox.utils import log_info, log_step, log_warn
 
 
@@ -234,10 +234,10 @@ def create_worktree(
     if not wt_p.exists():
         # Create new worktree
         if from_branch:
-            # Fetch the base branch
+            # Fetch the base branch and update the local ref.
             try:
-                git_with_retry(["-C", str(bare_p), "fetch", "origin", "--", f"{from_branch}:{from_branch}"])
-            except RuntimeError as e:
+                fetch_bare_branch(bare_p, from_branch)
+            except (RuntimeError, subprocess.CalledProcessError) as e:
                 log_info(f"Fetch failed (may already exist locally): {e}")
 
             # Verify from_branch ref exists before attempting worktree add
