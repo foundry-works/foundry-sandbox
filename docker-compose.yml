@@ -27,7 +27,7 @@ services:
       - /var/lib/apt/lists:mode=755,size=128m
       # Home directory - writable for configs, caches, local packages
       # Use a named volume instead if you need persistence across restarts
-      - /home/ubuntu:mode=755,uid=1000,gid=1000,size=${SANDBOX_HOME_TMPFS_SIZE:-2g}
+      - /home/ubuntu:exec,mode=755,uid=1000,gid=1000,size=${SANDBOX_HOME_TMPFS_SIZE:-2g}
 
     # Interactive shell
     stdin_open: true

@@ -5,6 +5,11 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.18.2] - 2026-02-20
+
+### Fixed
+- **`/home/ubuntu` tmpfs missing `exec` flag** — Pip-installed binaries (ruff, pytest, etc.) in `/home/ubuntu/.local/bin` failed with "Permission denied" because the tmpfs mount lacked the `exec` option; `/tmp` already had `exec` so this adds no new attack surface
+
 ## [0.18.1] - 2026-02-20
 
 ### Added
