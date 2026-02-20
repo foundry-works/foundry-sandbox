@@ -84,5 +84,5 @@ No partial allowlist startup is permitted.
 ## References
 
 - `unified-proxy/config.py` — `merge_allowlist_configs()`, `_parse_extra_allowlist()`, `load_allowlist_config()`
-- `unified-proxy/tests/unit/test_config_merge.py` — merge test suite (13 tests)
+- `unified-proxy/tests/unit/test_config_merge.py` — merge test suite (16 tests)
 - ADR-003: Policy Engine (related access control context)
