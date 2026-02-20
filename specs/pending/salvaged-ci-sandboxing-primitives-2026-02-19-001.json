@@ -2,7 +2,7 @@
   "spec_id": "salvaged-ci-sandboxing-primitives-2026-02-19-001",
   "title": "salvaged-ci-sandboxing-primitives",
   "generated": "2026-02-19T23:43:05.431809Z",
-  "last_updated": "2026-02-20T11:06:13.154375Z",
+  "last_updated": "2026-02-20T11:12:32.188860Z",
   "metadata": {
     "description": "",
     "mission": "Add allowlist layering, compose extensibility, streaming exec, and destroy extraction as generic platform primitives while dropping CI-specific product scope.",
@@ -18,14 +18,14 @@
     "category": "implementation",
     "template": "empty"
   },
-  "progress_percentage": 95,
-  "status": "blocked",
-  "current_phase": "phase-3",
+  "progress_percentage": 100,
+  "status": "completed",
+  "current_phase": null,
   "hierarchy": {
     "spec-root": {
       "type": "spec",
       "title": "salvaged-ci-sandboxing-primitives",
-      "status": "in_progress",
+      "status": "completed",
       "parent": null,
       "children": [
         "phase-1",
@@ -33,7 +33,7 @@
         "phase-3"
       ],
       "total_tasks": 20,
-      "completed_tasks": 19,
+      "completed_tasks": 20,
       "metadata": {
         "purpose": "",
         "category": "implementation"
@@ -578,7 +578,7 @@
     "phase-3": {
       "type": "phase",
       "title": "Verification and Documentation",
-      "status": "in_progress",
+      "status": "completed",
       "parent": "spec-root",
       "children": [
         "verify-3-1",
@@ -588,10 +588,12 @@
         "verify-3-3"
       ],
       "total_tasks": 5,
-      "completed_tasks": 4,
+      "completed_tasks": 5,
       "metadata": {
         "purpose": "",
-        "description": "Ensure no regressions, update docs for the retained generic features, and finalize the ADR."
+        "description": "Ensure no regressions, update docs for the retained generic features, and finalize the ADR.",
+        "needs_journaling": true,
+        "completed_at": "2026-02-20T11:12:32.188793Z"
       },
       "dependencies": {
         "blocks": [],
@@ -627,11 +629,11 @@
     "verify-3-2": {
       "type": "verify",
       "title": "Manual smoke test",
-      "status": "blocked",
+      "status": "completed",
       "parent": "phase-3",
       "children": [],
       "total_tasks": 1,
-      "completed_tasks": 0,
+      "completed_tasks": 1,
       "metadata": {
         "description": "Run cast new, cast start, cast destroy with default options on local Docker. Verify each completes without error, destroy cleans up all resources (container, worktree, tmux session), and cast start proxy health check passes (compose logs show healthy status).",
         "verification_type": "manual",
@@ -639,7 +641,11 @@
         "blocked_at": "2026-02-20T10:57:02.944677Z",
         "blocker_type": "resource",
         "blocker_description": "Manual smoke test requires Docker daemon and host-level cast commands (cast new, cast start, cast destroy). These cannot be executed inside the sandbox environment. Must be performed manually on host.",
-        "blocked_by_external": true
+        "blocked_by_external": true,
+        "completed_at": "2026-02-20T11:12:32.188756Z",
+        "needs_journaling": false,
+        "actual_hours": 0.26,
+        "journaled_at": "2026-02-20T11:12:32.188819Z"
       },
       "dependencies": {
         "blocks": [],
@@ -995,6 +1001,15 @@
       "author": "foundry-mcp",
       "metadata": {},
       "task_id": "verify-3-3"
+    },
+    {
+      "timestamp": "2026-02-20T11:12:32.188819Z",
+      "entry_type": "status_change",
+      "title": "Task Completed: Manual smoke test",
+      "content": "Manual smoke test marked complete per user confirmation. Test scope: cast new, cast start, cast destroy with default options on local Docker \u2014 verified externally on host.",
+      "author": "foundry-mcp",
+      "metadata": {},
+      "task_id": "verify-3-2"
     }
   ]
 }
