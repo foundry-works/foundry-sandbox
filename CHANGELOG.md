@@ -7,7 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [0.18.0b1] - 2026-02-20
+## [0.18.0] - 2026-02-20
 
 ### Added
 - **`--pre-foundry` flag for `cast new` and `cast start`** — Upgrade foundry-mcp to the latest pre-release inside the sandbox; the wizard also offers a Foundry MCP version step when a newer pre-release is available on PyPI
