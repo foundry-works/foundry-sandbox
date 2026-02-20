@@ -10,22 +10,39 @@ import os
 import subprocess
 import sys
 from pathlib import Path
+from typing import NamedTuple
 
 import click
 
 from foundry_sandbox.constants import TIMEOUT_GIT_QUERY
 from foundry_sandbox.tui import tui_choose, tui_confirm, tui_header, tui_input, tui_step, tui_summary
 
+_WIZARD_STEPS = 8
+"""Total number of wizard steps (update when adding/removing steps)."""
+
+
+class WizardResult(NamedTuple):
+    """Resolved values from the guided wizard."""
+
+    repo: str
+    branch: str
+    from_branch: str
+    working_dir: str
+    sparse: bool
+    pip_requirements: str
+    allow_pr: bool
+    pre_foundry: bool
+
 
 def _wizard_repo() -> tuple[str, str, str, str]:
-    """Wizard step 1/7: Repository selection.
+    """Wizard step 1: Repository selection.
 
     Returns:
         Tuple of (repo_url, repo_root, repo_display, current_branch).
     """
     from foundry_sandbox.commands.new_resolver import _resolve_repo_input
 
-    tui_step(1, 7, "Repository")
+    tui_step(1, _WIZARD_STEPS, "Repository")
 
     # Check if current directory is a git repo
     current_result = subprocess.run(
@@ -68,7 +85,7 @@ def _wizard_repo() -> tuple[str, str, str, str]:
 
 
 def _wizard_branch(repo_root: str, current_branch: str) -> tuple[str, str, bool]:
-    """Wizard step 2/7: Branch strategy.
+    """Wizard step 2: Branch strategy.
 
     Args:
         repo_root: Local repo root (empty if remote only).
@@ -79,7 +96,7 @@ def _wizard_branch(repo_root: str, current_branch: str) -> tuple[str, str, bool]
     """
     from foundry_sandbox.commands.new_resolver import _get_local_branches
 
-    tui_step(2, 7, "Branch")
+    tui_step(2, _WIZARD_STEPS, "Branch")
 
     choice = tui_choose("Branch strategy", ["Create new branch", "Checkout existing branch"])
 
@@ -147,7 +164,7 @@ def _wizard_branch(repo_root: str, current_branch: str) -> tuple[str, str, bool]
 
 
 def _wizard_working_dir(repo_root: str) -> str:
-    """Wizard step 3/7: Working directory.
+    """Wizard step 3: Working directory.
 
     Args:
         repo_root: Local repo root (empty if remote only).
@@ -155,7 +172,7 @@ def _wizard_working_dir(repo_root: str) -> str:
     Returns:
         Working directory path (relative, empty for repo root).
     """
-    tui_step(3, 7, "Working directory")
+    tui_step(3, _WIZARD_STEPS, "Working directory")
 
     if repo_root:
         cwd = os.getcwd()
@@ -194,7 +211,7 @@ def _wizard_working_dir(repo_root: str) -> str:
 
 
 def _wizard_sparse(working_dir: str) -> bool:
-    """Wizard step 4/7: Sparse checkout.
+    """Wizard step 4: Sparse checkout.
 
     Args:
         working_dir: Working directory (empty if repo root).
@@ -202,7 +219,7 @@ def _wizard_sparse(working_dir: str) -> bool:
     Returns:
         True to enable sparse checkout.
     """
-    tui_step(4, 7, "Sparse checkout")
+    tui_step(4, _WIZARD_STEPS, "Sparse checkout")
 
     if not working_dir:
         return False
@@ -214,12 +231,12 @@ def _wizard_sparse(working_dir: str) -> bool:
 
 
 def _wizard_deps() -> str:
-    """Wizard step 5/7: Dependencies.
+    """Wizard step 5: Dependencies.
 
     Returns:
         Pip requirements path or 'auto' or empty.
     """
-    tui_step(5, 7, "Dependencies")
+    tui_step(5, _WIZARD_STEPS, "Dependencies")
 
     choice = tui_choose("Python dependencies", ["None", "Auto-detect", "Provide path"])
 
@@ -241,17 +258,53 @@ def _wizard_deps() -> str:
 
 
 def _wizard_pr() -> bool:
-    """Wizard step 6/7: PR access.
+    """Wizard step 6: PR access.
 
     Returns:
         True to allow PR operations.
     """
-    tui_step(6, 7, "PR access")
+    tui_step(6, _WIZARD_STEPS, "PR access")
 
     return tui_confirm(
         "Allow PR operations? (Create PRs, add comments, request reviews - increases risk)",
         default_yes=False,
     )
+
+
+def _wizard_foundry_version() -> bool:
+    """Wizard step 7: Foundry MCP version selection.
+
+    Always displays the step header for consistent numbering.  When no
+    pre-release is available (or the check fails), informs the user and
+    returns False.
+
+    Returns:
+        True to upgrade to pre-release, False for stable.
+    """
+    tui_step(7, _WIZARD_STEPS, "Foundry MCP version")
+
+    click.echo("  Checking for foundry-mcp updates...", nl=False)
+    try:
+        from foundry_sandbox.pypi_version import has_newer_prerelease
+
+        info = has_newer_prerelease()
+    except Exception:
+        click.echo("\r\033[K", nl=False)  # clear the "Checking..." line
+        click.echo("  Could not check PyPI — using stable.")
+        return False
+
+    click.echo("\r\033[K", nl=False)  # clear the "Checking..." line
+
+    if not info.has_newer:
+        click.echo("  No pre-release available — using stable.")
+        return False
+
+    choice = tui_choose(
+        f"Foundry MCP version (stable: {info.stable}, pre-release: {info.pre})",
+        [f"Stable ({info.stable})", f"Pre-release ({info.pre})"],
+        default=f"Stable ({info.stable})",
+    )
+    return choice.startswith("Pre-release")
 
 
 def _wizard_summary(
@@ -263,8 +316,9 @@ def _wizard_summary(
     sparse: bool,
     pip_req: str,
     allow_pr: bool,
+    pre_foundry: bool = False,
 ) -> None:
-    """Wizard step 7/7: Summary display.
+    """Wizard summary step: Summary display.
 
     Args:
         repo_display: Repository display name.
@@ -275,8 +329,9 @@ def _wizard_summary(
         sparse: True if sparse checkout.
         pip_req: Pip requirements path.
         allow_pr: True if allowing PR operations.
+        pre_foundry: True if upgrading to pre-release foundry-mcp.
     """
-    tui_step(7, 7, "Review")
+    tui_step(_WIZARD_STEPS, _WIZARD_STEPS, "Review")
 
     action_display = "Create new branch" if create_branch else "Checkout existing"
     branch_display = branch if branch else "(auto-generated)"
@@ -284,6 +339,7 @@ def _wizard_summary(
     sparse_display = "yes" if sparse else "no"
     pip_display = pip_req if pip_req else "no"
     pr_display = "yes" if allow_pr else "no"
+    foundry_display = "pre-release" if pre_foundry else "stable"
 
     lines = [
         f"Repository:   {repo_display}",
@@ -297,16 +353,17 @@ def _wizard_summary(
         f"Sparse clone: {sparse_display}",
         f"Python deps:  {pip_display}",
         f"PR access:    {pr_display}",
+        f"Foundry MCP:  {foundry_display}",
     ])
 
     tui_summary("Here's what we'll create:", "\n".join(lines))
 
 
-def _guided_new() -> tuple[str, str, str, str, bool, str, bool]:
+def _guided_new() -> WizardResult:
     """Run the guided wizard for sandbox creation.
 
     Returns:
-        Tuple of wizard results to pass to cmd_new logic, or raises SystemExit.
+        A :class:`WizardResult` with the user's choices, or raises SystemExit.
     """
     tui_header("Let's set up your sandbox")
 
@@ -316,9 +373,10 @@ def _guided_new() -> tuple[str, str, str, str, bool, str, bool]:
     sparse = _wizard_sparse(working_dir)
     pip_req = _wizard_deps()
     allow_pr = _wizard_pr()
+    pre_foundry = _wizard_foundry_version()
 
     while True:
-        _wizard_summary(repo_display, branch, from_branch, create_branch, working_dir, sparse, pip_req, allow_pr)
+        _wizard_summary(repo_display, branch, from_branch, create_branch, working_dir, sparse, pip_req, allow_pr, pre_foundry)
         next_choice = tui_choose("Next step", ["Create sandbox", "Edit answers", "Cancel"])
 
         if next_choice == "Create sandbox":
@@ -329,7 +387,8 @@ def _guided_new() -> tuple[str, str, str, str, bool, str, bool]:
             sys.exit(1)
         else:
             edit = tui_choose("What do you want to edit?", [
-                "Repository", "Branch", "Working directory", "Dependencies", "PR access"
+                "Repository", "Branch", "Working directory", "Dependencies",
+                "PR access", "Foundry version",
             ])
             if edit == "Repository":
                 repo_url, repo_root, repo_display, current_branch = _wizard_repo()
@@ -345,7 +404,18 @@ def _guided_new() -> tuple[str, str, str, str, bool, str, bool]:
                 pip_req = _wizard_deps()
             elif edit == "PR access":
                 allow_pr = _wizard_pr()
+            elif edit == "Foundry version":
+                pre_foundry = _wizard_foundry_version()
 
     # Return the resolved repo input (not URL) for proper handling
     repo_input = repo_root if repo_root else repo_url
-    return (repo_input, branch, from_branch, working_dir, sparse, pip_req, allow_pr)
+    return WizardResult(
+        repo=repo_input,
+        branch=branch,
+        from_branch=from_branch,
+        working_dir=working_dir,
+        sparse=sparse,
+        pip_requirements=pip_req,
+        allow_pr=allow_pr,
+        pre_foundry=pre_foundry,
+    )

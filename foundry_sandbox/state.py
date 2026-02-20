@@ -95,6 +95,8 @@ def write_sandbox_metadata(
     sparse_checkout: bool = False,
     pip_requirements: str = "",
     allow_pr: bool = False,
+    pre_foundry: bool = False,
+    pre_foundry_version: str = "",
     enable_opencode: bool = False,
     enable_zai: bool = False,
     mounts: list[str] | None = None,
@@ -114,6 +116,8 @@ def write_sandbox_metadata(
         sparse_checkout: Whether to use sparse checkout.
         pip_requirements: Path to requirements file.
         allow_pr: Whether to allow PR creation.
+        pre_foundry: Whether to upgrade foundry-mcp to pre-release.
+        pre_foundry_version: Pinned foundry-mcp pre-release version.
         enable_opencode: Whether to enable OpenCode.
         enable_zai: Whether to enable ZAI.
         mounts: List of Docker mount specs.
@@ -131,6 +135,8 @@ def write_sandbox_metadata(
         sparse_checkout=sparse_checkout,
         pip_requirements=pip_requirements,
         allow_pr=allow_pr,
+        pre_foundry=pre_foundry,
+        pre_foundry_version=pre_foundry_version,
         enable_opencode=enable_opencode,
         enable_zai=enable_zai,
         mounts=mounts or [],
@@ -141,6 +147,39 @@ def write_sandbox_metadata(
     path = path_metadata_file(name)
     content = json.dumps(data) + "\n"
     _secure_write(path, content)
+
+
+def patch_sandbox_metadata(name: str, **updates: Any) -> None:
+    """Update specific fields in existing sandbox metadata.
+
+    Loads the current metadata, merges the updates, validates through the
+    Pydantic model, and writes back atomically.
+
+    Args:
+        name: Sandbox name identifier.
+        **updates: Field names and values to update.
+
+    Raises:
+        FileNotFoundError: If no metadata file exists for *name*.
+        ValueError: If any key in *updates* is not a SandboxMetadata field.
+    """
+    valid_fields = set(SandboxMetadata.model_fields)
+    bad_keys = set(updates) - valid_fields
+    if bad_keys:
+        raise ValueError(f"Unknown SandboxMetadata fields: {sorted(bad_keys)}")
+
+    json_path = path_metadata_file(name)
+    if not json_path.exists():
+        raise FileNotFoundError(f"No metadata file for sandbox '{name}'")
+
+    with _state_lock(json_path):
+        data = load_json(str(json_path))
+        if not data:
+            raise FileNotFoundError(f"Empty metadata for sandbox '{name}'")
+        data.update(updates)
+        model = SandboxMetadata(**data)
+        content = json.dumps(model.model_dump()) + "\n"
+        _secure_write_unlocked(json_path, content)
 
 
 def _parse_legacy_metadata(path: str | Path) -> dict[str, Any]:
@@ -347,6 +386,7 @@ def _build_command_line(
     sparse: bool = False,
     pip_requirements: str = "",
     allow_pr: bool = False,
+    pre_foundry: bool = False,
     network_mode: str = "limited",
     sync_ssh: bool = False,
     enable_opencode: bool = False,
@@ -368,6 +408,8 @@ def _build_command_line(
         parts.extend(["--pip-requirements", pip_requirements])
     if _flag_enabled(allow_pr):
         parts.append("--allow-pr")
+    if _flag_enabled(pre_foundry):
+        parts.append("--pre-foundry")
     if network_mode and network_mode != "limited":
         parts.extend(["--network", network_mode])
     if _flag_enabled(sync_ssh):
@@ -393,6 +435,7 @@ def _write_cast_new_json(
     sparse: bool = False,
     pip_requirements: str = "",
     allow_pr: bool = False,
+    pre_foundry: bool = False,
     network_mode: str = "limited",
     sync_ssh: bool = False,
     enable_opencode: bool = False,
@@ -414,6 +457,7 @@ def _write_cast_new_json(
         sparse=sparse,
         pip_requirements=pip_requirements,
         allow_pr=allow_pr,
+        pre_foundry=pre_foundry,
         network_mode=network_mode,
         sync_ssh=sync_ssh,
         enable_opencode=enable_opencode,
@@ -425,7 +469,7 @@ def _write_cast_new_json(
     timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
     command_line = _build_command_line(
         repo, branch, from_branch, working_dir, sparse,
-        pip_requirements, allow_pr, network_mode, sync_ssh,
+        pip_requirements, allow_pr, pre_foundry, network_mode, sync_ssh,
         enable_opencode, enable_zai, mounts, copies,
     )
 
@@ -449,6 +493,7 @@ def save_last_cast_new(
     sparse: bool = False,
     pip_requirements: str = "",
     allow_pr: bool = False,
+    pre_foundry: bool = False,
     network_mode: str = "limited",
     sync_ssh: bool = False,
     enable_opencode: bool = False,
@@ -466,6 +511,7 @@ def save_last_cast_new(
         path, repo=repo, branch=branch, from_branch=from_branch,
         working_dir=working_dir, sparse=sparse,
         pip_requirements=pip_requirements, allow_pr=allow_pr,
+        pre_foundry=pre_foundry,
         network_mode=network_mode, sync_ssh=sync_ssh,
         enable_opencode=enable_opencode, enable_zai=enable_zai,
         mounts=mounts, copies=copies,
@@ -482,6 +528,7 @@ def save_cast_preset(
     sparse: bool = False,
     pip_requirements: str = "",
     allow_pr: bool = False,
+    pre_foundry: bool = False,
     network_mode: str = "limited",
     sync_ssh: bool = False,
     enable_opencode: bool = False,
@@ -500,6 +547,7 @@ def save_cast_preset(
         path, repo=repo, branch=branch, from_branch=from_branch,
         working_dir=working_dir, sparse=sparse,
         pip_requirements=pip_requirements, allow_pr=allow_pr,
+        pre_foundry=pre_foundry,
         network_mode=network_mode, sync_ssh=sync_ssh,
         enable_opencode=enable_opencode, enable_zai=enable_zai,
         mounts=mounts, copies=copies,
@@ -530,6 +578,7 @@ def _load_cast_new_json(path: str | Path) -> dict[str, Any] | None:
             "sparse": _flag_enabled(args.get("sparse", False)),
             "pip_requirements": args.get("pip_requirements", ""),
             "allow_pr": _flag_enabled(args.get("allow_pr", False)),
+            "pre_foundry": _flag_enabled(args.get("pre_foundry", False)),
             "mounts": args.get("mounts", []),
             "copies": args.get("copies", []),
             "network_mode": args.get("network_mode", "limited"),

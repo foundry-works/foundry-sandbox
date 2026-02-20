@@ -40,6 +40,12 @@ class SandboxMetadata(BaseModel):
     allow_pr: bool = False
     """Whether to allow PR creation."""
 
+    pre_foundry: bool = False
+    """Whether to upgrade foundry-mcp to pre-release."""
+
+    pre_foundry_version: str = ""
+    """Pinned foundry-mcp pre-release version (e.g. '1.2.0a3')."""
+
     enable_opencode: bool = False
     """Whether to enable OpenCode."""
 
@@ -79,6 +85,9 @@ class CastNewPreset(BaseModel):
 
     allow_pr: bool = False
     """Whether to allow PR creation."""
+
+    pre_foundry: bool = False
+    """Whether to upgrade foundry-mcp to pre-release."""
 
     network_mode: str = "limited"
     """Network mode: limited, host-only, or none."""
