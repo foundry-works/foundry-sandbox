@@ -672,6 +672,8 @@ def _parse_extra_allowlist(file_path: str) -> AllowlistConfig:
                 raise ConfigError(f"blocked_paths[{i}] missing 'patterns' in {file_path}")
             if not isinstance(bp["patterns"], list):
                 raise ConfigError(f"blocked_paths[{i}].patterns must be a list in {file_path}")
+            if len(bp["patterns"]) == 0:
+                raise ConfigError(f"blocked_paths[{i}].patterns must not be empty in {file_path}")
             blocked_paths.append(
                 BlockedPathConfig(
                     host=str(bp["host"]),

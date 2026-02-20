@@ -312,20 +312,21 @@ class TestExecInContainerStreamingNonExistentContainer:
 class TestExecInContainerStreamingVerboseOutput:
     """Verbose mode prints command to stderr."""
 
-    @patch("foundry_sandbox.docker.sys.stderr")
     @patch("foundry_sandbox.docker.subprocess.Popen")
     @patch("foundry_sandbox.docker.get_sandbox_verbose", return_value=True)
-    def test_verbose_prints_command(self, mock_verbose, mock_popen, mock_stderr):
+    def test_verbose_prints_command(self, mock_verbose, mock_popen):
         """With verbose=True, command is printed to stderr."""
+        import io
+
         proc = _mock_process(returncode=0)
         mock_popen.return_value = proc
 
-        exec_in_container_streaming("container-1", "echo", "test")
+        captured_stderr = io.StringIO()
+        with patch("foundry_sandbox.docker.sys.stderr", captured_stderr):
+            exec_in_container_streaming("container-1", "echo", "test")
 
-        # Check that print was called with the command
-        # Note: We're not directly testing print() here, but the code calls:
-        # print(f"+ {' '.join(cmd)}", file=sys.stderr)
-        # The actual test would need to capture that
+        stderr_output = captured_stderr.getvalue()
+        assert "+ docker exec container-1 echo test" in stderr_output
 
     @patch("foundry_sandbox.docker.subprocess.Popen")
     @patch("foundry_sandbox.docker.get_sandbox_verbose", return_value=False)

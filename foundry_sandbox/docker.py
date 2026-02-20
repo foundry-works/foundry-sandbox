@@ -16,6 +16,7 @@ import re
 import secrets
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Callable
 
@@ -414,29 +415,30 @@ def compose_up(
     if isolate_credentials:
         host_extra = os.environ.get("PROXY_ALLOWLIST_EXTRA_PATH", "")
         if host_extra:
-            import tempfile as _tempfile
-
             host_extra = os.path.realpath(host_extra)
             if not os.path.isfile(host_extra):
                 raise FileNotFoundError(
                     f"PROXY_ALLOWLIST_EXTRA_PATH is not a regular file: {host_extra}"
                 )
             container_mount = "/etc/unified-proxy/allowlist-extra.yml"
+            # Quote the host path to handle paths with YAML-significant
+            # characters (colons, spaces, etc.)
+            quoted_host = host_extra.replace("'", "''")
             override_content = (
                 "services:\n"
                 "  unified-proxy:\n"
                 "    volumes:\n"
-                f"      - {host_extra}:{container_mount}:ro\n"
+                f"      - '{quoted_host}:{container_mount}:ro'\n"
                 "    environment:\n"
                 f"      - PROXY_ALLOWLIST_EXTRA_PATH={container_mount}\n"
             )
-            f = _tempfile.NamedTemporaryFile(
+            f = tempfile.NamedTemporaryFile(
                 mode="w", suffix=".yml", prefix="allowlist-extra-",
                 delete=False,
             )
+            _allowlist_extra_override = f.name
             f.write(override_content)
             f.close()
-            _allowlist_extra_override = f.name
             if compose_extras is None:
                 compose_extras = []
             compose_extras.append(_allowlist_extra_override)

@@ -308,3 +308,19 @@ class TestLoadAllowlistConfigExtraPath:
         finally:
             os.unlink(base_path)
             os.unlink(extra_path)
+
+    def test_extra_file_empty_patterns_raises_config_error(self):
+        """blocked_paths with patterns: [] must be rejected at parse time."""
+        base_path = _write_yaml(_base_yaml())
+        extra_path = _write_yaml({
+            "version": "2.0",
+            "blocked_paths": [
+                {"host": "evil.com", "patterns": []},
+            ],
+        })
+        try:
+            with pytest.raises(ConfigError, match="patterns must not be empty"):
+                load_allowlist_config(path=base_path, extra_path=extra_path)
+        finally:
+            os.unlink(base_path)
+            os.unlink(extra_path)

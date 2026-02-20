@@ -47,16 +47,22 @@ def destroy_impl(
     """Destroy a sandbox and clean up all resources.
 
     This is the non-interactive implementation. It never prompts the user.
-    Callers are responsible for confirmation and validation.
 
     Args:
-        name: Sandbox name.
+        name: Sandbox name (must pass validate_existing_sandbox_name).
         keep_worktree: If True, keep the git worktree and config directory.
         best_effort: If True (default), catch and log cleanup errors.
             If False (strict), re-raise on first cleanup failure.
         skip_tmux: If True, skip tmux session kill.
         skip_branch_cleanup: If True, skip branch cleanup from bare repo.
+
+    Raises:
+        ValueError: If name fails validation.
     """
+    valid_name, name_error = validate_existing_sandbox_name(name)
+    if not valid_name:
+        raise ValueError(f"Invalid sandbox name: {name_error}")
+
     paths = derive_sandbox_paths(name)
     worktree_path = paths.worktree_path
     container = paths.container_name
