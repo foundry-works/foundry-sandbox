@@ -164,7 +164,15 @@ def ensure_bare_repo(repo_url: str, bare_path: str | Path) -> None:
         git_with_retry(["-C", str(bp), "fetch", "origin", "--prune"])
 
 
-_VALID_BRANCH_RE = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9._/-]*$")
+_VALID_BRANCH_RE = re.compile(
+    r"^[a-zA-Z0-9]"          # Must start with alnum
+    r"(?!.*\.\.)"             # No ".." anywhere (path traversal)
+    r"(?!.*//)"               # No consecutive slashes
+    r"(?!.*\.lock$)"          # Must not end with .lock
+    r"(?!.*\.$)"              # Must not end with "."
+    r"(?!.*/\.)"              # No component starting with "."
+    r"[a-zA-Z0-9._/-]*$"     # Body: alnum, dot, underscore, slash, hyphen
+)
 
 
 def fetch_bare_branch(bare_path: str | Path, branch: str) -> None:
@@ -186,7 +194,7 @@ def fetch_bare_branch(bare_path: str | Path, branch: str) -> None:
     Raises:
         ValueError: If *branch* contains invalid ref characters or path traversal.
     """
-    if not _VALID_BRANCH_RE.match(branch) or ".." in branch:
+    if not _VALID_BRANCH_RE.match(branch):
         raise ValueError(f"Invalid branch name: {branch!r}")
     bp = str(bare_path)
 

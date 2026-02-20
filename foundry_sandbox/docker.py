@@ -412,40 +412,41 @@ def compose_up(
 
     # Thread PROXY_ALLOWLIST_EXTRA_PATH into container via temp compose override
     _allowlist_extra_override: str | None = None
-    if isolate_credentials:
-        host_extra = os.environ.get("PROXY_ALLOWLIST_EXTRA_PATH", "")
-        if host_extra:
-            host_extra = os.path.realpath(host_extra)
-            if not os.path.isfile(host_extra):
-                raise FileNotFoundError(
-                    f"PROXY_ALLOWLIST_EXTRA_PATH is not a regular file: {host_extra}"
-                )
-            container_mount = "/etc/unified-proxy/allowlist-extra.yml"
-            # Quote the host path to handle paths with YAML-significant
-            # characters (colons, spaces, etc.)
-            quoted_host = host_extra.replace("'", "''")
-            override_content = (
-                "services:\n"
-                "  unified-proxy:\n"
-                "    volumes:\n"
-                f"      - '{quoted_host}:{container_mount}:ro'\n"
-                "    environment:\n"
-                f"      - PROXY_ALLOWLIST_EXTRA_PATH={container_mount}\n"
-            )
-            f = tempfile.NamedTemporaryFile(
-                mode="w", suffix=".yml", prefix="allowlist-extra-",
-                delete=False,
-            )
-            _allowlist_extra_override = f.name
-            f.write(override_content)
-            f.close()
-            if compose_extras is None:
-                compose_extras = []
-            compose_extras.append(_allowlist_extra_override)
-
-    compose_cmd = get_compose_command(override_file, isolate_credentials, compose_extras)
 
     try:
+        if isolate_credentials:
+            host_extra = os.environ.get("PROXY_ALLOWLIST_EXTRA_PATH", "")
+            if host_extra:
+                host_extra = os.path.realpath(host_extra)
+                if not os.path.isfile(host_extra):
+                    raise FileNotFoundError(
+                        f"PROXY_ALLOWLIST_EXTRA_PATH is not a regular file: {host_extra}"
+                    )
+                container_mount = "/etc/unified-proxy/allowlist-extra.yml"
+                # Quote the host path to handle paths with YAML-significant
+                # characters (colons, spaces, etc.)
+                quoted_host = host_extra.replace("'", "''")
+                override_content = (
+                    "services:\n"
+                    "  unified-proxy:\n"
+                    "    volumes:\n"
+                    f"      - '{quoted_host}:{container_mount}:ro'\n"
+                    "    environment:\n"
+                    f"      - PROXY_ALLOWLIST_EXTRA_PATH={container_mount}\n"
+                )
+                f = tempfile.NamedTemporaryFile(
+                    mode="w", suffix=".yml", prefix="allowlist-extra-",
+                    delete=False,
+                )
+                _allowlist_extra_override = f.name
+                f.write(override_content)
+                f.close()
+                if compose_extras is None:
+                    compose_extras = []
+                compose_extras.append(_allowlist_extra_override)
+
+        compose_cmd = get_compose_command(override_file, isolate_credentials, compose_extras)
+
         if isolate_credentials:
             # Two-phase startup: start proxy first so we can capture its logs
             # on failure. A single `up -d` removes all containers on health
@@ -673,18 +674,6 @@ def exec_in_container_streaming(
         except subprocess.TimeoutExpired:
             proc.kill()
             proc.wait()
-
-        # Best-effort backstop: stop the docker exec target
-        try:
-            subprocess.run(
-                ["docker", "stop", "--time", "10", container_id],
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-                check=False,
-                timeout=15,
-            )
-        except (OSError, subprocess.TimeoutExpired):
-            log_warn(f"Backstop docker stop failed for container {container_id}")
 
         return 124
 

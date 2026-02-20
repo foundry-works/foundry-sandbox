@@ -1,15 +1,14 @@
 """Unit tests for foundry_sandbox.docker.exec_in_container_streaming().
 
 Tests for real-time streaming execution of commands inside containers,
-including normal completion, timeout handling with SIGTERM/SIGKILL sequence,
-and docker stop backstop calls.
+including normal completion and timeout handling with SIGTERM/SIGKILL sequence.
 
 All subprocess calls are mocked so tests run without Docker.
 """
 from __future__ import annotations
 
 import subprocess
-from unittest.mock import MagicMock, patch, call
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -191,83 +190,6 @@ class TestExecInContainerStreamingTimeout:
         proc.kill.assert_called_once()
         # wait() called 3 times: main timeout, after SIGTERM, after SIGKILL
         assert proc.wait.call_count == 3
-
-    @patch("foundry_sandbox.docker.subprocess.run")
-    @patch("foundry_sandbox.docker.subprocess.Popen")
-    @patch("foundry_sandbox.docker.get_sandbox_verbose", return_value=False)
-    def test_backstop_docker_stop_called_on_timeout(self, mock_verbose, mock_popen, mock_run):
-        """docker stop backstop is called after timeout."""
-        proc = _mock_process_timeout_on_first_wait(timeout_seconds=3600)
-        mock_popen.return_value = proc
-        mock_run.return_value = MagicMock(returncode=0)
-
-        exec_in_container_streaming("container-1", "cmd", timeout=3600)
-
-        # Verify docker stop was called with correct args
-        assert mock_run.called
-        call_args = mock_run.call_args
-        assert call_args[0][0] == ["docker", "stop", "--time", "10", "container-1"]
-        assert call_args[1]["check"] is False
-        assert call_args[1]["timeout"] == 15
-
-    @patch("foundry_sandbox.docker.subprocess.run")
-    @patch("foundry_sandbox.docker.subprocess.Popen")
-    @patch("foundry_sandbox.docker.get_sandbox_verbose", return_value=False)
-    def test_backstop_suppresses_stderr_stdout(self, mock_verbose, mock_popen, mock_run):
-        """docker stop backstop suppresses output."""
-        proc = _mock_process_timeout_on_first_wait(timeout_seconds=3600)
-        mock_popen.return_value = proc
-        mock_run.return_value = MagicMock(returncode=0)
-
-        exec_in_container_streaming("container-1", "cmd", timeout=3600)
-
-        call_kwargs = mock_run.call_args[1]
-        assert call_kwargs["stdout"] == subprocess.DEVNULL
-        assert call_kwargs["stderr"] == subprocess.DEVNULL
-
-
-# ---------------------------------------------------------------------------
-# TestExecInContainerStreamingBackstopErrors
-# ---------------------------------------------------------------------------
-
-
-class TestExecInContainerStreamingBackstopErrors:
-    """Backstop docker stop errors are handled gracefully."""
-
-    @patch("foundry_sandbox.docker.log_warn")
-    @patch("foundry_sandbox.docker.subprocess.run")
-    @patch("foundry_sandbox.docker.subprocess.Popen")
-    @patch("foundry_sandbox.docker.get_sandbox_verbose", return_value=False)
-    def test_docker_stop_oserror_logged_and_ignored(
-        self, mock_verbose, mock_popen, mock_run, mock_log_warn
-    ):
-        """OSError from docker stop is logged but doesn't affect return value."""
-        proc = _mock_process_timeout_on_first_wait(timeout_seconds=3600)
-        mock_popen.return_value = proc
-        mock_run.side_effect = OSError("docker not found")
-
-        result = exec_in_container_streaming("container-1", "cmd", timeout=3600)
-
-        assert result == 124
-        assert mock_log_warn.called
-        assert "Backstop docker stop failed" in mock_log_warn.call_args[0][0]
-
-    @patch("foundry_sandbox.docker.log_warn")
-    @patch("foundry_sandbox.docker.subprocess.run")
-    @patch("foundry_sandbox.docker.subprocess.Popen")
-    @patch("foundry_sandbox.docker.get_sandbox_verbose", return_value=False)
-    def test_docker_stop_timeout_logged_and_ignored(
-        self, mock_verbose, mock_popen, mock_run, mock_log_warn
-    ):
-        """TimeoutExpired from docker stop is logged but doesn't affect return value."""
-        proc = _mock_process_timeout_on_first_wait(timeout_seconds=3600)
-        mock_popen.return_value = proc
-        mock_run.side_effect = subprocess.TimeoutExpired("docker stop", 15)
-
-        result = exec_in_container_streaming("container-1", "cmd", timeout=3600)
-
-        assert result == 124
-        assert mock_log_warn.called
 
 
 # ---------------------------------------------------------------------------

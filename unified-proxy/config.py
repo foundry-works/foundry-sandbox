@@ -326,6 +326,19 @@ class AllowlistConfig:
         if not self.http_endpoints:
             raise ConfigError("Allowlist must have at least one HTTP endpoint")
 
+    @classmethod
+    def _partial(cls, *, version, domains=None, http_endpoints=None, blocked_paths=None):
+        """Construct a partial AllowlistConfig without validation.
+
+        For use in merge workflows where the final merged result is validated.
+        """
+        cfg = object.__new__(cls)
+        cfg.version = version
+        cfg.domains = domains or []
+        cfg.http_endpoints = http_endpoints or []
+        cfg.blocked_paths = blocked_paths or []
+        return cfg
+
 
 def merge_allowlist_configs(
     base: AllowlistConfig, extra: AllowlistConfig
@@ -681,14 +694,10 @@ def _parse_extra_allowlist(file_path: str) -> AllowlistConfig:
                 )
             )
 
-    # Bypass AllowlistConfig.__post_init__ — partial configs are valid for
-    # merge purposes; validation runs on the final merged result only.
-    cfg = object.__new__(AllowlistConfig)
-    cfg.version = version
-    cfg.domains = domains
-    cfg.http_endpoints = http_endpoints
-    cfg.blocked_paths = blocked_paths
-    return cfg
+    return AllowlistConfig._partial(
+        version=version, domains=domains,
+        http_endpoints=http_endpoints, blocked_paths=blocked_paths,
+    )
 
 
 def load_allowlist_config(

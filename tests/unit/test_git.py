@@ -335,6 +335,26 @@ class TestFetchBareBranch:
         with pytest.raises(ValueError, match="Invalid branch name"):
             git.fetch_bare_branch("/bare/repo", "")
 
+    def test_dotlock_suffix_rejected(self):
+        """Branch names ending with .lock are rejected."""
+        with pytest.raises(ValueError, match="Invalid branch name"):
+            git.fetch_bare_branch("/bare/repo", "refs.lock")
+
+    def test_consecutive_slashes_rejected(self):
+        """Branch names with consecutive slashes are rejected."""
+        with pytest.raises(ValueError, match="Invalid branch name"):
+            git.fetch_bare_branch("/bare/repo", "foo//bar")
+
+    def test_component_starting_with_dot_rejected(self):
+        """Branch names with a component starting with '.' are rejected."""
+        with pytest.raises(ValueError, match="Invalid branch name"):
+            git.fetch_bare_branch("/bare/repo", "foo/.bar")
+
+    def test_trailing_dot_rejected(self):
+        """Branch names ending with '.' are rejected."""
+        with pytest.raises(ValueError, match="Invalid branch name"):
+            git.fetch_bare_branch("/bare/repo", "foo.")
+
     @patch("foundry_sandbox.git.subprocess.run")
     @patch("foundry_sandbox.git.git_with_retry")
     def test_slashed_branch_name_accepted(self, mock_retry, mock_run):

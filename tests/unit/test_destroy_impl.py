@@ -11,7 +11,7 @@ Tests the destroy_impl() implementation function for:
 from __future__ import annotations
 
 from pathlib import Path
-from unittest.mock import MagicMock, patch, call
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -21,6 +21,8 @@ from foundry_sandbox.commands.destroy import destroy_impl
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------
+
+_DESTROY = "foundry_sandbox.commands.destroy"
 
 
 @pytest.fixture
@@ -40,28 +42,51 @@ def mock_paths_fixture(tmp_path):
 
 
 @pytest.fixture
-def standard_mocks():
-    """Provide standard mocks for all external dependencies."""
-    return {
-        "derive_sandbox_paths": MagicMock(),
-        "_tmux_session_name": MagicMock(return_value="session-test"),
-        "_proxy_cleanup": MagicMock(),
-        "compose_down": MagicMock(),
-        "remove_stubs_volume": MagicMock(),
-        "remove_hmac_volume": MagicMock(),
-        "remove_sandbox_networks": MagicMock(),
-        "load_sandbox_metadata": MagicMock(return_value={
-            "branch": "sandbox/test",
-            "repo_url": "/path/to/repo"
-        }),
-        "remove_worktree": MagicMock(),
-        "cleanup_sandbox_branch": MagicMock(),
-        "_repo_url_to_bare_path": MagicMock(return_value="/path/to/bare"),
-        "log_info": MagicMock(),
-        "log_warn": MagicMock(),
-        "subprocess.run": MagicMock(),
-        "shutil.rmtree": MagicMock(),
-    }
+def destroy_mocks(mock_paths_fixture):
+    """Provide all standard mocks for destroy_impl tests.
+
+    Patches every external dependency of destroy_impl and returns a dict
+    of mock objects keyed by short name.  Tests that need to override
+    specific behaviour (e.g. side_effect) do so on the fixture-provided
+    mock before calling destroy_impl.
+    """
+    with (
+        patch(f"{_DESTROY}.derive_sandbox_paths") as m_paths,
+        patch(f"{_DESTROY}._tmux_session_name") as m_tmux,
+        patch("subprocess.run") as m_subprocess,
+        patch(f"{_DESTROY}._proxy_cleanup") as m_proxy,
+        patch(f"{_DESTROY}.compose_down") as m_compose,
+        patch(f"{_DESTROY}.remove_stubs_volume") as m_stubs,
+        patch(f"{_DESTROY}.remove_hmac_volume") as m_hmac,
+        patch(f"{_DESTROY}.remove_sandbox_networks") as m_networks,
+        patch(f"{_DESTROY}.load_sandbox_metadata") as m_metadata,
+        patch(f"{_DESTROY}.remove_worktree") as m_rm_wt,
+        patch(f"{_DESTROY}.cleanup_sandbox_branch") as m_branch,
+        patch(f"{_DESTROY}._repo_url_to_bare_path") as m_url_to_path,
+        patch(f"{_DESTROY}.log_info") as m_log_info,
+        patch(f"{_DESTROY}.log_warn") as m_log_warn,
+        patch(f"{_DESTROY}.shutil.rmtree") as m_shutil_rmtree,
+    ):
+        m_paths.return_value = mock_paths_fixture
+        m_tmux.return_value = "session-test"
+        m_url_to_path.return_value = "/path/to/bare"
+        yield {
+            "paths": m_paths,
+            "tmux_name": m_tmux,
+            "subprocess": m_subprocess,
+            "proxy_cleanup": m_proxy,
+            "compose_down": m_compose,
+            "stubs": m_stubs,
+            "hmac": m_hmac,
+            "networks": m_networks,
+            "metadata": m_metadata,
+            "remove_worktree": m_rm_wt,
+            "branch": m_branch,
+            "url_to_path": m_url_to_path,
+            "log_info": m_log_info,
+            "log_warn": m_log_warn,
+            "shutil_rmtree": m_shutil_rmtree,
+        }
 
 
 # ---------------------------------------------------------------------------
@@ -72,89 +97,24 @@ def standard_mocks():
 class TestSkipTmuxFlag:
     """Test that skip_tmux=True prevents tmux kill."""
 
-    @patch("foundry_sandbox.commands.destroy.log_warn")
-    @patch("foundry_sandbox.commands.destroy.log_info")
-    @patch("foundry_sandbox.commands.destroy.cleanup_sandbox_branch")
-    @patch("foundry_sandbox.commands.destroy.remove_worktree")
-    @patch("foundry_sandbox.commands.destroy.load_sandbox_metadata")
-    @patch("foundry_sandbox.commands.destroy.remove_sandbox_networks")
-    @patch("foundry_sandbox.commands.destroy.remove_hmac_volume")
-    @patch("foundry_sandbox.commands.destroy.remove_stubs_volume")
-    @patch("foundry_sandbox.commands.destroy.compose_down")
-    @patch("foundry_sandbox.commands.destroy._proxy_cleanup")
-    @patch("subprocess.run")
-    @patch("foundry_sandbox.commands.destroy._tmux_session_name")
-    @patch("foundry_sandbox.commands.destroy.derive_sandbox_paths")
-    def test_skip_tmux_true_does_not_kill_session(
-        self,
-        mock_paths,
-        mock_tmux_name,
-        mock_subprocess,
-        mock_proxy,
-        mock_compose,
-        mock_stubs,
-        mock_hmac,
-        mock_networks,
-        mock_metadata,
-        mock_rm_wt,
-        mock_branch,
-        mock_log_info,
-        mock_log_warn,
-        mock_paths_fixture,
-    ):
+    def test_skip_tmux_true_does_not_kill_session(self, destroy_mocks):
         """When skip_tmux=True, subprocess.run with tmux args should NOT be called."""
-        mock_paths.return_value = mock_paths_fixture
-        mock_tmux_name.return_value = "session-test"
-        mock_metadata.return_value = None
+        destroy_mocks["metadata"].return_value = None
 
         destroy_impl("test-sandbox", skip_tmux=True)
 
-        # subprocess.run should NOT be called with tmux args
-        # Check all calls to subprocess.run
-        for call_obj in mock_subprocess.call_args_list:
+        for call_obj in destroy_mocks["subprocess"].call_args_list:
             args = call_obj[0][0] if call_obj[0] else []
             assert args != ["tmux", "kill-session", "-t", "session-test"]
 
-    @patch("foundry_sandbox.commands.destroy.log_warn")
-    @patch("foundry_sandbox.commands.destroy.log_info")
-    @patch("foundry_sandbox.commands.destroy.cleanup_sandbox_branch")
-    @patch("foundry_sandbox.commands.destroy.remove_worktree")
-    @patch("foundry_sandbox.commands.destroy.load_sandbox_metadata")
-    @patch("foundry_sandbox.commands.destroy.remove_sandbox_networks")
-    @patch("foundry_sandbox.commands.destroy.remove_hmac_volume")
-    @patch("foundry_sandbox.commands.destroy.remove_stubs_volume")
-    @patch("foundry_sandbox.commands.destroy.compose_down")
-    @patch("foundry_sandbox.commands.destroy._proxy_cleanup")
-    @patch("subprocess.run")
-    @patch("foundry_sandbox.commands.destroy._tmux_session_name")
-    @patch("foundry_sandbox.commands.destroy.derive_sandbox_paths")
-    def test_skip_tmux_false_kills_session(
-        self,
-        mock_paths,
-        mock_tmux_name,
-        mock_subprocess,
-        mock_proxy,
-        mock_compose,
-        mock_stubs,
-        mock_hmac,
-        mock_networks,
-        mock_metadata,
-        mock_rm_wt,
-        mock_branch,
-        mock_log_info,
-        mock_log_warn,
-        mock_paths_fixture,
-    ):
+    def test_skip_tmux_false_kills_session(self, destroy_mocks):
         """When skip_tmux=False (default), subprocess.run with tmux args SHOULD be called."""
-        mock_paths.return_value = mock_paths_fixture
-        mock_tmux_name.return_value = "session-test"
-        mock_metadata.return_value = None
+        destroy_mocks["metadata"].return_value = None
 
         destroy_impl("test-sandbox", skip_tmux=False)
 
-        # subprocess.run should be called with tmux args
         called_with_tmux = False
-        for call_obj in mock_subprocess.call_args_list:
+        for call_obj in destroy_mocks["subprocess"].call_args_list:
             args = call_obj[0][0] if call_obj[0] else []
             if args == ["tmux", "kill-session", "-t", "session-test"]:
                 called_with_tmux = True
@@ -170,94 +130,27 @@ class TestSkipTmuxFlag:
 class TestSkipBranchCleanupFlag:
     """Test that skip_branch_cleanup=True prevents branch cleanup."""
 
-    @patch("foundry_sandbox.commands.destroy.log_warn")
-    @patch("foundry_sandbox.commands.destroy.log_info")
-    @patch("foundry_sandbox.commands.destroy.cleanup_sandbox_branch")
-    @patch("foundry_sandbox.commands.destroy.remove_worktree")
-    @patch("foundry_sandbox.commands.destroy.load_sandbox_metadata")
-    @patch("foundry_sandbox.commands.destroy.remove_sandbox_networks")
-    @patch("foundry_sandbox.commands.destroy.remove_hmac_volume")
-    @patch("foundry_sandbox.commands.destroy.remove_stubs_volume")
-    @patch("foundry_sandbox.commands.destroy.compose_down")
-    @patch("foundry_sandbox.commands.destroy._proxy_cleanup")
-    @patch("subprocess.run")
-    @patch("foundry_sandbox.commands.destroy._tmux_session_name")
-    @patch("foundry_sandbox.commands.destroy.derive_sandbox_paths")
-    def test_skip_branch_cleanup_true_does_not_cleanup(
-        self,
-        mock_paths,
-        mock_tmux_name,
-        mock_subprocess,
-        mock_proxy,
-        mock_compose,
-        mock_stubs,
-        mock_hmac,
-        mock_networks,
-        mock_metadata,
-        mock_rm_wt,
-        mock_branch,
-        mock_log_info,
-        mock_log_warn,
-        mock_paths_fixture,
-    ):
+    def test_skip_branch_cleanup_true_does_not_cleanup(self, destroy_mocks):
         """When skip_branch_cleanup=True, cleanup_sandbox_branch should NOT be called."""
-        mock_paths.return_value = mock_paths_fixture
-        mock_tmux_name.return_value = "session-test"
-        mock_metadata.return_value = {
+        destroy_mocks["metadata"].return_value = {
             "branch": "sandbox/test",
-            "repo_url": "/path/to/repo"
+            "repo_url": "/path/to/repo",
         }
 
         destroy_impl("test-sandbox", skip_branch_cleanup=True)
 
-        # cleanup_sandbox_branch should NOT be called
-        mock_branch.assert_not_called()
+        destroy_mocks["branch"].assert_not_called()
 
-    @patch("foundry_sandbox.commands.destroy.log_warn")
-    @patch("foundry_sandbox.commands.destroy.log_info")
-    @patch("foundry_sandbox.commands.destroy._repo_url_to_bare_path")
-    @patch("foundry_sandbox.commands.destroy.cleanup_sandbox_branch")
-    @patch("foundry_sandbox.commands.destroy.remove_worktree")
-    @patch("foundry_sandbox.commands.destroy.load_sandbox_metadata")
-    @patch("foundry_sandbox.commands.destroy.remove_sandbox_networks")
-    @patch("foundry_sandbox.commands.destroy.remove_hmac_volume")
-    @patch("foundry_sandbox.commands.destroy.remove_stubs_volume")
-    @patch("foundry_sandbox.commands.destroy.compose_down")
-    @patch("foundry_sandbox.commands.destroy._proxy_cleanup")
-    @patch("subprocess.run")
-    @patch("foundry_sandbox.commands.destroy._tmux_session_name")
-    @patch("foundry_sandbox.commands.destroy.derive_sandbox_paths")
-    def test_skip_branch_cleanup_false_cleans_branch(
-        self,
-        mock_paths,
-        mock_tmux_name,
-        mock_subprocess,
-        mock_proxy,
-        mock_compose,
-        mock_stubs,
-        mock_hmac,
-        mock_networks,
-        mock_metadata,
-        mock_rm_wt,
-        mock_branch,
-        mock_url_to_path,
-        mock_log_info,
-        mock_log_warn,
-        mock_paths_fixture,
-    ):
+    def test_skip_branch_cleanup_false_cleans_branch(self, destroy_mocks):
         """When skip_branch_cleanup=False (default), cleanup_sandbox_branch SHOULD be called."""
-        mock_paths.return_value = mock_paths_fixture
-        mock_tmux_name.return_value = "session-test"
-        mock_metadata.return_value = {
+        destroy_mocks["metadata"].return_value = {
             "branch": "sandbox/test",
-            "repo_url": "/path/to/repo"
+            "repo_url": "/path/to/repo",
         }
-        mock_url_to_path.return_value = "/path/to/bare"
 
         destroy_impl("test-sandbox", skip_branch_cleanup=False)
 
-        # cleanup_sandbox_branch SHOULD be called
-        mock_branch.assert_called_once_with("sandbox/test", "/path/to/bare")
+        destroy_mocks["branch"].assert_called_once_with("sandbox/test", "/path/to/bare")
 
 
 # ---------------------------------------------------------------------------
@@ -268,161 +161,41 @@ class TestSkipBranchCleanupFlag:
 class TestBestEffortTrue:
     """Test that best_effort=True catches errors and logs them."""
 
-    @patch("foundry_sandbox.commands.destroy.log_warn")
-    @patch("foundry_sandbox.commands.destroy.log_info")
-    @patch("foundry_sandbox.commands.destroy.cleanup_sandbox_branch")
-    @patch("foundry_sandbox.commands.destroy.remove_worktree")
-    @patch("foundry_sandbox.commands.destroy.load_sandbox_metadata")
-    @patch("foundry_sandbox.commands.destroy.remove_sandbox_networks")
-    @patch("foundry_sandbox.commands.destroy.remove_hmac_volume")
-    @patch("foundry_sandbox.commands.destroy.remove_stubs_volume")
-    @patch("foundry_sandbox.commands.destroy.compose_down", side_effect=OSError("docker failed"))
-    @patch("foundry_sandbox.commands.destroy._proxy_cleanup")
-    @patch("subprocess.run")
-    @patch("foundry_sandbox.commands.destroy._tmux_session_name")
-    @patch("foundry_sandbox.commands.destroy.derive_sandbox_paths")
-    def test_best_effort_true_catches_proxy_cleanup_error(
-        self,
-        mock_paths,
-        mock_tmux_name,
-        mock_subprocess,
-        mock_proxy,
-        mock_compose,
-        mock_stubs,
-        mock_hmac,
-        mock_networks,
-        mock_metadata,
-        mock_rm_wt,
-        mock_branch,
-        mock_log_info,
-        mock_log_warn,
-        mock_paths_fixture,
-    ):
+    def test_best_effort_true_catches_proxy_cleanup_error(self, destroy_mocks):
         """best_effort=True catches OSError from compose_down and continues."""
-        mock_paths.return_value = mock_paths_fixture
-        mock_tmux_name.return_value = "session-test"
-        mock_metadata.return_value = None
+        destroy_mocks["metadata"].return_value = None
+        destroy_mocks["compose_down"].side_effect = OSError("docker failed")
 
         # Should not raise, should complete
         destroy_impl("test-sandbox", best_effort=True)
 
-    @patch("foundry_sandbox.commands.destroy.log_warn")
-    @patch("foundry_sandbox.commands.destroy.log_info")
-    @patch("foundry_sandbox.commands.destroy.cleanup_sandbox_branch")
-    @patch("foundry_sandbox.commands.destroy.remove_worktree")
-    @patch("foundry_sandbox.commands.destroy.load_sandbox_metadata")
-    @patch("foundry_sandbox.commands.destroy.remove_sandbox_networks")
-    @patch("foundry_sandbox.commands.destroy.remove_hmac_volume")
-    @patch("foundry_sandbox.commands.destroy.remove_stubs_volume")
-    @patch("foundry_sandbox.commands.destroy.compose_down", side_effect=OSError("docker failed"))
-    @patch("foundry_sandbox.commands.destroy._proxy_cleanup")
-    @patch("subprocess.run")
-    @patch("foundry_sandbox.commands.destroy._tmux_session_name")
-    @patch("foundry_sandbox.commands.destroy.derive_sandbox_paths")
-    def test_best_effort_true_logs_missing_resources(
-        self,
-        mock_paths,
-        mock_tmux_name,
-        mock_subprocess,
-        mock_proxy,
-        mock_compose,
-        mock_stubs,
-        mock_hmac,
-        mock_networks,
-        mock_metadata,
-        mock_rm_wt,
-        mock_branch,
-        mock_log_info,
-        mock_log_warn,
-        mock_paths_fixture,
-    ):
+    def test_best_effort_true_logs_missing_resources(self, destroy_mocks):
         """best_effort=True logs errors without raising."""
-        mock_paths.return_value = mock_paths_fixture
-        mock_tmux_name.return_value = "session-test"
-        mock_metadata.return_value = None
+        destroy_mocks["metadata"].return_value = None
+        destroy_mocks["compose_down"].side_effect = OSError("docker failed")
 
         # Should not raise
         destroy_impl("test-sandbox", best_effort=True)
 
         # compose_down was called and failed
-        mock_compose.assert_called_once()
+        destroy_mocks["compose_down"].assert_called_once()
 
 
 class TestBestEffortFalse:
     """Test that best_effort=False raises on first error."""
 
-    @patch("foundry_sandbox.commands.destroy.log_warn")
-    @patch("foundry_sandbox.commands.destroy.log_info")
-    @patch("foundry_sandbox.commands.destroy.cleanup_sandbox_branch")
-    @patch("foundry_sandbox.commands.destroy.remove_worktree")
-    @patch("foundry_sandbox.commands.destroy.load_sandbox_metadata")
-    @patch("foundry_sandbox.commands.destroy.remove_sandbox_networks")
-    @patch("foundry_sandbox.commands.destroy.remove_hmac_volume")
-    @patch("foundry_sandbox.commands.destroy.remove_stubs_volume")
-    @patch("foundry_sandbox.commands.destroy.compose_down", side_effect=OSError("docker failed"))
-    @patch("foundry_sandbox.commands.destroy._proxy_cleanup")
-    @patch("subprocess.run")
-    @patch("foundry_sandbox.commands.destroy._tmux_session_name")
-    @patch("foundry_sandbox.commands.destroy.derive_sandbox_paths")
-    def test_best_effort_false_raises_on_compose_down_error(
-        self,
-        mock_paths,
-        mock_tmux_name,
-        mock_subprocess,
-        mock_proxy,
-        mock_compose,
-        mock_stubs,
-        mock_hmac,
-        mock_networks,
-        mock_metadata,
-        mock_rm_wt,
-        mock_branch,
-        mock_log_info,
-        mock_log_warn,
-        mock_paths_fixture,
-    ):
+    def test_best_effort_false_raises_on_compose_down_error(self, destroy_mocks):
         """best_effort=False raises on OSError from compose_down."""
-        mock_paths.return_value = mock_paths_fixture
-        mock_tmux_name.return_value = "session-test"
-        mock_metadata.return_value = None
+        destroy_mocks["metadata"].return_value = None
+        destroy_mocks["compose_down"].side_effect = OSError("docker failed")
 
         with pytest.raises(OSError, match="docker failed"):
             destroy_impl("test-sandbox", best_effort=False)
 
-    @patch("foundry_sandbox.commands.destroy.log_warn")
-    @patch("foundry_sandbox.commands.destroy.log_info")
-    @patch("foundry_sandbox.commands.destroy.cleanup_sandbox_branch")
-    @patch("foundry_sandbox.commands.destroy.remove_worktree")
-    @patch("foundry_sandbox.commands.destroy.load_sandbox_metadata")
-    @patch("foundry_sandbox.commands.destroy.remove_sandbox_networks")
-    @patch("foundry_sandbox.commands.destroy.remove_hmac_volume")
-    @patch("foundry_sandbox.commands.destroy.remove_stubs_volume")
-    @patch("foundry_sandbox.commands.destroy.compose_down")
-    @patch("foundry_sandbox.commands.destroy._proxy_cleanup")
-    @patch("subprocess.run", side_effect=OSError("tmux not found"))
-    @patch("foundry_sandbox.commands.destroy._tmux_session_name")
-    @patch("foundry_sandbox.commands.destroy.derive_sandbox_paths")
-    def test_best_effort_false_raises_on_tmux_error(
-        self,
-        mock_paths,
-        mock_tmux_name,
-        mock_subprocess,
-        mock_proxy,
-        mock_compose,
-        mock_stubs,
-        mock_hmac,
-        mock_networks,
-        mock_metadata,
-        mock_rm_wt,
-        mock_branch,
-        mock_log_info,
-        mock_log_warn,
-        mock_paths_fixture,
-    ):
+    def test_best_effort_false_raises_on_tmux_error(self, destroy_mocks):
         """best_effort=False raises on OSError from tmux kill."""
-        mock_paths.return_value = mock_paths_fixture
-        mock_tmux_name.return_value = "session-test"
-        mock_metadata.return_value = None
+        destroy_mocks["metadata"].return_value = None
+        destroy_mocks["subprocess"].side_effect = OSError("tmux not found")
 
         with pytest.raises(OSError, match="tmux not found"):
             destroy_impl("test-sandbox", best_effort=False)
@@ -436,184 +209,57 @@ class TestBestEffortFalse:
 class TestLoggingOutput:
     """Test that log_info and log_warn are called appropriately."""
 
-    @patch("foundry_sandbox.commands.destroy.log_warn")
-    @patch("foundry_sandbox.commands.destroy.log_info")
-    @patch("foundry_sandbox.commands.destroy.cleanup_sandbox_branch")
-    @patch("foundry_sandbox.commands.destroy.remove_worktree")
-    @patch("foundry_sandbox.commands.destroy.load_sandbox_metadata")
-    @patch("foundry_sandbox.commands.destroy.remove_sandbox_networks")
-    @patch("foundry_sandbox.commands.destroy.remove_hmac_volume")
-    @patch("foundry_sandbox.commands.destroy.remove_stubs_volume")
-    @patch("foundry_sandbox.commands.destroy.compose_down")
-    @patch("foundry_sandbox.commands.destroy._proxy_cleanup")
-    @patch("subprocess.run")
-    @patch("foundry_sandbox.commands.destroy._tmux_session_name")
-    @patch("foundry_sandbox.commands.destroy.derive_sandbox_paths")
-    def test_log_info_called_for_config_removal(
-        self,
-        mock_paths,
-        mock_tmux_name,
-        mock_subprocess,
-        mock_proxy,
-        mock_compose,
-        mock_stubs,
-        mock_hmac,
-        mock_networks,
-        mock_metadata,
-        mock_rm_wt,
-        mock_branch,
-        mock_log_info,
-        mock_log_warn,
-        mock_paths_fixture,
-    ):
+    def test_log_info_called_for_config_removal(self, destroy_mocks):
         """log_info should be called when removing Claude config."""
-        mock_paths.return_value = mock_paths_fixture
-        mock_tmux_name.return_value = "session-test"
-        mock_metadata.return_value = None
+        destroy_mocks["metadata"].return_value = None
 
         destroy_impl("test-sandbox")
 
-        # Verify log_info was called with "Removing Claude config..."
         log_info_calls = [
             str(call_obj[0][0]) if call_obj[0] else ""
-            for call_obj in mock_log_info.call_args_list
+            for call_obj in destroy_mocks["log_info"].call_args_list
         ]
         assert any("Removing Claude config" in s for s in log_info_calls), \
             f"Expected 'Removing Claude config' in log_info calls: {log_info_calls}"
 
-    @patch("foundry_sandbox.commands.destroy.log_warn")
-    @patch("foundry_sandbox.commands.destroy.log_info")
-    @patch("foundry_sandbox.commands.destroy.cleanup_sandbox_branch")
-    @patch("foundry_sandbox.commands.destroy.remove_worktree")
-    @patch("foundry_sandbox.commands.destroy.load_sandbox_metadata")
-    @patch("foundry_sandbox.commands.destroy.remove_sandbox_networks")
-    @patch("foundry_sandbox.commands.destroy.remove_hmac_volume")
-    @patch("foundry_sandbox.commands.destroy.remove_stubs_volume")
-    @patch("foundry_sandbox.commands.destroy.compose_down")
-    @patch("foundry_sandbox.commands.destroy._proxy_cleanup")
-    @patch("subprocess.run")
-    @patch("foundry_sandbox.commands.destroy._tmux_session_name")
-    @patch("foundry_sandbox.commands.destroy.derive_sandbox_paths")
-    def test_log_info_called_for_worktree_removal(
-        self,
-        mock_paths,
-        mock_tmux_name,
-        mock_subprocess,
-        mock_proxy,
-        mock_compose,
-        mock_stubs,
-        mock_hmac,
-        mock_networks,
-        mock_metadata,
-        mock_rm_wt,
-        mock_branch,
-        mock_log_info,
-        mock_log_warn,
-        mock_paths_fixture,
-    ):
+    def test_log_info_called_for_worktree_removal(self, destroy_mocks):
         """log_info should be called when removing worktree."""
-        mock_paths.return_value = mock_paths_fixture
-        mock_tmux_name.return_value = "session-test"
-        mock_metadata.return_value = None
+        destroy_mocks["metadata"].return_value = None
 
         destroy_impl("test-sandbox")
 
-        # Verify log_info was called with "Removing worktree..."
         log_info_calls = [
             str(call_obj[0][0]) if call_obj[0] else ""
-            for call_obj in mock_log_info.call_args_list
+            for call_obj in destroy_mocks["log_info"].call_args_list
         ]
         assert any("Removing worktree" in s for s in log_info_calls), \
             f"Expected 'Removing worktree' in log_info calls: {log_info_calls}"
 
-    @patch("foundry_sandbox.commands.destroy.log_warn")
-    @patch("foundry_sandbox.commands.destroy.log_info")
-    @patch("foundry_sandbox.commands.destroy.cleanup_sandbox_branch")
-    @patch("foundry_sandbox.commands.destroy.remove_worktree", side_effect=Exception("worktree busy"))
-    @patch("foundry_sandbox.commands.destroy.load_sandbox_metadata")
-    @patch("foundry_sandbox.commands.destroy.remove_sandbox_networks")
-    @patch("foundry_sandbox.commands.destroy.remove_hmac_volume")
-    @patch("foundry_sandbox.commands.destroy.remove_stubs_volume")
-    @patch("foundry_sandbox.commands.destroy.compose_down")
-    @patch("foundry_sandbox.commands.destroy._proxy_cleanup")
-    @patch("subprocess.run")
-    @patch("foundry_sandbox.commands.destroy._tmux_session_name")
-    @patch("foundry_sandbox.commands.destroy.derive_sandbox_paths")
-    def test_log_warn_called_on_worktree_removal_error(
-        self,
-        mock_paths,
-        mock_tmux_name,
-        mock_subprocess,
-        mock_proxy,
-        mock_compose,
-        mock_stubs,
-        mock_hmac,
-        mock_networks,
-        mock_metadata,
-        mock_rm_wt,
-        mock_branch,
-        mock_log_info,
-        mock_log_warn,
-        mock_paths_fixture,
-    ):
+    def test_log_warn_called_on_worktree_removal_error(self, destroy_mocks):
         """log_warn should be called when worktree removal fails with best_effort=True."""
-        mock_paths.return_value = mock_paths_fixture
-        mock_tmux_name.return_value = "session-test"
-        mock_metadata.return_value = None
+        destroy_mocks["metadata"].return_value = None
+        destroy_mocks["remove_worktree"].side_effect = Exception("worktree busy")
 
         destroy_impl("test-sandbox", best_effort=True)
 
-        # Verify log_warn was called with error message
         log_warn_calls = [
             str(call_obj[0][0]) if call_obj[0] else ""
-            for call_obj in mock_log_warn.call_args_list
+            for call_obj in destroy_mocks["log_warn"].call_args_list
         ]
         assert any("Could not remove worktree" in s for s in log_warn_calls), \
             f"Expected 'Could not remove worktree' in log_warn calls: {log_warn_calls}"
 
-    @patch("foundry_sandbox.commands.destroy.log_warn")
-    @patch("foundry_sandbox.commands.destroy.log_info")
-    @patch("foundry_sandbox.commands.destroy.cleanup_sandbox_branch")
-    @patch("foundry_sandbox.commands.destroy.remove_worktree")
-    @patch("foundry_sandbox.commands.destroy.load_sandbox_metadata")
-    @patch("foundry_sandbox.commands.destroy.remove_sandbox_networks")
-    @patch("foundry_sandbox.commands.destroy.remove_hmac_volume")
-    @patch("foundry_sandbox.commands.destroy.remove_stubs_volume")
-    @patch("foundry_sandbox.commands.destroy.compose_down")
-    @patch("foundry_sandbox.commands.destroy._proxy_cleanup")
-    @patch("subprocess.run", side_effect=OSError("sudo not available"))
-    @patch("foundry_sandbox.commands.destroy._tmux_session_name")
-    @patch("foundry_sandbox.commands.destroy.derive_sandbox_paths")
-    @patch("foundry_sandbox.commands.destroy.shutil.rmtree", side_effect=OSError("permission denied"))
-    def test_log_warn_called_on_config_removal_error(
-        self,
-        mock_shutil_rmtree,
-        mock_paths,
-        mock_tmux_name,
-        mock_subprocess,
-        mock_proxy,
-        mock_compose,
-        mock_stubs,
-        mock_hmac,
-        mock_networks,
-        mock_metadata,
-        mock_rm_wt,
-        mock_branch,
-        mock_log_info,
-        mock_log_warn,
-        mock_paths_fixture,
-    ):
+    def test_log_warn_called_on_config_removal_error(self, destroy_mocks):
         """log_warn should be called when config removal sudo fails with best_effort=True."""
-        mock_paths.return_value = mock_paths_fixture
-        mock_tmux_name.return_value = "session-test"
-        mock_metadata.return_value = None
+        destroy_mocks["metadata"].return_value = None
+        destroy_mocks["shutil_rmtree"].side_effect = OSError("permission denied")
+        destroy_mocks["subprocess"].side_effect = OSError("sudo not available")
 
         destroy_impl("test-sandbox", best_effort=True)
 
-        # Verify log_warn was called with error message about config
         log_warn_calls = [
             str(call_obj[0][0]) if call_obj[0] else ""
-            for call_obj in mock_log_warn.call_args_list
+            for call_obj in destroy_mocks["log_warn"].call_args_list
         ]
         assert any("Could not remove config directory" in s for s in log_warn_calls), \
             f"Expected 'Could not remove config directory' in log_warn calls: {log_warn_calls}"
@@ -627,87 +273,21 @@ class TestLoggingOutput:
 class TestKeepWorktreeFlag:
     """Test that keep_worktree=True prevents deletion of worktree and config."""
 
-    @patch("foundry_sandbox.commands.destroy.log_warn")
-    @patch("foundry_sandbox.commands.destroy.log_info")
-    @patch("foundry_sandbox.commands.destroy.cleanup_sandbox_branch")
-    @patch("foundry_sandbox.commands.destroy.remove_worktree")
-    @patch("foundry_sandbox.commands.destroy.load_sandbox_metadata")
-    @patch("foundry_sandbox.commands.destroy.remove_sandbox_networks")
-    @patch("foundry_sandbox.commands.destroy.remove_hmac_volume")
-    @patch("foundry_sandbox.commands.destroy.remove_stubs_volume")
-    @patch("foundry_sandbox.commands.destroy.compose_down")
-    @patch("foundry_sandbox.commands.destroy._proxy_cleanup")
-    @patch("subprocess.run")
-    @patch("foundry_sandbox.commands.destroy._tmux_session_name")
-    @patch("foundry_sandbox.commands.destroy.derive_sandbox_paths")
-    def test_keep_worktree_true_skips_worktree_removal(
-        self,
-        mock_paths,
-        mock_tmux_name,
-        mock_subprocess,
-        mock_proxy,
-        mock_compose,
-        mock_stubs,
-        mock_hmac,
-        mock_networks,
-        mock_metadata,
-        mock_rm_wt,
-        mock_branch,
-        mock_log_info,
-        mock_log_warn,
-        mock_paths_fixture,
-    ):
+    def test_keep_worktree_true_skips_worktree_removal(self, destroy_mocks):
         """When keep_worktree=True, remove_worktree should NOT be called."""
-        mock_paths.return_value = mock_paths_fixture
-        mock_tmux_name.return_value = "session-test"
-        mock_metadata.return_value = None
+        destroy_mocks["metadata"].return_value = None
 
         destroy_impl("test-sandbox", keep_worktree=True)
 
-        # remove_worktree should NOT be called
-        mock_rm_wt.assert_not_called()
+        destroy_mocks["remove_worktree"].assert_not_called()
 
-    @patch("foundry_sandbox.commands.destroy.log_warn")
-    @patch("foundry_sandbox.commands.destroy.log_info")
-    @patch("foundry_sandbox.commands.destroy.cleanup_sandbox_branch")
-    @patch("foundry_sandbox.commands.destroy.remove_worktree")
-    @patch("foundry_sandbox.commands.destroy.load_sandbox_metadata")
-    @patch("foundry_sandbox.commands.destroy.remove_sandbox_networks")
-    @patch("foundry_sandbox.commands.destroy.remove_hmac_volume")
-    @patch("foundry_sandbox.commands.destroy.remove_stubs_volume")
-    @patch("foundry_sandbox.commands.destroy.compose_down")
-    @patch("foundry_sandbox.commands.destroy._proxy_cleanup")
-    @patch("subprocess.run")
-    @patch("foundry_sandbox.commands.destroy._tmux_session_name")
-    @patch("foundry_sandbox.commands.destroy.derive_sandbox_paths")
-    @patch("shutil.rmtree")
-    def test_keep_worktree_true_skips_config_removal(
-        self,
-        mock_shutil_rmtree,
-        mock_paths,
-        mock_tmux_name,
-        mock_subprocess,
-        mock_proxy,
-        mock_compose,
-        mock_stubs,
-        mock_hmac,
-        mock_networks,
-        mock_metadata,
-        mock_rm_wt,
-        mock_branch,
-        mock_log_info,
-        mock_log_warn,
-        mock_paths_fixture,
-    ):
+    def test_keep_worktree_true_skips_config_removal(self, destroy_mocks):
         """When keep_worktree=True, config dir should NOT be removed."""
-        mock_paths.return_value = mock_paths_fixture
-        mock_tmux_name.return_value = "session-test"
-        mock_metadata.return_value = None
+        destroy_mocks["metadata"].return_value = None
 
         destroy_impl("test-sandbox", keep_worktree=True)
 
-        # shutil.rmtree should NOT be called for config
-        mock_shutil_rmtree.assert_not_called()
+        destroy_mocks["shutil_rmtree"].assert_not_called()
 
 
 # ---------------------------------------------------------------------------
@@ -718,60 +298,23 @@ class TestKeepWorktreeFlag:
 class TestCleanupSequence:
     """Test that all cleanup steps are called in correct order."""
 
-    @patch("foundry_sandbox.commands.destroy.log_warn")
-    @patch("foundry_sandbox.commands.destroy.log_info")
-    @patch("foundry_sandbox.commands.destroy._repo_url_to_bare_path")
-    @patch("foundry_sandbox.commands.destroy.cleanup_sandbox_branch")
-    @patch("foundry_sandbox.commands.destroy.remove_worktree")
-    @patch("foundry_sandbox.commands.destroy.load_sandbox_metadata")
-    @patch("foundry_sandbox.commands.destroy.remove_sandbox_networks")
-    @patch("foundry_sandbox.commands.destroy.remove_hmac_volume")
-    @patch("foundry_sandbox.commands.destroy.remove_stubs_volume")
-    @patch("foundry_sandbox.commands.destroy.compose_down")
-    @patch("foundry_sandbox.commands.destroy._proxy_cleanup")
-    @patch("subprocess.run")
-    @patch("foundry_sandbox.commands.destroy._tmux_session_name")
-    @patch("foundry_sandbox.commands.destroy.derive_sandbox_paths")
-    @patch("shutil.rmtree")
-    def test_all_cleanup_steps_called(
-        self,
-        mock_shutil_rmtree,
-        mock_paths,
-        mock_tmux_name,
-        mock_subprocess,
-        mock_proxy,
-        mock_compose,
-        mock_stubs,
-        mock_hmac,
-        mock_networks,
-        mock_metadata,
-        mock_rm_wt,
-        mock_branch,
-        mock_url_to_path,
-        mock_log_info,
-        mock_log_warn,
-        mock_paths_fixture,
-    ):
+    def test_all_cleanup_steps_called(self, destroy_mocks):
         """All cleanup functions should be called during destroy."""
-        mock_paths.return_value = mock_paths_fixture
-        mock_tmux_name.return_value = "session-test"
-        mock_metadata.return_value = {
+        destroy_mocks["metadata"].return_value = {
             "branch": "sandbox/test",
-            "repo_url": "/path/to/repo"
+            "repo_url": "/path/to/repo",
         }
-        mock_url_to_path.return_value = "/path/to/bare"
 
         destroy_impl("test-sandbox")
 
-        # Verify all cleanup functions were called
-        mock_proxy.assert_called_once()
-        mock_compose.assert_called_once()
-        mock_stubs.assert_called_once()
-        mock_hmac.assert_called_once()
-        mock_networks.assert_called_once()
-        mock_metadata.assert_called_once()
-        mock_rm_wt.assert_called_once()
-        mock_branch.assert_called_once()
+        destroy_mocks["proxy_cleanup"].assert_called_once()
+        destroy_mocks["compose_down"].assert_called_once()
+        destroy_mocks["stubs"].assert_called_once()
+        destroy_mocks["hmac"].assert_called_once()
+        destroy_mocks["networks"].assert_called_once()
+        destroy_mocks["metadata"].assert_called_once()
+        destroy_mocks["remove_worktree"].assert_called_once()
+        destroy_mocks["branch"].assert_called_once()
 
 
 # ---------------------------------------------------------------------------
@@ -782,204 +325,42 @@ class TestCleanupSequence:
 class TestMetadataHandling:
     """Test metadata loading and branch cleanup conditions."""
 
-    @patch("foundry_sandbox.commands.destroy.log_warn")
-    @patch("foundry_sandbox.commands.destroy.log_info")
-    @patch("foundry_sandbox.commands.destroy.cleanup_sandbox_branch")
-    @patch("foundry_sandbox.commands.destroy.remove_worktree")
-    @patch("foundry_sandbox.commands.destroy.load_sandbox_metadata")
-    @patch("foundry_sandbox.commands.destroy.remove_sandbox_networks")
-    @patch("foundry_sandbox.commands.destroy.remove_hmac_volume")
-    @patch("foundry_sandbox.commands.destroy.remove_stubs_volume")
-    @patch("foundry_sandbox.commands.destroy.compose_down")
-    @patch("foundry_sandbox.commands.destroy._proxy_cleanup")
-    @patch("subprocess.run")
-    @patch("foundry_sandbox.commands.destroy._tmux_session_name")
-    @patch("foundry_sandbox.commands.destroy.derive_sandbox_paths")
-    def test_no_branch_cleanup_when_metadata_missing(
-        self,
-        mock_paths,
-        mock_tmux_name,
-        mock_subprocess,
-        mock_proxy,
-        mock_compose,
-        mock_stubs,
-        mock_hmac,
-        mock_networks,
-        mock_metadata,
-        mock_rm_wt,
-        mock_branch,
-        mock_log_info,
-        mock_log_warn,
-        mock_paths_fixture,
-    ):
+    def test_no_branch_cleanup_when_metadata_missing(self, destroy_mocks):
         """When metadata is None, branch cleanup should NOT be called."""
-        mock_paths.return_value = mock_paths_fixture
-        mock_tmux_name.return_value = "session-test"
-        mock_metadata.return_value = None
+        destroy_mocks["metadata"].return_value = None
 
         destroy_impl("test-sandbox")
 
-        # cleanup_sandbox_branch should NOT be called
-        mock_branch.assert_not_called()
+        destroy_mocks["branch"].assert_not_called()
 
-    @patch("foundry_sandbox.commands.destroy.log_warn")
-    @patch("foundry_sandbox.commands.destroy.log_info")
-    @patch("foundry_sandbox.commands.destroy.cleanup_sandbox_branch")
-    @patch("foundry_sandbox.commands.destroy.remove_worktree")
-    @patch("foundry_sandbox.commands.destroy.load_sandbox_metadata")
-    @patch("foundry_sandbox.commands.destroy.remove_sandbox_networks")
-    @patch("foundry_sandbox.commands.destroy.remove_hmac_volume")
-    @patch("foundry_sandbox.commands.destroy.remove_stubs_volume")
-    @patch("foundry_sandbox.commands.destroy.compose_down")
-    @patch("foundry_sandbox.commands.destroy._proxy_cleanup")
-    @patch("subprocess.run")
-    @patch("foundry_sandbox.commands.destroy._tmux_session_name")
-    @patch("foundry_sandbox.commands.destroy.derive_sandbox_paths")
-    def test_no_branch_cleanup_when_empty_metadata(
-        self,
-        mock_paths,
-        mock_tmux_name,
-        mock_subprocess,
-        mock_proxy,
-        mock_compose,
-        mock_stubs,
-        mock_hmac,
-        mock_networks,
-        mock_metadata,
-        mock_rm_wt,
-        mock_branch,
-        mock_log_info,
-        mock_log_warn,
-        mock_paths_fixture,
-    ):
+    def test_no_branch_cleanup_when_empty_metadata(self, destroy_mocks):
         """When metadata is empty dict, branch cleanup should NOT be called."""
-        mock_paths.return_value = mock_paths_fixture
-        mock_tmux_name.return_value = "session-test"
-        mock_metadata.return_value = {}
+        destroy_mocks["metadata"].return_value = {}
 
         destroy_impl("test-sandbox")
 
-        # cleanup_sandbox_branch should NOT be called (no branch/repo_url)
-        mock_branch.assert_not_called()
+        destroy_mocks["branch"].assert_not_called()
 
-    @patch("foundry_sandbox.commands.destroy.log_warn")
-    @patch("foundry_sandbox.commands.destroy.log_info")
-    @patch("foundry_sandbox.commands.destroy.cleanup_sandbox_branch")
-    @patch("foundry_sandbox.commands.destroy.remove_worktree")
-    @patch("foundry_sandbox.commands.destroy.load_sandbox_metadata")
-    @patch("foundry_sandbox.commands.destroy.remove_sandbox_networks")
-    @patch("foundry_sandbox.commands.destroy.remove_hmac_volume")
-    @patch("foundry_sandbox.commands.destroy.remove_stubs_volume")
-    @patch("foundry_sandbox.commands.destroy.compose_down")
-    @patch("foundry_sandbox.commands.destroy._proxy_cleanup")
-    @patch("subprocess.run")
-    @patch("foundry_sandbox.commands.destroy._tmux_session_name")
-    @patch("foundry_sandbox.commands.destroy.derive_sandbox_paths")
-    def test_no_branch_cleanup_when_branch_missing(
-        self,
-        mock_paths,
-        mock_tmux_name,
-        mock_subprocess,
-        mock_proxy,
-        mock_compose,
-        mock_stubs,
-        mock_hmac,
-        mock_networks,
-        mock_metadata,
-        mock_rm_wt,
-        mock_branch,
-        mock_log_info,
-        mock_log_warn,
-        mock_paths_fixture,
-    ):
+    def test_no_branch_cleanup_when_branch_missing(self, destroy_mocks):
         """When branch is missing, cleanup should NOT be called."""
-        mock_paths.return_value = mock_paths_fixture
-        mock_tmux_name.return_value = "session-test"
-        # Only repo_url, no branch
-        mock_metadata.return_value = {"repo_url": "/path/to/repo"}
+        destroy_mocks["metadata"].return_value = {"repo_url": "/path/to/repo"}
 
         destroy_impl("test-sandbox")
 
-        # cleanup_sandbox_branch should NOT be called
-        mock_branch.assert_not_called()
+        destroy_mocks["branch"].assert_not_called()
 
-    @patch("foundry_sandbox.commands.destroy.log_warn")
-    @patch("foundry_sandbox.commands.destroy.log_info")
-    @patch("foundry_sandbox.commands.destroy._repo_url_to_bare_path")
-    @patch("foundry_sandbox.commands.destroy.cleanup_sandbox_branch")
-    @patch("foundry_sandbox.commands.destroy.remove_worktree")
-    @patch("foundry_sandbox.commands.destroy.load_sandbox_metadata")
-    @patch("foundry_sandbox.commands.destroy.remove_sandbox_networks")
-    @patch("foundry_sandbox.commands.destroy.remove_hmac_volume")
-    @patch("foundry_sandbox.commands.destroy.remove_stubs_volume")
-    @patch("foundry_sandbox.commands.destroy.compose_down")
-    @patch("foundry_sandbox.commands.destroy._proxy_cleanup")
-    @patch("subprocess.run")
-    @patch("foundry_sandbox.commands.destroy._tmux_session_name")
-    @patch("foundry_sandbox.commands.destroy.derive_sandbox_paths")
-    def test_metadata_error_caught_in_best_effort(
-        self,
-        mock_paths,
-        mock_tmux_name,
-        mock_subprocess,
-        mock_proxy,
-        mock_compose,
-        mock_stubs,
-        mock_hmac,
-        mock_networks,
-        mock_metadata,
-        mock_rm_wt,
-        mock_branch,
-        mock_url_to_path,
-        mock_log_info,
-        mock_log_warn,
-        mock_paths_fixture,
-    ):
+    def test_metadata_error_caught_in_best_effort(self, destroy_mocks):
         """When metadata loading fails with best_effort=True, should continue."""
-        mock_paths.return_value = mock_paths_fixture
-        mock_tmux_name.return_value = "session-test"
-        mock_metadata.side_effect = OSError("metadata file missing")
+        destroy_mocks["metadata"].side_effect = OSError("metadata file missing")
 
         # Should not raise
         destroy_impl("test-sandbox", best_effort=True)
 
-        # Should have been called
-        mock_metadata.assert_called_once()
+        destroy_mocks["metadata"].assert_called_once()
 
-    @patch("foundry_sandbox.commands.destroy.log_warn")
-    @patch("foundry_sandbox.commands.destroy.log_info")
-    @patch("foundry_sandbox.commands.destroy.cleanup_sandbox_branch")
-    @patch("foundry_sandbox.commands.destroy.remove_worktree")
-    @patch("foundry_sandbox.commands.destroy.load_sandbox_metadata")
-    @patch("foundry_sandbox.commands.destroy.remove_sandbox_networks")
-    @patch("foundry_sandbox.commands.destroy.remove_hmac_volume")
-    @patch("foundry_sandbox.commands.destroy.remove_stubs_volume")
-    @patch("foundry_sandbox.commands.destroy.compose_down")
-    @patch("foundry_sandbox.commands.destroy._proxy_cleanup")
-    @patch("subprocess.run")
-    @patch("foundry_sandbox.commands.destroy._tmux_session_name")
-    @patch("foundry_sandbox.commands.destroy.derive_sandbox_paths")
-    def test_metadata_error_raised_in_strict_mode(
-        self,
-        mock_paths,
-        mock_tmux_name,
-        mock_subprocess,
-        mock_proxy,
-        mock_compose,
-        mock_stubs,
-        mock_hmac,
-        mock_networks,
-        mock_metadata,
-        mock_rm_wt,
-        mock_branch,
-        mock_log_info,
-        mock_log_warn,
-        mock_paths_fixture,
-    ):
+    def test_metadata_error_raised_in_strict_mode(self, destroy_mocks):
         """When metadata loading fails with best_effort=False, should raise."""
-        mock_paths.return_value = mock_paths_fixture
-        mock_tmux_name.return_value = "session-test"
-        mock_metadata.side_effect = ValueError("invalid metadata")
+        destroy_mocks["metadata"].side_effect = ValueError("invalid metadata")
 
         with pytest.raises(ValueError, match="invalid metadata"):
             destroy_impl("test-sandbox", best_effort=False)
@@ -993,48 +374,15 @@ class TestMetadataHandling:
 class TestSubprocessRunEdgeCases:
     """Test subprocess.run behavior for tmux kill and sudo rm fallback."""
 
-    @patch("foundry_sandbox.commands.destroy.log_warn")
-    @patch("foundry_sandbox.commands.destroy.log_info")
-    @patch("foundry_sandbox.commands.destroy.cleanup_sandbox_branch")
-    @patch("foundry_sandbox.commands.destroy.remove_worktree")
-    @patch("foundry_sandbox.commands.destroy.load_sandbox_metadata")
-    @patch("foundry_sandbox.commands.destroy.remove_sandbox_networks")
-    @patch("foundry_sandbox.commands.destroy.remove_hmac_volume")
-    @patch("foundry_sandbox.commands.destroy.remove_stubs_volume")
-    @patch("foundry_sandbox.commands.destroy.compose_down")
-    @patch("foundry_sandbox.commands.destroy._proxy_cleanup")
-    @patch("subprocess.run")
-    @patch("foundry_sandbox.commands.destroy._tmux_session_name")
-    @patch("foundry_sandbox.commands.destroy.derive_sandbox_paths")
-    @patch("shutil.rmtree", side_effect=OSError("permission denied"))
-    def test_sudo_rm_fallback_called_on_shutil_error(
-        self,
-        mock_shutil_rmtree,
-        mock_paths,
-        mock_tmux_name,
-        mock_subprocess,
-        mock_proxy,
-        mock_compose,
-        mock_stubs,
-        mock_hmac,
-        mock_networks,
-        mock_metadata,
-        mock_rm_wt,
-        mock_branch,
-        mock_log_info,
-        mock_log_warn,
-        mock_paths_fixture,
-    ):
+    def test_sudo_rm_fallback_called_on_shutil_error(self, destroy_mocks):
         """When shutil.rmtree fails, sudo rm should be tried."""
-        mock_paths.return_value = mock_paths_fixture
-        mock_tmux_name.return_value = "session-test"
-        mock_metadata.return_value = None
+        destroy_mocks["metadata"].return_value = None
+        destroy_mocks["shutil_rmtree"].side_effect = OSError("permission denied")
 
         destroy_impl("test-sandbox", best_effort=True)
 
-        # subprocess.run should have been called for sudo rm
         called_with_sudo = False
-        for call_obj in mock_subprocess.call_args_list:
+        for call_obj in destroy_mocks["subprocess"].call_args_list:
             args = call_obj[0][0] if call_obj[0] else []
             if args and args[0] == "sudo":
                 called_with_sudo = True
