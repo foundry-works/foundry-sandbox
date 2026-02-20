@@ -231,17 +231,17 @@ class TestFullPushFlow:
         data = response.get_json()
         assert "--mirror" in data.get("error", "") or "not allowed" in data.get("error", "").lower()
 
-    def test_push_without_refspec_blocked(self, client, hmac_secret):
-        """Push without explicit refspecs should be blocked."""
+    def test_push_without_refspec_auto_expanded(self, client, hmac_secret):
+        """Push without explicit refspecs is auto-expanded with the sandbox branch."""
         response = make_authenticated_request(
             client,
             sandbox_id="test-sandbox",
             hmac_secret=hmac_secret,
             args=["push", "origin"],
         )
-        assert response.status_code == 422
-        data = response.get_json()
-        assert "explicit" in data.get("error", "").lower() or "refspec" in data.get("error", "").lower()
+        # Since 10b89dd, bare "git push origin" is auto-expanded to include
+        # the sandbox branch refspec rather than being rejected.
+        assert response.status_code == 200
 
     def test_push_wildcard_refspec_blocked(self, client, hmac_secret):
         """Push with wildcard refspecs should be blocked."""
