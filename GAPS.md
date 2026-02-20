@@ -211,27 +211,12 @@ including:
 
 ### What egg Does
 
-egg validates files at **two** points:
-
-**Commit-time** (`gateway.py:1168-1218`): Before allowing a commit, the gateway runs
-`git diff --cached --name-only` to enumerate staged files. Each file is checked against
-phase-based restrictions. If any file is blocked, the commit is rejected with HTTP 403.
-
-**Push-time** (`gateway.py:616-801`): Before allowing a push, the gateway runs
-`git diff --name-only remote/branch..HEAD` to enumerate all changed files across all
-commits being pushed. Files are checked against both role-based and phase-based
-restrictions. If git diff fails, the push is **blocked** (fail-closed).
-
-Path normalization prevents bypass via `../`, `./`, `//`:
-
-```python
-@staticmethod
-def _normalize_path(file_path: str) -> str:
-    normalized = posixpath.normpath(file_path)
-    if ".." in normalized.split("/"):
-        return "__INVALID_PATH_TRAVERSAL__"
-    return normalized.lstrip("./").lstrip("/")
-```
+egg validates changed files at both commit-time and push-time using its phase/role
+system. The core idea is simple: enumerate the files being changed, check them against
+a list of patterns, and reject if any are blocked. egg's implementation is complex
+because it supports SDLC phases and multi-agent roles, but the underlying mechanism
+is just pattern matching on file paths with path normalization to prevent traversal
+bypasses.
 
 ### Why This Matters
 
@@ -453,53 +438,29 @@ tmpfs:
 foundry-sandbox does not validate files at commit time. The git API server executes
 `git commit` without inspecting which files are staged.
 
-Push-time validation (proposed in GAP 3) catches most issues, but there's a gap:
-an agent can commit files incrementally across many small commits, making it harder
-to spot dangerous changes in the push-time diff. It can also use `git commit --amend`
-or interactive rebase to hide the final state.
+Push-time validation (GAP 3) catches restricted files before they leave the sandbox,
+but commit-time validation adds defense-in-depth: catching violations early gives
+the agent a chance to fix them rather than failing at push time with a large diff.
 
-### What egg Does
-
-Before allowing any commit, the gateway inspects staged files:
-
-```python
-# gateway.py:1168-1218
-staged_result = git_cmd("diff", "--cached", "--name-only")
-staged_files = [f for f in staged_result.stdout.strip().split("\n") if f]
-phase_result = check_phase_file_restrictions(session_phase, staged_files)
-if not phase_result.allowed:
-    return jsonify({"error": f"File restrictions: {phase_result.reason}"}), 403
-```
-
-### Why This Matters
-
-For the local dev case, push-time validation (GAP 3) is sufficient. Commit-time
-validation adds defense-in-depth but isn't strictly necessary — the push is the
-security boundary, not the commit. The agent's commits exist only in its local
-worktree until pushed.
-
-If GAP 3 is implemented with fail-closed semantics, this becomes redundant for
-security purposes. It's still useful for **developer experience** — catching
-violations early gives the agent a chance to fix them rather than failing at push
-time with a large diff.
+For the local dev case, push-time validation is the security boundary — the agent's
+commits exist only in its local worktree until pushed. Commit-time validation is
+strictly a developer experience improvement.
 
 ### Proposed Implementation
 
-If GAP 3 is implemented, add the same file restriction check to the git API
-`commit` endpoint:
+Reuse the same file restriction config and `check_file_restrictions()` function from
+GAP 3. Add a call in the git API `commit` handler that enumerates staged files and
+checks them against the blocked/warn patterns:
 
-```python
-# In git_api.py, commit handler
-staged_files = run_git("diff", "--cached", "--name-only").splitlines()
-violations = check_file_restrictions(staged_files)
-if violations:
-    return {"error": f"Cannot commit restricted files: {violations}"}, 403
-```
+1. Before executing a commit, run `git diff --cached --name-only` to get staged files
+2. Pass them through the same `check_file_restrictions()` used at push time
+3. Blocked files: reject the commit with a clear error message
+4. Fail-closed: if `git diff` fails, reject the commit
 
 ### Scope
 
 - `unified-proxy/git_api.py`: Add staged file check to commit endpoint
-- Reuses the same restriction config from GAP 3
+- Reuses the same config and validation logic from GAP 3 — no new config files
 
 ---
 
