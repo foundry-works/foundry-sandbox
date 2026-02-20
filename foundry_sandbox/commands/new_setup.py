@@ -21,6 +21,7 @@ from foundry_sandbox.constants import get_repos_dir
 from foundry_sandbox.container_io import copy_dir_to_container, copy_file_to_container
 from foundry_sandbox.container_setup import install_pip_requirements
 from foundry_sandbox.credential_setup import copy_configs_to_container
+from foundry_sandbox.foundry_upgrade import upgrade_foundry_mcp_prerelease
 from foundry_sandbox.docker import compose_up
 from foundry_sandbox.foundry_plugin import prepopulate_foundry_global
 from foundry_sandbox.git import ensure_bare_repo
@@ -35,7 +36,7 @@ from foundry_sandbox.network import (
 from foundry_sandbox.paths import ensure_dir, path_claude_home
 from foundry_sandbox.permissions import install_workspace_permissions
 from foundry_sandbox.proxy import setup_proxy_registration
-from foundry_sandbox.state import write_sandbox_metadata
+from foundry_sandbox.state import patch_sandbox_metadata, write_sandbox_metadata
 from foundry_sandbox.validate import validate_git_remotes
 from foundry_sandbox.errors import SetupError
 from foundry_sandbox.utils import log_section, log_step, log_warn
@@ -124,6 +125,7 @@ def _new_setup(
     isolate_credentials: bool,
     allow_pr: bool,
     pip_requirements: str,
+    pre_foundry: bool = False,
     enable_opencode_flag: str,
     enable_zai_flag: str,
     anthropic_base_url: str,
@@ -204,6 +206,7 @@ def _new_setup(
         sparse_checkout=bool(sparse),
         pip_requirements=pip_requirements or "",
         allow_pr=bool(allow_pr),
+        pre_foundry=bool(pre_foundry),
         network_mode=network_mode or "",
         sync_ssh=1 if sync_ssh_enabled else 0,
         ssh_mode=ssh_mode,
@@ -339,7 +342,22 @@ def _new_setup(
     # Install workspace permissions
     install_workspace_permissions(container_id)
 
-    # Install pip requirements
+    # Upgrade foundry-mcp to pre-release if requested (must run before pip
+    # requirements because install_pip_requirements blocks PyPI afterward)
+    installed_foundry_version = ""
+    if pre_foundry:
+        installed_foundry_version = upgrade_foundry_mcp_prerelease(
+            container_id, required=True,
+        )
+        # Pin the installed version in sandbox metadata for deterministic restarts
+        if installed_foundry_version:
+            patch_sandbox_metadata(
+                name,
+                pre_foundry=True,
+                pre_foundry_version=installed_foundry_version,
+            )
+
+    # Install pip requirements (blocks PyPI access after install)
     if pip_requirements:
         install_pip_requirements(container_id, pip_requirements)
 

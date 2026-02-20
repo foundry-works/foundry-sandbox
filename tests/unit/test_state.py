@@ -10,6 +10,7 @@ import pytest
 
 from foundry_sandbox.state import (
     metadata_is_secure,
+    patch_sandbox_metadata,
     write_sandbox_metadata,
     load_sandbox_metadata,
     list_sandboxes,
@@ -858,6 +859,60 @@ class TestEdgeCases:
         metadata = load_sandbox_metadata("unicode-test")
 
         assert metadata["working_dir"] == "/workspace/日本語/文字"
+
+
+class TestPatchSandboxMetadata:
+    """Tests for patch_sandbox_metadata() partial update."""
+
+    def test_round_trip_update(self, sandbox_home):
+        """Patch updates specified fields and preserves others."""
+        write_sandbox_metadata(
+            "patch-test",
+            repo_url="https://github.com/test/repo.git",
+            branch="main",
+            allow_pr=False,
+        )
+
+        patch_sandbox_metadata("patch-test", allow_pr=True, pre_foundry=True, pre_foundry_version="1.2.0a3")
+
+        metadata = load_sandbox_metadata("patch-test")
+        assert metadata is not None
+        assert metadata["allow_pr"] is True
+        assert metadata["pre_foundry"] is True
+        assert metadata["pre_foundry_version"] == "1.2.0a3"
+        # Original fields preserved
+        assert metadata["repo_url"] == "https://github.com/test/repo.git"
+        assert metadata["branch"] == "main"
+
+    def test_rejects_unknown_field(self, sandbox_home):
+        """Patch raises ValueError for unknown field names."""
+        write_sandbox_metadata(
+            "reject-test",
+            repo_url="https://github.com/test/repo.git",
+            branch="main",
+        )
+
+        with pytest.raises(ValueError, match="Unknown SandboxMetadata fields"):
+            patch_sandbox_metadata("reject-test", not_a_real_field=True)
+
+    def test_missing_metadata_raises(self, sandbox_home):
+        """Patch raises FileNotFoundError for non-existent sandbox."""
+        with pytest.raises(FileNotFoundError):
+            patch_sandbox_metadata("nonexistent", allow_pr=True)
+
+    def test_no_updates_is_noop(self, sandbox_home):
+        """Patch with no kwargs is a valid no-op."""
+        write_sandbox_metadata(
+            "noop-test",
+            repo_url="https://github.com/test/repo.git",
+            branch="main",
+        )
+
+        patch_sandbox_metadata("noop-test")
+
+        metadata = load_sandbox_metadata("noop-test")
+        assert metadata is not None
+        assert metadata["branch"] == "main"
 
 
 if __name__ == "__main__":

@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.18.0b1] - 2026-02-20
+
+### Added
+- **`--pre-foundry` flag for `cast new` and `cast start`** — Upgrade foundry-mcp to the latest pre-release inside the sandbox; the wizard also offers a Foundry MCP version step when a newer pre-release is available on PyPI
+- **`patch_sandbox_metadata()` helper** — Partial-update function for sandbox metadata that validates fields through the Pydantic model
+- **Release workflow supports pre-release tags** — `v0.18.0b1`, `v1.0.0a1`, etc. now create GitHub pre-releases and publish to PyPI
+
+### Changed
+- Wizard returns a `WizardResult` named tuple instead of a plain tuple for better readability and extensibility
+
 ## [0.17.4] - 2026-02-19
 
 ### Fixed

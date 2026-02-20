@@ -40,6 +40,7 @@ def test_apply_saved_new_defaults_uses_saved_values() -> None:
         sparse=False,
         pip_requirements="",
         allow_pr=False,
+        pre_foundry=False,
     )
 
     assert isinstance(result, NewDefaults)
@@ -81,6 +82,7 @@ def test_apply_saved_new_defaults_preserves_explicit_values() -> None:
         sparse=False,
         pip_requirements="",
         allow_pr=True,
+        pre_foundry=False,
     )
 
     assert result.repo == "explicit/repo"

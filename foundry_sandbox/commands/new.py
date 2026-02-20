@@ -75,6 +75,7 @@ class NewDefaults:
     sparse: bool
     pip_requirements: str
     allow_pr: bool
+    pre_foundry: bool
 
 
 def _apply_saved_new_defaults(
@@ -94,6 +95,7 @@ def _apply_saved_new_defaults(
     sparse: bool,
     pip_requirements: str,
     allow_pr: bool,
+    pre_foundry: bool,
 ) -> NewDefaults:
     """Apply saved/preset values for parameters not explicitly set by the user."""
     if "repo" not in explicit_params:
@@ -112,6 +114,8 @@ def _apply_saved_new_defaults(
         pip_requirements = str(saved.get("pip_requirements", "") or "")
     if "allow_pr" not in explicit_params:
         allow_pr = _saved_flag_enabled(saved.get("allow_pr", False))
+    if "pre_foundry" not in explicit_params:
+        pre_foundry = _saved_flag_enabled(saved.get("pre_foundry", False))
     if "with_ssh" not in explicit_params:
         with_ssh = _saved_flag_enabled(saved.get("sync_ssh", False))
     if "with_opencode" not in explicit_params:
@@ -142,6 +146,7 @@ def _apply_saved_new_defaults(
         sparse=sparse,
         pip_requirements=pip_requirements,
         allow_pr=allow_pr,
+        pre_foundry=pre_foundry,
     )
 
 
@@ -163,6 +168,7 @@ def _load_and_apply_defaults(
     sparse: bool,
     pip_requirements: str,
     allow_pr: bool,
+    pre_foundry: bool,
 ) -> NewDefaults:
     """Load saved/preset data, validate it, echo a banner, and apply defaults.
 
@@ -198,6 +204,7 @@ def _load_and_apply_defaults(
         sparse=sparse,
         pip_requirements=pip_requirements,
         allow_pr=allow_pr,
+        pre_foundry=pre_foundry,
     )
 
 
@@ -209,6 +216,7 @@ def _persist_sandbox_state(
     sparse: bool,
     pip_requirements: str,
     allow_pr: bool,
+    pre_foundry: bool,
     network_mode: str,
     sync_ssh_enabled: bool,
     with_opencode: bool,
@@ -228,6 +236,7 @@ def _persist_sandbox_state(
         sparse: Whether sparse checkout is enabled.
         pip_requirements: Pip requirements path.
         allow_pr: Whether PR operations are allowed.
+        pre_foundry: Whether to upgrade foundry-mcp to pre-release.
         network_mode: Network mode string.
         sync_ssh_enabled: Whether SSH sync is enabled.
         with_opencode: Whether OpenCode is enabled.
@@ -245,6 +254,7 @@ def _persist_sandbox_state(
         sparse=sparse,
         pip_requirements=pip_requirements or "",
         allow_pr=allow_pr,
+        pre_foundry=pre_foundry,
         network_mode=network_mode or "",
         sync_ssh=sync_ssh_enabled,
         enable_opencode=with_opencode,
@@ -265,6 +275,7 @@ def _persist_sandbox_state(
             sparse=sparse,
             pip_requirements=pip_requirements or "",
             allow_pr=allow_pr,
+            pre_foundry=pre_foundry,
             network_mode=network_mode or "",
             sync_ssh=sync_ssh_enabled,
             enable_opencode=with_opencode,
@@ -357,6 +368,7 @@ def _handle_new_ide_and_attach(
 @click.option("--sparse", is_flag=True, help="Enable sparse checkout (requires --wd)")
 @click.option("--pip-requirements", "-r", metavar="PATH", help="Install Python packages from requirements.txt")
 @click.option("--allow-pr", "--with-pr", is_flag=True, help="Allow PR operations")
+@click.option("--pre-foundry", is_flag=True, help="Upgrade foundry-mcp to pre-release in sandbox")
 @click.option("--save-as", metavar="NAME", help="Save configuration as named preset")
 @click.option("--with-ide", metavar="NAME", help="Launch IDE after creation")
 @click.option("--ide-only", metavar="NAME", help="Launch IDE only (no terminal)")
@@ -385,6 +397,7 @@ def new(
     sparse: bool,
     pip_requirements: str,
     allow_pr: bool,
+    pre_foundry: bool,
     save_as: str,
     with_ide: str,
     ide_only: str,
@@ -419,6 +432,7 @@ def new(
         "sparse",
         "pip_requirements",
         "allow_pr",
+        "pre_foundry",
     }
     explicit_params = {
         name for name in explicit_param_names
@@ -429,14 +443,15 @@ def new(
 
     # No args mode - run guided wizard
     if not repo and not last and not preset:
-        wizard_repo, wizard_branch, wizard_from, wizard_wd, wizard_sparse, wizard_pip, wizard_pr = _guided_new()
-        repo = wizard_repo
-        branch = wizard_branch
-        from_branch = wizard_from
-        wd = wizard_wd
-        sparse = wizard_sparse
-        pip_requirements = wizard_pip
-        allow_pr = wizard_pr
+        wiz = _guided_new()
+        repo = wiz.repo
+        branch = wiz.branch
+        from_branch = wiz.from_branch
+        wd = wiz.working_dir
+        sparse = wiz.sparse
+        pip_requirements = wiz.pip_requirements
+        allow_pr = wiz.allow_pr
+        pre_foundry = wiz.pre_foundry
 
     # Handle --last / --preset flags
     if last or preset:
@@ -463,6 +478,7 @@ def new(
             sparse=sparse,
             pip_requirements=pip_requirements,
             allow_pr=allow_pr,
+            pre_foundry=pre_foundry,
         )
         repo = _defaults.repo
         branch = _defaults.branch
@@ -477,6 +493,7 @@ def new(
         sparse = _defaults.sparse
         pip_requirements = _defaults.pip_requirements
         allow_pr = _defaults.allow_pr
+        pre_foundry = _defaults.pre_foundry
 
     # Resolve repo input
     if not repo:
@@ -641,6 +658,7 @@ def new(
                 isolate_credentials=isolate_credentials,
                 allow_pr=allow_pr,
                 pip_requirements=pip_requirements or "",
+                pre_foundry=pre_foundry,
                 enable_opencode_flag=enable_opencode_flag,
                 enable_zai_flag=enable_zai_flag,
                 anthropic_base_url=anthropic_base_url or "",
@@ -673,6 +691,7 @@ def new(
             sparse=sparse,
             pip_requirements=pip_requirements,
             allow_pr=allow_pr,
+            pre_foundry=pre_foundry,
             network_mode=network_mode,
             sync_ssh_enabled=sync_ssh_enabled,
             with_opencode=with_opencode,
