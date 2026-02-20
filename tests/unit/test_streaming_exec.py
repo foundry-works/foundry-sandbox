@@ -221,7 +221,7 @@ class TestExecInContainerStreamingNonExistentContainer:
             proc = _mock_process(returncode=error_code)
             mock_popen.return_value = proc
 
-            result = exec_in_container_streaming(f"container", "cmd", timeout=3600)
+            result = exec_in_container_streaming("container", "cmd", timeout=3600)
 
             assert result == error_code
 

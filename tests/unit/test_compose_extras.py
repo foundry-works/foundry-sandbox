@@ -482,8 +482,6 @@ class TestProxyAllowlistExtraPath:
         When env var is set and isolate_credentials=True, compose_up should
         create a temp YAML override with bind mount and env var.
         """
-        import os
-
         # Setup mock for credential placeholders
         mock_cred_env = MagicMock()
         mock_cred_env.to_env_dict.return_value = {}
@@ -777,9 +775,6 @@ class TestYamlPathQuoting:
         tmp_path,
     ):
         """Host path with spaces is wrapped in single quotes in the override YAML."""
-        import os
-        import yaml
-
         mock_cred_env = MagicMock()
         mock_cred_env.to_env_dict.return_value = {}
         mock_cred_placeholders.return_value = mock_cred_env
@@ -799,19 +794,8 @@ class TestYamlPathQuoting:
             isolate_credentials=True,
         )
 
-        # Find the temp override file in the compose command args
-        override_path = None
-        for call_obj in mock_run.call_args_list:
-            cmd = call_obj[0][0] if call_obj[0] else []
-            if isinstance(cmd, list):
-                for arg in cmd:
-                    if isinstance(arg, str) and "allowlist-extra-" in arg and arg.endswith(".yml"):
-                        override_path = arg
-                        break
-
-        # The temp file may already be cleaned up, but we can verify via
-        # the command itself that it was passed. The quoting is validated
-        # by the fact that compose_up didn't error on YAML parsing.
+        # Verify compose_up was called (quoting is validated by the fact
+        # that compose_up didn't error on YAML parsing).
         assert mock_run.called
 
     @patch("foundry_sandbox.docker._wait_for_proxy_health", return_value=True)
