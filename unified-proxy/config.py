@@ -327,6 +327,105 @@ class AllowlistConfig:
             raise ConfigError("Allowlist must have at least one HTTP endpoint")
 
 
+def merge_allowlist_configs(
+    base: AllowlistConfig, extra: AllowlistConfig
+) -> AllowlistConfig:
+    """Merge two allowlist configs additively, returning a new AllowlistConfig.
+
+    Pure function with no side effects. Merge semantics:
+    - Domains: ordered dedup (base entries first, extra appended, exact string match)
+    - Same-host HTTP endpoints: methods uppercased + deduped, paths exact deduped
+    - New-host HTTP endpoints: appended preserving extra ordering
+    - Blocked paths: extra appended after base (no per-host dedup)
+    - Result uses base config version
+
+    Args:
+        base: The base allowlist configuration.
+        extra: The extra allowlist configuration to merge on top.
+
+    Returns:
+        A new AllowlistConfig containing the merged result.
+    """
+    # Merge domains: ordered dedup, base first
+    seen_domains: set = set(base.domains)
+    merged_domains = list(base.domains)
+    for domain in extra.domains:
+        if domain not in seen_domains:
+            seen_domains.add(domain)
+            merged_domains.append(domain)
+
+    # Merge HTTP endpoints: same-host union methods/paths, new-host append
+    base_endpoints_by_host: Dict[str, HttpEndpointConfig] = {
+        ep.host: ep for ep in base.http_endpoints
+    }
+    merged_endpoints: List[HttpEndpointConfig] = []
+
+    # Start with base endpoints (preserving order), merging any same-host extras
+    extra_by_host: Dict[str, HttpEndpointConfig] = {
+        ep.host: ep for ep in extra.http_endpoints
+    }
+    for base_ep in base.http_endpoints:
+        if base_ep.host in extra_by_host:
+            extra_ep = extra_by_host[base_ep.host]
+            # Methods: uppercase and dedup, base order first
+            seen_methods: set = set(m.upper() for m in base_ep.methods)
+            merged_methods = [m.upper() for m in base_ep.methods]
+            for m in extra_ep.methods:
+                upper_m = m.upper()
+                if upper_m not in seen_methods:
+                    seen_methods.add(upper_m)
+                    merged_methods.append(upper_m)
+            # Paths: exact dedup, base order first
+            seen_paths: set = set(base_ep.paths)
+            merged_paths = list(base_ep.paths)
+            for p in extra_ep.paths:
+                if p not in seen_paths:
+                    seen_paths.add(p)
+                    merged_paths.append(p)
+            merged_endpoints.append(
+                HttpEndpointConfig(
+                    host=base_ep.host,
+                    methods=merged_methods,
+                    paths=merged_paths,
+                )
+            )
+        else:
+            merged_endpoints.append(
+                HttpEndpointConfig(
+                    host=base_ep.host,
+                    methods=[m.upper() for m in base_ep.methods],
+                    paths=list(base_ep.paths),
+                )
+            )
+
+    # Append new-host endpoints from extra (preserving extra ordering)
+    for extra_ep in extra.http_endpoints:
+        if extra_ep.host not in base_endpoints_by_host:
+            merged_endpoints.append(
+                HttpEndpointConfig(
+                    host=extra_ep.host,
+                    methods=[m.upper() for m in extra_ep.methods],
+                    paths=list(extra_ep.paths),
+                )
+            )
+
+    # Merge blocked paths: append extra after base (no per-host dedup)
+    merged_blocked_paths: List[BlockedPathConfig] = [
+        BlockedPathConfig(host=bp.host, patterns=list(bp.patterns))
+        for bp in base.blocked_paths
+    ] + [
+        BlockedPathConfig(host=bp.host, patterns=list(bp.patterns))
+        for bp in extra.blocked_paths
+    ]
+
+    return AllowlistConfig(
+        version=base.version,
+        domains=merged_domains,
+        http_endpoints=merged_endpoints,
+        blocked_paths=merged_blocked_paths,
+    )
+
+
 def get_config_path(filename: str) -> str:
     """Get configuration file path from environment or use default.
 
@@ -344,6 +443,7 @@ def get_config_path(filename: str) -> str:
     env_vars = {
         "policy.yaml": "PROXY_POLICY_PATH",
         "allowlist.yaml": "PROXY_ALLOWLIST_PATH",
+        "allowlist_extra.yaml": "PROXY_ALLOWLIST_EXTRA_PATH",
     }
 
     env_var = env_vars.get(filename)
@@ -496,15 +596,115 @@ def load_policy_config(path: Optional[str] = None) -> PolicyConfig:
     )
 
 
-def load_allowlist_config(path: Optional[str] = None) -> AllowlistConfig:
-    """Load and validate allowlist configuration.
+def _parse_extra_allowlist(file_path: str) -> AllowlistConfig:
+    """Parse an extra allowlist file with relaxed schema.
+
+    Extra files may omit domains, http_endpoints, and blocked_paths (each
+    defaults to an empty list).  The version field is still required but its
+    value is ignored during merge.  The returned AllowlistConfig bypasses
+    __post_init__ validation so that partial configs can be merged before
+    the final result is validated.
+
+    Args:
+        file_path: Path to the extra allowlist YAML file.
+
+    Returns:
+        AllowlistConfig with relaxed fields (may have empty lists).
+
+    Raises:
+        ConfigError: If version is missing or YAML is invalid.
+    """
+    data = _load_yaml_file(file_path)
+
+    if "version" not in data:
+        raise ConfigError(f"Missing required field 'version' in extra allowlist {file_path}")
+    version = str(data["version"])
+    if not version:
+        raise ConfigError(f"Extra allowlist version cannot be empty in {file_path}")
+
+    # Domains: default to empty list
+    domains: List[str] = []
+    if "domains" in data:
+        domains_data = data["domains"]
+        if not isinstance(domains_data, list):
+            raise ConfigError(f"domains must be a list in {file_path}")
+        domains = [str(d) for d in domains_data]
+
+    # HTTP endpoints: default to empty list
+    http_endpoints: List[HttpEndpointConfig] = []
+    if "http_endpoints" in data:
+        endpoints_data = data["http_endpoints"]
+        if not isinstance(endpoints_data, list):
+            raise ConfigError(f"http_endpoints must be a list in {file_path}")
+        for i, endpoint in enumerate(endpoints_data):
+            if not isinstance(endpoint, dict):
+                raise ConfigError(f"http_endpoints[{i}] must be a dictionary in {file_path}")
+            if "host" not in endpoint:
+                raise ConfigError(f"http_endpoints[{i}] missing 'host' in {file_path}")
+            if "methods" not in endpoint:
+                raise ConfigError(f"http_endpoints[{i}] missing 'methods' in {file_path}")
+            if "paths" not in endpoint:
+                raise ConfigError(f"http_endpoints[{i}] missing 'paths' in {file_path}")
+            if not isinstance(endpoint["methods"], list):
+                raise ConfigError(f"http_endpoints[{i}].methods must be a list in {file_path}")
+            if not isinstance(endpoint["paths"], list):
+                raise ConfigError(f"http_endpoints[{i}].paths must be a list in {file_path}")
+            http_endpoints.append(
+                HttpEndpointConfig(
+                    host=str(endpoint["host"]),
+                    methods=[str(m) for m in endpoint["methods"]],
+                    paths=[str(p) for p in endpoint["paths"]],
+                )
+            )
+
+    # Blocked paths: default to empty list
+    blocked_paths: List[BlockedPathConfig] = []
+    if "blocked_paths" in data:
+        bp_data = data["blocked_paths"]
+        if not isinstance(bp_data, list):
+            raise ConfigError(f"blocked_paths must be a list in {file_path}")
+        for i, bp in enumerate(bp_data):
+            if not isinstance(bp, dict):
+                raise ConfigError(f"blocked_paths[{i}] must be a dictionary in {file_path}")
+            if "host" not in bp:
+                raise ConfigError(f"blocked_paths[{i}] missing 'host' in {file_path}")
+            if "patterns" not in bp:
+                raise ConfigError(f"blocked_paths[{i}] missing 'patterns' in {file_path}")
+            if not isinstance(bp["patterns"], list):
+                raise ConfigError(f"blocked_paths[{i}].patterns must be a list in {file_path}")
+            blocked_paths.append(
+                BlockedPathConfig(
+                    host=str(bp["host"]),
+                    patterns=[str(p) for p in bp["patterns"]],
+                )
+            )
+
+    # Bypass AllowlistConfig.__post_init__ — partial configs are valid for
+    # merge purposes; validation runs on the final merged result only.
+    cfg = object.__new__(AllowlistConfig)
+    cfg.version = version
+    cfg.domains = domains
+    cfg.http_endpoints = http_endpoints
+    cfg.blocked_paths = blocked_paths
+    return cfg
+
+
+def load_allowlist_config(
+    path: Optional[str] = None, extra_path: Optional[str] = None
+) -> AllowlistConfig:
+    """Load and validate allowlist configuration, optionally merging an extra file.
 
     Args:
         path: Optional path to allowlist.yaml. If not provided, uses
               environment variable PROXY_ALLOWLIST_PATH or default location.
+        extra_path: Optional path to an extra allowlist file. When None, falls
+              back to the PROXY_ALLOWLIST_EXTRA_PATH environment variable.
+              When explicitly passed (even empty string), env var is not consulted.
+              When the resolved path is unset or empty, extra loading is skipped.
+              When set but file is missing, raises ConfigError (fail-closed).
 
     Returns:
-        Validated AllowlistConfig instance.
+        Validated AllowlistConfig instance (merged if extra file provided).
 
     Raises:
         ConfigError: If configuration is invalid or missing required fields.
@@ -582,9 +782,24 @@ def load_allowlist_config(path: Optional[str] = None) -> AllowlistConfig:
                 )
             )
 
-    return AllowlistConfig(
+    base_config = AllowlistConfig(
         version=str(data["version"]),
         domains=domains,
         http_endpoints=http_endpoints,
         blocked_paths=blocked_paths,
     )
+
+    # Resolve extra path: explicit arg > env var
+    resolved_extra: Optional[str] = extra_path
+    if extra_path is None:
+        env_extra = get_config_path("allowlist_extra.yaml")
+        # get_config_path returns the default path when env var is unset;
+        # only use it if the env var was actually set
+        if os.environ.get("PROXY_ALLOWLIST_EXTRA_PATH"):
+            resolved_extra = env_extra
+
+    if not resolved_extra:
+        return base_config
+
+    extra_config = _parse_extra_allowlist(resolved_extra)
+    return merge_allowlist_configs(base_config, extra_config)
