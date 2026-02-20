@@ -346,7 +346,6 @@ class TestCredentialInjectionLatency:
         credential config by host, matching the hot path in _load_credentials.
         """
         test_hosts = [
-            "api.anthropic.com",
             "api.openai.com",
             "api.github.com",
             "generativelanguage.googleapis.com",
@@ -383,7 +382,6 @@ class TestCredentialInjectionLatency:
         look up the host in PROVIDER_MAP.
         """
         test_cases = [
-            ("api.anthropic.com", "CRED_PROXY_abc123"),
             ("api.openai.com", "Bearer real-token"),
             ("api.github.com", "CREDENTIAL_PROXY_PLACEHOLDER"),
             ("unknown.com", "normal-value"),

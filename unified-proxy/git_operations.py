@@ -28,6 +28,11 @@ import subprocess
 import uuid
 from typing import Any, Dict, FrozenSet, List, Optional, Tuple
 
+from config import (
+    ConfigError,
+    check_file_restrictions,
+    get_file_restrictions_config,
+)
 from git_policies import check_protected_branches
 from branch_types import (
     GIT_BINARY,
@@ -612,6 +617,245 @@ def check_push_protected_branches(
 
 
 # ---------------------------------------------------------------------------
+# Push File Restrictions
+# ---------------------------------------------------------------------------
+
+
+def check_push_file_restrictions(
+    args: List[str],
+    repo_root: str,
+    metadata: Optional[dict] = None,
+) -> Optional[ValidationError]:
+    """Check if a push modifies restricted files.
+
+    Enumerates files changed between the remote branch and HEAD, then
+    checks each against the file restriction config (blocked/warned patterns).
+
+    Fails closed: if the config cannot be loaded or the diff cannot be
+    computed, returns a ValidationError (blocks the push).
+
+    Args:
+        args: The push subcommand arguments (after the 'push' subcommand).
+        repo_root: Repository root path for running git commands.
+        metadata: Container metadata (unused currently, reserved for
+                  per-sandbox overrides).
+
+    Returns:
+        None if allowed, ValidationError if restricted files are modified.
+    """
+    # Load file restrictions config (fail closed on error)
+    try:
+        config = get_file_restrictions_config()
+    except ConfigError as exc:
+        logger.warning("File restrictions config unavailable: %s", exc)
+        return ValidationError(
+            "File restrictions config unavailable; push blocked (fail-closed)"
+        )
+
+    # Parse the push target to determine the remote and branch
+    positionals = _extract_push_positionals(args)
+    if not positionals:
+        return None  # No remote specified; other validation handles this
+
+    remote = positionals[0]
+    refspecs = positionals[1:] if len(positionals) > 1 else []
+
+    # Determine the remote branch to diff against
+    # Use the first refspec's destination, or fall back to sandbox branch
+    target_branch = None
+    if refspecs:
+        parsed = _parse_push_refspecs(args)
+        if parsed:
+            # Strip refs/heads/ prefix for remote tracking ref
+            ref = parsed[0]
+            if ref.startswith("refs/heads/"):
+                target_branch = ref[len("refs/heads/"):]
+
+    if not target_branch and metadata:
+        target_branch = metadata.get("sandbox_branch")
+
+    if not target_branch:
+        return None  # Can't determine target; other validation handles this
+
+    remote_ref = f"{remote}/{target_branch}"
+
+    # Try diffing against the remote tracking branch
+    resolved_cwd = os.path.realpath(repo_root)
+    env = build_clean_env()
+    changed_files = _enumerate_push_changed_files(
+        resolved_cwd, env, remote_ref,
+    )
+
+    if changed_files is None:
+        # Remote branch may not exist (first push). Fall back to diffing
+        # against the default branch.
+        bare_repo_path = resolve_bare_repo_path(repo_root)
+        default_branch = None
+        if bare_repo_path:
+            default_branch = _detect_default_branch(bare_repo_path)
+        if default_branch:
+            changed_files = _enumerate_push_changed_files(
+                resolved_cwd, env, default_branch,
+            )
+
+    if changed_files is None:
+        # Fail closed: can't enumerate files
+        return ValidationError(
+            "Cannot enumerate changed files for push file validation; "
+            "push blocked (fail-closed)"
+        )
+
+    if not changed_files:
+        return None  # No changed files
+
+    result = check_file_restrictions(changed_files, config)
+
+    if result.blocked:
+        return ValidationError(result.reason)
+
+    if result.warned_files:
+        logger.warning(
+            "Push modifies sensitive files: %s",
+            ", ".join(result.warned_files),
+        )
+
+    return None
+
+
+def _enumerate_push_changed_files(
+    cwd: str,
+    env: Dict[str, str],
+    base_ref: str,
+) -> Optional[List[str]]:
+    """Enumerate files changed between base_ref and HEAD.
+
+    Args:
+        cwd: Working directory for git command.
+        env: Clean environment for git command.
+        base_ref: The ref to diff against (e.g. 'origin/sandbox-branch').
+
+    Returns:
+        List of changed file paths, or None if the diff fails
+        (e.g. the base ref doesn't exist).
+    """
+    try:
+        result = subprocess.run(
+            [GIT_BINARY, "diff", "--name-only", f"{base_ref}..HEAD"],
+            cwd=cwd,
+            capture_output=True,
+            timeout=SHA_CHECK_TIMEOUT,
+            env=env,
+        )
+        if result.returncode != 0:
+            return None
+        output = result.stdout.decode("utf-8", errors="replace").strip()
+        if not output:
+            return []
+        return output.splitlines()
+    except (subprocess.TimeoutExpired, OSError):
+        return None
+
+
+# ---------------------------------------------------------------------------
+# Commit File Restrictions
+# ---------------------------------------------------------------------------
+
+
+def check_commit_file_restrictions(
+    repo_root: str,
+    metadata: Optional[dict] = None,
+) -> Optional[ValidationError]:
+    """Check if a commit stages restricted files.
+
+    Enumerates staged files via ``git diff --cached --name-only`` and
+    checks each against the file restriction config (blocked/warned patterns).
+
+    This is a developer-experience improvement — the security boundary is
+    at push time (check_push_file_restrictions). Commit-time validation
+    prevents the agent from building up commits that will all be rejected
+    at push.
+
+    Fails closed: if the config cannot be loaded or the diff cannot be
+    computed, returns a ValidationError (blocks the commit).
+
+    Args:
+        repo_root: Repository root path for running git commands.
+        metadata: Container metadata (unused currently, reserved for
+                  per-sandbox overrides).
+
+    Returns:
+        None if allowed, ValidationError if restricted files are staged.
+    """
+    # Load file restrictions config (fail closed on error)
+    try:
+        config = get_file_restrictions_config()
+    except ConfigError as exc:
+        logger.warning("File restrictions config unavailable: %s", exc)
+        return ValidationError(
+            "File restrictions config unavailable; commit blocked (fail-closed)"
+        )
+
+    # Enumerate staged files
+    resolved_cwd = os.path.realpath(repo_root)
+    env = build_clean_env()
+    changed_files = _enumerate_staged_files(resolved_cwd, env)
+
+    if changed_files is None:
+        # Fail closed: can't enumerate staged files
+        return ValidationError(
+            "Cannot enumerate staged files for commit file validation; "
+            "commit blocked (fail-closed)"
+        )
+
+    if not changed_files:
+        return None  # No staged files
+
+    result = check_file_restrictions(changed_files, config)
+
+    if result.blocked:
+        return ValidationError(result.reason)
+
+    if result.warned_files:
+        logger.warning(
+            "Commit stages sensitive files: %s",
+            ", ".join(result.warned_files),
+        )
+
+    return None
+
+
+def _enumerate_staged_files(
+    cwd: str,
+    env: Dict[str, str],
+) -> Optional[List[str]]:
+    """Enumerate files staged for commit.
+
+    Args:
+        cwd: Working directory for git command.
+        env: Clean environment for git command.
+
+    Returns:
+        List of staged file paths, or None if the diff fails.
+    """
+    try:
+        result = subprocess.run(
+            [GIT_BINARY, "diff", "--cached", "--name-only"],
+            cwd=cwd,
+            capture_output=True,
+            timeout=SHA_CHECK_TIMEOUT,
+            env=env,
+        )
+        if result.returncode != 0:
+            return None
+        output = result.stdout.decode("utf-8", errors="replace").strip()
+        if not output:
+            return []
+        return output.splitlines()
+    except (subprocess.TimeoutExpired, OSError):
+        return None
+
+
+# ---------------------------------------------------------------------------
 # Git Execution
 # ---------------------------------------------------------------------------
 
@@ -754,6 +998,23 @@ def execute_git(
             audit_log(event="push_blocked", action="push",
                       decision="deny", command_args=args, reason=err.reason,
                       matched_rule="protected_branch", request_id=req_id)
+            return None, err
+
+        # Check file restrictions for push operations
+        err = check_push_file_restrictions(push_args, repo_root, metadata)
+        if err:
+            audit_log(event="push_blocked", action="push",
+                      decision="deny", command_args=args, reason=err.reason,
+                      matched_rule="file_restriction", request_id=req_id)
+            return None, err
+
+    # Check file restrictions for commit operations
+    if get_subcommand(args) == "commit":
+        err = check_commit_file_restrictions(repo_root, metadata)
+        if err:
+            audit_log(event="commit_blocked", action="commit",
+                      decision="deny", command_args=args, reason=err.reason,
+                      matched_rule="file_restriction", request_id=req_id)
             return None, err
 
     # Decode stdin if provided

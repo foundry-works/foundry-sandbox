@@ -65,31 +65,30 @@ def test_no_real_credentials_in_env(docker_exec):
 @pytest.mark.skipif(
     not os.environ.get("ANTHROPIC_API_KEY")
     and not os.environ.get("CLAUDE_CODE_OAUTH_TOKEN"),
-    reason="No API credentials available — proxy cannot inject credentials",
+    reason="No API credentials available — gateway cannot inject credentials",
 )
-def test_api_requests_work_via_proxy(docker_exec, proxy_reachable):
-    """API requests with placeholder credentials should succeed via the proxy.
+def test_api_requests_work_via_gateway(docker_exec, proxy_reachable):
+    """API requests through the Anthropic gateway should succeed.
 
-    Mirrors redteam-sandbox.sh (lines 272-294): sends a request to the
-    Anthropic API using the placeholder credential.  The proxy should
-    inject the real key before forwarding.  We accept either a successful
-    response (type=message) or an auth error that proves the request
-    reached the API (as opposed to a connection failure).
+    Sends a request to the Anthropic API via the gateway endpoint
+    (http://unified-proxy:9848).  The gateway injects the real key
+    before forwarding to https://api.anthropic.com.  We accept either
+    a successful response (type=message) or an auth error that proves
+    the request reached the API (as opposed to a connection failure).
     """
     result = docker_exec(
         "curl", "-s", "--max-time", "15",
-        "-H", f"x-api-key: {PLACEHOLDER}",
         "-H", "anthropic-version: 2023-06-01",
         "-H", "content-type: application/json",
         "-d", '{"model":"claude-3-haiku-20240307","max_tokens":10,'
               '"messages":[{"role":"user","content":"hi"}]}',
-        "https://api.anthropic.com/v1/messages",
+        "http://unified-proxy:9848/v1/messages",
     )
 
     body = result.stdout
-    # Either the proxy injected real credentials and we got a response,
+    # Either the gateway injected real credentials and we got a response,
     # or the request reached the API and got an auth error — both prove
-    # the proxy is forwarding traffic.
+    # the gateway is forwarding traffic.
     api_reached = (
         '"type":"message"' in body
         or '"type": "message"' in body
@@ -97,16 +96,16 @@ def test_api_requests_work_via_proxy(docker_exec, proxy_reachable):
         or "invalid_api_key" in body
     )
     assert api_reached, (
-        "API request did not reach Anthropic (proxy may not be forwarding).\n"
+        "API request did not reach Anthropic (gateway may not be forwarding).\n"
         f"Response body: {body[:500]}"
     )
 
 
 def test_credential_not_in_response_headers(docker_exec):
-    """Response headers from proxied requests must not contain real credentials.
+    """Response headers from gateway requests must not contain real credentials.
 
-    Verifies the credential proxy strips injected credentials from
-    responses so they cannot be observed by the sandboxed process.
+    Verifies the gateway does not leak injected credentials in response
+    headers so they cannot be observed by the sandboxed process.
     """
     import re
 
@@ -114,12 +113,11 @@ def test_credential_not_in_response_headers(docker_exec):
         "curl", "-sS", "--max-time", "15",
         "-D", "-",  # dump headers to stdout
         "-o", "/dev/null",
-        "-H", f"x-api-key: {PLACEHOLDER}",
         "-H", "anthropic-version: 2023-06-01",
         "-H", "content-type: application/json",
         "-d", '{"model":"claude-3-haiku-20240307","max_tokens":10,'
               '"messages":[{"role":"user","content":"hi"}]}',
-        "https://api.anthropic.com/v1/messages",
+        "http://unified-proxy:9848/v1/messages",
     )
 
     headers = result.stdout

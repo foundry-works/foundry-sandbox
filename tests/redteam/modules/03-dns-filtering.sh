@@ -9,7 +9,9 @@ run_tests() {
     echo "Testing DNS resolution filtering..."
 
     # Allowed domains should resolve
-    ALLOWED_DOMAINS=("github.com" "api.github.com" "api.anthropic.com" "api.openai.com")
+    # NOTE: api.anthropic.com removed — Anthropic traffic goes through the gateway.
+    # NOTE: api.openai.com removed — OpenAI traffic goes through the gateway.
+    ALLOWED_DOMAINS=("github.com" "api.github.com" "api.tavily.com")
     for domain in "${ALLOWED_DOMAINS[@]}"; do
         if nslookup "$domain" >/dev/null 2>&1 || getent hosts "$domain" >/dev/null 2>&1; then
             test_pass "Allowed domain resolves: $domain"

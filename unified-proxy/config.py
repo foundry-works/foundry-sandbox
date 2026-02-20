@@ -4,7 +4,10 @@ Loads and validates policy.yaml and allowlist.yaml configuration files
 with support for environment variable overrides.
 """
 
+import fnmatch
+import logging
 import os
+import posixpath
 import re
 from dataclasses import dataclass, field
 from functools import lru_cache
@@ -439,6 +442,204 @@ def merge_allowlist_configs(
     )
 
 
+@dataclass
+class ValidationResult:
+    """Result of file restriction validation."""
+
+    blocked: bool
+    reason: str = ""
+    warned_files: List[str] = field(default_factory=list)
+
+
+@dataclass
+class FileRestrictionsConfig:
+    """Configuration for push/commit file restrictions."""
+
+    blocked_patterns: List[str]
+    warned_patterns: List[str]
+    warn_action: str  # "log" or "reject"
+
+    def __post_init__(self):
+        """Validate file restrictions configuration."""
+        if not isinstance(self.blocked_patterns, list):
+            raise ConfigError("blocked_patterns must be a list")
+        if not isinstance(self.warned_patterns, list):
+            raise ConfigError("warned_patterns must be a list")
+        if self.warn_action not in ("log", "reject"):
+            raise ConfigError(
+                f"warn_action must be 'log' or 'reject', got '{self.warn_action}'"
+            )
+
+
+def _matches_pattern(path: str, pattern: str) -> bool:
+    """Check if a file path matches a single restriction pattern.
+
+    Pattern semantics:
+    - Patterns ending in '/' match any file under that directory
+      (path.startswith(pattern)).
+    - Patterns with glob characters (*, ?) use fnmatch against both
+      the basename and the full relative path.
+    - Bare patterns (no '/', no glob) match any file at any depth
+      with that exact name (basename match).
+
+    Args:
+        path: Normalized relative file path.
+        pattern: Restriction pattern to match against.
+
+    Returns:
+        True if the path matches the pattern.
+    """
+    if pattern.endswith("/"):
+        return path.startswith(pattern)
+
+    has_glob = "*" in pattern or "?" in pattern
+    if has_glob:
+        basename = os.path.basename(path)
+        return fnmatch.fnmatch(basename, pattern) or fnmatch.fnmatch(path, pattern)
+
+    # Bare pattern: exact basename match at any depth
+    return os.path.basename(path) == pattern
+
+
+def matches_any(path: str, patterns: List[str]) -> bool:
+    """Check if a file path matches any pattern in a list.
+
+    Args:
+        path: Normalized relative file path.
+        patterns: List of restriction patterns.
+
+    Returns:
+        True if the path matches any pattern.
+    """
+    return any(_matches_pattern(path, p) for p in patterns)
+
+
+def check_file_restrictions(
+    changed_files: List[str],
+    config: FileRestrictionsConfig,
+) -> ValidationResult:
+    """Check a list of changed file paths against blocked/warned patterns.
+
+    This is the shared core used by both push-time and commit-time
+    validation. Callers are responsible for obtaining the file list
+    (git diff --name-only for push, git diff --cached --name-only for commit).
+
+    Args:
+        changed_files: List of relative file paths that were changed.
+        config: File restrictions configuration.
+
+    Returns:
+        ValidationResult indicating whether the operation should be blocked.
+    """
+    # 1. Normalize paths (collapse //, strip ./, reject ..)
+    normalized = []
+    for f in changed_files:
+        f = posixpath.normpath(f)
+        if ".." in f.split("/"):
+            return ValidationResult(
+                blocked=True, reason=f"Path traversal detected: {f}"
+            )
+        # Strip leading ./ that normpath may leave
+        if f.startswith("./"):
+            f = f[2:]
+        normalized.append(f)
+
+    # 2. Check against blocked patterns
+    blocked = [f for f in normalized if matches_any(f, config.blocked_patterns)]
+    if blocked:
+        return ValidationResult(
+            blocked=True,
+            reason=f"Push modifies blocked files: {', '.join(blocked)}",
+        )
+
+    # 3. Check against warned patterns
+    warned = [f for f in normalized if matches_any(f, config.warned_patterns)]
+    if warned and config.warn_action == "reject":
+        return ValidationResult(
+            blocked=True,
+            reason=f"Push modifies restricted files: {', '.join(warned)}",
+        )
+    if warned:
+        return ValidationResult(
+            blocked=False, warned_files=warned,
+        )
+
+    return ValidationResult(blocked=False)
+
+
+_file_restrictions_logger = logging.getLogger(__name__)
+
+# Module-level cache for file restrictions config (loaded once at first use).
+_file_restrictions_config: Optional[FileRestrictionsConfig] = None
+
+
+def load_file_restrictions_config(
+    path: Optional[str] = None,
+) -> FileRestrictionsConfig:
+    """Load and validate file restrictions configuration.
+
+    Fails closed: if the config file is missing or malformed, raises
+    ConfigError (callers should block the operation).
+
+    Args:
+        path: Optional path to push-file-restrictions.yaml. If not provided,
+              uses PROXY_FILE_RESTRICTIONS_PATH env var or default location.
+
+    Returns:
+        Validated FileRestrictionsConfig instance.
+
+    Raises:
+        ConfigError: If configuration is invalid or missing required fields.
+    """
+    if path is None:
+        path = get_config_path("push-file-restrictions.yaml")
+
+    data = _load_yaml_file(path)
+
+    required_fields = ["blocked_patterns", "warned_patterns", "warn_action"]
+    missing = [f for f in required_fields if f not in data]
+    if missing:
+        raise ConfigError(
+            f"Missing required fields in {path}: {', '.join(missing)}"
+        )
+
+    blocked = data["blocked_patterns"]
+    if not isinstance(blocked, list):
+        raise ConfigError(f"blocked_patterns must be a list in {path}")
+
+    warned = data["warned_patterns"]
+    if not isinstance(warned, list):
+        raise ConfigError(f"warned_patterns must be a list in {path}")
+
+    return FileRestrictionsConfig(
+        blocked_patterns=[str(p) for p in blocked],
+        warned_patterns=[str(p) for p in warned],
+        warn_action=str(data["warn_action"]),
+    )
+
+
+def get_file_restrictions_config(
+    path: Optional[str] = None,
+) -> FileRestrictionsConfig:
+    """Get the file restrictions config, loading and caching on first call.
+
+    Args:
+        path: Optional override path (bypasses cache when provided).
+
+    Returns:
+        FileRestrictionsConfig instance.
+
+    Raises:
+        ConfigError: If config is missing or invalid.
+    """
+    global _file_restrictions_config
+    if path is not None:
+        return load_file_restrictions_config(path)
+    if _file_restrictions_config is None:
+        _file_restrictions_config = load_file_restrictions_config()
+    return _file_restrictions_config
+
+
 def get_config_path(filename: str) -> str:
     """Get configuration file path from environment or use default.
 
@@ -457,6 +658,7 @@ def get_config_path(filename: str) -> str:
         "policy.yaml": "PROXY_POLICY_PATH",
         "allowlist.yaml": "PROXY_ALLOWLIST_PATH",
         "allowlist_extra.yaml": "PROXY_ALLOWLIST_EXTRA_PATH",
+        "push-file-restrictions.yaml": "PROXY_FILE_RESTRICTIONS_PATH",
     }
 
     env_var = env_vars.get(filename)

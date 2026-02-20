@@ -5,9 +5,11 @@ Centralized policy enforcement with documented evaluation order and comprehensiv
 logging. Acts as the coordination point for all policy decisions in the unified proxy.
 
 Evaluation Order:
+E. Early-exit merge blocking (unconditional, before all other checks)
+0. IP literal check (block direct-IP requests before any policy evaluation)
 1. Identity verification (via container_identity addon)
 2. Allowlist checks (domain/path allowlist from allowlist.yaml)
-3. Blocklist checks (explicit denies, e.g., merge/release endpoints)
+3. Blocklist checks (explicit denies, e.g., release/ref-mutation endpoints)
 3b. Body inspection (PATCH PR/issue close via state:closed)
 4. Rate limiting (via rate_limiter addon - future)
 5. Circuit breaker (via circuit_breaker addon - future)
@@ -33,6 +35,7 @@ import json
 import os
 import posixpath
 import re
+import socket
 import sys
 from typing import Optional, List
 from urllib.parse import unquote, urlparse
@@ -54,6 +57,98 @@ from config import (  # noqa: E402
 from logging_config import get_logger  # noqa: E402
 
 logger = get_logger(__name__)
+
+# --- IP literal detection ---
+# Patterns that identify IP-literal hostnames in various encodings.
+# Any request where the host matches an IP-literal pattern is rejected
+# before the domain allowlist lookup to prevent DNS filtering bypass.
+_IP_LITERAL_PATTERNS = [
+    re.compile(r"^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$"),  # Dotted decimal
+    re.compile(r"^\["),                                   # IPv6 brackets
+    re.compile(r"^0[0-7]+\.[0-9]"),                      # Octal prefix (digit after dot reduces false positives)
+    re.compile(r"^0x[0-9a-fA-F]"),                        # Hex prefix
+    re.compile(r"^[0-9]+$"),                              # Pure integer (any length)
+]
+
+
+def is_ip_literal(host: str) -> bool:
+    """Check if a hostname is an IP literal in any encoding.
+
+    Detects dotted decimal, octal, hex, pure integer, IPv6 bracket, and
+    mixed-encoding IP addresses. Used to block direct-IP requests that
+    bypass DNS-based domain filtering.
+
+    Args:
+        host: The hostname to check (should be pre-stripped of port).
+
+    Returns:
+        True if the host appears to be an IP literal.
+    """
+    # Fast path: regex catches common encodings
+    if any(p.match(host) for p in _IP_LITERAL_PATTERNS):
+        return True
+    # Belt-and-suspenders: catch mixed encodings (e.g. 0x7f.0.0.01,
+    # 1.0x0.0.1) that individual regex patterns miss. inet_aton handles
+    # dotted-decimal, octal, hex, and mixed forms.
+    try:
+        socket.inet_aton(host)
+        return True
+    except OSError:
+        pass
+    return False
+
+
+# --- Early-exit merge blocking ---
+# Unconditional check that runs before any request routing (identity,
+# allowlist, credential injection). Catches merge operations at the
+# earliest possible point so a bug in Steps 1-2 cannot short-circuit
+# past merge blocking.
+#
+# Patterns use search() (not match()) because the full request path
+# includes the /repos/owner/repo/... prefix.
+_MERGE_PATH_PATTERNS = [
+    re.compile(r"/pulls/\d+/merge$"),
+    re.compile(r"/pulls/\d+/auto-merge$"),
+]
+
+# GraphQL mutation keywords scanned in request bodies.
+# Intentionally broad (substring match, not AST parse) — a false
+# positive blocks a legitimate request, which is safer than a false
+# negative that allows a merge.
+_MERGE_BODY_KEYWORDS = [
+    b"mergePullRequest",
+    b"enablePullRequestAutoMerge",
+]
+
+
+def is_merge_request(path: str, body: bytes) -> bool:
+    """Check if a request is a merge operation (REST or GraphQL).
+
+    This is the early-exit merge check that runs before any other policy
+    evaluation. It catches both REST merge endpoints and GraphQL merge
+    mutations.
+
+    Note: Does NOT catch /repos/{owner}/{repo}/merges (repo merge API).
+    That endpoint creates merge commits but doesn't close PRs or trigger
+    deploy pipelines — it's a lower-severity threat handled by the Step 3
+    GitHub blocklist.
+
+    Args:
+        path: The request path (full, including /repos/owner/repo prefix).
+        body: The raw request body bytes.
+
+    Returns:
+        True if the request appears to be a merge operation.
+    """
+    # Path check: uses search() so patterns match anywhere in the full
+    # request path (e.g. /repos/owner/repo/pulls/1/merge).
+    if any(p.search(path) for p in _MERGE_PATH_PATTERNS):
+        return True
+    # GraphQL: scan for mutation names in request body.
+    if body and any(kw in body for kw in _MERGE_BODY_KEYWORDS):
+        return True
+    return False
+
 
 # Metadata key for policy decisions
 POLICY_DECISION_KEY = "policy_decision"
@@ -270,6 +365,8 @@ class PolicyEngine:
         """Evaluate policies for incoming request.
 
         Implements the documented evaluation order:
+        E. Early-exit merge blocking (unconditional, before all other checks)
+        0. IP literal check (block direct-IP requests)
         1. Identity verification
         2. Domain allowlist checks
         2b. Endpoint path enforcement (segment-aware matching + blocked_paths)
@@ -291,8 +388,39 @@ class PolicyEngine:
         # lowercase methods to bypass string comparisons.
         method = flow.request.method.upper()
         raw_host = flow.request.pretty_host
-        host = normalize_host(raw_host)
         path = flow.request.path
+
+        # Step E: Early-exit merge blocking — unconditional check that runs
+        # before identity verification, domain matching, or credential
+        # injection. This ensures a bug in Steps 0-2 cannot short-circuit
+        # past merge blocking. Merge operations are the highest-severity
+        # blocked action (irreversible PR merge / deploy pipeline trigger).
+        raw_content = flow.request.content
+        body = raw_content if isinstance(raw_content, (bytes, bytearray)) else b""
+        if is_merge_request(path, body):
+            decision = PolicyDecision(
+                allowed=False,
+                reason="Merge operations are not permitted",
+                policy_type="merge_block",
+            )
+            self._log_decision(decision, method, raw_host, path)
+            self._deny_request(flow, decision)
+            return
+
+        # Step 0: IP literal check — block all forms of direct-IP requests
+        # before any other processing. Prevents DNS filtering bypass via
+        # encoded IP addresses (dotted decimal, octal, hex, integer, mixed).
+        if is_ip_literal(raw_host):
+            decision = PolicyDecision(
+                allowed=False,
+                reason="Direct IP access is not permitted",
+                policy_type="ip_literal",
+            )
+            self._log_decision(decision, method, raw_host, path)
+            self._deny_request(flow, decision)
+            return
+
+        host = normalize_host(raw_host)
 
         # Step 1: Identity verification
         # Container identity addon runs before this, check if identity was verified
@@ -506,6 +634,11 @@ class PolicyEngine:
     def _check_github_blocklist(self, method: str, path: str) -> Optional[str]:
         """Check GitHub-specific blocklist policies.
 
+        Note: PR merge and auto-merge are also blocked by the early-exit
+        check (Step E) via is_merge_request(), which runs before identity
+        verification and domain matching. The patterns below are redundant
+        fallbacks kept for defense-in-depth.
+
         Args:
             method: HTTP method.
             path: Request path.
@@ -514,6 +647,7 @@ class PolicyEngine:
             Block reason if request should be blocked, None otherwise.
         """
         # Block PR merge operations
+        # (Redundant fallback — primary check is Step E early-exit)
         if method == "PUT" and GITHUB_MERGE_PR_PATTERN.match(path):
             return "GitHub PR merge operations are blocked by policy"
 
@@ -528,6 +662,7 @@ class PolicyEngine:
             return "GitHub git ref mutation is blocked by policy"
 
         # Block auto-merge enablement/disablement
+        # (Redundant fallback — primary check is Step E early-exit)
         # Defense-in-depth: also blocked in github-api-filter.py
         if method in ("PUT", "DELETE") and GITHUB_AUTO_MERGE_PATTERN.match(path):
             return "GitHub auto-merge operations are blocked by policy"

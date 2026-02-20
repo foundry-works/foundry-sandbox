@@ -145,15 +145,25 @@ class TestGitHubComCredentialInjection:
 
 
 class TestGitHubApiCredentialInjection:
-    """Tests for api.github.com and uploads.github.com (existing behavior)."""
+    """Tests for GitHub credential injection.
 
-    def test_api_github_com_injection(self, injector):
-        """Should inject token for api.github.com requests."""
+    api.github.com has been removed from PROVIDER_MAP — it routes through
+    the GitHub gateway (http://unified-proxy:9850) instead of MITM.
+    uploads.github.com remains on the MITM path for file uploads.
+    """
+
+    def test_api_github_com_not_in_provider_map(self):
+        """api.github.com should NOT be in PROVIDER_MAP (routes through gateway)."""
+        assert "api.github.com" not in credential_injector.PROVIDER_MAP
+
+    def test_api_github_com_passes_through(self, injector):
+        """Requests to api.github.com should pass through without injection."""
         flow = MockHTTPFlow("api.github.com", "/repos/owner/repo")
         injector.request(flow)
 
+        # Not in PROVIDER_MAP, so no injection and no error
         assert flow.response is None
-        assert flow.request.headers.get("Authorization") == "Bearer ghp_test_token_12345"
+        assert flow.request.headers.get("Authorization", "") == ""
 
     def test_uploads_github_com_injection(self, injector):
         """Should inject token for uploads.github.com requests."""
@@ -163,9 +173,9 @@ class TestGitHubApiCredentialInjection:
         assert flow.response is None
         assert flow.request.headers.get("Authorization") == "Bearer ghp_test_token_12345"
 
-    def test_api_github_allows_unauthenticated(self, injector_no_github):
-        """Should allow unauthenticated api.github.com requests."""
-        flow = MockHTTPFlow("api.github.com", "/repos/owner/repo")
+    def test_uploads_github_allows_unauthenticated(self, injector_no_github):
+        """Should allow unauthenticated uploads.github.com requests."""
+        flow = MockHTTPFlow("uploads.github.com", "/repos/owner/repo/releases/1/assets")
         injector_no_github.request(flow)
 
         assert flow.response is None
@@ -185,12 +195,12 @@ class TestNonGitHubHosts:
     def test_missing_credential_returns_error(self):
         """Non-GitHub hosts without credentials should get an error response."""
         env = os.environ.copy()
-        env.pop("ANTHROPIC_API_KEY", None)
-        env.pop("CLAUDE_CODE_OAUTH_TOKEN", None)
+        env.pop("TAVILY_API_KEY", None)
         with patch.dict(os.environ, env, clear=True):
             instance = credential_injector.CredentialInjector()
 
-        flow = MockHTTPFlow("api.anthropic.com", "/v1/messages")
+        # Use Tavily (still in PROVIDER_MAP; Anthropic and OpenAI route through gateways)
+        flow = MockHTTPFlow("api.tavily.com", "/search")
         instance.request(flow)
 
         # Should have set an error response (not pass-through)

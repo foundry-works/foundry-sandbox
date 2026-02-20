@@ -50,9 +50,10 @@ run_tests() {
     fi
 
     # Wildcard subdomain test (should work if wildcards allowed)
+    # Uses *.chatgpt.com (still in allowlist; api.openai.com routes through gateway now)
     info "Testing wildcard domain resolution..."
-    if nslookup "test-subdomain.api.openai.com" >/dev/null 2>&1; then
-        test_pass "Wildcard subdomain resolves (test-subdomain.api.openai.com)"
+    if nslookup "test-subdomain.chatgpt.com" >/dev/null 2>&1; then
+        test_pass "Wildcard subdomain resolves (test-subdomain.chatgpt.com)"
     else
         test_warn "Wildcard subdomain did not resolve (may be expected)"
     fi

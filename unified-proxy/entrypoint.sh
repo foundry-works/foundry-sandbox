@@ -27,8 +27,15 @@ GITHUB_FILTER_PATH="${LEGACY_ADDON_DIR}/github-api-filter.py"
 
 # Track child processes for graceful shutdown
 MITM_PID=""
+SQUID_PID=""
 INTERNAL_API_PID=""
 GIT_API_PID=""
+GATEWAY_PID=""
+OPENAI_GATEWAY_PID=""
+GITHUB_GATEWAY_PID=""
+
+# MITM mode detection (set by detect_mitm_needed)
+MITM_ENABLED="false"
 
 log() {
     echo "[$(date -Iseconds)] $*"
@@ -91,6 +98,46 @@ cleanup() {
 
     # Remove readiness marker
     rm -f "${READINESS_FILE}"
+
+    # Stop Squid if running
+    if [[ -n "${SQUID_PID}" ]] && kill -0 "${SQUID_PID}" 2>/dev/null; then
+        log "Stopping Squid (PID ${SQUID_PID})..."
+        kill -TERM "${SQUID_PID}" 2>/dev/null || true
+
+        for i in {1..10}; do
+            if ! kill -0 "${SQUID_PID}" 2>/dev/null; then
+                log "Squid stopped gracefully"
+                break
+            fi
+            sleep 0.5
+        done
+
+        if kill -0 "${SQUID_PID}" 2>/dev/null; then
+            log "Force killing Squid..."
+            kill -KILL "${SQUID_PID}" 2>/dev/null || true
+        fi
+    fi
+
+    # Stop API gateway if running
+    if [[ -n "${GATEWAY_PID}" ]] && kill -0 "${GATEWAY_PID}" 2>/dev/null; then
+        log "Stopping API gateway (PID ${GATEWAY_PID})..."
+        kill -TERM "${GATEWAY_PID}" 2>/dev/null || true
+        wait "${GATEWAY_PID}" 2>/dev/null || true
+    fi
+
+    # Stop OpenAI gateway if running
+    if [[ -n "${OPENAI_GATEWAY_PID}" ]] && kill -0 "${OPENAI_GATEWAY_PID}" 2>/dev/null; then
+        log "Stopping OpenAI gateway (PID ${OPENAI_GATEWAY_PID})..."
+        kill -TERM "${OPENAI_GATEWAY_PID}" 2>/dev/null || true
+        wait "${OPENAI_GATEWAY_PID}" 2>/dev/null || true
+    fi
+
+    # Stop GitHub gateway if running
+    if [[ -n "${GITHUB_GATEWAY_PID}" ]] && kill -0 "${GITHUB_GATEWAY_PID}" 2>/dev/null; then
+        log "Stopping GitHub gateway (PID ${GITHUB_GATEWAY_PID})..."
+        kill -TERM "${GITHUB_GATEWAY_PID}" 2>/dev/null || true
+        wait "${GITHUB_GATEWAY_PID}" 2>/dev/null || true
+    fi
 
     # Stop git API if running
     if [[ -n "${GIT_API_PID}" ]] && kill -0 "${GIT_API_PID}" 2>/dev/null; then
@@ -199,36 +246,19 @@ validate_config() {
         fi
     done
 
-    # Check legacy addons exist
-    if [[ ! -f "${GITHUB_FILTER_PATH}" ]]; then
-        log_error "GitHub API filter addon not found at ${GITHUB_FILTER_PATH}"
-        return 1
-    fi
-
-    # Addon dependency order: each addon may depend on addons loaded before it.
-    # This array defines the REQUIRED load order. Addons are loaded in this
-    # sequence in start_mitmproxy(). If a new addon is added, it must be placed
-    # in the correct position relative to its dependencies.
-    #
-    # Dependencies:
-    #   container_identity - no deps (identifies containers for all other addons)
-    #   policy_engine      - depends on: container_identity
-    #   dns_filter         - depends on: container_identity (optional, DNS mode)
-    #   credential_injector - depends on: container_identity, policy_engine
-    #   git_proxy          - depends on: container_identity, policy_engine
-    #   rate_limiter       - depends on: container_identity
-    #   circuit_breaker    - depends on: container_identity
-    #   metrics            - depends on: all above (observes everything, must be last)
+    # Core addons that are always needed
     local required_addons=(
         "container_identity.py"
-        "policy_engine.py"
         "dns_filter.py"
-        "credential_injector.py"
-        "git_proxy.py"
-        "rate_limiter.py"
-        "circuit_breaker.py"
-        "metrics.py"
     )
+
+    # MITM-mode addons (only needed when MITM is enabled)
+    if [[ "${MITM_ENABLED}" == "true" ]]; then
+        required_addons+=(
+            "policy_engine.py"
+            "credential_injector.py"
+        )
+    fi
 
     for addon in "${required_addons[@]}"; do
         if [[ ! -f "${ADDON_DIR}/${addon}" ]]; then
@@ -237,55 +267,13 @@ validate_config() {
         fi
     done
 
-    log "Configuration validated successfully (${#required_addons[@]} addons in dependency order)"
-    return 0
-}
-
-validate_addon_load_order() {
-    # Verify addons will be loaded in the correct dependency order.
-    # This catches mismatches between validate_config() and start_mitmproxy().
-    local expected_order=(
-        "container_identity.py"
-        "policy_engine.py"
-        "credential_injector.py"
-        "git_proxy.py"
-        "rate_limiter.py"
-        "circuit_breaker.py"
-        "metrics.py"
-    )
-
-    local actual_order=("$@")
-    local expected_idx=0
-
-    for actual in "${actual_order[@]}"; do
-        local basename="${actual##*/}"
-
-        # Skip dns_filter — it's conditionally loaded based on PROXY_ENABLE_DNS
-        [[ "${basename}" == "dns_filter.py" ]] && continue
-        # Skip legacy addons (not part of dependency chain)
-        # Note: can't use "${LEGACY_ADDON_DIR}"* — it matches /opt/proxy/addons/* too
-        [[ "${actual}" == "${GITHUB_FILTER_PATH}" ]] && continue
-
-        if [[ ${expected_idx} -ge ${#expected_order[@]} ]]; then
-            log_error "Addon load order: unexpected addon '${basename}' after all expected addons"
-            return 1
-        fi
-
-        if [[ "${basename}" != "${expected_order[${expected_idx}]}" ]]; then
-            log_error "Addon load order mismatch at position ${expected_idx}: expected '${expected_order[${expected_idx}]}', got '${basename}'"
-            log_error "Required order: ${expected_order[*]}"
-            return 1
-        fi
-
-        ((expected_idx++))
-    done
-
-    if [[ ${expected_idx} -ne ${#expected_order[@]} ]]; then
-        log_error "Addon load order: only ${expected_idx} of ${#expected_order[@]} required addons found"
+    # Validate Squid config exists
+    if [[ ! -f "/etc/squid/squid.conf" ]]; then
+        log_error "Squid configuration not found at /etc/squid/squid.conf"
         return 1
     fi
 
-    log "Addon load order validated (${expected_idx} addons in correct sequence)"
+    log "Configuration validated successfully (${#required_addons[@]} addons, Squid config present)"
     return 0
 }
 
@@ -436,6 +424,106 @@ start_git_api() {
     return 1
 }
 
+start_gateway() {
+    # The API gateway provides plaintext HTTP endpoints for providers that
+    # support base URL env vars (e.g. ANTHROPIC_BASE_URL). Sandboxes talk
+    # HTTP to the gateway; the gateway injects credentials and forwards
+    # over HTTPS to the upstream API.
+    #
+    # Anthropic (port 9848), OpenAI (port 9849), GitHub (port 9850).
+
+    # Only start if an Anthropic credential is available
+    if [[ -z "${ANTHROPIC_API_KEY:-}" && -z "${CLAUDE_CODE_OAUTH_TOKEN:-}" ]]; then
+        log "No Anthropic credential set; skipping API gateway startup"
+        return 0
+    fi
+
+    local port="${GATEWAY_PORT:-9848}"
+    log "Starting API gateway (port ${port})..."
+
+    export PYTHONPATH="/opt/proxy:${PYTHONPATH:-}"
+
+    python3 /opt/proxy/gateway.py &
+    GATEWAY_PID=$!
+
+    # Wait for the server to start listening
+    for i in {1..20}; do
+        if python3 -c "import socket; s=socket.socket(); s.settimeout(0.5); s.connect(('127.0.0.1', ${port})); s.close()" 2>/dev/null; then
+            log "API gateway ready on port ${port} (PID ${GATEWAY_PID})"
+            return 0
+        fi
+        sleep 0.25
+    done
+
+    log_error "API gateway not ready after 5 seconds"
+    return 1
+}
+
+start_openai_gateway() {
+    # OpenAI API gateway provides plaintext HTTP endpoint on port 9849.
+    # Sandboxes talk HTTP to the gateway; the gateway injects credentials
+    # and forwards over HTTPS to https://api.openai.com.
+
+    # Only start if an OpenAI credential is available
+    if [[ -z "${OPENAI_API_KEY:-}" ]]; then
+        log "No OpenAI credential set; skipping OpenAI gateway startup"
+        return 0
+    fi
+
+    local port="${OPENAI_GATEWAY_PORT:-9849}"
+    log "Starting OpenAI gateway (port ${port})..."
+
+    export PYTHONPATH="/opt/proxy:${PYTHONPATH:-}"
+
+    python3 /opt/proxy/openai_gateway.py &
+    OPENAI_GATEWAY_PID=$!
+
+    # Wait for the server to start listening
+    for i in {1..20}; do
+        if python3 -c "import socket; s=socket.socket(); s.settimeout(0.5); s.connect(('127.0.0.1', ${port})); s.close()" 2>/dev/null; then
+            log "OpenAI gateway ready on port ${port} (PID ${OPENAI_GATEWAY_PID})"
+            return 0
+        fi
+        sleep 0.25
+    done
+
+    log_error "OpenAI gateway not ready after 5 seconds"
+    return 1
+}
+
+start_github_gateway() {
+    # GitHub API gateway provides plaintext HTTP endpoint on port 9850.
+    # Sandboxes talk HTTP to the gateway; the gateway enforces security
+    # policies, injects credentials, and forwards over HTTPS to
+    # https://api.github.com.
+
+    # Only start if a GitHub credential is available
+    if [[ -z "${GITHUB_TOKEN:-}" && -z "${GH_TOKEN:-}" ]]; then
+        log "No GitHub credential set; skipping GitHub gateway startup"
+        return 0
+    fi
+
+    local port="${GITHUB_GATEWAY_PORT:-9850}"
+    log "Starting GitHub gateway (port ${port})..."
+
+    export PYTHONPATH="/opt/proxy:${PYTHONPATH:-}"
+
+    python3 /opt/proxy/github_gateway.py &
+    GITHUB_GATEWAY_PID=$!
+
+    # Wait for the server to start listening
+    for i in {1..20}; do
+        if python3 -c "import socket; s=socket.socket(); s.settimeout(0.5); s.connect(('127.0.0.1', ${port})); s.close()" 2>/dev/null; then
+            log "GitHub gateway ready on port ${port} (PID ${GITHUB_GATEWAY_PID})"
+            return 0
+        fi
+        sleep 0.25
+    done
+
+    log_error "GitHub gateway not ready after 5 seconds"
+    return 1
+}
+
 disable_missing_auth_file() {
     local var_name="$1"
     local auth_path="${!var_name:-}"
@@ -452,66 +540,123 @@ mark_ready() {
     log "Readiness marker created at ${READINESS_FILE}"
 }
 
+detect_mitm_needed() {
+    # Check if any MITM provider credentials are set.
+    # These providers require mitmproxy for TLS interception and credential injection.
+    # When no MITM providers are configured and ENABLE_MITM_FALLBACK is false,
+    # CA certificate generation is skipped (reduced attack surface).
+
+    if [[ "${ENABLE_MITM_FALLBACK:-true}" == "true" ]]; then
+        MITM_ENABLED="true"
+        log "MITM mode: enabled (ENABLE_MITM_FALLBACK=true)"
+        return 0
+    fi
+
+    # Check for MITM provider credentials
+    local mitm_vars=(
+        GOOGLE_API_KEY
+        GEMINI_API_KEY
+        TAVILY_API_KEY
+        SEMANTIC_SCHOLAR_API_KEY
+        PERPLEXITY_API_KEY
+        ZHIPU_API_KEY
+        CODEX_AUTH_FILE
+        GEMINI_OAUTH_FILE
+    )
+
+    for var in "${mitm_vars[@]}"; do
+        if [[ -n "${!var:-}" ]]; then
+            MITM_ENABLED="true"
+            log "MITM mode: enabled (${var} is set)"
+            return 0
+        fi
+    done
+
+    MITM_ENABLED="false"
+    log "MITM mode: disabled (no MITM provider credentials set)"
+    return 0
+}
+
+generate_squid_domain_lists() {
+    log "Generating Squid domain list files from allowlist.yaml..."
+    export PYTHONPATH="/opt/proxy:${PYTHONPATH:-}"
+    python3 /opt/proxy/generate_squid_config.py --output-dir /etc/squid
+    log "Squid domain lists generated"
+}
+
+start_squid() {
+    log "Starting Squid forward proxy on port 8080..."
+
+    # Start Squid in foreground mode (non-daemon)
+    squid -N -f /etc/squid/squid.conf &
+    SQUID_PID=$!
+
+    # Wait for Squid to bind to port 8080
+    for i in {1..30}; do
+        if python3 -c "import socket; s=socket.socket(); s.settimeout(0.5); s.connect(('127.0.0.1', 8080)); s.close()" 2>/dev/null; then
+            log "Squid ready on port 8080 (PID ${SQUID_PID})"
+            return 0
+        fi
+        if ! kill -0 "${SQUID_PID}" 2>/dev/null; then
+            log_error "Squid exited before becoming ready"
+            return 1
+        fi
+        sleep 0.5
+    done
+
+    log_error "Squid did not bind to port 8080 within 15 seconds"
+    return 1
+}
+
 start_mitmproxy() {
-    local mode="${PROXY_MODE:-regular}"
     local log_level="${PROXY_LOG_LEVEL:-info}"
     local enable_dns="${PROXY_ENABLE_DNS:-true}"
 
-    log "Starting mitmproxy (HTTP mode: ${mode}, DNS: ${enable_dns})..."
+    # mitmproxy now runs on port 8081 (receives forwarded CONNECT from Squid)
+    # and dns@53 (DNS filtering). Squid is the primary forward proxy on port 8080.
+
+    log "Starting mitmproxy (DNS: ${enable_dns}, MITM: ${MITM_ENABLED})..."
 
     # Ensure addon modules can import from /opt/proxy
     export PYTHONPATH="/opt/proxy:${PYTHONPATH:-}"
 
     # Build mitmproxy arguments
     local args=(
-        --mode "${mode}@8080"
         --set confdir="${MITMPROXY_CA_DIR}"
         --set block_global=false
         --set connection_strategy=lazy
     )
 
-    # Add DNS mode if enabled
+    # DNS mode (always runs when enabled — independent of MITM)
     if [[ "${enable_dns}" == "true" ]]; then
         args+=(--mode "dns@53")
         log "DNS filtering enabled on port 53"
     fi
 
-    # Load addons in dependency order:
-    # 1. container_identity - identifies source container (needed by others)
-    # 2. policy_engine - enforces security policies
-    # 3. dns_filter - filters DNS queries (if DNS mode enabled)
-    # 4. credential_injector - injects API credentials
-    # 5. git_proxy - filters git protocol operations
-    # 6. rate_limiter - enforces rate limits
-    # 7. circuit_breaker - handles failures gracefully
-    # 8. metrics - collects telemetry (last, observes all)
+    # MITM HTTP proxy mode (receives forwarded CONNECT from Squid cache_peer)
+    if [[ "${MITM_ENABLED}" == "true" ]]; then
+        args+=(--mode "regular@8081")
+        log "MITM proxy enabled on port 8081 (receives from Squid cache_peer)"
+    fi
 
+    # Load addons based on MITM mode
+    # container_identity and dns_filter always load (needed for DNS)
+    # credential_injector and policy_engine only when MITM is active
     local addon_paths=()
     addon_paths+=("${ADDON_DIR}/container_identity.py")
-    addon_paths+=("${ADDON_DIR}/policy_engine.py")
 
     if [[ "${enable_dns}" == "true" ]]; then
         addon_paths+=("${ADDON_DIR}/dns_filter.py")
     fi
 
-    addon_paths+=("${ADDON_DIR}/credential_injector.py")
-    addon_paths+=("${ADDON_DIR}/git_proxy.py")
-    addon_paths+=("${ADDON_DIR}/rate_limiter.py")
-    addon_paths+=("${ADDON_DIR}/circuit_breaker.py")
-    addon_paths+=("${ADDON_DIR}/metrics.py")
-
-    # Validate load order before starting
-    if ! validate_addon_load_order "${addon_paths[@]}"; then
-        log_error "Addon load order validation failed — aborting"
-        exit 1
+    if [[ "${MITM_ENABLED}" == "true" ]]; then
+        addon_paths+=("${ADDON_DIR}/policy_engine.py")
+        addon_paths+=("${ADDON_DIR}/credential_injector.py")
     fi
 
     for addon_path in "${addon_paths[@]}"; do
         args+=(-s "${addon_path}")
     done
-
-    # Also load legacy addons for backward compatibility
-    args+=(-s "${GITHUB_FILTER_PATH}")
 
     # Flow detail: debug shows full detail
     if [[ "${log_level}" == "debug" ]]; then
@@ -527,37 +672,36 @@ start_mitmproxy() {
 
     log "mitmproxy started with PID ${MITM_PID}"
 
-    # Wait for mitmproxy to bind to HTTP proxy port before marking ready.
-    # This matches the pattern used by start_internal_api() and start_git_api().
-    # Without this check, the health check can pass (via internal API socket)
-    # while mitmproxy is still starting or has crashed on port binding.
-    local mitm_ready=false
-    for i in {1..30}; do
-        if python3 -c "import socket; s=socket.socket(); s.settimeout(0.5); s.connect(('127.0.0.1', 8080)); s.close()" 2>/dev/null; then
-            log "mitmproxy HTTP proxy ready on port 8080"
-            mark_ready
-            mitm_ready=true
-            break
-        fi
-        if ! kill -0 "${MITM_PID}" 2>/dev/null; then
-            log_error "mitmproxy exited before becoming ready"
+    # Wait for mitmproxy to be ready.
+    # If MITM is enabled, check port 8081. If only DNS, check process health.
+    if [[ "${MITM_ENABLED}" == "true" ]]; then
+        local mitm_ready=false
+        for i in {1..30}; do
+            if python3 -c "import socket; s=socket.socket(); s.settimeout(0.5); s.connect(('127.0.0.1', 8081)); s.close()" 2>/dev/null; then
+                log "mitmproxy MITM proxy ready on port 8081"
+                mitm_ready=true
+                break
+            fi
+            if ! kill -0 "${MITM_PID}" 2>/dev/null; then
+                log_error "mitmproxy exited before becoming ready"
+                exit 1
+            fi
+            sleep 0.5
+        done
+
+        if [[ "${mitm_ready}" != "true" ]]; then
+            log_error "mitmproxy did not bind to port 8081 within 15 seconds"
             exit 1
         fi
-        sleep 0.5
-    done
-
-    if [[ "${mitm_ready}" != "true" ]]; then
-        log_error "mitmproxy did not bind to port 8080 within 15 seconds"
-        exit 1
+    else
+        # DNS-only mode: wait briefly for process to start
+        sleep 1
+        if ! kill -0 "${MITM_PID}" 2>/dev/null; then
+            log_error "mitmproxy (DNS-only) exited immediately"
+            exit 1
+        fi
+        log "mitmproxy DNS-only mode started"
     fi
-
-    # Wait for mitmproxy (this allows signal handling)
-    wait "${MITM_PID}"
-    local exit_code=$?
-
-    log "mitmproxy exited with code ${exit_code}"
-    rm -f "${READINESS_FILE}" "${PID_FILE}"
-    exit ${exit_code}
 }
 
 main() {
@@ -565,26 +709,37 @@ main() {
 
     log "Unified Proxy starting..."
 
-    # Generate CA certificate if needed
-    if [[ ! -f "${MITMPROXY_CA_CERT}" ]]; then
-        generate_ca_cert
+    # 1. Detect if MITM mode is needed (checks provider credentials)
+    detect_mitm_needed
+
+    # 2. Generate CA certificate only when MITM is needed
+    if [[ "${MITM_ENABLED}" == "true" ]]; then
+        if [[ ! -f "${MITMPROXY_CA_CERT}" ]]; then
+            generate_ca_cert
+        else
+            log "Using existing CA certificate"
+        fi
+        copy_ca_to_shared_volume
+        generate_combined_ca_bundle
     else
-        log "Using existing CA certificate"
+        log "MITM disabled — skipping CA certificate generation"
+        # Still need to generate a CA cert dir for mitmproxy DNS-only mode
+        mkdir -p "${MITMPROXY_CA_DIR}"
     fi
 
-    copy_ca_to_shared_volume
-    generate_combined_ca_bundle
+    # 3. Generate Squid domain list files from allowlist.yaml
+    generate_squid_domain_lists
 
-    # Validate configuration
+    # 4. Validate configuration
     validate_config
 
-    # Start internal API for container registration
+    # 5. Start internal API for container registration
     if ! start_internal_api; then
         log_error "Failed to start internal API"
         exit 1
     fi
 
-    # Start git API server if git shadow mode is enabled
+    # 6. Start git API server if git shadow mode is enabled
     configure_git_identity
     configure_git_credentials
     if ! start_git_api; then
@@ -598,12 +753,46 @@ main() {
         unset OPENCODE_AUTH_FILE
     fi
 
+    # 7. Start API gateways
+    if ! start_gateway; then
+        log_error "Failed to start API gateway"
+        exit 1
+    fi
+
+    if ! start_openai_gateway; then
+        log_error "Failed to start OpenAI gateway"
+        exit 1
+    fi
+
+    if ! start_github_gateway; then
+        log_error "Failed to start GitHub gateway"
+        exit 1
+    fi
+
     # Disable auth files that don't exist
     disable_missing_auth_file CODEX_AUTH_FILE
     disable_missing_auth_file OPENCODE_AUTH_FILE
     disable_missing_auth_file GEMINI_OAUTH_FILE
 
+    # 8. Start mitmproxy (port 8081 for MITM + dns@53)
     start_mitmproxy
+
+    # 9. Start Squid forward proxy (port 8080 — primary sandbox proxy)
+    if ! start_squid; then
+        log_error "Failed to start Squid"
+        exit 1
+    fi
+
+    # 10. Mark ready (after Squid is listening on port 8080)
+    mark_ready
+
+    # Wait for Squid (primary process for signal handling)
+    wait "${SQUID_PID}"
+    local exit_code=$?
+
+    log "Squid exited with code ${exit_code}"
+    rm -f "${READINESS_FILE}" "${PID_FILE}"
+    exit ${exit_code}
 }
 
 main "$@"

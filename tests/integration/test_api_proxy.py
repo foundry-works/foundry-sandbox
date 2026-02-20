@@ -17,7 +17,7 @@ import pytest
 # Add unified-proxy to path
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../../unified-proxy"))
 
-from addons.credential_injector import CredentialInjector, OAUTH_PLACEHOLDER
+from addons.credential_injector import CredentialInjector
 from addons.rate_limiter import RateLimiterAddon
 from addons.circuit_breaker import CircuitBreakerAddon
 
@@ -54,8 +54,8 @@ class MockFlow:
 
     def __init__(
         self,
-        host: str = "api.anthropic.com",
-        path: str = "/v1/messages",
+        host: str = "api.github.com",
+        path: str = "/repos/owner/repo",
         method: str = "POST",
         headers: Optional[dict] = None,
     ):
@@ -79,21 +79,21 @@ class TestCredentialInjection:
     def injector(self):
         """Create credential injector with test env vars."""
         with mock.patch.dict(os.environ, {
-            "ANTHROPIC_API_KEY": "sk-ant-test-key",
-            "OPENAI_API_KEY": "sk-openai-test-key",
             "GITHUB_TOKEN": "ghp_testtoken",
         }, clear=True):
             yield CredentialInjector()
 
-    def test_anthropic_api_key_injected(self, injector):
-        """Test Anthropic API key injection."""
-        flow = MockFlow(host="api.anthropic.com", path="/v1/messages")
+    def test_openai_not_in_provider_map(self, injector):
+        """Test OpenAI is not handled by credential injector (routes through gateway)."""
+        flow = MockFlow(host="api.openai.com", path="/v1/chat/completions")
         flow.metadata["container"] = MockContainerConfig()
 
         injector.request(flow)
 
-        # Should inject x-api-key header
-        assert ("x-api-key", "sk-ant-test-key") in flow.request.headers.set_calls
+        # OpenAI traffic routes through the gateway (port 9849), not the
+        # credential injector.  The injector should not inject any headers.
+        auth_set_calls = [name for name, _ in flow.request.headers.set_calls if name == "Authorization"]
+        assert len(auth_set_calls) == 0, "Expected no Authorization injection for OpenAI (routes through gateway)"
 
     def test_github_token_injected(self, injector):
         """Test GitHub token injection."""
@@ -105,21 +105,6 @@ class TestCredentialInjection:
         # Should inject Authorization header with Bearer token
         assert ("Authorization", "Bearer ghp_testtoken") in flow.request.headers.set_calls
 
-    def test_placeholder_replaced(self, injector):
-        """Test placeholder token is replaced with real credential."""
-        flow = MockFlow(
-            host="api.anthropic.com",
-            path="/v1/messages",
-            headers={"x-api-key": OAUTH_PLACEHOLDER},
-        )
-
-        flow.metadata["container"] = MockContainerConfig()
-        injector.request(flow)
-
-        # Placeholder should be removed and real key injected
-        assert "x-api-key" in flow.request.headers.del_calls
-        assert ("x-api-key", "sk-ant-test-key") in flow.request.headers.set_calls
-
 
 class TestBlockedEndpoints:
     """Test blocked API endpoints return 403."""
@@ -128,7 +113,7 @@ class TestBlockedEndpoints:
     def injector(self):
         """Create credential injector."""
         with mock.patch.dict(os.environ, {
-            "ANTHROPIC_API_KEY": "sk-ant-test-key",
+            "GITHUB_TOKEN": "ghp_testtoken",
         }, clear=True):
             return CredentialInjector()
 

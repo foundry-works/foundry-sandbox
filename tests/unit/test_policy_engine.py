@@ -22,6 +22,8 @@ from addons.policy_engine import (
     PolicyDecision,
     PolicyEngine,
     get_policy_decision,
+    is_ip_literal,
+    is_merge_request,
 )
 
 
@@ -331,12 +333,11 @@ class TestBlocklistOverride:
 
         policy_engine.request(flow)
 
-        # Verify: decision is deny
+        # Verify: decision is deny (caught by early-exit merge block, Step E)
         decision = flow.metadata[POLICY_DECISION_KEY]
         assert decision["allowed"] is False
-        assert decision["policy_type"] == "blocklist"
-        assert decision["container_id"] == "blocked-container"
-        assert "PR merge" in decision["reason"]
+        assert decision["policy_type"] == "merge_block"
+        assert "Merge operations" in decision["reason"]
 
         # Verify: 403 response created
         assert flow.response is not None
@@ -483,16 +484,20 @@ class TestEvaluationOrder:
     def test_identity_checked_first(
         self, mock_logger, mock_get_config, policy_engine
     ):
-        """Test that identity verification is checked before other policies."""
+        """Test that identity verification is checked before other policies.
+
+        Note: merge paths are caught even earlier by Step E (early-exit
+        merge block), so we use a non-merge blocked endpoint to verify
+        that identity is checked before the Step 3 blocklist.
+        """
         mock_get_config.return_value = None
 
-
-        # Even for a blocked GitHub endpoint, identity check fails first
+        # Use release creation (blocked in Step 3) — identity should fail first
         flow = Mock()
         flow.request = Mock()
-        flow.request.method = "PUT"
+        flow.request.method = "POST"
         flow.request.pretty_host = "api.github.com"
-        flow.request.path = "/repos/owner/repo/pulls/1/merge"
+        flow.request.path = "/repos/owner/repo/releases"
         flow.metadata = {}
         flow.response = None
 
@@ -507,16 +512,19 @@ class TestEvaluationOrder:
     def test_blocklist_checked_after_identity(
         self, mock_logger, mock_get_config, policy_engine, mock_container_config
     ):
-        """Test that blocklist is checked after identity verification."""
-        mock_get_config.return_value = mock_container_config
+        """Test that blocklist is checked after identity verification.
 
+        Note: merge paths are caught by Step E (early-exit), so we use
+        release creation to test the Step 3 blocklist ordering.
+        """
+        mock_get_config.return_value = mock_container_config
 
         # Container is identified, so blocklist check happens
         flow = Mock()
         flow.request = Mock()
-        flow.request.method = "PUT"
+        flow.request.method = "POST"
         flow.request.pretty_host = "api.github.com"
-        flow.request.path = "/repos/owner/repo/pulls/1/merge"
+        flow.request.path = "/repos/owner/repo/releases"
         flow.metadata = {}
         flow.response = None
 
@@ -632,9 +640,9 @@ class TestConflictResolution:
 
         requests = [
             ("GET", "/repos/owner/repo", True, "allowlist"),  # Allowed
-            ("PUT", "/repos/owner/repo/pulls/1/merge", False, "blocklist"),  # Blocked
+            ("PUT", "/repos/owner/repo/pulls/1/merge", False, "merge_block"),  # Early-exit merge block (Step E)
             ("GET", "/user", True, "allowlist"),  # Allowed
-            ("POST", "/repos/owner/repo/releases", False, "blocklist"),  # Blocked
+            ("POST", "/repos/owner/repo/releases", False, "blocklist"),  # Blocked (Step 3)
         ]
 
         for method, path, should_allow, expected_policy in requests:
@@ -653,7 +661,9 @@ class TestConflictResolution:
                 decision["allowed"] is should_allow
             ), f"{method} {path} should be {'allowed' if should_allow else 'blocked'}"
             assert decision["policy_type"] == expected_policy
-            assert decision["container_id"] == "conflict-test"
+            # Early-exit merge block runs before identity, so no container_id
+            if expected_policy != "merge_block":
+                assert decision["container_id"] == "conflict-test"
 
             if should_allow:
                 assert flow.response is None
@@ -2036,6 +2046,557 @@ class TestAddAnthropicBaseUrlHost:
 
         assert "my-proxy.example.com" in engine._domains
         assert len(engine._allowlist.http_endpoints) == 0
+
+
+class TestIsIpLiteral:
+    """Tests for is_ip_literal() function."""
+
+    def test_dotted_decimal(self):
+        """Standard dotted decimal IPv4."""
+        assert is_ip_literal("1.2.3.4") is True
+        assert is_ip_literal("127.0.0.1") is True
+        assert is_ip_literal("192.168.1.1") is True
+        assert is_ip_literal("0.0.0.0") is True
+        assert is_ip_literal("255.255.255.255") is True
+
+    def test_octal_encoding(self):
+        """Octal-encoded IP addresses."""
+        assert is_ip_literal("0177.0.0.1") is True
+        assert is_ip_literal("0177.0.0.01") is True
+        assert is_ip_literal("0300.0250.0.1") is True
+
+    def test_hex_encoding(self):
+        """Hex-encoded IP addresses."""
+        assert is_ip_literal("0x7f000001") is True
+        assert is_ip_literal("0x7f.0.0.1") is True
+        assert is_ip_literal("0xC0A80101") is True
+
+    def test_pure_integer(self):
+        """Pure integer IP addresses."""
+        assert is_ip_literal("2130706433") is True  # 127.0.0.1
+        assert is_ip_literal("3232235777") is True  # 192.168.1.1
+        assert is_ip_literal("0") is True
+        assert is_ip_literal("1") is True
+        assert is_ip_literal("16777216") is True  # 1.0.0.0
+
+    def test_mixed_encoding(self):
+        """Mixed-encoding IP addresses (caught by inet_aton fallback)."""
+        assert is_ip_literal("0x7f.0.0.01") is True
+        assert is_ip_literal("0x7f.0.0.1") is True
+
+    def test_ipv6_brackets(self):
+        """IPv6 bracket notation."""
+        assert is_ip_literal("[::1]") is True
+        assert is_ip_literal("[2001:db8::1]") is True
+        assert is_ip_literal("[fe80::1%25eth0]") is True
+
+    def test_normal_domains_not_matched(self):
+        """Normal domain names should not be detected as IP literals."""
+        assert is_ip_literal("example.com") is False
+        assert is_ip_literal("api.github.com") is False
+        assert is_ip_literal("sub.domain.example.org") is False
+        assert is_ip_literal("my-service.internal") is False
+        assert is_ip_literal("localhost") is False
+
+    def test_edge_cases(self):
+        """Edge cases that should not be false positives."""
+        # Hostnames starting with digits but containing letters
+        assert is_ip_literal("123abc.example.com") is False
+        assert is_ip_literal("1a2b.example.com") is False
+
+
+class TestIpLiteralIntegration:
+    """Integration tests for IP literal blocking in the request handler."""
+
+    @pytest.fixture
+    def policy_engine(self):
+        """Create PolicyEngine instance with test allowlist."""
+        engine = PolicyEngine()
+        engine._domains = ["api.github.com"]
+        return engine
+
+    @patch("addons.policy_engine.http.Response.make", side_effect=make_mock_response)
+    @patch("addons.policy_engine.get_container_config")
+    @patch("addons.policy_engine.logger")
+    def test_dotted_decimal_ip_blocked(
+        self, mock_logger, mock_get_config, mock_response_make, policy_engine
+    ):
+        """Request to dotted decimal IP is blocked before identity check."""
+        # get_container_config should never be called — IP check is Step 0
+        mock_get_config.return_value = None
+
+        flow = Mock()
+        flow.request = Mock()
+        flow.request.method = "GET"
+        flow.request.pretty_host = "1.2.3.4"
+        flow.request.path = "/some/path"
+        flow.metadata = {}
+        flow.response = None
+
+        policy_engine.request(flow)
+
+        decision = flow.metadata[POLICY_DECISION_KEY]
+        assert decision["allowed"] is False
+        assert decision["policy_type"] == "ip_literal"
+        assert "Direct IP" in decision["reason"]
+        assert flow.response is not None
+        assert flow.response.status_code == 403
+
+    @patch("addons.policy_engine.http.Response.make", side_effect=make_mock_response)
+    @patch("addons.policy_engine.get_container_config")
+    @patch("addons.policy_engine.logger")
+    def test_integer_ip_blocked(
+        self, mock_logger, mock_get_config, mock_response_make, policy_engine
+    ):
+        """Request to integer-encoded IP is blocked."""
+        mock_get_config.return_value = None
+
+        flow = Mock()
+        flow.request = Mock()
+        flow.request.method = "GET"
+        flow.request.pretty_host = "2130706433"
+        flow.request.path = "/"
+        flow.metadata = {}
+        flow.response = None
+
+        policy_engine.request(flow)
+
+        decision = flow.metadata[POLICY_DECISION_KEY]
+        assert decision["allowed"] is False
+        assert decision["policy_type"] == "ip_literal"
+
+    @patch("addons.policy_engine.http.Response.make", side_effect=make_mock_response)
+    @patch("addons.policy_engine.get_container_config")
+    @patch("addons.policy_engine.logger")
+    def test_hex_ip_blocked(
+        self, mock_logger, mock_get_config, mock_response_make, policy_engine
+    ):
+        """Request to hex-encoded IP is blocked."""
+        mock_get_config.return_value = None
+
+        flow = Mock()
+        flow.request = Mock()
+        flow.request.method = "GET"
+        flow.request.pretty_host = "0x7f000001"
+        flow.request.path = "/"
+        flow.metadata = {}
+        flow.response = None
+
+        policy_engine.request(flow)
+
+        decision = flow.metadata[POLICY_DECISION_KEY]
+        assert decision["allowed"] is False
+        assert decision["policy_type"] == "ip_literal"
+
+    @patch("addons.policy_engine.http.Response.make", side_effect=make_mock_response)
+    @patch("addons.policy_engine.get_container_config")
+    @patch("addons.policy_engine.logger")
+    def test_ipv6_brackets_blocked(
+        self, mock_logger, mock_get_config, mock_response_make, policy_engine
+    ):
+        """Request to IPv6 bracket notation is blocked."""
+        mock_get_config.return_value = None
+
+        flow = Mock()
+        flow.request = Mock()
+        flow.request.method = "GET"
+        flow.request.pretty_host = "[::1]"
+        flow.request.path = "/"
+        flow.metadata = {}
+        flow.response = None
+
+        policy_engine.request(flow)
+
+        decision = flow.metadata[POLICY_DECISION_KEY]
+        assert decision["allowed"] is False
+        assert decision["policy_type"] == "ip_literal"
+
+    @patch("addons.policy_engine.get_container_config")
+    @patch("addons.policy_engine.logger")
+    def test_normal_domain_not_blocked(
+        self, mock_logger, mock_get_config, policy_engine
+    ):
+        """Normal domain names pass through IP literal check."""
+        mock_config = Mock()
+        mock_config.container_id = "test-container"
+        mock_get_config.return_value = mock_config
+
+        flow = Mock()
+        flow.request = Mock()
+        flow.request.method = "GET"
+        flow.request.pretty_host = "api.github.com"
+        flow.request.path = "/user"
+        flow.metadata = {}
+        flow.response = None
+
+        policy_engine.request(flow)
+
+        decision = flow.metadata[POLICY_DECISION_KEY]
+        # Should pass IP check and proceed to allowlist (allowed)
+        assert decision["allowed"] is True
+        assert decision["policy_type"] != "ip_literal"
+
+    @patch("addons.policy_engine.http.Response.make", side_effect=make_mock_response)
+    @patch("addons.policy_engine.get_container_config")
+    @patch("addons.policy_engine.logger")
+    def test_ip_check_runs_before_identity(
+        self, mock_logger, mock_get_config, mock_response_make, policy_engine
+    ):
+        """IP literal check runs before identity verification (Step 0 before Step 1)."""
+        # Set up a valid container config — if identity ran first, it would pass
+        mock_config = Mock()
+        mock_config.container_id = "test-container"
+        mock_get_config.return_value = mock_config
+
+        flow = Mock()
+        flow.request = Mock()
+        flow.request.method = "GET"
+        flow.request.pretty_host = "127.0.0.1"
+        flow.request.path = "/"
+        flow.metadata = {}
+        flow.response = None
+
+        policy_engine.request(flow)
+
+        # Should be blocked by IP literal check, not allowed by identity
+        decision = flow.metadata[POLICY_DECISION_KEY]
+        assert decision["allowed"] is False
+        assert decision["policy_type"] == "ip_literal"
+
+
+class TestIsMergeRequest:
+    """Tests for is_merge_request() function."""
+
+    def test_rest_merge_path(self):
+        """REST PR merge endpoint is detected."""
+        assert is_merge_request("/repos/owner/repo/pulls/1/merge", b"") is True
+
+    def test_rest_merge_path_variations(self):
+        """Various PR merge path patterns are detected."""
+        paths = [
+            "/repos/user/project/pulls/1/merge",
+            "/repos/org-name/repo-name/pulls/999/merge",
+            "/repos/a/b/pulls/42/merge",
+        ]
+        for path in paths:
+            assert is_merge_request(path, b"") is True, f"{path} should be detected"
+
+    def test_rest_auto_merge_path(self):
+        """REST auto-merge endpoint is detected."""
+        assert is_merge_request("/repos/owner/repo/pulls/1/auto-merge", b"") is True
+
+    def test_graphql_merge_pull_request(self):
+        """GraphQL mergePullRequest mutation is detected in body."""
+        body = b'{"query":"mutation { mergePullRequest(input: {pullRequestId: \\"PR_123\\"}) { pullRequest { id } } }"}'
+        assert is_merge_request("/graphql", body) is True
+
+    def test_graphql_enable_auto_merge(self):
+        """GraphQL enablePullRequestAutoMerge mutation is detected in body."""
+        body = b'{"query":"mutation { enablePullRequestAutoMerge(input: {pullRequestId: \\"PR_123\\"}) { pullRequest { id } } }"}'
+        assert is_merge_request("/graphql", body) is True
+
+    def test_merges_path_not_caught(self):
+        """Repo merges endpoint (/merges) is NOT caught by early-exit.
+
+        The /merges endpoint creates merge commits but doesn't close PRs
+        or trigger deploy pipelines. It's handled by the Step 3 blocklist.
+        """
+        assert is_merge_request("/repos/owner/repo/merges", b"") is False
+
+    def test_non_merge_paths_not_caught(self):
+        """Non-merge GitHub API paths are not caught."""
+        safe_paths = [
+            "/repos/owner/repo/pulls/1",
+            "/repos/owner/repo/pulls",
+            "/repos/owner/repo/releases",
+            "/user",
+            "/repos/owner/repo/git/refs",
+        ]
+        for path in safe_paths:
+            assert is_merge_request(path, b"") is False, f"{path} should not match"
+
+    def test_non_merge_body_not_caught(self):
+        """Request bodies without merge keywords are not caught."""
+        bodies = [
+            b'{"query":"query { repository(owner: \\"o\\", name: \\"r\\") { id } }"}',
+            b'{"title":"Update feature","body":"description"}',
+            b"plain text body",
+            b"",
+        ]
+        for body in bodies:
+            assert is_merge_request("/graphql", body) is False
+
+    def test_empty_body(self):
+        """Empty body does not trigger merge detection."""
+        assert is_merge_request("/repos/owner/repo/pulls/1", b"") is False
+
+    def test_none_like_body(self):
+        """Body keyword check handles empty bytes correctly."""
+        # is_merge_request expects bytes, b"" is the empty case
+        assert is_merge_request("/some/path", b"") is False
+
+    def test_merge_keyword_in_non_graphql_body(self):
+        """Merge keyword in any body triggers detection (intentionally broad)."""
+        # Even non-GraphQL paths — this is defense-in-depth, false positives
+        # are acceptable (blocks rather than allows)
+        body = b'some text containing mergePullRequest in it'
+        assert is_merge_request("/some/path", body) is True
+
+
+class TestMergeBlockEarlyExitIntegration:
+    """Integration tests for early-exit merge blocking in the request handler."""
+
+    @pytest.fixture
+    def policy_engine(self):
+        """Create PolicyEngine instance with GitHub in allowlist."""
+        engine = PolicyEngine()
+        engine._domains = ["api.github.com"]
+        return engine
+
+    @pytest.fixture
+    def mock_container_config(self):
+        """Create mock container config."""
+        config = Mock()
+        config.container_id = "test-container"
+        return config
+
+    @patch("addons.policy_engine.http.Response.make", side_effect=make_mock_response)
+    @patch("addons.policy_engine.get_container_config")
+    @patch("addons.policy_engine.logger")
+    def test_rest_merge_blocked_early(
+        self, mock_logger, mock_get_config, mock_response_make, policy_engine, mock_container_config
+    ):
+        """REST merge request is blocked at early-exit (Step E), before identity check."""
+        mock_get_config.return_value = mock_container_config
+
+        flow = Mock()
+        flow.request = Mock()
+        flow.request.method = "PUT"
+        flow.request.pretty_host = "api.github.com"
+        flow.request.path = "/repos/owner/repo/pulls/1/merge"
+        flow.request.content = b'{"merge_method":"merge"}'
+        flow.metadata = {}
+        flow.response = None
+
+        policy_engine.request(flow)
+
+        decision = flow.metadata[POLICY_DECISION_KEY]
+        assert decision["allowed"] is False
+        assert decision["policy_type"] == "merge_block"
+        assert "Merge operations" in decision["reason"]
+        assert flow.response is not None
+        assert flow.response.status_code == 403
+
+        # Identity check should NOT have been called — early-exit runs first
+        mock_get_config.assert_not_called()
+
+    @patch("addons.policy_engine.http.Response.make", side_effect=make_mock_response)
+    @patch("addons.policy_engine.get_container_config")
+    @patch("addons.policy_engine.logger")
+    def test_auto_merge_blocked_early(
+        self, mock_logger, mock_get_config, mock_response_make, policy_engine, mock_container_config
+    ):
+        """Auto-merge REST request is blocked at early-exit."""
+        mock_get_config.return_value = mock_container_config
+
+        flow = Mock()
+        flow.request = Mock()
+        flow.request.method = "PUT"
+        flow.request.pretty_host = "api.github.com"
+        flow.request.path = "/repos/owner/repo/pulls/1/auto-merge"
+        flow.request.content = b"{}"
+        flow.metadata = {}
+        flow.response = None
+
+        policy_engine.request(flow)
+
+        decision = flow.metadata[POLICY_DECISION_KEY]
+        assert decision["allowed"] is False
+        assert decision["policy_type"] == "merge_block"
+        mock_get_config.assert_not_called()
+
+    @patch("addons.policy_engine.http.Response.make", side_effect=make_mock_response)
+    @patch("addons.policy_engine.get_container_config")
+    @patch("addons.policy_engine.logger")
+    def test_graphql_merge_mutation_blocked_early(
+        self, mock_logger, mock_get_config, mock_response_make, policy_engine, mock_container_config
+    ):
+        """GraphQL mergePullRequest mutation is blocked at early-exit."""
+        mock_get_config.return_value = mock_container_config
+
+        flow = Mock()
+        flow.request = Mock()
+        flow.request.method = "POST"
+        flow.request.pretty_host = "api.github.com"
+        flow.request.path = "/graphql"
+        flow.request.content = b'{"query":"mutation { mergePullRequest(input: {pullRequestId: \\"PR_123\\"}) { pullRequest { id } } }"}'
+        flow.metadata = {}
+        flow.response = None
+
+        policy_engine.request(flow)
+
+        decision = flow.metadata[POLICY_DECISION_KEY]
+        assert decision["allowed"] is False
+        assert decision["policy_type"] == "merge_block"
+        assert "Merge operations" in decision["reason"]
+        mock_get_config.assert_not_called()
+
+    @patch("addons.policy_engine.http.Response.make", side_effect=make_mock_response)
+    @patch("addons.policy_engine.get_container_config")
+    @patch("addons.policy_engine.logger")
+    def test_graphql_enable_auto_merge_blocked_early(
+        self, mock_logger, mock_get_config, mock_response_make, policy_engine, mock_container_config
+    ):
+        """GraphQL enablePullRequestAutoMerge mutation is blocked at early-exit."""
+        mock_get_config.return_value = mock_container_config
+
+        flow = Mock()
+        flow.request = Mock()
+        flow.request.method = "POST"
+        flow.request.pretty_host = "api.github.com"
+        flow.request.path = "/graphql"
+        flow.request.content = b'{"query":"mutation { enablePullRequestAutoMerge(input: {pullRequestId: \\"PR_123\\"}) { pullRequest { id } } }"}'
+        flow.metadata = {}
+        flow.response = None
+
+        policy_engine.request(flow)
+
+        decision = flow.metadata[POLICY_DECISION_KEY]
+        assert decision["allowed"] is False
+        assert decision["policy_type"] == "merge_block"
+        mock_get_config.assert_not_called()
+
+    @patch("addons.policy_engine.get_container_config")
+    @patch("addons.policy_engine.logger")
+    def test_merges_path_not_caught_by_early_exit(
+        self, mock_logger, mock_get_config, policy_engine, mock_container_config
+    ):
+        """Repo merges endpoint passes early-exit (handled by Step 3 blocklist)."""
+        mock_get_config.return_value = mock_container_config
+
+        flow = Mock()
+        flow.request = Mock()
+        flow.request.method = "POST"
+        flow.request.pretty_host = "api.github.com"
+        flow.request.path = "/repos/owner/repo/merges"
+        flow.request.content = b'{"base":"main","head":"feature"}'
+        flow.metadata = {}
+        flow.response = None
+
+        policy_engine.request(flow)
+
+        decision = flow.metadata[POLICY_DECISION_KEY]
+        # Should NOT be blocked by merge_block — it passes through to later steps
+        assert decision["policy_type"] != "merge_block"
+
+    @patch("addons.policy_engine.get_container_config")
+    @patch("addons.policy_engine.logger")
+    def test_non_merge_github_request_passes(
+        self, mock_logger, mock_get_config, policy_engine, mock_container_config
+    ):
+        """Normal GitHub API requests pass through early-exit check."""
+        mock_get_config.return_value = mock_container_config
+
+        flow = Mock()
+        flow.request = Mock()
+        flow.request.method = "GET"
+        flow.request.pretty_host = "api.github.com"
+        flow.request.path = "/repos/owner/repo/pulls/1"
+        flow.request.content = b""
+        flow.metadata = {}
+        flow.response = None
+
+        policy_engine.request(flow)
+
+        decision = flow.metadata[POLICY_DECISION_KEY]
+        assert decision["allowed"] is True
+        assert decision["policy_type"] != "merge_block"
+
+    @patch("addons.policy_engine.http.Response.make", side_effect=make_mock_response)
+    @patch("addons.policy_engine.get_container_config")
+    @patch("addons.policy_engine.logger")
+    def test_merge_blocked_even_without_identity(
+        self, mock_logger, mock_get_config, mock_response_make, policy_engine
+    ):
+        """Merge request is blocked even when identity verification would fail.
+
+        This is the core defense-in-depth scenario: even if container
+        identity is not available, the early-exit catches the merge.
+        """
+        # Identity check would fail
+        mock_get_config.return_value = None
+
+        flow = Mock()
+        flow.request = Mock()
+        flow.request.method = "PUT"
+        flow.request.pretty_host = "api.github.com"
+        flow.request.path = "/repos/owner/repo/pulls/1/merge"
+        flow.request.content = b"{}"
+        flow.metadata = {}
+        flow.response = None
+
+        policy_engine.request(flow)
+
+        decision = flow.metadata[POLICY_DECISION_KEY]
+        assert decision["allowed"] is False
+        assert decision["policy_type"] == "merge_block"
+        # Identity check should not have been called
+        mock_get_config.assert_not_called()
+
+    @patch("addons.policy_engine.http.Response.make", side_effect=make_mock_response)
+    @patch("addons.policy_engine.get_container_config")
+    @patch("addons.policy_engine.logger")
+    def test_merge_blocked_on_non_github_host(
+        self, mock_logger, mock_get_config, mock_response_make, policy_engine
+    ):
+        """Merge path pattern is checked regardless of host (defense-in-depth).
+
+        The early-exit runs before domain matching, so it blocks merge
+        paths even if the host isn't api.github.com. This is intentional —
+        an attacker might route through a custom domain.
+        """
+        mock_get_config.return_value = None
+
+        flow = Mock()
+        flow.request = Mock()
+        flow.request.method = "PUT"
+        flow.request.pretty_host = "evil-proxy.example.com"
+        flow.request.path = "/repos/owner/repo/pulls/1/merge"
+        flow.request.content = b"{}"
+        flow.metadata = {}
+        flow.response = None
+
+        policy_engine.request(flow)
+
+        decision = flow.metadata[POLICY_DECISION_KEY]
+        assert decision["allowed"] is False
+        assert decision["policy_type"] == "merge_block"
+
+    @patch("addons.policy_engine.http.Response.make", side_effect=make_mock_response)
+    @patch("addons.policy_engine.get_container_config")
+    @patch("addons.policy_engine.logger")
+    def test_merge_early_exit_with_none_content(
+        self, mock_logger, mock_get_config, mock_response_make, policy_engine
+    ):
+        """Merge check handles None content (streaming body) gracefully."""
+        mock_get_config.return_value = None
+
+        flow = Mock()
+        flow.request = Mock()
+        flow.request.method = "POST"
+        flow.request.pretty_host = "api.github.com"
+        flow.request.path = "/graphql"
+        flow.request.content = None  # Streaming — content not yet available
+        flow.metadata = {}
+        flow.response = None
+
+        # Should not crash; path doesn't match merge patterns and body is None
+        policy_engine.request(flow)
+
+        # With None content and non-merge path, should proceed past early-exit
+        # (will fail at identity check since mock returns None, but that's fine)
+        decision = flow.metadata[POLICY_DECISION_KEY]
+        assert decision["policy_type"] != "merge_block"
 
 
 if __name__ == "__main__":

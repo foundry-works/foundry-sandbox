@@ -5,6 +5,10 @@ version: "1.0"
 
 domains:
   # GitHub
+  # NOTE: api.github.com credential injection has moved to the gateway
+  # (http://unified-proxy:9850). Domain kept here for defense-in-depth —
+  # policy_engine still enforces endpoint/blocklist rules on any direct
+  # MITM requests that bypass the gateway.
   - github.com
   - "*.github.com"
   - api.github.com
@@ -19,9 +23,11 @@ domains:
   - uploads.github.com
 
   # AI Providers
-  - api.anthropic.com
-  - api.openai.com
-  - "*.api.openai.com"
+  # NOTE: api.anthropic.com removed — Anthropic traffic routes through the
+  # gateway (http://unified-proxy:9848) which handles credential injection
+  # and forwards to the upstream over HTTPS.
+  # NOTE: api.openai.com and *.api.openai.com removed — OpenAI traffic
+  # routes through the gateway (http://unified-proxy:9849).
   - chatgpt.com
   - "*.chatgpt.com"
   - generativelanguage.googleapis.com
@@ -68,7 +74,10 @@ domains:
 # HTTP endpoint allowlist for fine-grained API access control
 # Each endpoint specifies host, allowed methods, and allowed paths
 http_endpoints:
-  # GitHub API - segment-safe path patterns
+  # GitHub API — credential injection has moved to the gateway
+  # (http://unified-proxy:9850), but endpoint enforcement remains here as
+  # defense-in-depth for any direct api.github.com requests that bypass
+  # the gateway through the MITM proxy path.
   # *  matches exactly one path segment (does not span /)
   # ** matches one or more characters and may span /
   - host: api.github.com
@@ -141,22 +150,11 @@ http_endpoints:
       # GraphQL API (mutation filtering handled by github-api-filter.py)
       - "/graphql"
 
-  # Anthropic API
-  - host: api.anthropic.com
-    methods: [GET, POST]
-    paths:
-      - "/v1/messages"
-      - "/v1/complete"
-      - "/api/oauth/profile"
+  # Anthropic API — removed from allowlist. Traffic routes through the
+  # gateway (http://unified-proxy:9848) and no longer flows through mitmproxy.
 
-  # OpenAI API
-  - host: api.openai.com
-    methods: [POST, GET]
-    paths:
-      - "/v1/chat/completions"
-      - "/v1/completions"
-      - "/v1/models"
-      - "/v1/responses"
+  # OpenAI API — removed from allowlist. Traffic routes through the
+  # gateway (http://unified-proxy:9849) and no longer flows through mitmproxy.
 
   # ChatGPT / Codex
   - host: chatgpt.com

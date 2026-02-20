@@ -37,6 +37,16 @@ if [ "$SANDBOX_GATEWAY_ENABLED" = "true" ]; then
     iptables -A OUTPUT -p udp --dport 53 -j DROP || { echo "FATAL: iptables rule failed (udp drop)" >&2; exit 1; }
     iptables -A OUTPUT -p tcp --dport 53 -j DROP || { echo "FATAL: iptables rule failed (tcp drop)" >&2; exit 1; }
     echo "DNS firewall rules applied"
+
+    # Overlay /workspace/.git with tmpfs so it appears as an empty directory.
+    # The compose file bind-mounts /dev/null over the gitdir pointer file,
+    # which hides the content but exposes /dev/null metadata via stat(2).
+    # This tmpfs overlay converts it to a normal empty directory.
+    if mount -t tmpfs -o size=1k,mode=755 tmpfs /workspace/.git 2>/dev/null; then
+        echo ".git tmpfs overlay applied (empty directory)"
+    else
+        echo "Warning: .git tmpfs overlay failed; falling back to /dev/null bind mount" >&2
+    fi
 fi
 
 # Drop privileges and run the regular entrypoint

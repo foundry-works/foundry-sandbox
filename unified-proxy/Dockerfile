@@ -20,20 +20,25 @@ USER root
 COPY requirements.txt /opt/proxy/requirements.txt
 RUN pip install --no-cache-dir -r /opt/proxy/requirements.txt
 
-# Ensure curl, gosu, and git are available (curl for host-driven registration via docker exec,
-# gosu for privilege dropping at runtime, git for credential helper configuration)
+# Ensure curl, gosu, git, and squid are available
+# curl: host-driven registration via docker exec
+# gosu: privilege dropping at runtime
+# git: credential helper configuration
+# squid: forward proxy for SNI-based domain filtering (no TLS decryption)
 RUN if command -v apt-get >/dev/null 2>&1; then \
-        apt-get update && apt-get install -y curl gosu git && rm -rf /var/lib/apt/lists/*; \
+        apt-get update && apt-get install -y curl gosu git squid && rm -rf /var/lib/apt/lists/*; \
     elif command -v apk >/dev/null 2>&1; then \
-        apk add --no-cache curl gosu git; \
+        apk add --no-cache curl gosu git squid; \
     else \
         echo "ERROR: No supported package manager (apt-get or apk) found" >&2 && exit 1; \
     fi
 
-# Create directories for configuration, certificates, and runtime
+# Create directories for configuration, certificates, runtime, and Squid
 # Owned by mitmproxy user so the container can write to mounted volumes
 RUN mkdir -p /etc/proxy/credentials /etc/proxy/certs /var/run/proxy /var/lib/unified-proxy \
-    && chown -R mitmproxy:mitmproxy /etc/proxy /var/run/proxy /var/lib/unified-proxy
+        /etc/squid /var/log/squid /var/spool/squid /var/run/squid \
+    && chown -R mitmproxy:mitmproxy /etc/proxy /var/run/proxy /var/lib/unified-proxy \
+        /etc/squid /var/log/squid /var/spool/squid /var/run/squid
 
 # Copy core modules
 COPY __init__.py /opt/proxy/__init__.py
@@ -52,6 +57,12 @@ COPY gemini-token-manager.py /opt/proxy/gemini_token_manager.py
 COPY github-api-filter.py /opt/proxy/github-api-filter.py
 COPY github_config.py /opt/proxy/github_config.py
 
+# Copy the API gateways and shared middleware
+COPY gateway_middleware.py /opt/proxy/gateway_middleware.py
+COPY gateway.py /opt/proxy/gateway.py
+COPY openai_gateway.py /opt/proxy/openai_gateway.py
+COPY github_gateway.py /opt/proxy/github_gateway.py
+
 # Copy the git API server and git policy modules (used when git shadow mode is enabled)
 COPY git_api.py /opt/proxy/git_api.py
 COPY git_operations.py /opt/proxy/git_operations.py
@@ -65,6 +76,10 @@ COPY git_subprocess.py /opt/proxy/git_subprocess.py
 # Copy addon modules (mitmproxy addons)
 COPY addons/ /opt/proxy/addons/
 
+# Copy Squid configuration and domain list generator
+COPY squid.conf /etc/squid/squid.conf
+COPY generate_squid_config.py /opt/proxy/generate_squid_config.py
+
 # Copy the entrypoint script
 COPY entrypoint.sh /opt/proxy/entrypoint.sh
 RUN chmod +x /opt/proxy/entrypoint.sh
@@ -72,11 +87,15 @@ RUN chmod +x /opt/proxy/entrypoint.sh
 # Set PYTHONPATH so addons can import core modules
 ENV PYTHONPATH=/opt/proxy
 
-# Expose mitmproxy ports
-# 8080: HTTP/HTTPS proxy port
-# 8081: mitmproxy web interface (optional, for debugging)
+# Expose proxy and gateway ports
+# 8080: Squid forward proxy (SNI-based domain filtering)
+# 8081: mitmproxy (MITM-only, receives CONNECT from Squid cache_peer)
 # 8082: Internal API for container registration
-EXPOSE 8080 8081 8082
+# 8083: Git API server
+# 9848: Anthropic API gateway
+# 9849: OpenAI API gateway
+# 9850: GitHub API gateway
+EXPOSE 8080 8081 8082 8083 9848 9849 9850
 
 # Health check - verify internal API is responsive
 HEALTHCHECK --interval=5s --timeout=5s --start-period=10s --retries=3 \
