@@ -1942,5 +1942,101 @@ class TestCheckGithubBodyPolicies:
         )
 
 
+class TestAddAnthropicBaseUrlHost:
+    """Tests for PolicyEngine._add_anthropic_base_url_host()."""
+
+    def test_custom_host_added_to_domains(self):
+        """Custom ANTHROPIC_BASE_URL host is added to the domain allowlist."""
+        engine = PolicyEngine()
+        engine._domains = ["api.anthropic.com"]
+        engine._allowlist = None
+
+        with patch.dict("os.environ", {"ANTHROPIC_BASE_URL": "https://my-proxy.example.com/v1"}):
+            engine._add_anthropic_base_url_host()
+
+        assert "my-proxy.example.com" in engine._domains
+
+    def test_endpoint_config_mirrored(self):
+        """Custom host gets an http_endpoints entry mirroring api.anthropic.com."""
+        from config import HttpEndpointConfig, AllowlistConfig
+
+        engine = PolicyEngine()
+        engine._domains = ["api.anthropic.com"]
+        anthropic_ep = HttpEndpointConfig(
+            host="api.anthropic.com",
+            methods=["GET", "POST"],
+            paths=["/v1/messages", "/v1/complete"],
+        )
+        # Build a minimal allowlist with the anthropic endpoint
+        allowlist = object.__new__(AllowlistConfig)
+        allowlist.domains = ["api.anthropic.com"]
+        allowlist.http_endpoints = [anthropic_ep]
+        allowlist.blocked_paths = []
+        allowlist.version = "1.0"
+        engine._allowlist = allowlist
+
+        with patch.dict("os.environ", {"ANTHROPIC_BASE_URL": "https://my-proxy.example.com/v1"}):
+            engine._add_anthropic_base_url_host()
+
+        # Should have 2 endpoints now
+        assert len(engine._allowlist.http_endpoints) == 2
+        custom_ep = engine._allowlist.http_endpoints[1]
+        assert custom_ep.host == "my-proxy.example.com"
+        assert custom_ep.methods == ["GET", "POST"]
+        assert custom_ep.paths == ["/v1/messages", "/v1/complete"]
+
+    def test_noop_when_host_already_allowed(self):
+        """No duplicate added if the host is already in the domain allowlist."""
+        engine = PolicyEngine()
+        engine._domains = ["api.anthropic.com"]
+        engine._allowlist = None
+
+        with patch.dict("os.environ", {"ANTHROPIC_BASE_URL": "https://api.anthropic.com"}):
+            engine._add_anthropic_base_url_host()
+
+        assert engine._domains.count("api.anthropic.com") == 1
+
+    def test_noop_when_env_var_unset(self):
+        """No changes when ANTHROPIC_BASE_URL is not set."""
+        engine = PolicyEngine()
+        engine._domains = ["api.anthropic.com"]
+        engine._allowlist = None
+
+        with patch.dict("os.environ", {}, clear=True):
+            engine._add_anthropic_base_url_host()
+
+        assert engine._domains == ["api.anthropic.com"]
+
+    def test_noop_when_env_var_empty(self):
+        """No changes when ANTHROPIC_BASE_URL is empty string."""
+        engine = PolicyEngine()
+        engine._domains = ["api.anthropic.com"]
+        engine._allowlist = None
+
+        with patch.dict("os.environ", {"ANTHROPIC_BASE_URL": "  "}):
+            engine._add_anthropic_base_url_host()
+
+        assert engine._domains == ["api.anthropic.com"]
+
+    def test_no_endpoint_mirror_when_anthropic_ep_missing(self):
+        """If there's no api.anthropic.com endpoint config, only the domain is added."""
+        from config import AllowlistConfig
+
+        engine = PolicyEngine()
+        engine._domains = ["other.example.com"]
+        allowlist = object.__new__(AllowlistConfig)
+        allowlist.domains = ["other.example.com"]
+        allowlist.http_endpoints = []
+        allowlist.blocked_paths = []
+        allowlist.version = "1.0"
+        engine._allowlist = allowlist
+
+        with patch.dict("os.environ", {"ANTHROPIC_BASE_URL": "https://my-proxy.example.com/v1"}):
+            engine._add_anthropic_base_url_host()
+
+        assert "my-proxy.example.com" in engine._domains
+        assert len(engine._allowlist.http_endpoints) == 0
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])

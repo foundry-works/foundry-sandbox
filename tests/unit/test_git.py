@@ -9,6 +9,7 @@ Tests cover:
 
 from __future__ import annotations
 
+import subprocess
 from unittest.mock import Mock, patch
 
 import pytest
@@ -264,6 +265,92 @@ class TestEnsureRepoCheckout:
 
         # Should have called git_with_retry for fetch and possibly pull
         assert mock_retry.call_count >= 1
+
+
+class TestFetchBareBranch:
+    """Tests for fetch_bare_branch()."""
+
+    @patch("foundry_sandbox.git.subprocess.run")
+    @patch("foundry_sandbox.git.git_with_retry")
+    def test_success_calls_fetch_revparse_updateref(self, mock_retry, mock_run):
+        """Happy path: fetch, rev-parse FETCH_HEAD, update-ref."""
+        mock_retry.return_value = Mock(returncode=0)
+        mock_run.side_effect = [
+            Mock(returncode=0, stdout="abc123\n", stderr=""),  # rev-parse
+            Mock(returncode=0, stdout="", stderr=""),  # update-ref
+        ]
+
+        git.fetch_bare_branch("/bare/repo", "my-branch")
+
+        mock_retry.assert_called_once_with(["-C", "/bare/repo", "fetch", "origin", "my-branch"])
+        assert mock_run.call_count == 2
+        # rev-parse FETCH_HEAD
+        assert mock_run.call_args_list[0][0][0] == [
+            "git", "-C", "/bare/repo", "rev-parse", "FETCH_HEAD"
+        ]
+        # update-ref with the SHA
+        assert mock_run.call_args_list[1][0][0] == [
+            "git", "-C", "/bare/repo", "update-ref", "refs/heads/my-branch", "abc123"
+        ]
+
+    @patch("foundry_sandbox.git.git_with_retry")
+    def test_fetch_failure_propagates(self, mock_retry):
+        """If git fetch fails, the error should propagate."""
+        mock_retry.side_effect = subprocess.CalledProcessError(1, "git fetch")
+
+        with pytest.raises(subprocess.CalledProcessError):
+            git.fetch_bare_branch("/bare/repo", "main")
+
+    @patch("foundry_sandbox.git.subprocess.run")
+    @patch("foundry_sandbox.git.git_with_retry")
+    def test_revparse_failure_propagates(self, mock_retry, mock_run):
+        """If rev-parse FETCH_HEAD fails, the error should propagate."""
+        mock_retry.return_value = Mock(returncode=0)
+        mock_run.side_effect = subprocess.CalledProcessError(1, "git rev-parse")
+
+        with pytest.raises(subprocess.CalledProcessError):
+            git.fetch_bare_branch("/bare/repo", "main")
+
+    @patch("foundry_sandbox.git.subprocess.run")
+    @patch("foundry_sandbox.git.git_with_retry")
+    def test_updateref_failure_propagates(self, mock_retry, mock_run):
+        """If update-ref fails, the error should propagate."""
+        mock_retry.return_value = Mock(returncode=0)
+        mock_run.side_effect = [
+            Mock(returncode=0, stdout="abc123\n", stderr=""),  # rev-parse OK
+            subprocess.CalledProcessError(1, "git update-ref"),  # update-ref fails
+        ]
+
+        with pytest.raises(subprocess.CalledProcessError):
+            git.fetch_bare_branch("/bare/repo", "main")
+
+    def test_invalid_branch_name_rejected(self):
+        """Branch names with path traversal or invalid chars are rejected."""
+        with pytest.raises(ValueError, match="Invalid branch name"):
+            git.fetch_bare_branch("/bare/repo", "../etc/passwd")
+
+        with pytest.raises(ValueError, match="Invalid branch name"):
+            git.fetch_bare_branch("/bare/repo", "branch\x00name")
+
+        with pytest.raises(ValueError, match="Invalid branch name"):
+            git.fetch_bare_branch("/bare/repo", "")
+
+    @patch("foundry_sandbox.git.subprocess.run")
+    @patch("foundry_sandbox.git.git_with_retry")
+    def test_slashed_branch_name_accepted(self, mock_retry, mock_run):
+        """Branch names like 'feature/foo' should be accepted."""
+        mock_retry.return_value = Mock(returncode=0)
+        mock_run.side_effect = [
+            Mock(returncode=0, stdout="abc123\n", stderr=""),
+            Mock(returncode=0, stdout="", stderr=""),
+        ]
+
+        git.fetch_bare_branch("/bare/repo", "feature/my-branch")
+
+        assert mock_run.call_args_list[1][0][0] == [
+            "git", "-C", "/bare/repo", "update-ref",
+            "refs/heads/feature/my-branch", "abc123"
+        ]
 
 
 class TestBranchExists:

@@ -11,7 +11,7 @@ import subprocess
 from datetime import datetime
 
 from foundry_sandbox.constants import TIMEOUT_GIT_QUERY, TIMEOUT_LOCAL_CMD
-from foundry_sandbox.utils import log_debug, sanitize_ref_component
+from foundry_sandbox.utils import log_debug, log_warn, sanitize_ref_component
 
 
 def _resolve_repo_input(repo_input: str) -> tuple[str, str, str, str]:
@@ -138,6 +138,10 @@ def _detect_remote_default_branch(repo_root: str) -> str:
         if _branch_exists_on_remote(repo_root, candidate):
             return candidate
 
+    log_warn(
+        "Could not detect remote default branch (neither 'main' nor 'master' found); "
+        "falling back to 'main'."
+    )
     return "main"
 
 

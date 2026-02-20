@@ -1042,5 +1042,29 @@ class TestSubprocessRunEdgeCases:
         assert called_with_sudo, "sudo rm was not called after shutil.rmtree failed"
 
 
+class TestDestroyImplNameValidation:
+    """Test that destroy_impl validates sandbox names."""
+
+    def test_empty_name_raises_value_error(self):
+        """Empty sandbox name should raise ValueError."""
+        with pytest.raises(ValueError, match="Invalid sandbox name"):
+            destroy_impl("")
+
+    def test_path_traversal_name_raises_value_error(self):
+        """Name containing path separators should raise ValueError."""
+        with pytest.raises(ValueError, match="Invalid sandbox name"):
+            destroy_impl("../evil")
+
+    def test_dot_name_raises_value_error(self):
+        """Name '.' or '..' should raise ValueError."""
+        with pytest.raises(ValueError, match="Invalid sandbox name"):
+            destroy_impl("..")
+
+    def test_control_char_name_raises_value_error(self):
+        """Name with control characters should raise ValueError."""
+        with pytest.raises(ValueError, match="Invalid sandbox name"):
+            destroy_impl("sandbox\x00name")
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
