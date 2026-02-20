@@ -1,0 +1,4 @@
+# Python dependencies for gateway service
+flask>=3.0,<4.0
+gunicorn>=22.0,<23.0
+requests>=2.31,<3.0

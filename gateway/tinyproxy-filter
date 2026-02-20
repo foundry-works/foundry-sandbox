@@ -1,0 +1,4 @@
+# Allow any domain-name URL (but not IP literals)
+# This regex matches valid hostnames: letters, digits, hyphens, dots
+# It does NOT match IP addresses (pure digit.digit.digit.digit patterns)
+^[a-zA-Z]
