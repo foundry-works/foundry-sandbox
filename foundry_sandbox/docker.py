@@ -16,6 +16,7 @@ import re
 import secrets
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Callable
 
@@ -237,15 +238,22 @@ def generate_sandbox_subnet(project_name: str) -> tuple[str, str]:
 def get_compose_command(
     override_file: str = "",
     isolate_credentials: bool = False,
+    compose_extras: list[str] | None = None,
 ) -> list[str]:
     """Build docker compose command with optional credential isolation.
 
     Args:
         override_file: Path to docker-compose override file (optional).
         isolate_credentials: Whether to include credential isolation compose file.
+        compose_extras: Optional list of paths to additional compose override files.
+            Each path must exist and be a regular file.
 
     Returns:
         List of command arguments for docker compose.
+
+    Raises:
+        FileNotFoundError: If any compose_extras path does not exist or is not
+            a regular file.
     """
     script_dir = str(_script_dir())
     cmd = [
@@ -256,6 +264,14 @@ def get_compose_command(
         cmd.extend(["-f", f"{script_dir}/docker-compose.credential-isolation.yml"])
     if override_file and Path(override_file).is_file():
         cmd.extend(["-f", override_file])
+    if compose_extras:
+        for extra_path in compose_extras:
+            p = Path(extra_path)
+            if not p.exists() or not p.is_file():
+                raise FileNotFoundError(
+                    f"Compose extras path does not exist or is not a regular file: {extra_path}"
+                )
+            cmd.extend(["-f", extra_path])
     return cmd
 
 
@@ -316,6 +332,7 @@ def compose_up(
     repos_dir: str = "",
     sandbox_id: str = "",
     anthropic_base_url: str = "",
+    compose_extras: list[str] | None = None,
 ) -> None:
     """Start containers via docker compose up.
 
@@ -329,6 +346,8 @@ def compose_up(
         isolate_credentials: Whether to enable credential isolation.
         repos_dir: Repository directory (for compose volume substitution).
         sandbox_id: Sandbox ID (for HMAC secret provisioning).
+        anthropic_base_url: Optional Anthropic API base URL override.
+        compose_extras: Optional list of additional compose override file paths.
     """
     env = os.environ.copy()
     env["WORKSPACE_PATH"] = worktree_path
@@ -391,56 +410,97 @@ def compose_up(
         env["SANDBOX_SUBNET"] = subnet
         env["SANDBOX_PROXY_IP"] = proxy_ip
 
-    compose_cmd = get_compose_command(override_file, isolate_credentials)
+    # Thread PROXY_ALLOWLIST_EXTRA_PATH into container via temp compose override
+    _allowlist_extra_override: str | None = None
 
-    if isolate_credentials:
-        # Two-phase startup: start proxy first so we can capture its logs
-        # on failure. A single `up -d` removes all containers on health
-        # check failure, making diagnosis impossible.
-        proxy_cmd = compose_cmd + ["-p", container, "up", "-d", "--no-deps", "unified-proxy"]
+    try:
+        if isolate_credentials:
+            host_extra = os.environ.get("PROXY_ALLOWLIST_EXTRA_PATH", "")
+            if host_extra:
+                host_extra = os.path.realpath(host_extra)
+                if not os.path.isfile(host_extra):
+                    raise FileNotFoundError(
+                        f"PROXY_ALLOWLIST_EXTRA_PATH is not a regular file: {host_extra}"
+                    )
+                container_mount = "/etc/unified-proxy/allowlist-extra.yml"
+                # Quote the host path to handle paths with YAML-significant
+                # characters (colons, spaces, etc.)
+                quoted_host = host_extra.replace("'", "''")
+                override_content = (
+                    "services:\n"
+                    "  unified-proxy:\n"
+                    "    volumes:\n"
+                    f"      - '{quoted_host}:{container_mount}:ro'\n"
+                    "    environment:\n"
+                    f"      - PROXY_ALLOWLIST_EXTRA_PATH={container_mount}\n"
+                )
+                f = tempfile.NamedTemporaryFile(
+                    mode="w", suffix=".yml", prefix="allowlist-extra-",
+                    delete=False,
+                )
+                _allowlist_extra_override = f.name
+                f.write(override_content)
+                f.close()
+                if compose_extras is None:
+                    compose_extras = []
+                compose_extras.append(_allowlist_extra_override)
+
+        compose_cmd = get_compose_command(override_file, isolate_credentials, compose_extras)
+
+        if isolate_credentials:
+            # Two-phase startup: start proxy first so we can capture its logs
+            # on failure. A single `up -d` removes all containers on health
+            # check failure, making diagnosis impossible.
+            proxy_cmd = compose_cmd + ["-p", container, "up", "-d", "--no-deps", "unified-proxy"]
+            if get_sandbox_verbose():
+                print(f"+ {' '.join(proxy_cmd)}", file=sys.stderr)
+            proxy_result = subprocess.run(
+                proxy_cmd, env=env, check=False,
+                capture_output=True, timeout=TIMEOUT_DOCKER_COMPOSE,
+            )
+            if proxy_result.returncode != 0:
+                stderr_text = proxy_result.stderr.decode() if isinstance(proxy_result.stderr, bytes) else (proxy_result.stderr or "")
+                raise subprocess.CalledProcessError(
+                    proxy_result.returncode, proxy_cmd, output=proxy_result.stdout, stderr=stderr_text,
+                )
+
+            # Wait for proxy health (matches compose healthcheck: start_period=30s + retries=5 * interval=5s)
+            proxy_container = f"{container}-unified-proxy-1"
+            proxy_healthy = _wait_for_proxy_health(proxy_container, timeout=55)
+            if not proxy_healthy:
+                # Capture proxy logs for diagnosis before cleanup
+                logs = _capture_container_logs(proxy_container)
+                # Stop the proxy so compose down can clean up
+                subprocess.run(
+                    ["docker", "rm", "-f", proxy_container],
+                    capture_output=True, check=False, timeout=TIMEOUT_DOCKER_QUERY,
+                )
+                raise subprocess.CalledProcessError(
+                    1, proxy_cmd,
+                    stderr=f"unified-proxy failed health check.\n--- Proxy Logs ---\n{logs}",
+                )
+
+        cmd = compose_cmd + ["-p", container, "up", "-d"]
+
         if get_sandbox_verbose():
-            print(f"+ {' '.join(proxy_cmd)}", file=sys.stderr)
-        proxy_result = subprocess.run(
-            proxy_cmd, env=env, check=False,
-            capture_output=True, timeout=TIMEOUT_DOCKER_COMPOSE,
+            print(f"+ {' '.join(cmd)}", file=sys.stderr)
+
+        compose_result = subprocess.run(
+            cmd, env=env, check=False,
+            capture_output=True,
+            timeout=TIMEOUT_DOCKER_COMPOSE,
         )
-        if proxy_result.returncode != 0:
-            stderr_text = proxy_result.stderr.decode() if isinstance(proxy_result.stderr, bytes) else (proxy_result.stderr or "")
+        if compose_result.returncode != 0:
+            stderr_text = compose_result.stderr.decode() if isinstance(compose_result.stderr, bytes) else (compose_result.stderr or "")
             raise subprocess.CalledProcessError(
-                proxy_result.returncode, proxy_cmd, output=proxy_result.stdout, stderr=stderr_text,
+                compose_result.returncode, cmd, output=compose_result.stdout, stderr=stderr_text,
             )
-
-        # Wait for proxy health (matches compose healthcheck: start_period=30s + retries=5 * interval=5s)
-        proxy_container = f"{container}-unified-proxy-1"
-        proxy_healthy = _wait_for_proxy_health(proxy_container, timeout=55)
-        if not proxy_healthy:
-            # Capture proxy logs for diagnosis before cleanup
-            logs = _capture_container_logs(proxy_container)
-            # Stop the proxy so compose down can clean up
-            subprocess.run(
-                ["docker", "rm", "-f", proxy_container],
-                capture_output=True, check=False, timeout=TIMEOUT_DOCKER_QUERY,
-            )
-            raise subprocess.CalledProcessError(
-                1, proxy_cmd,
-                stderr=f"unified-proxy failed health check.\n--- Proxy Logs ---\n{logs}",
-            )
-
-    cmd = compose_cmd + ["-p", container, "up", "-d"]
-
-    if get_sandbox_verbose():
-        print(f"+ {' '.join(cmd)}", file=sys.stderr)
-
-    compose_result = subprocess.run(
-        cmd, env=env, check=False,
-        capture_output=True,
-        timeout=TIMEOUT_DOCKER_COMPOSE,
-    )
-    if compose_result.returncode != 0:
-        stderr_text = compose_result.stderr.decode() if isinstance(compose_result.stderr, bytes) else (compose_result.stderr or "")
-        raise subprocess.CalledProcessError(
-            compose_result.returncode, cmd, output=compose_result.stdout, stderr=stderr_text,
-        )
+    finally:
+        if _allowlist_extra_override:
+            try:
+                os.unlink(_allowlist_extra_override)
+            except OSError:
+                pass
 
 
 def compose_down(
@@ -450,6 +510,7 @@ def compose_down(
     override_file: str = "",
     remove_volumes: bool = False,
     isolate_credentials: bool = False,
+    compose_extras: list[str] | None = None,
 ) -> None:
     """Stop containers via docker compose down.
 
@@ -460,6 +521,7 @@ def compose_down(
         override_file: Optional docker-compose override file.
         remove_volumes: Whether to remove volumes (-v flag).
         isolate_credentials: Whether credential isolation is enabled.
+        compose_extras: Optional list of additional compose override file paths.
     """
     env = os.environ.copy()
     env["WORKSPACE_PATH"] = worktree_path
@@ -488,7 +550,7 @@ def compose_down(
         env.setdefault("SANDBOX_SUBNET", "10.0.0.0/24")
         env.setdefault("SANDBOX_PROXY_IP", "10.0.0.2")
 
-    compose_cmd = get_compose_command(override_file, isolate_credentials)
+    compose_cmd = get_compose_command(override_file, isolate_credentials, compose_extras)
     cmd = compose_cmd + ["-p", container, "down"]
     if remove_volumes:
         cmd.append("-v")
@@ -579,6 +641,41 @@ def exec_in_container(container_id: str, *args: str) -> subprocess.CompletedProc
         CompletedProcess result.
     """
     return _run_cmd(["docker", "exec", container_id, *args], timeout=TIMEOUT_DOCKER_EXEC)
+
+
+def exec_in_container_streaming(
+    container_id: str, *args: str, timeout: int = 3600
+) -> int:
+    """Execute a command inside a container with real-time output streaming.
+
+    Unlike exec_in_container(), stdout and stderr are inherited (not captured),
+    so output streams to the caller's terminal in real time.
+
+    Args:
+        container_id: Docker container ID or name.
+        *args: Command and arguments to run.
+        timeout: Maximum seconds to wait (default 3600). Returns 124 on timeout.
+
+    Returns:
+        Process exit code, or 124 on timeout (coreutils convention).
+    """
+    cmd = ["docker", "exec", container_id, *args]
+    if get_sandbox_verbose():
+        print(f"+ {' '.join(cmd)}", file=sys.stderr)
+
+    proc = subprocess.Popen(cmd)
+    try:
+        return proc.wait(timeout=timeout)
+    except subprocess.TimeoutExpired:
+        # Graceful shutdown: SIGTERM → wait 5s → SIGKILL → reap
+        proc.terminate()
+        try:
+            proc.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            proc.kill()
+            proc.wait()
+
+        return 124
 
 
 def copy_to_container(src: str, container_id: str, dst: str) -> None:

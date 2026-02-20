@@ -45,6 +45,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from addons.container_identity import get_container_config  # noqa: E402
 from config import (  # noqa: E402
+    HttpEndpointConfig,
     load_allowlist_config,
     AllowlistConfig,
     ConfigError,
@@ -255,7 +256,6 @@ class PolicyEngine:
                     break
 
             if anthropic_ep is not None:
-                from config import HttpEndpointConfig
                 custom_ep = HttpEndpointConfig(
                     host=hostname,
                     methods=list(anthropic_ep.methods),

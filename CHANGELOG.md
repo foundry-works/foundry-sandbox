@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **Allowlist merge layering** — `load_allowlist_config()` accepts an optional extra allowlist YAML that is additively merged with the base config; supports `PROXY_ALLOWLIST_EXTRA_PATH` env var for host-to-container threading
+- **`destroy_impl()` programmatic API** — Non-interactive destroy implementation with `best_effort`, `skip_tmux`, and `skip_branch_cleanup` parameters
+- **`exec_in_container_streaming()`** — Streaming `docker exec` with timeout handling (SIGTERM → SIGKILL escalation)
+- **`compose_extras` parameter** — `get_compose_command()`, `compose_up()`, and `compose_down()` accept additional compose override files
+
+### Fixed
+- **`fetch_bare_branch` ref injection** — Branch names are now validated against a strict regex and path traversal before constructing `refs/heads/` paths
+- **Inline import in policy engine** — Moved `HttpEndpointConfig` import from inside `_add_anthropic_base_url_host()` to module-level
+- **Silent fallback in `_detect_remote_default_branch`** — Now logs a warning when falling back to `"main"` because neither `main` nor `master` was found on the remote
+- **Compose YAML path quoting** — Host paths in allowlist-extra overrides are single-quoted to handle paths with spaces, colons, or other YAML-significant characters
+- **Empty `blocked_paths.patterns` accepted** — `_parse_extra_allowlist()` now rejects entries with empty `patterns` lists
+
 ## [0.18.0] - 2026-02-20
 
 ### Added

@@ -11,6 +11,7 @@ Security-critical: ref validation preserves deny-by-default behavior.
 
 from __future__ import annotations
 
+import re
 import subprocess
 import time
 from pathlib import Path
@@ -163,6 +164,17 @@ def ensure_bare_repo(repo_url: str, bare_path: str | Path) -> None:
         git_with_retry(["-C", str(bp), "fetch", "origin", "--prune"])
 
 
+_VALID_BRANCH_RE = re.compile(
+    r"^[a-zA-Z0-9]"          # Must start with alnum
+    r"(?!.*\.\.)"             # No ".." anywhere (path traversal)
+    r"(?!.*//)"               # No consecutive slashes
+    r"(?!.*\.lock$)"          # Must not end with .lock
+    r"(?!.*\.$)"              # Must not end with "."
+    r"(?!.*/\.)"              # No component starting with "."
+    r"[a-zA-Z0-9._/-]*$"     # Body: alnum, dot, underscore, slash, hyphen
+)
+
+
 def fetch_bare_branch(bare_path: str | Path, branch: str) -> None:
     """Fetch a single branch into a bare repo, updating refs/heads/<branch>.
 
@@ -171,10 +183,19 @@ def fetch_bare_branch(bare_path: str | Path, branch: str) -> None:
     works around both issues by fetching to ``FETCH_HEAD`` and then using
     ``update-ref`` to move the local branch pointer.
 
+    Note: the fetch → rev-parse → update-ref sequence is not atomic. A
+    concurrent fetch could change FETCH_HEAD between steps. In practice
+    bare repos are per-user so contention is unlikely.
+
     Args:
         bare_path: Path to the bare repository.
         branch: Remote branch name to fetch and update.
+
+    Raises:
+        ValueError: If *branch* contains invalid ref characters or path traversal.
     """
+    if not _VALID_BRANCH_RE.match(branch):
+        raise ValueError(f"Invalid branch name: {branch!r}")
     bp = str(bare_path)
 
     # Fetch the branch — this always writes FETCH_HEAD regardless of

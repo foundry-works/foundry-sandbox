@@ -109,3 +109,62 @@ Sandbox tmux sessions can be tuned via environment variables:
 export SANDBOX_TMUX_SCROLLBACK=200000
 export SANDBOX_TMUX_MOUSE=0
 ```
+
+## Proxy Allowlist Extension
+
+The unified proxy enforces network access via an allowlist that declares permitted domains, HTTP endpoints, and blocked paths. To grant additional network access to a sandbox without replacing the entire allowlist, use the `PROXY_ALLOWLIST_EXTRA_PATH` environment variable:
+
+```bash
+export PROXY_ALLOWLIST_EXTRA_PATH="/path/to/allowlist-extra.yml"
+```
+
+When credential isolation is enabled, this file is automatically mounted into the container at `/etc/unified-proxy/allowlist-extra.yml` and merged with the base allowlist.
+
+### Merge Semantics
+
+The merge is **additive-only**: extra entries can only grant access, never revoke access granted by the base allowlist. This preserves the security properties of the base allowlist while allowing controlled expansion.
+
+The extra file uses a relaxed schema where `domains`, `http_endpoints`, and `blocked_paths` may all be omitted. Only the `version` field is required. For example:
+
+```yaml
+version: "1"
+domains:
+  - example.com
+http_endpoints:
+  - host: private-registry.example.com
+    methods: [GET, POST]
+    paths: [/v2/*, /manifests/*]
+```
+
+### Failure Policy
+
+This is a **fail-closed** mechanism:
+
+- If `PROXY_ALLOWLIST_EXTRA_PATH` is set but the file does not exist, proxy startup fails
+- If the file exists but contains invalid YAML or schema errors, proxy startup fails
+- If the file is missing the required `version` field, proxy startup fails
+
+No partial allowlist startup is permitted. This prevents silent security degradation from misconfigured extras.
+
+For detailed merge canonicalization rules and precedence logic, see [ADR-008: Allowlist Layering](/docs/adr/008-allowlist-layering.md).
+
+## Internal API: Docker Compose Overrides
+
+The `foundry_sandbox.docker` module provides a `compose_extras` parameter on programmatic compose operations (`get_compose_command()`, `compose_up()`, `compose_down()`) for advanced use cases.
+
+`compose_extras` accepts a list of paths to additional docker-compose override files:
+
+```python
+from foundry_sandbox.docker import compose_up
+
+compose_up(
+    worktree_path=...,
+    claude_config_path=...,
+    container=...,
+    compose_extras=["/path/to/override1.yml", "/path/to/override2.yml"],
+)
+```
+
+Each file must exist and be a regular file; non-existent paths raise `FileNotFoundError`. Files are appended as `-f <path>` arguments to the docker compose command in list order, after the base compose file and credential isolation file.
+
+This is an internal API intended for programmatic integration. End users typically configure docker-compose overrides via the standard docker-compose.override.yml mechanism or via other sandboxing features.
