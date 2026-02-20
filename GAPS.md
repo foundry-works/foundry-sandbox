@@ -61,9 +61,64 @@ written to a temp file, used for the single operation, and cleaned up immediatel
    `REQUESTS_CA_BUNDLE`. Custom CA trust is a known source of breakage (e.g., Go
    binaries compiled with `CGO_ENABLED=0` ignore system certs).
 
+### Provider Base URL Support (Research)
+
+The gateway pattern only works if the provider's SDK/CLI supports redirecting API
+traffic to a custom endpoint via environment variable. Research as of 2026-02:
+
+| Provider | Env Var | SDK Param | HTTP OK? | Feasibility |
+|----------|---------|-----------|----------|-------------|
+| **Anthropic** | `ANTHROPIC_BASE_URL` | `base_url=` | Yes (httpx) | Easy — env var, CLI support |
+| **OpenAI** | `OPENAI_BASE_URL` | `base_url=` | Yes (httpx) | Easy — env var, both SDKs |
+| **Perplexity** | (uses `OPENAI_BASE_URL`) | (uses OpenAI SDK) | Yes | Easy — but conflicts if OpenAI also proxied via same var |
+| **Zhipu/GLM** | `ZHIPUAI_BASE_URL` | `base_url=` | Untested | Easy — env var support |
+| **Google/Gemini** | **None documented** | `http_options={"base_url":}` | Unknown | Hard — no env var; SDK requires programmatic config |
+| **Tavily** | **None** | `api_base_url=` | Untested | Hard — no env var; constructor-only |
+| **Semantic Scholar** | **None** | `api_url=` | Untested | Hard — no env var; unofficial SDK |
+
+**Key findings:**
+
+- **Anthropic + OpenAI cover the primary use case.** These two providers handle the
+  vast majority of sandbox API traffic and both have first-class env var support.
+- **Google/Gemini is the hardest.** No documented `GOOGLE_GEMINI_BASE_URL` env var
+  despite multiple GitHub issues requesting it. The Python SDK only accepts
+  `http_options` programmatically. The Gemini CLI's base URL support is undocumented.
+- **Tavily and Semantic Scholar** have no env var support — only constructor params.
+  These would need either (a) wrapper scripts that patch the SDK initialization, or
+  (b) continued MITM proxying.
+- **Perplexity** uses the OpenAI SDK, so `OPENAI_BASE_URL` works, but this creates
+  a routing conflict if OpenAI itself also needs proxying. Would need per-provider
+  gateway endpoints with distinct env vars.
+
+### Can mitmproxy Be Fully Eliminated?
+
+Adopting gateway endpoints for all providers would make mitmproxy's MITM capability
+unnecessary. An audit of the current mitmproxy addons shows:
+
+| Addon | Needs MITM? | Alternative |
+|-------|-------------|-------------|
+| `credential_injector` | Yes — modifies headers/body | Move to gateway endpoints |
+| `policy_engine` | Yes — inspects GitHub API request bodies | Move to `gh` CLI gateway endpoint |
+| `git_proxy` | Yes — parses pkt-line protocol | Already handled by git API server (`:8083`) in shadow mode |
+| `dns_filter` | No — hostname only | Keep as standalone DNS proxy |
+| `container_identity` | No — source IP only | Move to gateway request handling |
+| `rate_limiter` | No — (container, host) tuples | Move to gateway middleware |
+| `circuit_breaker` | No — response status codes | Move to gateway middleware |
+| `metrics` | No — connection metadata | Move to gateway middleware |
+
+If credential injection and GitHub API filtering move to gateway endpoints, mitmproxy
+could be replaced with Squid doing SNI peek/splice (like egg does) — providing domain
+filtering without any HTTPS decryption. This eliminates the CA certificate entirely.
+
+**However**, providers without env var support (Google, Tavily, Semantic Scholar) would
+still need MITM unless their SDKs add env var support or we use wrapper scripts.
+A pragmatic approach: gateway endpoints for Anthropic/OpenAI (the high-traffic
+providers), Squid SNI filtering for general web traffic, and MITM as an opt-in
+fallback for providers that lack base URL env vars.
+
 ### Proposed Implementation
 
-For the **Anthropic API** (primary use case), adopt the `ANTHROPIC_BASE_URL` pattern:
+**Phase 1: Anthropic gateway endpoint (highest value, lowest risk)**
 
 1. Add an HTTP endpoint to the unified proxy (e.g., `:9848/v1/messages`) that:
    - Accepts plaintext HTTP requests from sandboxes on the internal network
@@ -76,22 +131,34 @@ For the **Anthropic API** (primary use case), adopt the `ANTHROPIC_BASE_URL` pat
 3. Remove `api.anthropic.com` from the domain allowlist (force all traffic through
    the gateway endpoint).
 
-For **other providers** (OpenAI, Google, Tavily, etc.), the same pattern can be
-extended per-provider, or mitmproxy can remain as a fallback for providers that don't
-support base URL override. This is a gradual migration — the highest-value target
-(Anthropic) can be done first.
+**Phase 2: OpenAI gateway endpoint**
 
-For **GitHub**, the existing git API server (`:8083`) already avoids MITM for git
-operations. The remaining MITM surface is GitHub REST/GraphQL API calls made by `gh`
-CLI, which could be routed through a gateway endpoint similar to egg's approach.
+Same pattern with `OPENAI_BASE_URL=http://unified-proxy:9849` (separate port or
+path prefix to distinguish providers).
+
+**Phase 3: GitHub API gateway endpoint**
+
+Route `gh` CLI through a gateway REST endpoint (similar to egg's
+`/api/v1/gh/execute`). This moves the GitHub API body inspection from mitmproxy's
+`policy_engine` addon to the gateway, where it can be enforced without MITM.
+
+The existing git API server (`:8083`) already handles git operations without MITM.
+
+**Phase 4: Replace mitmproxy with Squid SNI filtering**
+
+Once Anthropic, OpenAI, and GitHub traffic no longer need MITM:
+- Replace mitmproxy with Squid (SNI peek/splice for domain filtering)
+- Remove CA certificate generation and distribution
+- Remove the six CA trust env vars from sandbox config
+- Keep MITM as an opt-in mode for providers that lack base URL support
 
 ### Scope
 
-- `unified-proxy/`: New HTTP relay endpoint
-- `docker-compose.credential-isolation.yml`: Add `ANTHROPIC_BASE_URL` env var
-- `config/allowlist.yaml`: Remove `api.anthropic.com`
-- `unified-proxy/addons/credential_injector.py`: Remove Anthropic provider (keep others
-  during transition)
+- `unified-proxy/`: New HTTP relay endpoints (one per provider)
+- `docker-compose.credential-isolation.yml`: Add `ANTHROPIC_BASE_URL`, `OPENAI_BASE_URL`
+- `config/allowlist.yaml`: Remove provider domains as they migrate to gateway
+- `unified-proxy/addons/credential_injector.py`: Remove providers as they migrate
+- Long-term: Replace mitmproxy with Squid, remove CA cert infrastructure
 
 ---
 
