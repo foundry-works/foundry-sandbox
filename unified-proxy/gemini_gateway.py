@@ -10,14 +10,20 @@ Port allocation:
   :9849  OpenAI gateway    (openai_gateway.py)
   :9850  GitHub gateway     (github_gateway.py)
   :9851  Gemini gateway     (this module)
+  :9852  ChatGPT gateway    (chatgpt_gateway.py)
 
-Credential injection:
-  Uses x-goog-api-key header (not Authorization: Bearer).
-  Reads GEMINI_API_KEY (primary) or GOOGLE_API_KEY (fallback).
+Credential injection (two modes):
+  API-key mode:
+    Uses x-goog-api-key header.
+    Reads GEMINI_API_KEY (primary) or GOOGLE_API_KEY (fallback).
 
-OAuth login mode:
-  Gemini CLI OAuth login (oauth2.googleapis.com, accounts.google.com)
-  still uses the MITM path.  This gateway handles API-key mode only.
+  OAuth mode:
+    Uses Authorization: Bearer header with tokens from GEMINI_OAUTH_FILE.
+    Tokens are loaded via GeminiTokenManager.  Note that Google OAuth
+    refresh requires client credentials we don't have, so expired tokens
+    require the user to re-run ``gemini login`` on the host.
+
+  Priority: API-key mode wins when both are configured.
 
 Sandbox configuration:
   GOOGLE_GEMINI_BASE_URL=http://unified-proxy:9851
@@ -37,7 +43,7 @@ _PROXY_DIR = "/opt/proxy"
 if _PROXY_DIR not in sys.path:
     sys.path.insert(0, _PROXY_DIR)
 
-from gateway_base import create_gateway_app, run_gateway  # noqa: E402
+from gateway_base import create_gateway_app, gateway_error, run_gateway  # noqa: E402
 from logging_config import get_logger, setup_logging  # noqa: E402
 from registry import ContainerRegistry  # noqa: E402
 
@@ -52,20 +58,118 @@ GEMINI_GATEWAY_BIND = os.environ.get("GEMINI_GATEWAY_BIND", "0.0.0.0")
 
 
 # ---------------------------------------------------------------------------
+# OAuth token manager (module-level so request_hook can access it)
+# ---------------------------------------------------------------------------
+
+_token_manager = None
+
+# Track which credential mode is active so the request hook knows
+# whether to refresh tokens.
+_credential_mode: str = "none"  # "api_key", "oauth", or "none"
+
+
+def _init_token_manager() -> None:
+    """Initialize the Gemini OAuth token manager from GEMINI_OAUTH_FILE."""
+    global _token_manager
+
+    auth_file = os.environ.get("GEMINI_OAUTH_FILE", "").strip()
+    if not auth_file:
+        logger.info("gemini-gateway: GEMINI_OAUTH_FILE not set")
+        return
+
+    if not os.path.exists(auth_file):
+        logger.warning(f"gemini-gateway: OAuth file not found: {auth_file}")
+        return
+
+    try:
+        from addons.oauth_managers.gemini import GeminiTokenManager
+        _token_manager = GeminiTokenManager(auth_file)
+        logger.info(f"gemini-gateway: OAuth token manager initialized from {auth_file}")
+    except ImportError:
+        try:
+            from gemini_token_manager import GeminiTokenManager as FallbackManager
+            _token_manager = FallbackManager(auth_file)
+            logger.info(f"gemini-gateway: OAuth token manager initialized (fallback) from {auth_file}")
+        except ImportError:
+            logger.error("gemini-gateway: GeminiTokenManager not available")
+    except (FileNotFoundError, ValueError) as e:
+        logger.warning(f"gemini-gateway: failed to load OAuth file: {e}")
+    except Exception as e:
+        logger.error(f"gemini-gateway: failed to initialize OAuth manager: {e}")
+
+
+# ---------------------------------------------------------------------------
 # Credential loading
 # ---------------------------------------------------------------------------
 
 def _load_gemini_credential() -> Optional[dict]:
-    """Load the Gemini API credential from environment variables.
+    """Load the Gemini API credential.
 
-    Priority: GEMINI_API_KEY > GOOGLE_API_KEY (matches credential_injector.py).
+    Priority:
+      1. GEMINI_API_KEY or GOOGLE_API_KEY → x-goog-api-key (static)
+      2. GEMINI_OAUTH_FILE → Authorization: Bearer (via token manager)
+
     Returns dict with 'header' and 'value' keys, or None.
     """
+    global _credential_mode
+
+    # Priority 1: API key
     api_key = os.environ.get("GEMINI_API_KEY", "").strip()
     if not api_key:
         api_key = os.environ.get("GOOGLE_API_KEY", "").strip()
     if api_key:
+        _credential_mode = "api_key"
+        logger.info("gemini-gateway: using API-key mode")
         return {"header": "x-goog-api-key", "value": api_key}
+
+    # Priority 2: OAuth
+    if _token_manager is not None:
+        try:
+            token = _token_manager.get_valid_token()
+            _credential_mode = "oauth"
+            logger.info("gemini-gateway: using OAuth mode")
+            return {"header": "Authorization", "value": f"Bearer {token}"}
+        except Exception as e:
+            logger.error(f"gemini-gateway: failed to get initial OAuth token: {e}")
+
+    _credential_mode = "none"
+    return None
+
+
+# ---------------------------------------------------------------------------
+# Request hook — refresh OAuth token before each request
+# ---------------------------------------------------------------------------
+
+async def _gemini_request_hook(
+    request: web.Request,
+    method: str,
+    body: bytes,
+    container_id: str,
+) -> Optional[web.Response]:
+    """Refresh OAuth token before forwarding to upstream.
+
+    Only active in OAuth mode.  In API-key mode this is a no-op.
+    """
+    if _credential_mode != "oauth":
+        return None  # API-key mode — nothing to refresh
+
+    if _token_manager is None:
+        return gateway_error(502, "Gemini OAuth credential not configured")
+
+    try:
+        token = _token_manager.get_valid_token()
+        credential = request.app.get("credential")
+        if credential is not None:
+            credential["value"] = f"Bearer {token}"
+        else:
+            request.app["credential"] = {
+                "header": "Authorization",
+                "value": f"Bearer {token}",
+            }
+    except Exception as e:
+        logger.error(f"gemini-gateway: OAuth token error: {e}")
+        return gateway_error(502, f"Gemini OAuth token error: {e}")
+
     return None
 
 
@@ -77,6 +181,14 @@ def create_gemini_gateway_app(
     registry: Optional[ContainerRegistry] = None,
 ) -> web.Application:
     """Create the aiohttp application for the Gemini gateway."""
+    _init_token_manager()
+
+    # Determine stripped headers based on credential mode.
+    # In API-key mode we strip x-goog-api-key (sandbox placeholder).
+    # In OAuth mode we don't need to strip it (Authorization is already
+    # in the base stripped set).
+    extra_stripped = frozenset({"x-goog-api-key"})
+
     return create_gateway_app(
         upstream_base_url="https://generativelanguage.googleapis.com",
         upstream_host="generativelanguage.googleapis.com",
@@ -91,7 +203,8 @@ def create_gemini_gateway_app(
         connect_timeout=30,
         total_timeout=600,
         credential_required=True,
-        extra_stripped_headers=frozenset({"x-goog-api-key"}),
+        extra_stripped_headers=extra_stripped,
+        request_hook=_gemini_request_hook,
         registry=registry,
     )
 

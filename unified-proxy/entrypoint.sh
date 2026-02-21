@@ -34,6 +34,7 @@ GATEWAY_PID=""
 OPENAI_GATEWAY_PID=""
 GITHUB_GATEWAY_PID=""
 GEMINI_GATEWAY_PID=""
+CHATGPT_GATEWAY_PID=""
 
 # MITM mode detection (set by detect_mitm_needed)
 MITM_ENABLED="false"
@@ -146,6 +147,13 @@ cleanup() {
         log "Stopping Gemini gateway (PID ${GEMINI_GATEWAY_PID})..."
         kill -TERM "${GEMINI_GATEWAY_PID}" 2>/dev/null || true
         wait "${GEMINI_GATEWAY_PID}" 2>/dev/null || true
+    fi
+
+    # Stop ChatGPT gateway if running
+    if [[ -n "${CHATGPT_GATEWAY_PID}" ]] && kill -0 "${CHATGPT_GATEWAY_PID}" 2>/dev/null; then
+        log "Stopping ChatGPT gateway (PID ${CHATGPT_GATEWAY_PID})..."
+        kill -TERM "${CHATGPT_GATEWAY_PID}" 2>/dev/null || true
+        wait "${CHATGPT_GATEWAY_PID}" 2>/dev/null || true
     fi
 
     # Stop git API if running
@@ -549,11 +557,15 @@ start_gemini_gateway() {
     # Gemini API gateway provides plaintext HTTP endpoint on port 9851.
     # Sandboxes talk HTTP to the gateway; the gateway injects credentials
     # and forwards over HTTPS to https://generativelanguage.googleapis.com.
-    # NOTE: OAuth login mode (Gemini CLI) still uses MITM path via
-    # oauth2.googleapis.com and accounts.google.com.
+    # Supports both API-key mode (GEMINI_API_KEY/GOOGLE_API_KEY) and
+    # OAuth mode (GEMINI_OAUTH_FILE from `gemini login`).
 
-    # Only start if a Gemini credential is available
-    if [[ -z "${GEMINI_API_KEY:-}" && -z "${GOOGLE_API_KEY:-}" ]]; then
+    # Only start if a Gemini credential is available (API key or OAuth file)
+    local has_oauth="false"
+    if [[ -n "${GEMINI_OAUTH_FILE:-}" && -f "${GEMINI_OAUTH_FILE}" ]]; then
+        has_oauth="true"
+    fi
+    if [[ -z "${GEMINI_API_KEY:-}" && -z "${GOOGLE_API_KEY:-}" && "${has_oauth}" == "false" ]]; then
         log "No Gemini credential set; skipping Gemini gateway startup"
         return 0
     fi
@@ -576,6 +588,39 @@ start_gemini_gateway() {
     done
 
     log_error "Gemini gateway not ready after 5 seconds"
+    return 1
+}
+
+start_chatgpt_gateway() {
+    # ChatGPT/Codex API gateway provides plaintext HTTP endpoint on port 9852.
+    # Sandboxes talk HTTP to the gateway; the gateway injects OAuth credentials
+    # and forwards over HTTPS to https://chatgpt.com.
+    # Uses OAuthTokenManager to read tokens from CODEX_AUTH_FILE (auth.json).
+
+    # Only start if a Codex auth file is available
+    if [[ -z "${CODEX_AUTH_FILE:-}" ]] || [[ ! -f "${CODEX_AUTH_FILE}" ]]; then
+        log "No Codex auth file available; skipping ChatGPT gateway startup"
+        return 0
+    fi
+
+    local port="${CHATGPT_GATEWAY_PORT:-9852}"
+    log "Starting ChatGPT gateway (port ${port})..."
+
+    export PYTHONPATH="/opt/proxy:${PYTHONPATH:-}"
+
+    python3 /opt/proxy/chatgpt_gateway.py &
+    CHATGPT_GATEWAY_PID=$!
+
+    # Wait for the server to start listening
+    for i in {1..20}; do
+        if python3 -c "import socket; s=socket.socket(); s.settimeout(0.5); s.connect(('127.0.0.1', ${port})); s.close()" 2>/dev/null; then
+            log "ChatGPT gateway ready on port ${port} (PID ${CHATGPT_GATEWAY_PID})"
+            return 0
+        fi
+        sleep 0.25
+    done
+
+    log_error "ChatGPT gateway not ready after 5 seconds"
     return 1
 }
 
@@ -826,6 +871,11 @@ main() {
 
     if ! start_gemini_gateway; then
         log_error "Failed to start Gemini gateway"
+        exit 1
+    fi
+
+    if ! start_chatgpt_gateway; then
+        log_error "Failed to start ChatGPT gateway"
         exit 1
     fi
 

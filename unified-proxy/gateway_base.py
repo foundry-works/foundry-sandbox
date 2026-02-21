@@ -88,6 +88,7 @@ _DISPLAY_NAMES = {
     "openai-gateway": "OpenAI",
     "github-gateway": "GitHub",
     "gemini-gateway": "Gemini",
+    "chatgpt-gateway": "ChatGPT",
 }
 
 # ---------------------------------------------------------------------------

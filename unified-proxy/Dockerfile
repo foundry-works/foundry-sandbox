@@ -63,6 +63,7 @@ COPY security_policies.py /opt/proxy/security_policies.py
 COPY gateway_middleware.py /opt/proxy/gateway_middleware.py
 COPY gateway.py /opt/proxy/gateway.py
 COPY openai_gateway.py /opt/proxy/openai_gateway.py
+COPY chatgpt_gateway.py /opt/proxy/chatgpt_gateway.py
 COPY github_gateway.py /opt/proxy/github_gateway.py
 
 # Copy the git API server and git policy modules (used when git shadow mode is enabled)
@@ -97,7 +98,8 @@ ENV PYTHONPATH=/opt/proxy
 # 9848: Anthropic API gateway
 # 9849: OpenAI API gateway
 # 9850: GitHub API gateway
-EXPOSE 8080 8081 8082 8083 9848 9849 9850
+# 9852: ChatGPT/Codex API gateway
+EXPOSE 8080 8081 8082 8083 9848 9849 9850 9852
 
 # Health check - verify internal API is responsive
 HEALTHCHECK --interval=5s --timeout=5s --start-period=10s --retries=3 \
