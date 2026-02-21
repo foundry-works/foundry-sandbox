@@ -252,6 +252,34 @@ generate_combined_ca_bundle() {
     log "Combined CA bundle generated at $combined"
 }
 
+generate_chatgpt_gateway_cert() {
+    # Generate a TLS cert for chatgpt.com signed by the mitmproxy CA,
+    # so the ChatGPT gateway can terminate TLS transparently.
+    local ca_key="${MITMPROXY_CA_DIR}/mitmproxy-ca.pem"  # mitmproxy stores key+cert in same file
+    local gw_key="${SHARED_CERTS_DIR}/chatgpt-gw.key"
+    local gw_cert="${SHARED_CERTS_DIR}/chatgpt-gw.pem"
+
+    if [[ -f "${gw_cert}" && -f "${gw_key}" ]]; then
+        log "ChatGPT gateway TLS cert already exists"
+        return 0
+    fi
+
+    # Generate leaf key
+    openssl genrsa -out "${gw_key}" 2048 2>/dev/null
+
+    # Generate leaf cert signed by mitmproxy CA (SAN: chatgpt.com + *.chatgpt.com)
+    openssl req -new -key "${gw_key}" -subj "/CN=chatgpt.com" |
+        openssl x509 -req -CA "${ca_key}" -CAkey "${ca_key}" \
+            -CAcreateserial -days 3650 -sha256 \
+            -extfile <(printf "subjectAltName=DNS:chatgpt.com,DNS:*.chatgpt.com") \
+            -out "${gw_cert}" 2>/dev/null
+
+    chown mitmproxy:mitmproxy "${gw_key}" "${gw_cert}"
+    chmod 0600 "${gw_key}"
+    chmod 0644 "${gw_cert}"
+    log "ChatGPT gateway TLS cert generated (signed by mitmproxy CA)"
+}
+
 validate_config() {
     log "Validating configuration..."
 
@@ -615,13 +643,29 @@ start_chatgpt_gateway() {
     for i in {1..20}; do
         if python3 -c "import socket; s=socket.socket(); s.settimeout(0.5); s.connect(('127.0.0.1', ${port})); s.close()" 2>/dev/null; then
             log "ChatGPT gateway ready on port ${port} (PID ${CHATGPT_GATEWAY_PID})"
-            return 0
+            break
         fi
         sleep 0.25
     done
 
-    log_error "ChatGPT gateway not ready after 5 seconds"
-    return 1
+    if ! python3 -c "import socket; s=socket.socket(); s.settimeout(0.5); s.connect(('127.0.0.1', ${port})); s.close()" 2>/dev/null; then
+        log_error "ChatGPT gateway not ready after 5 seconds"
+        return 1
+    fi
+
+    # Also verify TLS port if cert was generated
+    if [[ -f "${SHARED_CERTS_DIR}/chatgpt-gw.pem" ]]; then
+        local tls_port="${CHATGPT_TLS_PORT:-443}"
+        for _ in {1..20}; do
+            if python3 -c "import socket; s=socket.socket(); s.settimeout(0.5); s.connect(('127.0.0.1', ${tls_port})); s.close()" 2>/dev/null; then
+                log "ChatGPT gateway TLS ready on port ${tls_port}"
+                break
+            fi
+            sleep 0.25
+        done
+    fi
+
+    return 0
 }
 
 disable_missing_auth_file() {
@@ -821,6 +865,10 @@ main() {
         fi
         copy_ca_to_shared_volume
         generate_combined_ca_bundle
+        # Generate ChatGPT gateway TLS cert if Codex auth is available
+        if [[ -n "${CODEX_AUTH_FILE:-}" && -f "${CODEX_AUTH_FILE}" ]]; then
+            generate_chatgpt_gateway_cert
+        fi
     else
         log "MITM disabled — skipping CA certificate generation"
         # Still need to generate a CA cert dir for mitmproxy DNS-only mode

@@ -248,6 +248,8 @@ foundry-sandbox/
 │   ├── gateway.py              # Anthropic API gateway (:9848)
 │   ├── openai_gateway.py       # OpenAI API gateway (:9849)
 │   ├── github_gateway.py       # GitHub API gateway (:9850)
+│   ├── gemini_gateway.py       # Gemini API gateway (:9851)
+│   ├── chatgpt_gateway.py      # ChatGPT/Codex API gateway (:9852)
 │   ├── security_policies.py    # Shared GitHub security policies (gateway + policy engine)
 │   ├── generate_squid_config.py # Squid domain list generator from allowlist.yaml
 │   ├── squid.conf              # Squid forward proxy configuration
@@ -347,6 +349,9 @@ The unified-proxy handles credential isolation, API proxying, and security polic
 │  │  :9848  Anthropic gateway  ──► api.anthropic.com (HTTPS)     │ │
 │  │  :9849  OpenAI gateway     ──► api.openai.com    (HTTPS)     │ │
 │  │  :9850  GitHub gateway     ──► api.github.com    (HTTPS)     │ │
+│  │  :9851  Gemini gateway     ──► generativelanguage.. (HTTPS)  │ │
+│  │  :9852  ChatGPT gateway    ──► chatgpt.com  (HTTP)  │ │
+│  │  :443   ChatGPT gateway    ──► chatgpt.com  (TLS)   │ │
 │  │                                                              │ │
 │  │  Shared infrastructure:                                      │ │
 │  │    gateway_base.py         — app factory, forwarding, errors │ │

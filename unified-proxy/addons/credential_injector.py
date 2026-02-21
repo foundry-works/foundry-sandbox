@@ -371,6 +371,9 @@ class CredentialInjector:
 
         # Only handle OpenAI/ChatGPT endpoints (Codex CLI)
         # Don't intercept requests to other APIs like Anthropic
+        # NOTE: chatgpt.com traffic now primarily routes through the ChatGPT
+        # gateway (:443 TLS) via /etc/hosts redirect. This MITM path remains
+        # as a safety net for edge cases (e.g., auth.openai.com OAuth refresh).
         host = flow.request.host
         if host not in ("api.openai.com", "auth.openai.com", "chatgpt.com"):
             return False

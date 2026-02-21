@@ -60,8 +60,8 @@ MITM_DOMAINS = [
     "auth.openai.com",
     "oauth2.googleapis.com",
     "accounts.google.com",
-    # ChatGPT / Codex (OAuth flow)
-    "chatgpt.com",
+    # NOTE: chatgpt.com removed — traffic routes through the ChatGPT gateway
+    # (:9852/:443) via /etc/hosts DNS redirect. See chatgpt_gateway.py.
 ]
 
 

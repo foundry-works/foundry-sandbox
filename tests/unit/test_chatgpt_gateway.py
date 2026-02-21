@@ -1,7 +1,8 @@
 """Unit tests for ChatGPT/Codex API gateway.
 
 Tests credential loading from auth.json via OAuthTokenManager,
-the request hook token refresh, and gateway app creation.
+the request hook token refresh, gateway app creation, and
+dual-port TLS server startup.
 """
 
 import json
@@ -155,3 +156,103 @@ class TestChatGPTRequestHook:
         assert result is None
         assert app["credential"]["header"] == "Authorization"
         assert app["credential"]["value"] == "Bearer new-token-789"
+
+
+# ---------------------------------------------------------------------------
+# TLS listener (dual-port server)
+# ---------------------------------------------------------------------------
+
+
+class TestRunChatGPTGatewayServer:
+    """Tests for run_chatgpt_gateway_server() dual-port startup."""
+
+    def _run_server(self, *, tls_cert_exists: bool, tls_port: int = 8443):
+        """Run the server with fully mocked asyncio/aiohttp, returning call records."""
+        web_mod = chatgpt_gateway.web
+
+        # Track TCPSite construction calls
+        tcp_site_calls: list[tuple] = []
+
+        def _tcp_site_factory(*args, **kwargs):
+            tcp_site_calls.append((args, kwargs))
+            return MagicMock()
+
+        mock_runner = MagicMock()
+        web_mod.AppRunner.return_value = mock_runner
+        web_mod.TCPSite = MagicMock(side_effect=_tcp_site_factory)
+
+        mock_app = MagicMock()
+
+        # Fully mock the event loop so we don't need real async execution
+        mock_loop = MagicMock()
+        mock_loop.run_forever.side_effect = KeyboardInterrupt
+
+        ssl_ctx_instances: list[MagicMock] = []
+
+        def _mock_ssl_ctx(protocol):
+            ctx = MagicMock()
+            ctx._protocol = protocol
+            ssl_ctx_instances.append(ctx)
+            return ctx
+
+        try:
+            with patch("chatgpt_gateway.asyncio.new_event_loop", return_value=mock_loop), \
+                 patch("chatgpt_gateway.asyncio.set_event_loop"), \
+                 patch("chatgpt_gateway.os.path.isfile", return_value=tls_cert_exists), \
+                 patch("chatgpt_gateway.ssl.SSLContext", side_effect=_mock_ssl_ctx):
+                try:
+                    chatgpt_gateway.run_chatgpt_gateway_server(
+                        app=mock_app,
+                        tls_port=tls_port,
+                        tls_cert="/fake/cert.pem",
+                        tls_key="/fake/key.pem",
+                    )
+                except KeyboardInterrupt:
+                    pass
+        finally:
+            web_mod.TCPSite = MagicMock()
+            web_mod.AppRunner.reset_mock()
+
+        return tcp_site_calls, ssl_ctx_instances
+
+    def test_starts_http_only_when_no_tls_cert(self):
+        """Starts only HTTP listener when TLS cert files are missing."""
+        calls, ssl_ctxs = self._run_server(tls_cert_exists=False)
+
+        # Only one TCPSite (HTTP)
+        assert len(calls) == 1
+        # No SSL context created
+        assert len(ssl_ctxs) == 0
+        # No ssl_context kwarg
+        _, kwargs = calls[0]
+        assert "ssl_context" not in kwargs
+
+    def test_starts_both_http_and_tls_when_cert_exists(self):
+        """Starts both HTTP and TLS listeners when cert files exist."""
+        calls, ssl_ctxs = self._run_server(tls_cert_exists=True, tls_port=8443)
+
+        # Two TCPSite instances: HTTP + TLS
+        assert len(calls) == 2
+
+        # First call: HTTP (port 9852, no ssl_context)
+        http_args, http_kwargs = calls[0]
+        assert http_args[2] == chatgpt_gateway.CHATGPT_GATEWAY_PORT
+        assert "ssl_context" not in http_kwargs
+
+        # Second call: TLS (port 8443, with ssl_context)
+        tls_args, tls_kwargs = calls[1]
+        assert tls_args[2] == 8443
+        assert "ssl_context" in tls_kwargs
+        assert tls_kwargs["ssl_context"] is ssl_ctxs[0]
+
+        # SSLContext configured with cert chain
+        assert len(ssl_ctxs) == 1
+        ssl_ctxs[0].load_cert_chain.assert_called_once_with(
+            "/fake/cert.pem", "/fake/key.pem"
+        )
+
+    def test_tls_config_constants(self):
+        """Verifies TLS configuration constants have correct defaults."""
+        assert chatgpt_gateway.CHATGPT_TLS_PORT == 443
+        assert chatgpt_gateway.CHATGPT_TLS_CERT == "/etc/proxy/certs/chatgpt-gw.pem"
+        assert chatgpt_gateway.CHATGPT_TLS_KEY == "/etc/proxy/certs/chatgpt-gw.key"

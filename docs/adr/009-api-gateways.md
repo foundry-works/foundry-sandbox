@@ -25,7 +25,7 @@ Many AI providers support custom base URLs via environment variables (`ANTHROPIC
 
 **Gemini (Google AI)** supports `GOOGLE_GEMINI_BASE_URL` in API-key mode (both the Gemini CLI and Python SDK respect this env var), so API-key traffic routes through the Gemini gateway. However, Gemini CLI's OAuth login mode authenticates via `oauth2.googleapis.com` and `accounts.google.com`, which remain on the MITM path.
 
-**Codex (OpenAI CLI)** supports `OPENAI_BASE_URL` in API-key mode, so those requests route through the OpenAI gateway like any other OpenAI SDK call. However, Codex's subscription/ChatGPT login mode authenticates via `auth.openai.com` and sends requests to the `chatgpt.com/backend-api/` backend, which is unaffected by `OPENAI_BASE_URL`. Subscription-mode Codex therefore remains on the MITM path.
+**Codex (OpenAI CLI)** supports `OPENAI_BASE_URL` in API-key mode, so those requests route through the OpenAI gateway like any other OpenAI SDK call. Codex's subscription/ChatGPT login mode authenticates via `auth.openai.com` and sends requests to the `chatgpt.com/backend-api/` backend, which is unaffected by `OPENAI_BASE_URL`. A dedicated ChatGPT gateway handles subscription-mode traffic via transparent TLS interception: `/etc/hosts` redirects `chatgpt.com` to the proxy IP, the gateway terminates TLS on port 443 using a cert signed by the mitmproxy CA, injects OAuth tokens from the mounted Codex `auth.json`, and forwards to the real `chatgpt.com`. The HTTP listener on port 9852 remains available for tests and direct access.
 
 ### Constraints
 
@@ -36,7 +36,7 @@ Many AI providers support custom base URLs via environment variables (`ANTHROPIC
 
 ## Decision
 
-Route API traffic through four dedicated HTTP gateways for providers that support base URL configuration, with Squid as the forward proxy for domain allowlisting, and mitmproxy as a fallback for MITM-required providers.
+Route API traffic through five dedicated HTTP gateways for providers that support base URL configuration, with Squid as the forward proxy for domain allowlisting, and mitmproxy as a fallback for MITM-required providers.
 
 ### Architecture
 
@@ -49,6 +49,7 @@ Route API traffic through four dedicated HTTP gateways for providers that suppor
 │  OPENAI_BASE_URL=http://proxy:9849           │
 │  GITHUB_API_URL=http://proxy:9850            │
 │  GOOGLE_GEMINI_BASE_URL=http://proxy:9851    │
+│  chatgpt.com → proxy IP (via /etc/hosts)      │
 │                                  │
 │  SDK calls ──► gateway (direct)  │
 │  Other HTTPS ──► Squid (proxy)   │
@@ -65,6 +66,8 @@ Route API traffic through four dedicated HTTP gateways for providers that suppor
 │  │  :9849  OpenAI    ──► api.openai.com         │ │
 │  │  :9850  GitHub    ──► api.github.com         │ │
 │  │  :9851  Gemini    ──► generativelanguage..   │ │
+│  │  :9852  ChatGPT   ──► chatgpt.com (HTTP)     │ │
+│  │  :443   ChatGPT   ──► chatgpt.com (TLS)     │ │
 │  │                                              │ │
 │  │  Shared: gateway_base.py (factory)           │ │
 │  │          gateway_middleware.py (identity,     │ │
@@ -105,14 +108,15 @@ Route API traffic through four dedicated HTTP gateways for providers that suppor
 | OpenAI SDK calls | `OPENAI_BASE_URL` → gateway `:9849` | Gateway injects `Authorization: Bearer` |
 | GitHub CLI / API | `GITHUB_API_URL` → gateway `:9850` | Gateway injects `Authorization: Bearer` |
 | Gemini API-key calls | `GOOGLE_GEMINI_BASE_URL` → gateway `:9851` | Gateway injects `x-goog-api-key` |
-| Gemini OAuth calls | `HTTP_PROXY` → Squid `:8080` → mitmproxy `:8081` | mitmproxy injects via TLS interception |
+| Gemini OAuth calls | `GOOGLE_GEMINI_BASE_URL` → gateway `:9851` | Gateway injects `Authorization: Bearer` |
+| ChatGPT/Codex subscription | `/etc/hosts` → gateway `:443` (TLS) | Gateway terminates TLS, injects `Authorization: Bearer` (OAuth) |
 | MITM-required providers | `HTTP_PROXY` → Squid `:8080` → mitmproxy `:8081` | mitmproxy injects via TLS interception |
 | Other allowed HTTPS | `HTTP_PROXY` → Squid `:8080` → direct tunnel | No injection (SNI splice, no TLS decryption) |
 | Blocked domains / IPs | `HTTP_PROXY` → Squid `:8080` → deny | N/A |
 
 ### Gateway shared infrastructure
 
-All four gateways share common logic via two modules:
+All five gateways share common logic via two modules:
 
 **`gateway_base.py`** — Application factory that creates a fully configured aiohttp `Application` given per-gateway settings. Handles:
 - Container identity validation (via `IdentityMiddleware` from the middleware stack)
@@ -143,7 +147,7 @@ IP literals (dotted decimal, IPv6 brackets, octal, hex, integer) are blocked by 
 
 mitmproxy startup is gated behind `ENABLE_MITM_FALLBACK` and provider credential detection. When no MITM-required provider credentials are configured, mitmproxy runs only for DNS filtering (if enabled) and does not generate a CA certificate.
 
-MITM-required providers: Gemini OAuth mode (`oauth2.googleapis.com`, `accounts.google.com`), Tavily, Semantic Scholar, Perplexity, Zhipu, Codex subscription mode (`chatgpt.com`, `auth.openai.com`), and GitHub OAuth/git credential flows. Gemini API-key traffic routes through the gateway (:9851) and no longer requires MITM.
+MITM-required providers: Tavily, Semantic Scholar, Perplexity, Zhipu, and GitHub OAuth/git credential flows. Gemini traffic (both API-key and OAuth) routes through the gateway (:9851). ChatGPT/Codex subscription-mode traffic routes through the gateway via transparent TLS interception (:443) — `/etc/hosts` redirects `chatgpt.com` to the proxy IP and `NO_PROXY` bypasses Squid.
 
 ### GitHub gateway: security policy enforcement
 
@@ -166,10 +170,10 @@ The GitHub gateway enforces security policies via a request hook that runs after
 
 ### Negative
 
-- **Process complexity** — Four additional processes (gateway servers) plus Squid, compared to mitmproxy alone
+- **Process complexity** — Five additional processes (gateway servers) plus Squid, compared to mitmproxy alone
 - **MITM still required** — Providers without base URL support still need TLS interception
 - **Dual code paths** — Credential injection logic exists in both gateways and `credential_injector.py` (mitmproxy addon); changes must be kept in sync
-- **Port allocation** — Four fixed ports (9848-9851) consumed on the internal network
+- **Port allocation** — Six fixed ports (443, 9848-9852) consumed on the internal network
 
 ### Neutral
 
@@ -195,6 +199,7 @@ The GitHub gateway enforces security policies via a request hook that runs after
 - `unified-proxy/openai_gateway.py` — OpenAI gateway
 - `unified-proxy/github_gateway.py` — GitHub gateway
 - `unified-proxy/gemini_gateway.py` — Gemini gateway
+- `unified-proxy/chatgpt_gateway.py` — ChatGPT/Codex gateway
 - `unified-proxy/security_policies.py` — Shared GitHub security policies
 - `unified-proxy/generate_squid_config.py` — Squid domain list generator
 - `unified-proxy/squid.conf` — Squid configuration

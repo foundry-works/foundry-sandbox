@@ -1,13 +1,13 @@
 """Shared API gateway infrastructure — identity validation, header
 filtering, upstream forwarding, and streaming response relay.
 
-All three API gateways (Anthropic, OpenAI, GitHub) share identical logic
-for container identity validation, header stripping, placeholder filtering,
-upstream request forwarding with streaming, and error handling.  This module
-provides a factory function ``create_gateway_app()`` that builds a fully
-configured aiohttp Application given per-gateway configuration.
+All five API gateways share identical logic for container identity
+validation, header stripping, placeholder filtering, upstream request
+forwarding with streaming, and error handling.  This module provides a
+factory function ``create_gateway_app()`` that builds a fully configured
+aiohttp Application given per-gateway configuration.
 
-Each gateway module becomes a thin wrapper (~50 lines) that calls the
+Each gateway module becomes a thin wrapper (~50-200 lines) that calls the
 factory with its specific settings (upstream URL, credential loader,
 routes, optional request hook).
 
@@ -16,6 +16,7 @@ Port allocation:
   :9849  OpenAI gateway    (openai_gateway.py)
   :9850  GitHub gateway     (github_gateway.py)
   :9851  Gemini gateway     (gemini_gateway.py)
+  :9852  ChatGPT gateway    (chatgpt_gateway.py)
 """
 
 import asyncio
@@ -266,6 +267,9 @@ async def _proxy_request(request: web.Request) -> web.StreamResponse:
         hook_response = await request_hook(request, method, body, container_id)
         if hook_response is not None:
             return hook_response
+        # Re-read credential — the hook may have mutated it in-place or
+        # created a new dict on app["credential"] (e.g., OAuth token refresh).
+        credential = app["credential"]
 
     # --- 4. Build upstream request ------------------------------------
     upstream_path = request.path

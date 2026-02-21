@@ -30,6 +30,7 @@ Sandbox configuration:
   GEMINI_API_KEY=CREDENTIAL_PROXY_PLACEHOLDER
 """
 
+import asyncio
 import os
 import sys
 from typing import Optional
@@ -64,7 +65,9 @@ GEMINI_GATEWAY_BIND = os.environ.get("GEMINI_GATEWAY_BIND", "0.0.0.0")
 _token_manager = None
 
 # Track which credential mode is active so the request hook knows
-# whether to refresh tokens.
+# whether to refresh tokens.  Set once at app creation time by
+# _load_gemini_credential() and read (not written) per-request —
+# safe without synchronization in the current single-process model.
 _credential_mode: str = "none"  # "api_key", "oauth", or "none"
 
 
@@ -157,7 +160,9 @@ async def _gemini_request_hook(
         return gateway_error(502, "Gemini OAuth credential not configured")
 
     try:
-        token = _token_manager.get_valid_token()
+        # Run in a thread to avoid blocking the event loop — the token
+        # manager acquires a threading.Lock and may do I/O in the future.
+        token = await asyncio.to_thread(_token_manager.get_valid_token)
         credential = request.app.get("credential")
         if credential is not None:
             credential["value"] = f"Bearer {token}"
@@ -168,7 +173,7 @@ async def _gemini_request_hook(
             }
     except Exception as e:
         logger.error(f"gemini-gateway: OAuth token error: {e}")
-        return gateway_error(502, f"Gemini OAuth token error: {e}")
+        return gateway_error(502, "Gemini OAuth token refresh failed")
 
     return None
 

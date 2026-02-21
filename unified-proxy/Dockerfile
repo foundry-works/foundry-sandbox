@@ -64,6 +64,7 @@ COPY gateway_middleware.py /opt/proxy/gateway_middleware.py
 COPY gateway.py /opt/proxy/gateway.py
 COPY openai_gateway.py /opt/proxy/openai_gateway.py
 COPY chatgpt_gateway.py /opt/proxy/chatgpt_gateway.py
+COPY gemini_gateway.py /opt/proxy/gemini_gateway.py
 COPY github_gateway.py /opt/proxy/github_gateway.py
 
 # Copy the git API server and git policy modules (used when git shadow mode is enabled)
@@ -91,6 +92,7 @@ RUN chmod +x /opt/proxy/entrypoint.sh
 ENV PYTHONPATH=/opt/proxy
 
 # Expose proxy and gateway ports
+# 443:  ChatGPT gateway TLS (transparent interception for chatgpt.com)
 # 8080: Squid forward proxy (SNI-based domain filtering)
 # 8081: mitmproxy (MITM-only, receives CONNECT from Squid cache_peer)
 # 8082: Internal API for container registration
@@ -98,8 +100,9 @@ ENV PYTHONPATH=/opt/proxy
 # 9848: Anthropic API gateway
 # 9849: OpenAI API gateway
 # 9850: GitHub API gateway
-# 9852: ChatGPT/Codex API gateway
-EXPOSE 8080 8081 8082 8083 9848 9849 9850 9852
+# 9851: Gemini API gateway
+# 9852: ChatGPT/Codex API gateway (HTTP)
+EXPOSE 443 8080 8081 8082 8083 9848 9849 9850 9851 9852
 
 # Health check - verify internal API is responsive
 HEALTHCHECK --interval=5s --timeout=5s --start-period=10s --retries=3 \
