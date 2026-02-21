@@ -161,6 +161,7 @@ class TestCredentialPlaceholders:
             "SANDBOX_GEMINI_API_KEY",
             "SANDBOX_ZHIPU_API_KEY",
             "SANDBOX_ENABLE_TAVILY",
+            "SANDBOX_OPENAI_BASE_URL",
         }
         assert set(env.keys()) == expected_keys
 

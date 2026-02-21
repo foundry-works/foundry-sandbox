@@ -5,10 +5,10 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [0.19.2] - 2026-02-21
+## [0.19.3] - 2026-02-21
 
 ### Fixed
-- **Codex CLI 404 in subscription mode** — `OPENAI_BASE_URL` was unconditionally set to the OpenAI gateway (`http://unified-proxy:9849`), which only handles API-key mode; Codex subscription mode sends `POST /responses` to `chatgpt.com` and got 404 from the gateway. Now only set when the host has `OPENAI_API_KEY`; when unset, Codex routes through `chatgpt.com` → TLS interception on port 443
+- **Codex CLI 404 in subscription mode** — `OPENAI_BASE_URL` was unconditionally set to the OpenAI gateway (`http://unified-proxy:9849`), which only handles API-key mode; Codex subscription mode sends `POST /responses` to `chatgpt.com` and got 404 from the gateway. Now `OPENAI_BASE_URL` is always unset so Codex routes through `chatgpt.com` → TLS interception on port 443; OpenAI API-key traffic restored to MITM credential injection path
 - **Gemini CLI 403 in OAuth mode** — Container identity failed for HTTPS CONNECT tunnels because Squid sets XFF on the outer CONNECT request, but mitmproxy's `request()` hook fires on inner (decrypted) requests which don't carry XFF. Added `http_connect` handler to extract real client IP from CONNECT-level XFF and store it for subsequent `request()` calls
 
 ## [0.19.1] - 2026-02-21

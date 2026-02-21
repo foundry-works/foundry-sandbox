@@ -7,7 +7,7 @@ Uses container identity for context in logging and per-container rules.
 
 Provider Credential Map:
 - api.anthropic.com: → gateway (:9848), removed from PROVIDER_MAP
-- api.openai.com: → gateway (:9849), removed from PROVIDER_MAP
+- api.openai.com: Authorization Bearer from OPENAI_API_KEY (MITM path)
 - api.github.com: → gateway (:9850), removed from PROVIDER_MAP
 - generativelanguage.googleapis.com: x-goog-api-key from GOOGLE_API_KEY (or GEMINI_API_KEY)
 - api.tavily.com: Authorization Bearer from TAVILY_API_KEY (header + body injection)
@@ -111,10 +111,14 @@ PROVIDER_MAP = {
     # which handles credential injection and HTTPS forwarding.
     # See unified-proxy/gateway.py.
 
-    # NOTE: api.openai.com removed from PROVIDER_MAP.
-    # OpenAI traffic routes through the API gateway (http://unified-proxy:9849)
-    # which handles credential injection and HTTPS forwarding.
-    # See unified-proxy/openai_gateway.py.
+    # OpenAI: restored to MITM path. OPENAI_BASE_URL is intentionally unset
+    # in sandboxes to avoid conflicting with Codex subscription mode (which
+    # routes through chatgpt.com). API-key traffic uses the MITM path.
+    "api.openai.com": {
+        "header": "Authorization",
+        "env_var": "OPENAI_API_KEY",
+        "format": "bearer",
+    },
     # NOTE: generativelanguage.googleapis.com API-key traffic now routes
     # through the Gemini gateway (http://unified-proxy:9851) which handles
     # credential injection and HTTPS forwarding. This entry remains as

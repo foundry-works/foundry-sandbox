@@ -17,10 +17,11 @@ Perplexity conflict:
   env var.
 
 Sandbox configuration:
-  OPENAI_BASE_URL is conditional — only set when the host has OPENAI_API_KEY
-  (API-key mode).  When using Codex subscription mode (no API key), it is
-  left unset so Codex routes through chatgpt.com → TLS interception on
-  port 443.
+  OPENAI_BASE_URL is intentionally left unset in sandboxes to avoid
+  conflicting with Codex subscription mode (which routes through
+  chatgpt.com → TLS interception on port 443). OpenAI API-key traffic
+  uses the MITM credential injection path instead of this gateway.
+  This gateway remains available but is not actively routed to.
   OPENAI_API_KEY=CREDENTIAL_PROXY_PLACEHOLDER
 """
 
