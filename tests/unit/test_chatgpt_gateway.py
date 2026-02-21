@@ -93,11 +93,22 @@ class TestInitTokenManager:
             json.dump(auth_data, f)
             auth_path = f.name
 
+        # Mock the OAuthTokenManager import so it succeeds in the test env
+        mock_manager_instance = MagicMock()
+        mock_manager_cls = MagicMock(return_value=mock_manager_instance)
+        mock_module = MagicMock()
+        mock_module.OAuthTokenManager = mock_manager_cls
+
         try:
-            with patch.dict(os.environ, {"CODEX_AUTH_FILE": auth_path}):
+            with patch.dict(os.environ, {"CODEX_AUTH_FILE": auth_path}), \
+                 patch.dict(sys.modules, {
+                     "addons": MagicMock(),
+                     "addons.oauth_managers": MagicMock(),
+                     "addons.oauth_managers.codex": mock_module,
+                 }):
                 chatgpt_gateway._token_manager = None
                 chatgpt_gateway._init_token_manager()
-            assert chatgpt_gateway._token_manager is not None
+            assert chatgpt_gateway._token_manager is mock_manager_instance
         finally:
             os.unlink(auth_path)
             chatgpt_gateway._token_manager = None

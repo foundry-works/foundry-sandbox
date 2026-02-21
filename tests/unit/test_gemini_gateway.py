@@ -175,10 +175,21 @@ class TestInitTokenManager:
             json.dump(oauth_data, f)
             oauth_path = f.name
 
+        # Mock the GeminiTokenManager import so it succeeds in the test env
+        mock_manager_instance = MagicMock()
+        mock_manager_cls = MagicMock(return_value=mock_manager_instance)
+        mock_module = MagicMock()
+        mock_module.GeminiTokenManager = mock_manager_cls
+
         try:
-            with patch.dict(os.environ, {"GEMINI_OAUTH_FILE": oauth_path}):
+            with patch.dict(os.environ, {"GEMINI_OAUTH_FILE": oauth_path}), \
+                 patch.dict(sys.modules, {
+                     "addons": MagicMock(),
+                     "addons.oauth_managers": MagicMock(),
+                     "addons.oauth_managers.gemini": mock_module,
+                 }):
                 gemini_gateway._init_token_manager()
-            assert gemini_gateway._token_manager is not None
+            assert gemini_gateway._token_manager is mock_manager_instance
         finally:
             os.unlink(oauth_path)
             _reset_module_state()
