@@ -16,13 +16,17 @@ import pytest
 # mitmproxy mocks and sys.path setup handled by conftest.py
 
 from addons.policy_engine import (
-    GITHUB_PATCH_ISSUE_PATTERN,
-    GITHUB_PATCH_PR_PATTERN,
     POLICY_DECISION_KEY,
     PolicyDecision,
     PolicyEngine,
     get_policy_decision,
     is_ip_literal,
+)
+from security_policies import (
+    GITHUB_PATCH_ISSUE_PATTERN,
+    GITHUB_PATCH_PR_PATTERN,
+    check_github_blocklist,
+    check_github_body_policies,
     is_merge_request,
 )
 
@@ -794,7 +798,7 @@ class TestCheckGithubBlocklist:
 
     def test_check_github_blocklist_pr_merge(self, policy_engine):
         """Test PR merge detection."""
-        result = policy_engine._check_github_blocklist(
+        result = check_github_blocklist(
             "PUT", "/repos/owner/repo/pulls/1/merge"
         )
         assert result is not None
@@ -802,7 +806,7 @@ class TestCheckGithubBlocklist:
 
     def test_check_github_blocklist_release_creation(self, policy_engine):
         """Test release creation detection."""
-        result = policy_engine._check_github_blocklist(
+        result = check_github_blocklist(
             "POST", "/repos/owner/repo/releases"
         )
         assert result is not None
@@ -810,7 +814,7 @@ class TestCheckGithubBlocklist:
 
     def test_check_github_blocklist_git_ref_creation(self, policy_engine):
         """Test git ref creation endpoint is blocked."""
-        result = policy_engine._check_github_blocklist(
+        result = check_github_blocklist(
             "POST", "/repos/owner/repo/git/refs"
         )
         assert result is not None
@@ -819,7 +823,7 @@ class TestCheckGithubBlocklist:
     def test_check_github_blocklist_git_ref_mutation(self, policy_engine):
         """Test git ref update/delete endpoints are blocked."""
         for method in ("PATCH", "DELETE"):
-            result = policy_engine._check_github_blocklist(
+            result = check_github_blocklist(
                 method, "/repos/owner/repo/git/refs/heads/main"
             )
             assert result is not None
@@ -836,7 +840,7 @@ class TestCheckGithubBlocklist:
         ]
 
         for method, path in safe_requests:
-            result = policy_engine._check_github_blocklist(method, path)
+            result = check_github_blocklist(method, path)
             assert (
                 result is None
             ), f"{method} {path} should not match blocklist"
@@ -844,20 +848,20 @@ class TestCheckGithubBlocklist:
     def test_check_github_blocklist_wrong_method(self, policy_engine):
         """Test that wrong HTTP method doesn't match."""
         # GET on merge endpoint - should not match (must be PUT)
-        result = policy_engine._check_github_blocklist(
+        result = check_github_blocklist(
             "GET", "/repos/owner/repo/pulls/1/merge"
         )
         assert result is None
 
         # GET on releases endpoint - should not match (must be POST)
-        result = policy_engine._check_github_blocklist(
+        result = check_github_blocklist(
             "GET", "/repos/owner/repo/releases"
         )
         assert result is None
 
     def test_check_github_blocklist_auto_merge_enable(self, policy_engine):
         """Test auto-merge enablement is blocked."""
-        result = policy_engine._check_github_blocklist(
+        result = check_github_blocklist(
             "PUT", "/repos/owner/repo/pulls/1/auto-merge"
         )
         assert result is not None
@@ -865,7 +869,7 @@ class TestCheckGithubBlocklist:
 
     def test_check_github_blocklist_auto_merge_disable(self, policy_engine):
         """Test auto-merge disablement is blocked."""
-        result = policy_engine._check_github_blocklist(
+        result = check_github_blocklist(
             "DELETE", "/repos/owner/repo/pulls/1/auto-merge"
         )
         assert result is not None
@@ -873,7 +877,7 @@ class TestCheckGithubBlocklist:
 
     def test_check_github_blocklist_review_deletion(self, policy_engine):
         """Test review deletion is blocked."""
-        result = policy_engine._check_github_blocklist(
+        result = check_github_blocklist(
             "DELETE", "/repos/owner/repo/pulls/1/reviews/123"
         )
         assert result is not None
@@ -893,7 +897,7 @@ class TestPRReviewBodyPolicies:
         import json
 
         body = json.dumps({"event": "APPROVE"}).encode()
-        result = policy_engine._check_github_body_policies(
+        result = check_github_body_policies(
             "POST", "/repos/owner/repo/pulls/1/reviews", body, "application/json", ""
         )
         assert result is not None
@@ -904,7 +908,7 @@ class TestPRReviewBodyPolicies:
         import json
 
         body = json.dumps({"event": "COMMENT"}).encode()
-        result = policy_engine._check_github_body_policies(
+        result = check_github_body_policies(
             "POST", "/repos/owner/repo/pulls/1/reviews", body, "application/json", ""
         )
         assert result is None
@@ -914,7 +918,7 @@ class TestPRReviewBodyPolicies:
         import json
 
         body = json.dumps({"event": "REQUEST_CHANGES"}).encode()
-        result = policy_engine._check_github_body_policies(
+        result = check_github_body_policies(
             "POST", "/repos/owner/repo/pulls/1/reviews", body, "application/json", ""
         )
         assert result is None
@@ -1753,7 +1757,7 @@ class TestCheckGithubBodyPolicies:
         import json
 
         body = json.dumps({"title": "new title"}).encode()
-        result = policy_engine._check_github_body_policies(
+        result = check_github_body_policies(
             "PATCH", "/repos/owner/repo/pulls/1", body, "application/json", ""
         )
         assert result is None
@@ -1763,7 +1767,7 @@ class TestCheckGithubBodyPolicies:
         import json
 
         body = json.dumps({"state": "closed"}).encode()
-        result = policy_engine._check_github_body_policies(
+        result = check_github_body_policies(
             "PATCH", "/repos/owner/repo/pulls/1", body, "application/json", ""
         )
         assert result is not None
@@ -1774,7 +1778,7 @@ class TestCheckGithubBodyPolicies:
         import json
 
         body = json.dumps({"state": "open"}).encode()
-        result = policy_engine._check_github_body_policies(
+        result = check_github_body_policies(
             "PATCH", "/repos/owner/repo/pulls/1", body, "application/json", ""
         )
         assert result is None
@@ -1784,7 +1788,7 @@ class TestCheckGithubBodyPolicies:
         import json
 
         body = json.dumps({"state": "closed", "title": "new title"}).encode()
-        result = policy_engine._check_github_body_policies(
+        result = check_github_body_policies(
             "PATCH", "/repos/owner/repo/pulls/1", body, "application/json", ""
         )
         assert result is not None
@@ -1793,7 +1797,7 @@ class TestCheckGithubBodyPolicies:
     def test_malformed_json_blocked(self, policy_engine):
         """Test malformed JSON body is blocked."""
         body = b"{not valid json"
-        result = policy_engine._check_github_body_policies(
+        result = check_github_body_policies(
             "PATCH", "/repos/owner/repo/pulls/1", body, "application/json", ""
         )
         assert result is not None
@@ -1801,7 +1805,7 @@ class TestCheckGithubBodyPolicies:
 
     def test_streaming_mode_blocked(self, policy_engine):
         """Test streaming mode (content=None) is blocked."""
-        result = policy_engine._check_github_body_policies(
+        result = check_github_body_policies(
             "PATCH", "/repos/owner/repo/pulls/1", None, "application/json", ""
         )
         assert result is not None
@@ -1812,7 +1816,7 @@ class TestCheckGithubBodyPolicies:
         import json
 
         body = json.dumps({"state": "closed"}).encode()
-        result = policy_engine._check_github_body_policies(
+        result = check_github_body_policies(
             "PATCH", "/repos/owner/repo/issues/1", body, "application/json", ""
         )
         assert result is not None
@@ -1821,7 +1825,7 @@ class TestCheckGithubBodyPolicies:
     def test_existing_merge_block_still_works(self, policy_engine):
         """Test that existing merge block is not affected by body policies."""
         # Merge block is in _check_github_blocklist, not body policies
-        result = policy_engine._check_github_blocklist(
+        result = check_github_blocklist(
             "PUT", "/repos/owner/repo/pulls/1/merge"
         )
         assert result is not None
@@ -1832,7 +1836,7 @@ class TestCheckGithubBodyPolicies:
         import json
 
         body = json.dumps({"title": "new"}).encode()
-        result = policy_engine._check_github_body_policies(
+        result = check_github_body_policies(
             "PATCH", "/repos/owner/repo/pulls/1", body, "", ""
         )
         assert result is not None
@@ -1843,7 +1847,7 @@ class TestCheckGithubBodyPolicies:
         import json
 
         body = json.dumps({"title": "new"}).encode()
-        result = policy_engine._check_github_body_policies(
+        result = check_github_body_policies(
             "PATCH", "/repos/owner/repo/pulls/1", body, "text/plain", ""
         )
         assert result is not None
@@ -1855,7 +1859,7 @@ class TestCheckGithubBodyPolicies:
         # json.loads uses last value for duplicate keys
         # Manually craft JSON with duplicate keys
         body = b'{"state": "open", "state": "closed"}'
-        result = policy_engine._check_github_body_policies(
+        result = check_github_body_policies(
             "PATCH", "/repos/owner/repo/pulls/1", body, "application/json", ""
         )
         assert result is not None
@@ -1865,7 +1869,7 @@ class TestCheckGithubBodyPolicies:
         """Test unicode escape state resolved and blocked."""
         # json.loads resolves unicode escapes: \u0063losed -> closed
         body = b'{"state": "\\u0063losed"}'
-        result = policy_engine._check_github_body_policies(
+        result = check_github_body_policies(
             "PATCH", "/repos/owner/repo/pulls/1", body, "application/json", ""
         )
         assert result is not None
@@ -1876,7 +1880,7 @@ class TestCheckGithubBodyPolicies:
         import json
 
         body = json.dumps({"state": "closed"}).encode()
-        result = policy_engine._check_github_body_policies(
+        result = check_github_body_policies(
             "GET", "/repos/owner/repo/pulls/1", body, "application/json", ""
         )
         assert result is None
@@ -1886,7 +1890,7 @@ class TestCheckGithubBodyPolicies:
         import json
 
         body = json.dumps({"state": "closed"}).encode()
-        result = policy_engine._check_github_body_policies(
+        result = check_github_body_policies(
             "PATCH", "/repos/owner/repo/labels/1", body, "application/json", ""
         )
         assert result is None
@@ -1896,7 +1900,7 @@ class TestCheckGithubBodyPolicies:
         import json
 
         body = json.dumps({"title": "new"}).encode()
-        result = policy_engine._check_github_body_policies(
+        result = check_github_body_policies(
             "PATCH", "/repos/owner/repo/pulls/1", body, "application/json", "gzip"
         )
         assert result is not None
@@ -1907,7 +1911,7 @@ class TestCheckGithubBodyPolicies:
         import json
 
         body = b"\xef\xbb\xbf" + json.dumps({"title": "new"}).encode()
-        result = policy_engine._check_github_body_policies(
+        result = check_github_body_policies(
             "PATCH", "/repos/owner/repo/pulls/1", body, "application/json", ""
         )
         assert result is None
@@ -1917,7 +1921,7 @@ class TestCheckGithubBodyPolicies:
         import json
 
         body = json.dumps({"title": "new"}).encode()
-        result = policy_engine._check_github_body_policies(
+        result = check_github_body_policies(
             "PATCH",
             "/repos/owner/repo/pulls/1",
             body,
@@ -1929,7 +1933,7 @@ class TestCheckGithubBodyPolicies:
     def test_non_object_body_rejected(self, policy_engine):
         """Test non-object JSON body (e.g., array) is rejected."""
         body = b'["state", "closed"]'
-        result = policy_engine._check_github_body_policies(
+        result = check_github_body_policies(
             "PATCH", "/repos/owner/repo/pulls/1", body, "application/json", ""
         )
         assert result is not None
@@ -2336,11 +2340,13 @@ class TestIsMergeRequest:
         assert is_merge_request("/some/path", b"") is False
 
     def test_merge_keyword_in_non_graphql_body(self):
-        """Merge keyword in any body triggers detection (intentionally broad)."""
-        # Even non-GraphQL paths — this is defense-in-depth, false positives
-        # are acceptable (blocks rather than allows)
+        """Merge keyword in non-GraphQL body does NOT trigger detection.
+
+        Only /graphql paths have body inspection for merge keywords.
+        Non-graphql paths rely on path-based checks only.
+        """
         body = b'some text containing mergePullRequest in it'
-        assert is_merge_request("/some/path", body) is True
+        assert is_merge_request("/some/path", body) is False
 
 
 class TestMergeBlockEarlyExitIntegration:

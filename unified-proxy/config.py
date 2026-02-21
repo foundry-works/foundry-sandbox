@@ -495,6 +495,7 @@ def _matches_pattern(path: str, pattern: str) -> bool:
     has_glob = "*" in pattern or "?" in pattern
     if has_glob:
         basename = os.path.basename(path)
+        # Note: fnmatch is case-sensitive on Linux (sandbox runtime). macOS tests may differ.
         return fnmatch.fnmatch(basename, pattern) or fnmatch.fnmatch(path, pattern)
 
     # Bare pattern: exact basename match at any depth

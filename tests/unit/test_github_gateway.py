@@ -1,10 +1,12 @@
-"""Unit tests for GitHub API gateway.
+"""Unit tests for GitHub API gateway and shared security policies.
 
-Tests the github_gateway module including:
-- Credential loading (GITHUB_TOKEN, GH_TOKEN, unauthenticated fallback)
-- Security policies (merge blocking, blocklist, body inspection)
+Tests the security policy functions (now in security_policies.py) including:
 - Path normalization
-- Error helpers
+- Merge blocking (with GraphQL scoping fix)
+- GitHub blocklist
+- Body inspection
+
+Also tests GitHub-specific credential loading from github_gateway.py.
 """
 
 import json
@@ -21,12 +23,12 @@ if "aiohttp" not in sys.modules:
 
 # conftest.py adds unified-proxy to sys.path.
 
-from github_gateway import (
-    _check_github_blocklist,
-    _check_github_body_policies,
-    _is_merge_request,
-    _load_github_credential,
-    _normalize_path,
+from github_gateway import _load_github_credential
+from security_policies import (
+    check_github_blocklist,
+    check_github_body_policies,
+    is_merge_request,
+    normalize_path,
 )
 
 
@@ -93,42 +95,42 @@ class TestLoadGitHubCredential:
 
 
 class TestNormalizePath:
-    """Tests for _normalize_path()."""
+    """Tests for normalize_path()."""
 
     def test_simple_path(self):
-        assert _normalize_path("/repos/owner/repo") == "/repos/owner/repo"
+        assert normalize_path("/repos/owner/repo") == "/repos/owner/repo"
 
     def test_strips_query_string(self):
-        assert _normalize_path("/repos/owner/repo?per_page=100") == "/repos/owner/repo"
+        assert normalize_path("/repos/owner/repo?per_page=100") == "/repos/owner/repo"
 
     def test_strips_fragment(self):
-        assert _normalize_path("/repos/owner/repo#section") == "/repos/owner/repo"
+        assert normalize_path("/repos/owner/repo#section") == "/repos/owner/repo"
 
     def test_collapses_double_slashes(self):
-        assert _normalize_path("/repos//owner///repo") == "/repos/owner/repo"
+        assert normalize_path("/repos//owner///repo") == "/repos/owner/repo"
 
     def test_resolves_dot_segments(self):
-        assert _normalize_path("/repos/owner/../other/repo") == "/repos/other/repo"
+        assert normalize_path("/repos/owner/../other/repo") == "/repos/other/repo"
 
     def test_strips_trailing_slash(self):
-        assert _normalize_path("/repos/owner/repo/") == "/repos/owner/repo"
+        assert normalize_path("/repos/owner/repo/") == "/repos/owner/repo"
 
     def test_root_path_preserved(self):
-        assert _normalize_path("/") == "/"
+        assert normalize_path("/") == "/"
 
     def test_rejects_double_encoding(self):
         """Double-encoded paths (% remaining after decode) are rejected."""
         # %252e decodes to %2e — the remaining % triggers rejection
-        assert _normalize_path("/repos/%252e%252e/evil") is None
+        assert normalize_path("/repos/%252e%252e/evil") is None
 
     def test_single_encoded_dots_resolved(self):
         """Single-encoded .. (%2e%2e) decodes normally and gets resolved."""
         # %2e%2e decodes to .. which normpath resolves
-        assert _normalize_path("/repos/%2e%2e/evil") == "/evil"
+        assert normalize_path("/repos/%2e%2e/evil") == "/evil"
 
     def test_single_encoded_slash_decoded(self):
         """Single-encoded / (%2F) decodes normally."""
-        assert _normalize_path("/repos/owner%2Frepo") == "/repos/owner/repo"
+        assert normalize_path("/repos/owner%2Frepo") == "/repos/owner/repo"
 
 
 # ---------------------------------------------------------------------------
@@ -137,36 +139,73 @@ class TestNormalizePath:
 
 
 class TestIsMergeRequest:
-    """Tests for _is_merge_request()."""
+    """Tests for is_merge_request()."""
 
     def test_rest_merge_endpoint(self):
-        assert _is_merge_request("/repos/owner/repo/pulls/42/merge", b"") is True
+        assert is_merge_request("/repos/owner/repo/pulls/42/merge", b"") is True
 
     def test_rest_auto_merge_endpoint(self):
-        assert _is_merge_request("/repos/owner/repo/pulls/1/auto-merge", b"") is True
+        assert is_merge_request("/repos/owner/repo/pulls/1/auto-merge", b"") is True
 
     def test_graphql_merge_mutation(self):
-        body = b'{"query": "mutation { mergePullRequest(input: {}) }"}'
-        assert _is_merge_request("/graphql", body) is True
+        body = json.dumps({"query": "mutation { mergePullRequest(input: {}) }"}).encode()
+        assert is_merge_request("/graphql", body) is True
 
     def test_graphql_auto_merge_mutation(self):
-        body = b'{"query": "mutation { enablePullRequestAutoMerge(input: {}) }"}'
-        assert _is_merge_request("/graphql", body) is True
+        body = json.dumps({"query": "mutation { enablePullRequestAutoMerge(input: {}) }"}).encode()
+        assert is_merge_request("/graphql", body) is True
 
     def test_normal_pr_endpoint_not_blocked(self):
-        assert _is_merge_request("/repos/owner/repo/pulls/42", b"") is False
+        assert is_merge_request("/repos/owner/repo/pulls/42", b"") is False
 
     def test_repo_merges_not_caught(self):
         """The repo merge API (/merges) is NOT caught by the early-exit merge check."""
-        assert _is_merge_request("/repos/owner/repo/merges", b"") is False
+        assert is_merge_request("/repos/owner/repo/merges", b"") is False
 
     def test_empty_body(self):
-        assert _is_merge_request("/repos/owner/repo/pulls", b"") is False
+        assert is_merge_request("/repos/owner/repo/pulls", b"") is False
 
-    def test_merge_keyword_in_normal_body(self):
-        """Body containing 'mergePullRequest' anywhere triggers the check."""
+    def test_graphql_merge_keyword_in_variables_not_blocked(self):
+        """GraphQL body with merge keyword only in variables (not query) is NOT blocked.
+
+        This tests the Issue #5 fix: only the 'query' field is checked,
+        not the entire body.
+        """
+        body = json.dumps({
+            "query": "mutation { createPullRequest(input: $input) }",
+            "variables": {
+                "input": {
+                    "title": "Fix mergePullRequest documentation"
+                }
+            }
+        }).encode()
+        assert is_merge_request("/graphql", body) is False
+
+    def test_graphql_merge_keyword_in_query_field_blocked(self):
+        """GraphQL body with merge keyword in query field IS blocked."""
+        body = json.dumps({
+            "query": "mutation { mergePullRequest(input: {pullRequestId: \"abc\"}) }",
+            "variables": {}
+        }).encode()
+        assert is_merge_request("/graphql", body) is True
+
+    def test_non_graphql_path_with_merge_keyword_in_body_not_blocked(self):
+        """Non-GraphQL path with merge keyword in body is NOT blocked.
+
+        Only /graphql paths have body inspection for merge keywords.
+        """
         body = b'some text with mergePullRequest in it'
-        assert _is_merge_request("/some/other/path", body) is True
+        assert is_merge_request("/some/other/path", body) is False
+
+    def test_graphql_malformed_json_fallback(self):
+        """Malformed JSON on /graphql falls back to substring scan (fail closed)."""
+        body = b'not json but contains mergePullRequest'
+        assert is_merge_request("/graphql", body) is True
+
+    def test_graphql_no_query_field(self):
+        """GraphQL body without 'query' field is not blocked."""
+        body = json.dumps({"variables": {"note": "mergePullRequest ref"}}).encode()
+        assert is_merge_request("/graphql", body) is False
 
 
 # ---------------------------------------------------------------------------
@@ -175,95 +214,95 @@ class TestIsMergeRequest:
 
 
 class TestCheckGitHubBlocklist:
-    """Tests for _check_github_blocklist()."""
+    """Tests for check_github_blocklist()."""
 
     def test_blocks_pr_merge(self):
-        result = _check_github_blocklist("PUT", "/repos/owner/repo/pulls/1/merge")
+        result = check_github_blocklist("PUT", "/repos/owner/repo/pulls/1/merge")
         assert result is not None
         assert "merge" in result.lower()
 
     def test_blocks_release_creation(self):
-        result = _check_github_blocklist("POST", "/repos/owner/repo/releases")
+        result = check_github_blocklist("POST", "/repos/owner/repo/releases")
         assert result is not None
         assert "release" in result.lower()
 
     def test_blocks_git_ref_creation(self):
-        result = _check_github_blocklist("POST", "/repos/owner/repo/git/refs")
+        result = check_github_blocklist("POST", "/repos/owner/repo/git/refs")
         assert result is not None
         assert "ref" in result.lower()
 
     def test_blocks_git_ref_mutation(self):
-        result = _check_github_blocklist("PATCH", "/repos/owner/repo/git/refs/heads/main")
+        result = check_github_blocklist("PATCH", "/repos/owner/repo/git/refs/heads/main")
         assert result is not None
 
     def test_blocks_git_ref_deletion(self):
-        result = _check_github_blocklist("DELETE", "/repos/owner/repo/git/refs/tags/v1")
+        result = check_github_blocklist("DELETE", "/repos/owner/repo/git/refs/tags/v1")
         assert result is not None
 
     def test_blocks_auto_merge_put(self):
-        result = _check_github_blocklist("PUT", "/repos/owner/repo/pulls/1/auto-merge")
+        result = check_github_blocklist("PUT", "/repos/owner/repo/pulls/1/auto-merge")
         assert result is not None
 
     def test_blocks_auto_merge_delete(self):
-        result = _check_github_blocklist("DELETE", "/repos/owner/repo/pulls/1/auto-merge")
+        result = check_github_blocklist("DELETE", "/repos/owner/repo/pulls/1/auto-merge")
         assert result is not None
 
     def test_blocks_review_deletion(self):
-        result = _check_github_blocklist("DELETE", "/repos/owner/repo/pulls/1/reviews/123")
+        result = check_github_blocklist("DELETE", "/repos/owner/repo/pulls/1/reviews/123")
         assert result is not None
 
     def test_blocks_repo_merges(self):
-        result = _check_github_blocklist("POST", "/repos/owner/repo/merges")
+        result = check_github_blocklist("POST", "/repos/owner/repo/merges")
         assert result is not None
         assert "merge" in result.lower()
 
     def test_blocks_webhooks(self):
-        result = _check_github_blocklist("POST", "/repos/owner/repo/hooks")
+        result = check_github_blocklist("POST", "/repos/owner/repo/hooks")
         assert result is not None
 
     def test_blocks_deploy_keys(self):
-        result = _check_github_blocklist("POST", "/repos/owner/repo/deploy_keys")
+        result = check_github_blocklist("POST", "/repos/owner/repo/deploy_keys")
         assert result is not None
 
     def test_blocks_actions_secrets(self):
-        result = _check_github_blocklist("GET", "/repos/owner/repo/actions/secrets")
+        result = check_github_blocklist("GET", "/repos/owner/repo/actions/secrets")
         assert result is not None
 
     def test_blocks_branch_protection(self):
-        result = _check_github_blocklist("PUT", "/repos/owner/repo/branches/main/protection")
+        result = check_github_blocklist("PUT", "/repos/owner/repo/branches/main/protection")
         assert result is not None
 
     def test_blocks_branch_rename(self):
-        result = _check_github_blocklist("POST", "/repos/owner/repo/branches/main/rename")
+        result = check_github_blocklist("POST", "/repos/owner/repo/branches/main/rename")
         assert result is not None
 
     def test_allows_pr_list(self):
-        result = _check_github_blocklist("GET", "/repos/owner/repo/pulls")
+        result = check_github_blocklist("GET", "/repos/owner/repo/pulls")
         assert result is None
 
     def test_allows_pr_get(self):
-        result = _check_github_blocklist("GET", "/repos/owner/repo/pulls/1")
+        result = check_github_blocklist("GET", "/repos/owner/repo/pulls/1")
         assert result is None
 
     def test_allows_issue_list(self):
-        result = _check_github_blocklist("GET", "/repos/owner/repo/issues")
+        result = check_github_blocklist("GET", "/repos/owner/repo/issues")
         assert result is None
 
     def test_allows_graphql(self):
-        result = _check_github_blocklist("POST", "/graphql")
+        result = check_github_blocklist("POST", "/graphql")
         assert result is None
 
     def test_allows_release_list(self):
         """GET releases is allowed (only POST creation is blocked)."""
-        result = _check_github_blocklist("GET", "/repos/owner/repo/releases")
+        result = check_github_blocklist("GET", "/repos/owner/repo/releases")
         assert result is None
 
     def test_allows_pr_create(self):
-        result = _check_github_blocklist("POST", "/repos/owner/repo/pulls")
+        result = check_github_blocklist("POST", "/repos/owner/repo/pulls")
         assert result is None
 
     def test_allows_pr_comment(self):
-        result = _check_github_blocklist("POST", "/repos/owner/repo/issues/1/comments")
+        result = check_github_blocklist("POST", "/repos/owner/repo/issues/1/comments")
         assert result is None
 
 
@@ -273,14 +312,14 @@ class TestCheckGitHubBlocklist:
 
 
 class TestCheckGitHubBodyPolicies:
-    """Tests for _check_github_body_policies()."""
+    """Tests for check_github_body_policies()."""
 
     def _json_body(self, data: dict) -> bytes:
         return json.dumps(data).encode()
 
     def test_blocks_pr_close(self):
         body = self._json_body({"state": "closed"})
-        result = _check_github_body_policies(
+        result = check_github_body_policies(
             "PATCH", "/repos/owner/repo/pulls/1", body,
             "application/json", "",
         )
@@ -289,7 +328,7 @@ class TestCheckGitHubBodyPolicies:
 
     def test_blocks_issue_close(self):
         body = self._json_body({"state": "closed"})
-        result = _check_github_body_policies(
+        result = check_github_body_policies(
             "PATCH", "/repos/owner/repo/issues/1", body,
             "application/json", "",
         )
@@ -298,7 +337,7 @@ class TestCheckGitHubBodyPolicies:
 
     def test_allows_pr_reopen(self):
         body = self._json_body({"state": "open"})
-        result = _check_github_body_policies(
+        result = check_github_body_policies(
             "PATCH", "/repos/owner/repo/pulls/1", body,
             "application/json", "",
         )
@@ -306,7 +345,7 @@ class TestCheckGitHubBodyPolicies:
 
     def test_allows_pr_title_edit(self):
         body = self._json_body({"title": "New title"})
-        result = _check_github_body_policies(
+        result = check_github_body_policies(
             "PATCH", "/repos/owner/repo/pulls/1", body,
             "application/json", "",
         )
@@ -314,7 +353,7 @@ class TestCheckGitHubBodyPolicies:
 
     def test_blocks_pr_self_approval(self):
         body = self._json_body({"event": "APPROVE", "body": "LGTM"})
-        result = _check_github_body_policies(
+        result = check_github_body_policies(
             "POST", "/repos/owner/repo/pulls/1/reviews", body,
             "application/json", "",
         )
@@ -323,7 +362,7 @@ class TestCheckGitHubBodyPolicies:
 
     def test_allows_pr_review_comment(self):
         body = self._json_body({"event": "COMMENT", "body": "Looks good"})
-        result = _check_github_body_policies(
+        result = check_github_body_policies(
             "POST", "/repos/owner/repo/pulls/1/reviews", body,
             "application/json", "",
         )
@@ -331,7 +370,7 @@ class TestCheckGitHubBodyPolicies:
 
     def test_allows_pr_review_request_changes(self):
         body = self._json_body({"event": "REQUEST_CHANGES", "body": "Fix this"})
-        result = _check_github_body_policies(
+        result = check_github_body_policies(
             "POST", "/repos/owner/repo/pulls/1/reviews", body,
             "application/json", "",
         )
@@ -339,7 +378,7 @@ class TestCheckGitHubBodyPolicies:
 
     def test_rejects_compressed_body(self):
         body = self._json_body({"state": "closed"})
-        result = _check_github_body_policies(
+        result = check_github_body_policies(
             "PATCH", "/repos/owner/repo/pulls/1", body,
             "application/json", "gzip",
         )
@@ -348,7 +387,7 @@ class TestCheckGitHubBodyPolicies:
 
     def test_rejects_non_json_content_type(self):
         body = b"state=closed"
-        result = _check_github_body_policies(
+        result = check_github_body_policies(
             "PATCH", "/repos/owner/repo/pulls/1", body,
             "application/x-www-form-urlencoded", "",
         )
@@ -357,7 +396,7 @@ class TestCheckGitHubBodyPolicies:
 
     def test_rejects_malformed_json(self):
         body = b"not json at all"
-        result = _check_github_body_policies(
+        result = check_github_body_policies(
             "PATCH", "/repos/owner/repo/pulls/1", body,
             "application/json", "",
         )
@@ -366,7 +405,7 @@ class TestCheckGitHubBodyPolicies:
 
     def test_rejects_json_array(self):
         body = b"[1, 2, 3]"
-        result = _check_github_body_policies(
+        result = check_github_body_policies(
             "PATCH", "/repos/owner/repo/pulls/1", body,
             "application/json", "",
         )
@@ -374,7 +413,7 @@ class TestCheckGitHubBodyPolicies:
         assert "object" in result.lower()
 
     def test_ignores_get_requests(self):
-        result = _check_github_body_policies(
+        result = check_github_body_policies(
             "GET", "/repos/owner/repo/pulls/1", None,
             "", "",
         )
@@ -382,7 +421,7 @@ class TestCheckGitHubBodyPolicies:
 
     def test_ignores_non_pr_patch(self):
         body = self._json_body({"state": "closed"})
-        result = _check_github_body_policies(
+        result = check_github_body_policies(
             "PATCH", "/repos/owner/repo/contents/README.md", body,
             "application/json", "",
         )
@@ -391,7 +430,7 @@ class TestCheckGitHubBodyPolicies:
     def test_case_insensitive_state(self):
         """state: 'CLOSED' (uppercase) should also be blocked."""
         body = self._json_body({"state": "CLOSED"})
-        result = _check_github_body_policies(
+        result = check_github_body_policies(
             "PATCH", "/repos/owner/repo/pulls/1", body,
             "application/json", "",
         )
@@ -400,7 +439,7 @@ class TestCheckGitHubBodyPolicies:
     def test_case_insensitive_approve(self):
         """event: 'approve' (lowercase) should also be blocked."""
         body = self._json_body({"event": "approve"})
-        result = _check_github_body_policies(
+        result = check_github_body_policies(
             "POST", "/repos/owner/repo/pulls/1/reviews", body,
             "application/json", "",
         )
@@ -409,7 +448,7 @@ class TestCheckGitHubBodyPolicies:
     def test_handles_utf8_bom(self):
         """Bodies with UTF-8 BOM should be handled correctly."""
         body = b"\xef\xbb\xbf" + self._json_body({"state": "closed"})
-        result = _check_github_body_policies(
+        result = check_github_body_policies(
             "PATCH", "/repos/owner/repo/pulls/1", body,
             "application/json", "",
         )

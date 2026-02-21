@@ -40,5 +40,6 @@ warned_patterns:
   - "Dockerfile"
   - ".env*"
 
-# What to do with warned files: "log" or "reject"
+# What to do with warned files: "log" (warn only) or "reject" (block push)
+# Use "log" for initial rollout; switch to "reject" once patterns are validated.
 warn_action: "log"

@@ -740,7 +740,7 @@ def _enumerate_push_changed_files(
     """
     try:
         result = subprocess.run(
-            [GIT_BINARY, "diff", "--name-only", f"{base_ref}..HEAD"],
+            [GIT_BINARY, "diff", "--name-only", "--", f"{base_ref}..HEAD"],
             cwd=cwd,
             capture_output=True,
             timeout=SHA_CHECK_TIMEOUT,
@@ -839,7 +839,7 @@ def _enumerate_staged_files(
     """
     try:
         result = subprocess.run(
-            [GIT_BINARY, "diff", "--cached", "--name-only"],
+            [GIT_BINARY, "diff", "--cached", "--name-only", "--"],
             cwd=cwd,
             capture_output=True,
             timeout=SHA_CHECK_TIMEOUT,

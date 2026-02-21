@@ -22,6 +22,10 @@ github_api_filter = importlib.import_module("github-api-filter")
 GitHubAPIFilter = github_api_filter.GitHubAPIFilter
 
 from addons.policy_engine import PolicyEngine
+from security_policies import (
+    check_github_blocklist,
+    check_github_body_policies,
+)
 
 
 # Operations that MUST be blocked in both layers
@@ -127,7 +131,7 @@ class TestDualLayerConsistency:
         method = op_spec["method"]
         path = op_spec["path"]
 
-        result = policy_engine._check_github_blocklist(method, path)
+        result = check_github_blocklist(method, path)
 
         assert result is not None, (
             f"PolicyEngine did NOT block {op_name}: "
@@ -150,7 +154,7 @@ class TestDualLayerConsistency:
             api_filter.request(api_filter_flow)
 
         # Layer 2: PolicyEngine
-        policy_engine_blocks = policy_engine._check_github_blocklist(method, path)
+        policy_engine_blocks = check_github_blocklist(method, path)
 
         # Both layers must block
         api_filter_blocks = api_filter_flow.response is not None
@@ -215,7 +219,7 @@ class TestKnownAsymmetries:
         Blocks APPROVE to prevent self-approval via REST API.
         """
         body = json.dumps({"event": "APPROVE"}).encode()
-        result = policy_engine._check_github_body_policies(
+        result = check_github_body_policies(
             "POST", "/repos/owner/repo/pulls/1/reviews",
             body, "application/json", ""
         )
@@ -231,7 +235,7 @@ class TestKnownAsymmetries:
         while being collaterally blocked at GraphQL layer.
         """
         body = json.dumps({"event": "COMMENT"}).encode()
-        result = policy_engine._check_github_body_policies(
+        result = check_github_body_policies(
             "POST", "/repos/owner/repo/pulls/1/reviews",
             body, "application/json", ""
         )
@@ -246,7 +250,7 @@ class TestKnownAsymmetries:
         Documented asymmetry: REQUEST_CHANGES reviews are allowed at REST layer.
         """
         body = json.dumps({"event": "REQUEST_CHANGES"}).encode()
-        result = policy_engine._check_github_body_policies(
+        result = check_github_body_policies(
             "POST", "/repos/owner/repo/pulls/1/reviews",
             body, "application/json", ""
         )
@@ -268,28 +272,28 @@ class TestBlocklistPatternCoverage:
         """Merge PR (PUT /repos/.../pulls/.../merge) must be blocked in both layers."""
         # GitHubAPIFilter has it in BLOCKED_PATTERNS
         # PolicyEngine must have it in _check_github_blocklist via GITHUB_MERGE_PR_PATTERN
-        result = policy_engine._check_github_blocklist(
+        result = check_github_blocklist(
             "PUT", "/repos/owner/repo/pulls/1/merge"
         )
         assert result is not None, "PolicyEngine must block PR merge via _check_github_blocklist"
 
     def test_auto_merge_put_in_both_layers(self, policy_engine):
         """Auto-merge PUT (PUT /repos/.../pulls/.../auto-merge) must be blocked in both layers."""
-        result = policy_engine._check_github_blocklist(
+        result = check_github_blocklist(
             "PUT", "/repos/owner/repo/pulls/1/auto-merge"
         )
         assert result is not None, "PolicyEngine must block auto-merge PUT via _check_github_blocklist"
 
     def test_auto_merge_delete_in_both_layers(self, policy_engine):
         """Auto-merge DELETE (DELETE /repos/.../pulls/.../auto-merge) must be blocked in both layers."""
-        result = policy_engine._check_github_blocklist(
+        result = check_github_blocklist(
             "DELETE", "/repos/owner/repo/pulls/1/auto-merge"
         )
         assert result is not None, "PolicyEngine must block auto-merge DELETE via _check_github_blocklist"
 
     def test_delete_review_in_both_layers(self, policy_engine):
         """Review deletion (DELETE /repos/.../pulls/.../reviews/...) must be blocked in both layers."""
-        result = policy_engine._check_github_blocklist(
+        result = check_github_blocklist(
             "DELETE", "/repos/owner/repo/pulls/1/reviews/123"
         )
         assert result is not None, "PolicyEngine must block review deletion via _check_github_blocklist"
@@ -356,7 +360,7 @@ class TestPolicyEngineBlocklistCompleteness:
 
     def test_policy_engine_has_github_patterns(self, policy_engine):
         """PolicyEngine must have GitHub pattern constants defined."""
-        from addons.policy_engine import (
+        from security_policies import (
             GITHUB_MERGE_PR_PATTERN,
             GITHUB_AUTO_MERGE_PATTERN,
             GITHUB_DELETE_REVIEW_PATTERN,
@@ -373,7 +377,7 @@ class TestPolicyEngineBlocklistCompleteness:
 
     def test_policy_engine_merge_pr_pattern(self, policy_engine):
         """GITHUB_MERGE_PR_PATTERN must match PR merge endpoints."""
-        from addons.policy_engine import GITHUB_MERGE_PR_PATTERN
+        from security_policies import GITHUB_MERGE_PR_PATTERN
         assert GITHUB_MERGE_PR_PATTERN.match("/repos/owner/repo/pulls/1/merge")
         assert GITHUB_MERGE_PR_PATTERN.match("/repos/o/r/pulls/123/merge")
         assert not GITHUB_MERGE_PR_PATTERN.match("/repos/owner/repo/pulls/1/merge/something")
@@ -381,14 +385,14 @@ class TestPolicyEngineBlocklistCompleteness:
 
     def test_policy_engine_auto_merge_pattern(self, policy_engine):
         """GITHUB_AUTO_MERGE_PATTERN must match auto-merge endpoints."""
-        from addons.policy_engine import GITHUB_AUTO_MERGE_PATTERN
+        from security_policies import GITHUB_AUTO_MERGE_PATTERN
         assert GITHUB_AUTO_MERGE_PATTERN.match("/repos/owner/repo/pulls/1/auto-merge")
         assert GITHUB_AUTO_MERGE_PATTERN.match("/repos/o/r/pulls/999/auto-merge")
         assert not GITHUB_AUTO_MERGE_PATTERN.match("/repos/owner/repo/pulls/1/auto-merge/something")
 
     def test_policy_engine_delete_review_pattern(self, policy_engine):
         """GITHUB_DELETE_REVIEW_PATTERN must match review deletion endpoints."""
-        from addons.policy_engine import GITHUB_DELETE_REVIEW_PATTERN
+        from security_policies import GITHUB_DELETE_REVIEW_PATTERN
         assert GITHUB_DELETE_REVIEW_PATTERN.match("/repos/owner/repo/pulls/1/reviews/123")
         assert GITHUB_DELETE_REVIEW_PATTERN.match("/repos/o/r/pulls/99/reviews/42")
         assert not GITHUB_DELETE_REVIEW_PATTERN.match("/repos/owner/repo/pulls/1/reviews")
@@ -425,7 +429,7 @@ class TestLayerIsolation:
 
     def test_policy_engine_blocks_independently(self, policy_engine):
         """PolicyEngine blocks requests independently of GitHubAPIFilter."""
-        result = policy_engine._check_github_blocklist(
+        result = check_github_blocklist(
             "PUT", "/repos/owner/repo/pulls/1/merge"
         )
         assert result is not None
