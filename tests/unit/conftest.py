@@ -21,6 +21,15 @@ unified_proxy_dir = os.path.join(
 if unified_proxy_dir not in sys.path:
     sys.path.insert(0, unified_proxy_dir)
 
+# Pre-import aiohttp (if available) so it's in sys.modules before any test
+# file can install a MagicMock replacement.  This ensures tests that need
+# real aiohttp (e.g. gateway integration tests) get the real module.
+try:
+    import aiohttp  # noqa: F401
+    import aiohttp.web  # noqa: F401
+except ImportError:
+    pass
+
 _SKIP_MOCKS = os.environ.get("MITMPROXY_NO_MOCK") == "1"
 
 if not _SKIP_MOCKS:

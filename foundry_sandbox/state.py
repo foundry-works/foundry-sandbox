@@ -26,7 +26,7 @@ from foundry_sandbox.atomic_io import (
 )
 from foundry_sandbox.config import load_json
 from foundry_sandbox.constants import get_claude_configs_dir
-from foundry_sandbox.utils import flag_enabled as _flag_enabled, log_debug, log_warn
+from foundry_sandbox.utils import flag_enabled as _flag_enabled, log_debug, log_error
 from foundry_sandbox.models import CastNewPreset, SandboxMetadata
 from foundry_sandbox.paths import (
     ensure_dir,
@@ -239,6 +239,54 @@ def _parse_legacy_metadata(path: str | Path) -> dict[str, Any]:
     return data
 
 
+def _load_metadata_from_json(json_path: Path) -> dict[str, Any] | None:
+    """Read and validate metadata from a JSON file without acquiring a lock.
+
+    Callers are responsible for holding the appropriate lock (shared or
+    exclusive) before calling this function.
+
+    Args:
+        json_path: Path to the JSON metadata file.
+
+    Returns:
+        Validated metadata dictionary, or None if the file is empty/missing.
+    """
+    data = load_json(str(json_path))
+    if not data:
+        return None
+    # Auto-derive ssh_mode if missing
+    if not data.get("ssh_mode"):
+        data["ssh_mode"] = "always" if str(data.get("sync_ssh", "0")) == "1" else "disabled"
+    # Validate through Pydantic model — fail fast on bad schema
+    try:
+        model = SandboxMetadata(**data)
+        return model.model_dump()
+    except (ValueError, TypeError) as exc:
+        # Differentiate version skew (extra fields from a newer format) from
+        # genuine corruption (missing required fields, wrong types).
+        from pydantic import ValidationError
+
+        if isinstance(exc, ValidationError):
+            error_types = {e["type"] for e in exc.errors()}
+            version_skew_types = {"extra_forbidden"}
+            if error_types and error_types <= version_skew_types:
+                # All errors are about unrecognised extra fields — likely a
+                # newer metadata format.  Return raw data so callers can still
+                # operate on what they understand.
+                log_debug(
+                    f"Metadata at '{json_path}' has extra fields (version skew): {exc}; "
+                    "returning raw data"
+                )
+                return data
+        # Missing required fields, invalid types, or other structural
+        # problems indicate corruption or an incompatible file.
+        log_error(
+            f"Metadata at '{json_path}' failed schema validation: {exc}; "
+            "returning None (possible corruption)"
+        )
+        return None
+
+
 def load_sandbox_metadata(name: str) -> dict[str, Any] | None:
     """Load sandbox metadata, with auto-migration from legacy format.
 
@@ -259,27 +307,12 @@ def load_sandbox_metadata(name: str) -> dict[str, Any] | None:
             return None
         try:
             with _state_lock(json_path, shared=True):
-                data = load_json(str(json_path))
+                return _load_metadata_from_json(json_path)
         except OSError as exc:
             # Read-only callers (list/status/info) should degrade gracefully when
             # lock creation/acquisition is not permitted for a given sandbox.
             log_debug(f"Skipping metadata for '{name}': lock unavailable ({exc})")
             return None
-        if data:
-            # Auto-derive ssh_mode if missing
-            if not data.get("ssh_mode"):
-                data["ssh_mode"] = "always" if str(data.get("sync_ssh", "0")) == "1" else "disabled"
-            # Validate through Pydantic model — fail fast on bad schema
-            try:
-                model = SandboxMetadata(**data)
-                return model.model_dump()
-            except (ValueError, TypeError) as exc:
-                log_warn(
-                    f"Metadata for '{name}' failed schema validation: {exc}; "
-                    "using raw data (may indicate corruption or version skew)"
-                )
-                return data
-        return None
 
     if legacy_path.exists():
         if not metadata_is_secure(legacy_path):
@@ -289,7 +322,8 @@ def load_sandbox_metadata(name: str) -> dict[str, Any] | None:
             with _state_lock(json_path):
                 # Double-check: another process may have migrated while we waited
                 if json_path.exists():
-                    return load_sandbox_metadata(name)
+                    # Use the lock-free helper to avoid reentrant lock acquisition
+                    return _load_metadata_from_json(json_path)
 
                 try:
                     data = _parse_legacy_metadata(legacy_path)

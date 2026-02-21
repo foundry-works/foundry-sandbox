@@ -23,14 +23,16 @@ run_tests() {
     info "Testing certificate validation..."
 
     # Test 1: curl should FAIL without mitmproxy CA (proves interception is active)
-    if ! curl -sf --cacert /etc/ssl/certs/ca-certificates.crt --max-time 10 "https://api.anthropic.com/" >/dev/null 2>&1; then
+    # Uses generativelanguage.googleapis.com (still routed through mitmproxy;
+    # Anthropic and OpenAI use their respective gateways now)
+    if ! curl -sf --cacert /etc/ssl/certs/ca-certificates.crt --max-time 10 "https://generativelanguage.googleapis.com/" >/dev/null 2>&1; then
         test_pass "HTTPS interception active (system CA rejects mitmproxy cert)"
     else
         test_fail "HTTPS interception NOT active (system CA accepted connection)"
     fi
 
     # Test 2: curl should complete TLS handshake with mitmproxy CA (proves proxy setup works)
-    CURL_OUT=$(curl -s --cacert /certs/mitmproxy-ca.pem --max-time 10 -w "%{ssl_verify_result}" -o /dev/null "https://api.anthropic.com/" 2>&1)
+    CURL_OUT=$(curl -s --cacert /certs/mitmproxy-ca.pem --max-time 10 -w "%{ssl_verify_result}" -o /dev/null "https://generativelanguage.googleapis.com/" 2>&1)
     if [[ "$CURL_OUT" == "0" ]]; then
         test_pass "mitmproxy CA trust working (TLS handshake succeeds)"
     else

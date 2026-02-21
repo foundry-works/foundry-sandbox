@@ -38,21 +38,22 @@ def upgrade(use_local: bool) -> None:
             sys.exit(1)
     else:
         click.echo("Downloading latest installer from GitHub...")
-        with tempfile.NamedTemporaryFile(suffix=".sh", delete=False) as tmp:
-            tmp_path = tmp.name
+        fd, tmp_path = tempfile.mkstemp(suffix=".sh")
+        os.close(fd)
+        try:
+            dl_result = subprocess.run(
+                ["curl", "-fsSL", "-o", tmp_path,
+                 "https://raw.githubusercontent.com/foundry-works/foundry-sandbox/main/install.sh"],
+                check=False,
+                timeout=TIMEOUT_GIT_TRANSFER,
+            )
+            if dl_result.returncode != 0:
+                log_error("Failed to download installer")
+                sys.exit(1)
 
-        dl_result = subprocess.run(
-            ["curl", "-fsSL", "-o", tmp_path,
-             "https://raw.githubusercontent.com/foundry-works/foundry-sandbox/main/install.sh"],
-            check=False,
-            timeout=TIMEOUT_GIT_TRANSFER,
-        )
-        if dl_result.returncode != 0:
-            log_error("Failed to download installer")
+            os.chmod(tmp_path, 0o700)
+            click.echo(f"Running installer from {tmp_path}...")
+            result = subprocess.run(["bash", tmp_path], check=False)  # no timeout: interactive installer
+            sys.exit(result.returncode)
+        finally:
             os.unlink(tmp_path)
-            sys.exit(1)
-
-        click.echo(f"Running installer from {tmp_path}...")
-        result = subprocess.run(["bash", tmp_path], check=False)  # no timeout: interactive installer
-        os.unlink(tmp_path)
-        sys.exit(result.returncode)

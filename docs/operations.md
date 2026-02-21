@@ -532,6 +532,95 @@ docker compose -f docker-compose.credential-isolation.yml restart unified-proxy
 | `Unknown sandbox or missing secret` | Secret file not written to proxy | Check `/run/secrets/sandbox-hmac/` contains the file |
 | Rotation works but reverts on restart | Secrets volume not persisted | Ensure secrets are on a Docker volume, not tmpfs |
 
+## Gateway Rollback Procedures
+
+The API gateways (Anthropic, OpenAI, GitHub) route provider traffic through plaintext HTTP endpoints on the internal Docker network, injecting credentials at the gateway rather than via MITM interception. If a gateway has issues, traffic can be reverted to the MITM path.
+
+### Anthropic Gateway Rollback
+
+If the Anthropic gateway (port 9848) is failing or misbehaving:
+
+**Step 1: Re-add `api.anthropic.com` to the domain allowlist**
+
+```yaml
+# config/allowlist.yaml — add back under domains:
+- api.anthropic.com
+```
+
+**Step 2: Unset the gateway URL in the sandbox environment**
+
+Create or edit `docker-compose.override.yml`:
+
+```yaml
+services:
+  sandbox:
+    environment:
+      - ANTHROPIC_BASE_URL=  # Empty to clear — SDK uses default api.anthropic.com
+```
+
+**Step 3: Restart**
+
+```bash
+docker compose -f docker-compose.credential-isolation.yml up -d
+```
+
+**Step 4: Verify MITM path is working**
+
+```bash
+# From inside the sandbox
+curl -s https://api.anthropic.com/v1/messages \
+  -H "content-type: application/json" \
+  -H "x-api-key: $ANTHROPIC_API_KEY" \
+  -d '{"model":"claude-sonnet-4-20250514","max_tokens":1,"messages":[{"role":"user","content":"hi"}]}' \
+  | head -c 200
+```
+
+The credential injector (on the MITM mitmproxy instance) will inject the real API key. The same procedure applies to OpenAI (port 9849, `OPENAI_BASE_URL`, `api.openai.com`) and GitHub (port 9850, `GITHUB_API_URL`, `api.github.com`).
+
+### Squid Migration Rollback
+
+The Squid SNI filter replaced mitmproxy as the primary forward proxy. MITM is gated behind `ENABLE_MITM_FALLBACK`. If the Squid-based architecture has issues:
+
+**Step 1: Re-enable full MITM mode**
+
+```yaml
+# docker-compose.override.yml
+services:
+  unified-proxy:
+    environment:
+      - ENABLE_MITM_FALLBACK=true
+```
+
+When `ENABLE_MITM_FALLBACK=true` and provider credentials are present, `entrypoint.sh` detects MITM is needed (`detect_mitm_needed()`), generates the CA certificate, starts mitmproxy on port 8081, and routes MITM-required provider traffic through it.
+
+**Step 2: Restore gateway URLs to MITM path (if needed)**
+
+To fully revert to pre-gateway MITM for a specific provider, follow the per-gateway rollback above (re-add domain to allowlist, unset `*_BASE_URL`).
+
+**Step 3: Restart the proxy**
+
+```bash
+docker compose -f docker-compose.credential-isolation.yml restart unified-proxy
+```
+
+**Step 4: Verify**
+
+```bash
+# Check mitmproxy is running on MITM port
+docker exec unified-proxy ss -tlnp | grep 8081
+
+# Check CA certificate was generated
+docker exec unified-proxy ls -la /etc/proxy/certs/mitmproxy-ca.pem
+
+# Check Squid is still running (handles non-MITM traffic)
+docker exec unified-proxy ss -tlnp | grep 8080
+
+# Test a request from inside the sandbox
+docker exec <sandbox-container> curl -s https://api.anthropic.com/v1/messages -I
+```
+
+**MITM-required providers:** Gemini (`GOOGLE_API_KEY`, `GEMINI_API_KEY`), Tavily (`TAVILY_API_KEY`), Semantic Scholar (`SEMANTIC_SCHOLAR_API_KEY`), Perplexity (`PERPLEXITY_API_KEY`), Zhipu (`ZHIPU_API_KEY`). These providers lack `*_BASE_URL` env var support and always require MITM when their credentials are set.
+
 ## See Also
 
 - [Architecture](architecture.md) - System components

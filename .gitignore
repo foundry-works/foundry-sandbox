@@ -18,7 +18,6 @@ __pycache__/
 *.pem
 *.key
 *.p12
-PLAN*.md
 issues.md
 tests/redteam/results/*.tap
 tests/redteam/results/*.xml

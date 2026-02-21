@@ -170,7 +170,7 @@ class ContainerIdentityAddon:
                             log_level="warning",
                         )
                         return
-                    metadata["bare_repo_path"] = candidate_path
+                    metadata["bare_repo_path"] = real_path
                     container_config.metadata = metadata
 
         # Attach container config to flow metadata for downstream addons

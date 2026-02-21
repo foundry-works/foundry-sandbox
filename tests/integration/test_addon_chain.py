@@ -144,7 +144,11 @@ class TestCredentialInjectionThenRateLimit:
     """Test credential injection happens before rate limiting."""
 
     def test_credentials_injected_before_rate_limit(self):
-        """Credential injector modifies headers, rate limiter checks separately."""
+        """Credential injector modifies headers, rate limiter checks separately.
+
+        Uses uploads.github.com because api.github.com traffic now routes
+        through the GitHub API gateway and is no longer in PROVIDER_MAP.
+        """
         with patch.dict(os.environ, {"GITHUB_TOKEN": "ghp_test_token"}, clear=False):
             injector = CredentialInjector()
 
@@ -158,7 +162,7 @@ class TestCredentialInjectionThenRateLimit:
             metadata=None,
         )
 
-        flow = make_flow(host="api.github.com", path="/repos/owner/repo")
+        flow = make_flow(host="uploads.github.com", path="/repos/owner/repo")
 
         # Run through credential injector first
         injector.request(flow)

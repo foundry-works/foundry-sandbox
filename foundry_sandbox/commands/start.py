@@ -43,6 +43,7 @@ from foundry_sandbox.container_setup import install_pip_requirements
 from foundry_sandbox.foundry_upgrade import upgrade_foundry_mcp_prerelease
 from foundry_sandbox.credential_setup import copy_configs_to_container
 from foundry_sandbox.docker import (
+    compose_down,
     compose_up,
     hmac_secret_file_count,
     populate_stubs_volume,
@@ -84,15 +85,6 @@ def _export_feature_flags(
     env["SANDBOX_ENABLE_OPENCODE"] = "1" if enable_opencode else "0"
     env["SANDBOX_ENABLE_ZAI"] = "1" if enable_zai else "0"
     return enable_opencode, enable_zai
-
-
-def _has_zai_key() -> bool:
-    """Check if ZHIPU_API_KEY is set.
-
-    Returns:
-        True if ZHIPU_API_KEY is set and non-empty.
-    """
-    return bool(os.environ.get("ZHIPU_API_KEY"))
 
 
 def _has_opencode_key() -> bool:
@@ -149,7 +141,7 @@ def _log_credential_warnings(
         opencode_auth = Path.home() / ".local/share/opencode/auth.json"
         if not opencode_auth.is_file():
             if enable_opencode:
-                if _has_zai_key():
+                if api_keys.has_zai_key():
                     log_warn("OpenCode enabled but auth file not found; relying on ZHIPU_API_KEY fallback (credential isolation).")
                 else:
                     log_warn("OpenCode enabled but auth file not found; OpenCode CLI will not work in credential isolation.")
@@ -163,7 +155,7 @@ def _log_credential_warnings(
             log_warn("Credential isolation: ~/.gemini/oauth_creds.json not found and GEMINI_API_KEY not set; Gemini CLI will not work.")
             log_warn("Run 'gemini auth' or set GEMINI_API_KEY if you plan to use Gemini.")
 
-    if enable_zai and not _has_zai_key():
+    if enable_zai and not api_keys.has_zai_key():
         log_warn("ZAI enabled but ZHIPU_API_KEY not set on host; claude-zai will not work.")
 
     if enable_opencode and not _has_opencode_key() and not uses_isolation:
@@ -210,10 +202,8 @@ def _setup_credential_isolation(
     container: str,
     name: str,
     metadata: dict[str, object],
-) -> tuple[str, str]:
-    """Handle credential isolation: stubs volume, HMAC secrets, ALLOW_PR.
-
-    Mutates os.environ for SANDBOX_ID and ALLOW_PR_OPERATIONS.
+) -> tuple[str, str, bool]:
+    """Handle credential isolation: stubs volume, HMAC secrets.
 
     Args:
         container: Container name prefix.
@@ -221,7 +211,7 @@ def _setup_credential_isolation(
         metadata: Sandbox metadata dictionary.
 
     Returns:
-        Tuple of (isolate_credentials flag, sandbox_id string).
+        Tuple of (isolate_credentials flag, sandbox_id string, allow_pr bool).
 
     Raises:
         SystemExit: On HMAC secret errors or generation failure.
@@ -274,9 +264,8 @@ def _setup_credential_isolation(
         log_step(f"Sandbox ID: {sandbox_id}")
 
     allow_pr = _flag_enabled(metadata.get("allow_pr", False))
-    os.environ["ALLOW_PR_OPERATIONS"] = "true" if allow_pr else ""
 
-    return "true", sandbox_id
+    return "true", sandbox_id, allow_pr
 
 
 def _register_proxy(
@@ -511,6 +500,9 @@ def start(ctx: click.Context, name: str, pre_foundry: bool | None) -> None:
         # --------------------------------------------------------------
         token = api_keys.export_gh_token()
         if token:
+            # Set via cmd_env-style keys so environment_scope tracks them.
+            # environment_scope restores the full os.environ snapshot, but
+            # being explicit keeps intent clear for future readers.
             os.environ["GITHUB_TOKEN"] = token
             os.environ["GH_TOKEN"] = token
             log_info("GitHub CLI token exported for container")
@@ -522,9 +514,12 @@ def start(ctx: click.Context, name: str, pre_foundry: bool | None) -> None:
         sandbox_id = ""
 
         if uses_isolation:
-            isolate_credentials, sandbox_id = _setup_credential_isolation(
+            isolate_credentials, sandbox_id, allow_pr = _setup_credential_isolation(
                 container, name, metadata,
             )
+            # Set ALLOW_PR_OPERATIONS inside the environment_scope so it
+            # is restored on scope exit rather than leaking into the host.
+            os.environ["ALLOW_PR_OPERATIONS"] = "true" if allow_pr else ""
 
         # --------------------------------------------------------------
         # 10. Start containers via compose_up
@@ -546,7 +541,18 @@ def start(ctx: click.Context, name: str, pre_foundry: bool | None) -> None:
         # 11. Register container with proxy (if credential isolation)
         # --------------------------------------------------------------
         if isolate_credentials == "true":
-            _register_proxy(container, container_id, metadata)
+            try:
+                _register_proxy(container, container_id, metadata)
+            except SystemExit:
+                log_error("Proxy registration failed; stopping containers to avoid unregistered sandbox.")
+                compose_down(
+                    worktree_path=str(worktree_path),
+                    claude_config_path=str(claude_config_path),
+                    container=container,
+                    override_file=str(override_file),
+                    isolate_credentials=True,
+                )
+                raise
 
         # --------------------------------------------------------------
         # 12. Finalize container: configs, pip, network

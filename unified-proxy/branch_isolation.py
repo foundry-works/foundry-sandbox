@@ -68,6 +68,15 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 
 
+def _is_within_boundary(resolved: str, boundary: str) -> bool:
+    """Check that *resolved* is under *boundary* (inclusive).
+
+    Both paths must already be canonicalized via ``os.path.realpath()``.
+    Returns True when *resolved* equals *boundary* or is a child path.
+    """
+    return resolved == boundary or resolved.startswith(boundary + os.sep)
+
+
 def resolve_bare_repo_path(repo_root: str) -> Optional[str]:
     """Follow the worktree .git -> gitdir -> commondir chain to find the bare repo.
 
@@ -89,6 +98,7 @@ def resolve_bare_repo_path(repo_root: str) -> Optional[str]:
     """
     try:
         real_root = os.path.realpath(repo_root)
+        boundary = os.path.dirname(real_root)
         dot_git = os.path.join(real_root, ".git")
 
         # If .git is a directory, this IS the git dir (not a worktree)
@@ -104,6 +114,12 @@ def resolve_bare_repo_path(repo_root: str) -> Optional[str]:
                     resolved = os.path.realpath(
                         os.path.join(dot_git, commondir)
                     )
+                if not _is_within_boundary(resolved, boundary):
+                    logger.warning(
+                        "commondir escapes repo boundary: %s (boundary: %s)",
+                        resolved, boundary,
+                    )
+                    return None
                 return resolved
             # No commondir — .git itself is the git dir
             return os.path.realpath(dot_git)
@@ -141,6 +157,13 @@ def resolve_bare_repo_path(repo_root: str) -> Optional[str]:
             bare_path = os.path.realpath(os.path.join(gitdir, commondir))
 
         if not os.path.isdir(bare_path):
+            return None
+
+        if not _is_within_boundary(bare_path, boundary):
+            logger.warning(
+                "worktree commondir escapes repo boundary: %s (boundary: %s)",
+                bare_path, boundary,
+            )
             return None
 
         return bare_path
@@ -327,7 +350,7 @@ def _is_allowed_ref(
         prefix, _, branch_part = base.partition("/")
         if not _is_allowed_branch_name(base, sandbox_branch, base_branch):
             # Not an allowed branch name as-is, try as remote/branch
-            if branch_part:
+            if branch_part and re.fullmatch(r"[A-Za-z0-9_-]+", prefix):
                 return _is_allowed_branch_name(
                     branch_part, sandbox_branch, base_branch
                 )

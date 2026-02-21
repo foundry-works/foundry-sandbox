@@ -110,6 +110,72 @@ export SANDBOX_TMUX_SCROLLBACK=200000
 export SANDBOX_TMUX_MOUSE=0
 ```
 
+## Push File Restrictions
+
+Sandboxes enforce push-time file restrictions to prevent agents from modifying CI/CD pipelines, build system files, or other sensitive configuration that could enable persistent compromise outside the sandbox. Restrictions are defined in `config/push-file-restrictions.yaml`.
+
+### How It Works
+
+File restrictions are enforced at two points:
+- **Push time** — The git API's `check_push_files()` enumerates files changed between the remote tracking branch and HEAD, matching each against the restriction patterns. Blocked files reject the entire push.
+- **Commit time** — `check_file_restrictions()` runs against staged files for early feedback before the push attempt.
+
+### Configuration Format
+
+```yaml
+version: "1.0"
+
+blocked_patterns:
+  - ".github/workflows/"    # Directory prefix
+  - "Makefile"              # Exact basename match
+  - "*.yml"                 # Glob pattern (hypothetical)
+
+warned_patterns:
+  - "package.json"
+  - "requirements-*.txt"
+
+warn_action: "log"          # "log" or "reject"
+```
+
+### Pattern Semantics
+
+| Pattern form | Matching behavior | Example |
+|---|---|---|
+| Ends with `/` | Directory prefix match — blocks any file under that directory (`path.startswith(pattern)`) | `.github/workflows/` blocks `.github/workflows/ci.yml` |
+| Contains `*` or `?` | Glob match via `fnmatch` against both the basename and the full relative path | `requirements-*.txt` matches `requirements-dev.txt` at any depth |
+| Bare name (no `/`, no glob) | Basename match — blocks any file at any depth with that exact name | `Makefile` blocks `Makefile` and `subdir/Makefile` |
+
+### Blocked vs. Warned Patterns
+
+- **`blocked_patterns`** — Always reject the push. No override.
+- **`warned_patterns`** — Behavior depends on `warn_action`:
+  - `"log"` — Log a warning but allow the push (suitable for initial rollout or monitoring)
+  - `"reject"` — Block the push (same as blocked patterns)
+
+### Default Restrictions
+
+The default configuration blocks CI/CD pipeline files and generates warnings for dependency/build files:
+
+**Blocked** (always rejected):
+- `.github/workflows/`, `.github/actions/` — GitHub Actions
+- `Makefile`, `Justfile`, `Taskfile.yml` — Build system entry points
+- `.pre-commit-config.yaml` — Git hook configuration
+- `CODEOWNERS` — Approval requirement definitions
+- `.github/FUNDING.yml` — Funding configuration
+
+**Warned** (logged by default):
+- `package.json`, `pyproject.toml`, `requirements.txt`, `Gemfile`, `go.mod`, `Cargo.toml` — Dependency manifests
+- `Dockerfile`, `docker-compose*.yml` — Container definitions
+- `.env*` — Environment files
+
+### Customization
+
+To modify restrictions, edit `config/push-file-restrictions.yaml`. Changes take effect on the next proxy startup. To switch warned patterns from monitoring to enforcement:
+
+```yaml
+warn_action: "reject"
+```
+
 ## Proxy Allowlist Extension
 
 The unified proxy enforces network access via an allowlist that declares permitted domains, HTTP endpoints, and blocked paths. To grant additional network access to a sandbox without replacing the entire allowlist, use the `PROXY_ALLOWLIST_EXTRA_PATH` environment variable:

@@ -30,6 +30,7 @@ from branch_isolation import (
     filter_ref_listing_output,
     filter_stderr_branch_refs,
     get_subcommand_args,
+    resolve_bare_repo_path,
     validate_branch_isolation,
     validate_sha_reachability,
 )
@@ -1564,3 +1565,128 @@ class TestRefEnumPass2Fallback:
         output = f"abcdef123456 {SANDBOX}\n"
         result = filter_ref_listing_output(output, ["for-each-ref"], SANDBOX)
         assert SANDBOX in result
+
+
+# ---------------------------------------------------------------------------
+# resolve_bare_repo_path — boundary checks
+# ---------------------------------------------------------------------------
+
+
+class TestResolveBareRepoPath:
+    """Test symlink boundary enforcement in resolve_bare_repo_path."""
+
+    def test_normal_git_dir_resolves(self, tmp_path):
+        """A normal .git directory resolves to itself."""
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        git_dir = repo / ".git"
+        git_dir.mkdir()
+        # Fake a valid git dir (HEAD file)
+        (git_dir / "HEAD").write_text("ref: refs/heads/main\n")
+        result = resolve_bare_repo_path(str(repo))
+        assert result == str(git_dir.resolve())
+
+    def test_commondir_outside_boundary_returns_none(self, tmp_path):
+        """commondir pointing outside the repo tree returns None."""
+        # Nest the repo so boundary = tmp_path / "projects"
+        projects = tmp_path / "projects"
+        projects.mkdir()
+        repo = projects / "repo"
+        repo.mkdir()
+        git_dir = repo / ".git"
+        git_dir.mkdir()
+        # Create a directory outside the boundary
+        outside = tmp_path / "outside" / "escape"
+        outside.mkdir(parents=True)
+        # Write commondir pointing outside
+        (git_dir / "commondir").write_text(str(outside))
+        result = resolve_bare_repo_path(str(repo))
+        assert result is None
+
+    def test_commondir_traversal_returns_none(self, tmp_path):
+        """commondir with .. traversal that escapes boundary returns None."""
+        repo = tmp_path / "repos" / "myrepo"
+        repo.mkdir(parents=True)
+        git_dir = repo / ".git"
+        git_dir.mkdir()
+        # Create an outside target
+        outside = tmp_path / "evil"
+        outside.mkdir()
+        # Write a relative commondir that traverses up and out
+        (git_dir / "commondir").write_text("../../../evil")
+        result = resolve_bare_repo_path(str(repo))
+        assert result is None
+
+    def test_no_commondir_resolves_normally(self, tmp_path):
+        """Without commondir, .git dir resolves normally."""
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        git_dir = repo / ".git"
+        git_dir.mkdir()
+        result = resolve_bare_repo_path(str(repo))
+        assert result == str(git_dir.resolve())
+
+# ---------------------------------------------------------------------------
+# Rebase isolation
+# ---------------------------------------------------------------------------
+
+
+class TestRebaseIsolation:
+    """Test rebase --root and --onto isolation."""
+
+    def test_rebase_onto_disallowed_blocked(self):
+        """rebase --onto <disallowed> must be blocked."""
+        err = validate_branch_isolation(
+            ["rebase", "--onto", OTHER, "main"], META
+        )
+        assert err is not None
+        assert OTHER in err.reason
+
+    def test_rebase_onto_own_branch_allowed(self):
+        assert validate_branch_isolation(
+            ["rebase", "--onto", SANDBOX, "main"], META
+        ) is None
+
+    def test_rebase_onto_well_known_allowed(self):
+        assert validate_branch_isolation(
+            ["rebase", "--onto", "main", SANDBOX], META
+        ) is None
+
+    def test_rebase_root_disallowed_blocked(self):
+        """rebase --root with a disallowed upstream ref must be blocked."""
+        err = validate_branch_isolation(
+            ["rebase", "--root", OTHER], META
+        )
+        assert err is not None
+        assert OTHER in err.reason
+
+    def test_rebase_root_own_branch_allowed(self):
+        assert validate_branch_isolation(
+            ["rebase", "--root", SANDBOX], META
+        ) is None
+
+
+class TestResolveBareRepoPathWorktreeChain:
+    """Additional resolve_bare_repo_path tests for worktree chains."""
+
+    def test_worktree_chain_commondir_escape_returns_none(self, tmp_path):
+        """Worktree -> gitdir -> commondir chain escaping boundary returns None."""
+        # Nest the worktree so boundary = tmp_path / "projects"
+        projects = tmp_path / "projects"
+        projects.mkdir()
+        repo = projects / "repo"
+        repo.mkdir()
+        # Create a gitdir for the worktree
+        worktree_gitdir = repo / ".git" / "worktrees" / "wt1"
+        worktree_gitdir.mkdir(parents=True)
+        # Create outside target above the boundary
+        outside = tmp_path / "outside" / "bare"
+        outside.mkdir(parents=True)
+        # Write commondir in worktree gitdir pointing outside
+        (worktree_gitdir / "commondir").write_text(str(outside))
+        # Create worktree with .git file pointing to worktree_gitdir
+        wt = projects / "worktree"
+        wt.mkdir()
+        (wt / ".git").write_text(f"gitdir: {worktree_gitdir}")
+        result = resolve_bare_repo_path(str(wt))
+        assert result is None

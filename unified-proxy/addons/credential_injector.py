@@ -6,15 +6,14 @@ Credentials are read from environment variables and injected as headers.
 Uses container identity for context in logging and per-container rules.
 
 Provider Credential Map:
-- api.anthropic.com: Authorization Bearer from CLAUDE_CODE_OAUTH_TOKEN,
-                     or x-api-key from ANTHROPIC_API_KEY
-- api.openai.com: Authorization Bearer from OPENAI_API_KEY
+- api.anthropic.com: → gateway (:9848), removed from PROVIDER_MAP
+- api.openai.com: → gateway (:9849), removed from PROVIDER_MAP
+- api.github.com: → gateway (:9850), removed from PROVIDER_MAP
 - generativelanguage.googleapis.com: x-goog-api-key from GOOGLE_API_KEY (or GEMINI_API_KEY)
 - api.tavily.com: Authorization Bearer from TAVILY_API_KEY (header + body injection)
 - api.semanticscholar.org: x-api-key from SEMANTIC_SCHOLAR_API_KEY
 - api.perplexity.ai: Authorization Bearer from PERPLEXITY_API_KEY
 - api.z.ai: x-api-key from ZHIPU_API_KEY
-- api.github.com: Authorization Bearer from GITHUB_TOKEN (or GH_TOKEN)
 - uploads.github.com: Authorization Bearer from GITHUB_TOKEN (or GH_TOKEN)
 - github.com: Authorization Bearer from GITHUB_TOKEN (or GH_TOKEN)
 
@@ -35,9 +34,7 @@ API Key Support (OpenCode CLI - zai-coding-plan):
 
 import json
 import os
-import re
 from typing import Optional
-from urllib.parse import urlparse
 
 from mitmproxy import http
 
@@ -105,21 +102,24 @@ ZHIPU_API_HOSTS = [
 ]
 
 
+# SYNC WARNING: If you add a new provider here, also add its domain(s) to
+# MITM_DOMAINS in generate_squid_config.py so Squid routes traffic through
+# mitmproxy for credential injection.
 PROVIDER_MAP = {
-    "api.anthropic.com": {
-        "header": "x-api-key",
-        "env_var": "ANTHROPIC_API_KEY",
-        "format": "value",
-        # Alternative credential with different header (OAuth token)
-        "alt_env_var": "CLAUDE_CODE_OAUTH_TOKEN",
-        "alt_header": "Authorization",
-        "alt_format": "bearer",
-    },
-    "api.openai.com": {
-        "header": "Authorization",
-        "env_var": "OPENAI_API_KEY",
-        "format": "bearer",
-    },
+    # NOTE: api.anthropic.com removed from PROVIDER_MAP.
+    # Anthropic traffic routes through the API gateway (http://unified-proxy:9848)
+    # which handles credential injection and HTTPS forwarding.
+    # See unified-proxy/gateway.py.
+
+    # NOTE: api.openai.com removed from PROVIDER_MAP.
+    # OpenAI traffic routes through the API gateway (http://unified-proxy:9849)
+    # which handles credential injection and HTTPS forwarding.
+    # See unified-proxy/openai_gateway.py.
+    # NOTE: generativelanguage.googleapis.com API-key traffic now routes
+    # through the Gemini gateway (http://unified-proxy:9851) which handles
+    # credential injection and HTTPS forwarding. This entry remains as
+    # fallback for OAuth-mode traffic that still flows through MITM.
+    # See unified-proxy/gemini_gateway.py.
     "generativelanguage.googleapis.com": {
         "header": "x-goog-api-key",
         "env_var": "GOOGLE_API_KEY",
@@ -146,13 +146,14 @@ PROVIDER_MAP = {
         "env_var": "ZHIPU_API_KEY",
         "format": "value",
     },
-    # GitHub hosts (for gh CLI, API access, and git HTTPS operations)
-    "api.github.com": {
-        "header": "Authorization",
-        "env_var": "GITHUB_TOKEN",
-        "fallback_env_var": "GH_TOKEN",
-        "format": "bearer",
-    },
+    # NOTE: api.github.com removed from PROVIDER_MAP.
+    # GitHub API traffic routes through the API gateway (http://unified-proxy:9850)
+    # which handles credential injection, security policy enforcement, and
+    # HTTPS forwarding. See unified-proxy/github_gateway.py.
+
+    # GitHub uploads and github.com remain on the MITM path because
+    # uploads.github.com is used for release asset uploads which the gh CLI
+    # accesses via URLs returned from the API (not GITHUB_API_URL).
     "uploads.github.com": {
         "header": "Authorization",
         "env_var": "GITHUB_TOKEN",
@@ -177,84 +178,9 @@ class CredentialInjector:
         self.opencode_manager: Optional[OpenCodeKeyManager] = None
         self.gemini_manager: Optional[GeminiTokenManager] = None
         self._load_credentials()
-        self._register_anthropic_base_url_host()
         self._init_oauth_manager()
         self._init_opencode_manager()
         self._init_gemini_manager()
-        self.anthropic_custom_headers = self._parse_custom_headers(
-            os.environ.get("ANTHROPIC_CUSTOM_HEADERS", "")
-        )
-        self.anthropic_hosts = self._build_anthropic_hosts()
-        if self.anthropic_custom_headers:
-            logger.info(
-                f"Loaded {len(self.anthropic_custom_headers)} custom Anthropic header(s), "
-                f"targeting hosts: {self.anthropic_hosts}"
-            )
-
-    # Header names that must not be overridden by custom headers because
-    # they are managed by the credential injection logic.
-    _RESERVED_HEADER_NAMES = frozenset({"x-api-key", "authorization"})
-
-    def _register_anthropic_base_url_host(self) -> None:
-        """Register custom ANTHROPIC_BASE_URL host in PROVIDER_MAP and credentials_cache.
-
-        When users set a custom base URL (e.g. a LiteLLM proxy), the credential
-        injector must treat that host identically to api.anthropic.com — otherwise
-        `host not in PROVIDER_MAP` short-circuits and neither credentials nor
-        custom headers are injected.
-        """
-        base_url = os.environ.get("ANTHROPIC_BASE_URL", "").strip()
-        if not base_url:
-            return
-        parsed = urlparse(base_url)
-        hostname = parsed.hostname
-        if not hostname or hostname == "api.anthropic.com":
-            return
-
-        # Mirror api.anthropic.com's PROVIDER_MAP entry for this host
-        anthropic_config = PROVIDER_MAP["api.anthropic.com"]
-        PROVIDER_MAP[hostname] = dict(anthropic_config)
-        logger.info(
-            f"Registered ANTHROPIC_BASE_URL host '{hostname}' in PROVIDER_MAP"
-        )
-
-        # Copy credentials_cache entry so host-based injection works
-        if "api.anthropic.com" in self.credentials_cache:
-            self.credentials_cache[hostname] = dict(
-                self.credentials_cache["api.anthropic.com"]
-            )
-            logger.info(
-                f"Copied Anthropic credentials to cache for '{hostname}'"
-            )
-
-    def _build_anthropic_hosts(self) -> set[str]:
-        """Return the set of hosts that should receive custom Anthropic headers."""
-        hosts = {"api.anthropic.com"}
-        base_url = os.environ.get("ANTHROPIC_BASE_URL", "").strip()
-        if base_url:
-            parsed = urlparse(base_url)
-            if parsed.hostname:
-                hosts.add(parsed.hostname)
-        return hosts
-
-    def _parse_custom_headers(self, raw: str) -> list[tuple[str, str]]:
-        """Parse ANTHROPIC_CUSTOM_HEADERS env var into (name, value) pairs."""
-        if not raw:
-            return []
-        headers = []
-        for entry in re.split(r"[,\n]", raw):
-            entry = entry.strip()
-            if not entry or ":" not in entry:
-                continue
-            name, _, value = entry.partition(":")
-            name = name.strip()
-            if name.lower() in self._RESERVED_HEADER_NAMES:
-                logger.warning(
-                    f"Ignoring custom header '{name}': conflicts with credential injection"
-                )
-                continue
-            headers.append((name, value.strip()))
-        return headers
 
     def _load_credentials(self):
         """Load credentials from environment variables into cache."""
@@ -445,6 +371,9 @@ class CredentialInjector:
 
         # Only handle OpenAI/ChatGPT endpoints (Codex CLI)
         # Don't intercept requests to other APIs like Anthropic
+        # NOTE: chatgpt.com traffic now primarily routes through the ChatGPT
+        # gateway (:443 TLS) via /etc/hosts redirect. This MITM path remains
+        # as a safety net for edge cases (e.g., auth.openai.com OAuth refresh).
         host = flow.request.host
         if host not in ("api.openai.com", "auth.openai.com", "chatgpt.com"):
             return False
@@ -655,7 +584,7 @@ class CredentialInjector:
             return
 
         if host not in self.credentials_cache:
-            if host in ("api.github.com", "uploads.github.com", "github.com"):
+            if host in ("uploads.github.com", "github.com"):
                 # Allow unauthenticated GitHub API requests when no token is available
                 self._strip_github_placeholder(flow)
                 logger.info(
@@ -692,15 +621,6 @@ class CredentialInjector:
             f"Injected {header_name} for {host} "
             f"(container: {container_id or 'unknown'})"
         )
-
-        # Inject custom Anthropic headers if configured
-        if host in self.anthropic_hosts and self.anthropic_custom_headers:
-            for h_name, h_value in self.anthropic_custom_headers:
-                flow.request.headers[h_name] = h_value
-            logger.info(
-                f"Injected {len(self.anthropic_custom_headers)} custom header(s) for {host} "
-                f"(container: {container_id or 'unknown'})"
-            )
 
     def _strip_github_placeholder(self, flow: http.HTTPFlow) -> None:
         """Remove placeholder GitHub Authorization header to allow anonymous access."""

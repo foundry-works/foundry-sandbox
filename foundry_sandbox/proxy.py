@@ -139,7 +139,7 @@ def proxy_curl(
             return json.loads(output) if output else {}
 
     except subprocess.TimeoutExpired as e:
-        raise ProxyError(f"curl timed out after 30s: {e}")
+        raise ProxyError(f"curl timed out after {PROXY_TIMEOUT}s: {e}")
     except json.JSONDecodeError as e:
         raise ProxyError(f"Failed to parse JSON response: {e}")
 

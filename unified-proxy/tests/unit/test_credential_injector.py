@@ -132,26 +132,6 @@ class TestCredentialInjector:
 class TestAPICredentialInjection(TestCredentialInjector):
     """Tests for API credential injection."""
 
-    def test_anthropic_api_key_injection(self, injector: CredentialInjector):
-        """Test that Anthropic API key is injected correctly."""
-        flow = MockHTTPFlow("api.anthropic.com", "/v1/messages")
-        flow.request.headers["x-api-key"] = "placeholder"
-
-        injector.request(flow)
-
-        assert flow.response is None  # No error response
-        assert flow.request.headers["x-api-key"] == "test-anthropic-key"
-
-    def test_openai_bearer_injection(self, injector: CredentialInjector):
-        """Test that OpenAI key is injected as Bearer token."""
-        flow = MockHTTPFlow("api.openai.com", "/v1/chat/completions")
-        flow.request.headers["Authorization"] = "placeholder"
-
-        injector.request(flow)
-
-        assert flow.response is None
-        assert flow.request.headers["Authorization"] == "Bearer test-openai-key"
-
     def test_google_api_key_injection(self, injector: CredentialInjector):
         """Test that Google API key is injected correctly."""
         flow = MockHTTPFlow("generativelanguage.googleapis.com", "/v1beta/models")
@@ -221,7 +201,8 @@ class TestAPICredentialInjection(TestCredentialInjector):
 
     def test_missing_credential_returns_500(self, injector_minimal: CredentialInjector):
         """Test that missing credentials return 500 error."""
-        flow = MockHTTPFlow("api.openai.com", "/v1/chat/completions")
+        # Use a provider still in PROVIDER_MAP (api.tavily.com) without its key set
+        flow = MockHTTPFlow("api.tavily.com", "/search")
 
         injector_minimal.request(flow)
 
@@ -242,9 +223,9 @@ class TestAPICredentialInjection(TestCredentialInjector):
 class TestGitHubTokenInjection(TestCredentialInjector):
     """Tests for GitHub token injection."""
 
-    def test_github_api_token_injection(self, injector: CredentialInjector):
-        """Test GitHub API token injection."""
-        flow = MockHTTPFlow("api.github.com", "/repos/owner/repo")
+    def test_github_main_site_token_injection(self, injector: CredentialInjector):
+        """Test GitHub main site token injection (git credential flow)."""
+        flow = MockHTTPFlow("github.com", "/owner/repo.git/info/refs")
         flow.request.headers["Authorization"] = "placeholder"
 
         injector.request(flow)
@@ -264,7 +245,7 @@ class TestGitHubTokenInjection(TestCredentialInjector):
 
     def test_github_no_token_allows_anonymous(self, injector_minimal: CredentialInjector):
         """Test that GitHub requests work without token (anonymous)."""
-        flow = MockHTTPFlow("api.github.com", "/repos/owner/repo")
+        flow = MockHTTPFlow("github.com", "/owner/repo.git/info/refs")
         flow.request.headers["Authorization"] = f"Bearer {GITHUB_PLACEHOLDER_MARKER}"
 
         injector_minimal.request(flow)
@@ -281,7 +262,7 @@ class TestGitHubTokenInjection(TestCredentialInjector):
         }, clear=True):
             injector = CredentialInjector()
 
-        flow = MockHTTPFlow("api.github.com", "/repos/owner/repo")
+        flow = MockHTTPFlow("github.com", "/owner/repo.git/info/refs")
         flow.request.headers["Authorization"] = "placeholder"
 
         injector.request(flow)
@@ -396,9 +377,8 @@ class TestCredentialInjectionLatency:
     def injector(self) -> CredentialInjector:
         """Create a CredentialInjector with test credentials."""
         with mock.patch.dict(os.environ, {
-            "ANTHROPIC_API_KEY": "test-anthropic-key",
-            "OPENAI_API_KEY": "test-openai-key",
             "GOOGLE_API_KEY": "test-google-key",
+            "TAVILY_API_KEY": "test-tavily-key",
             "GITHUB_TOKEN": "test-github-token",
         }, clear=True):
             return CredentialInjector()
@@ -411,8 +391,8 @@ class TestCredentialInjectionLatency:
         latencies = []
 
         for _ in range(1000):
-            flow = MockHTTPFlow("api.anthropic.com", "/v1/messages")
-            flow.request.headers["x-api-key"] = "placeholder"
+            flow = MockHTTPFlow("generativelanguage.googleapis.com", "/v1beta/models")
+            flow.request.headers["x-goog-api-key"] = "placeholder"
 
             start = time.perf_counter()
             injector.request(flow)
@@ -432,8 +412,8 @@ class TestCredentialInjectionLatency:
         latencies = []
 
         for _ in range(100):
-            flow = MockHTTPFlow("api.anthropic.com", "/v1/messages")
-            flow.request.headers["x-api-key"] = "placeholder"
+            flow = MockHTTPFlow("generativelanguage.googleapis.com", "/v1beta/models")
+            flow.request.headers["x-goog-api-key"] = "placeholder"
 
             start = time.perf_counter()
             injector.request(flow)
@@ -457,114 +437,12 @@ class TestProviderMapConfiguration:
             missing = required_fields - set(config.keys())
             assert not missing, f"{host} missing required fields: {missing}"
 
-    def test_anthropic_has_alternative_credential(self):
-        """Test that Anthropic has alternative OAuth credential config."""
-        config = PROVIDER_MAP["api.anthropic.com"]
-        assert "alt_env_var" in config
-        assert config["alt_env_var"] == "CLAUDE_CODE_OAUTH_TOKEN"
-        assert "alt_header" in config
-        assert "alt_format" in config
-
     def test_github_has_fallback_token(self):
         """Test that GitHub has fallback GH_TOKEN config."""
-        for host in ["api.github.com", "uploads.github.com"]:
+        for host in ["uploads.github.com", "github.com"]:
             config = PROVIDER_MAP[host]
             assert "fallback_env_var" in config
             assert config["fallback_env_var"] == "GH_TOKEN"
-
-
-class TestCustomBaseURLRegistration:
-    """Tests for ANTHROPIC_BASE_URL host registration in PROVIDER_MAP."""
-
-    def teardown_method(self):
-        """Remove any custom hosts added to PROVIDER_MAP during tests."""
-        for host in list(PROVIDER_MAP.keys()):
-            if host not in (
-                "api.anthropic.com", "api.openai.com",
-                "generativelanguage.googleapis.com", "api.tavily.com",
-                "api.semanticscholar.org", "api.perplexity.ai", "api.z.ai",
-                "api.github.com", "uploads.github.com", "github.com",
-            ):
-                del PROVIDER_MAP[host]
-
-    def test_custom_base_url_registered_in_provider_map(self):
-        """Test that ANTHROPIC_BASE_URL host is added to PROVIDER_MAP."""
-        with mock.patch.dict(os.environ, {
-            "ANTHROPIC_API_KEY": "test-anthropic-key",
-            "ANTHROPIC_BASE_URL": "https://my-litellm.example.com/v1",
-        }, clear=True):
-            CredentialInjector()
-
-        assert "my-litellm.example.com" in PROVIDER_MAP
-        config = PROVIDER_MAP["my-litellm.example.com"]
-        assert config["header"] == "x-api-key"
-        assert config["env_var"] == "ANTHROPIC_API_KEY"
-
-    def test_custom_base_url_credentials_cached(self):
-        """Test that credentials are cached for custom base URL host."""
-        with mock.patch.dict(os.environ, {
-            "ANTHROPIC_API_KEY": "test-anthropic-key",
-            "ANTHROPIC_BASE_URL": "https://my-litellm.example.com/v1",
-        }, clear=True):
-            injector = CredentialInjector()
-
-        assert "my-litellm.example.com" in injector.credentials_cache
-        assert injector.credentials_cache["my-litellm.example.com"]["value"] == "test-anthropic-key"
-
-    def test_custom_base_url_credential_injection(self):
-        """Test that requests to custom base URL get credentials injected."""
-        with mock.patch.dict(os.environ, {
-            "ANTHROPIC_API_KEY": "test-anthropic-key",
-            "ANTHROPIC_BASE_URL": "https://my-litellm.example.com/v1",
-        }, clear=True):
-            injector = CredentialInjector()
-
-        flow = MockHTTPFlow("my-litellm.example.com", "/v1/messages")
-        flow.request.headers["x-api-key"] = "CRED_PROXY_placeholder"
-
-        injector.request(flow)
-
-        assert flow.response is None
-        assert flow.request.headers["x-api-key"] == "test-anthropic-key"
-
-    def test_custom_base_url_with_custom_headers(self):
-        """Test that custom headers are injected for custom base URL host."""
-        with mock.patch.dict(os.environ, {
-            "ANTHROPIC_API_KEY": "test-anthropic-key",
-            "ANTHROPIC_BASE_URL": "https://my-litellm.example.com/v1",
-            "ANTHROPIC_CUSTOM_HEADERS": "x-litellm-api-key: Bearer sk-1234",
-        }, clear=True):
-            injector = CredentialInjector()
-
-        flow = MockHTTPFlow("my-litellm.example.com", "/v1/messages")
-        flow.request.headers["x-api-key"] = "CRED_PROXY_placeholder"
-
-        injector.request(flow)
-
-        assert flow.response is None
-        assert flow.request.headers["x-api-key"] == "test-anthropic-key"
-        assert flow.request.headers["x-litellm-api-key"] == "Bearer sk-1234"
-
-    def test_no_custom_base_url_leaves_provider_map_unchanged(self):
-        """Test that PROVIDER_MAP is unchanged when no custom base URL is set."""
-        original_hosts = set(PROVIDER_MAP.keys())
-        with mock.patch.dict(os.environ, {
-            "ANTHROPIC_API_KEY": "test-anthropic-key",
-        }, clear=True):
-            CredentialInjector()
-
-        assert set(PROVIDER_MAP.keys()) == original_hosts
-
-    def test_api_anthropic_com_base_url_not_duplicated(self):
-        """Test that api.anthropic.com is not re-registered."""
-        with mock.patch.dict(os.environ, {
-            "ANTHROPIC_API_KEY": "test-anthropic-key",
-            "ANTHROPIC_BASE_URL": "https://api.anthropic.com",
-        }, clear=True):
-            CredentialInjector()
-
-        # Should still work normally, no duplication issues
-        assert "api.anthropic.com" in PROVIDER_MAP
 
 
 class TestContainerIdentityIntegration:

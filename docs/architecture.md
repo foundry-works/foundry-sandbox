@@ -243,9 +243,19 @@ foundry-sandbox/
 │       └── ...             # Other commands
 │
 ├── unified-proxy/              # Credential isolation proxy
-│   ├── addons/                 # mitmproxy addons
+│   ├── gateway_base.py         # Shared gateway factory (identity, forwarding, errors)
+│   ├── gateway_middleware.py   # Gateway middleware (identity, metrics, circuit breaker, rate limiter)
+│   ├── gateway.py              # Anthropic API gateway (:9848)
+│   ├── openai_gateway.py       # OpenAI API gateway (:9849)
+│   ├── github_gateway.py       # GitHub API gateway (:9850)
+│   ├── gemini_gateway.py       # Gemini API gateway (:9851)
+│   ├── chatgpt_gateway.py      # ChatGPT/Codex API gateway (:9852)
+│   ├── security_policies.py    # Shared GitHub security policies (gateway + policy engine)
+│   ├── generate_squid_config.py # Squid domain list generator from allowlist.yaml
+│   ├── squid.conf              # Squid forward proxy configuration
+│   ├── addons/                 # mitmproxy addons (MITM-required providers)
 │   │   ├── container_identity.py   # Container identification
-│   │   ├── credential_injector.py  # API credential injection
+│   │   ├── credential_injector.py  # API credential injection (MITM path)
 │   │   ├── git_proxy.py            # Git protocol handling
 │   │   ├── rate_limiter.py         # Rate limiting
 │   │   ├── circuit_breaker.py      # Resilience
@@ -256,10 +266,13 @@ foundry-sandbox/
 │   ├── git_operations.py       # Sandboxed git command execution (deny-by-default allowlist)
 │   ├── git_policies.py         # Protected branch enforcement
 │   ├── git_api.py              # Git API TCP server (port 8083)
-│   ├── github-api-filter.py    # GitHub API endpoint security filter
 │   ├── registry.py             # Container registry (SQLite)
 │   ├── internal_api.py         # Flask API for registration
 │   └── entrypoint.sh           # Proxy startup script
+│
+├── config/                         # Configuration files
+│   ├── allowlist.yaml              # Domain/endpoint allowlist
+│   └── push-file-restrictions.yaml # Push-time file restriction patterns
 │
 └── safety/                         # Security controls
     ├── sudoers-allowlist           # Sudo command restrictions
@@ -324,50 +337,99 @@ User runs: cast new owner/repo
 
 ## Unified Proxy Architecture
 
-The unified-proxy handles all credential isolation and API proxying for sandboxed containers:
+The unified-proxy handles credential isolation, API proxying, and security policy enforcement for sandboxed containers. It runs three subsystems: dedicated API gateways for high-traffic providers, a Squid forward proxy for domain allowlisting, and a conditional mitmproxy instance for providers that require TLS interception.
 
 ```
-┌─────────────────────────────────────────────────────────────────┐
-│                        UNIFIED PROXY                             │
-│                                                                 │
-│  ┌─────────────┐    ┌─────────────────────────────────────┐    │
-│  │  Internal   │    │           mitmproxy Core             │    │
-│  │  API (Flask)│    │                                      │    │
-│  │  /containers│    │  ┌─────────────────────────────────┐ │    │
-│  │  (Unix sock)│    │  │          Addon Chain            │ │    │
-│  └──────┬──────┘    │  │                                 │ │    │
-│         │           │  │  container_identity (identify)  │ │    │
-│         ▼           │  │  policy_engine (rules)          │ │    │
-│  ┌─────────────┐    │  │  dns_filter (DNS allowlist)     │ │    │
-│  │  Container  │    │  │  credential_injector (inject)   │ │    │
-│  │  Registry   │────┼──│  git_proxy (rewrite URLs)       │ │    │
-│  │  (SQLite)   │    │  │  rate_limiter (throttle)        │ │    │
-│  └─────────────┘    │  │  circuit_breaker (resilience)   │ │    │
-│                     │  │  metrics (observability)        │ │    │
-│                     │  └─────────────────────────────────┘ │    │
-│                     └─────────────────────────────────────┘    │
-│                                                                 │
-│  ┌─────────────┐                                                │
-│  │ DNS Filter  │  Allowlist-based DNS filtering                 │
-│  │ (mitmproxy) │  Returns NXDOMAIN for blocked domains          │
-│  └─────────────┘                                                │
-└─────────────────────────────────────────────────────────────────┘
+┌──────────────────────────────────────────────────────────────────┐
+│                        UNIFIED PROXY                              │
+│                                                                   │
+│  ┌──────────────────────────────────────────────────────────────┐ │
+│  │              API GATEWAYS (aiohttp)                          │ │
+│  │                                                              │ │
+│  │  :9848  Anthropic gateway  ──► api.anthropic.com (HTTPS)     │ │
+│  │  :9849  OpenAI gateway     ──► api.openai.com    (HTTPS)     │ │
+│  │  :9850  GitHub gateway     ──► api.github.com    (HTTPS)     │ │
+│  │  :9851  Gemini gateway     ──► generativelanguage.. (HTTPS)  │ │
+│  │  :9852  ChatGPT gateway    ──► chatgpt.com  (HTTP)  │ │
+│  │  :443   ChatGPT gateway    ──► chatgpt.com  (TLS)   │ │
+│  │                                                              │ │
+│  │  Shared infrastructure:                                      │ │
+│  │    gateway_base.py         — app factory, forwarding, errors │ │
+│  │    gateway_middleware.py    — identity, metrics, circuit      │ │
+│  │                              breaker, rate limiter            │ │
+│  │    security_policies.py    — GitHub policy enforcement        │ │
+│  └──────────────────────────────────────────────────────────────┘ │
+│                                                                   │
+│  ┌──────────────────────────────────────────────────────────────┐ │
+│  │         SQUID FORWARD PROXY (:8080)                          │ │
+│  │                                                              │ │
+│  │  Allowed domains   → direct HTTPS tunnel (SNI, no decrypt)  │ │
+│  │  MITM domains      → cache_peer to mitmproxy (:8081)        │ │
+│  │  IP literals       → deny (all encodings blocked)           │ │
+│  │  Unknown domains   → deny                                   │ │
+│  └──────────────────────────────────────────────────────────────┘ │
+│                                                                   │
+│  ┌──────────────────────────────────────────────────────────────┐ │
+│  │     MITMPROXY (:8081, conditional)                           │ │
+│  │                                                              │ │
+│  │  ┌────────────────────────────────────────────────────────┐  │ │
+│  │  │              Addon Chain                               │  │ │
+│  │  │                                                        │  │ │
+│  │  │  container_identity → policy_engine → dns_filter       │  │ │
+│  │  │  → credential_injector → git_proxy → rate_limiter      │  │ │
+│  │  │  → circuit_breaker → metrics                           │  │ │
+│  │  └────────────────────────────────────────────────────────┘  │ │
+│  │                                                              │ │
+│  │  Active only when MITM-required provider credentials are     │ │
+│  │  configured (Gemini, Tavily, Semantic Scholar, Perplexity,   │ │
+│  │  Zhipu) or DNS filtering is enabled.                         │ │
+│  └──────────────────────────────────────────────────────────────┘ │
+│                                                                   │
+│  ┌─────────────┐  ┌─────────────┐  ┌────────────────────────┐   │
+│  │ Internal API│  │  Container  │  │  Git API (:8083)       │   │
+│  │ (Flask)     │  │  Registry   │  │  HMAC-authenticated    │   │
+│  │ (Unix sock) │──│  (SQLite)   │──│  git command execution │   │
+│  └─────────────┘  └─────────────┘  └────────────────────────┘   │
+└──────────────────────────────────────────────────────────────────┘
 ```
 
-### Addon Chain
+### API Gateways
 
-Each request flows through the addon chain in order:
+Sandboxes connect to API gateways via provider-specific `*_BASE_URL` environment variables. Gateways accept plaintext HTTP on the internal Docker network, validate container identity, inject real credentials, and forward to the upstream provider over HTTPS. Responses are streamed back chunk-by-chunk without buffering.
 
-1. **container_identity** - Identifies container by source IP, attaches config to request
-2. **policy_engine** - Enforces access policies (evaluated before credentials are injected)
-3. **dns_filter** - Filters DNS queries against allowlist (conditional; only when DNS mode enabled)
-4. **credential_injector** - Injects API credentials (Anthropic, GitHub, etc.)
-5. **git_proxy** - Validates git operations, enforces repo authorization and push policies
-6. **rate_limiter** - Per-container, per-upstream rate limiting
-7. **circuit_breaker** - Protects against upstream failures
-8. **metrics** - Records request/response metrics
+Each gateway is a thin wrapper around `gateway_base.py`, which provides a factory function (`create_gateway_app()`) that builds a fully configured aiohttp application. The per-gateway module specifies the upstream URL, credential loading logic, route table, and optional request hook.
 
-Additionally, `github-api-filter.py` runs as a legacy addon loaded after the main chain, filtering dangerous GitHub API operations (repo deletion, secret access, branch protection changes) at the network layer.
+**Middleware stack** (applied to all gateways, outermost first):
+1. `IdentityMiddleware` — Resolves container identity from source IP via the container registry
+2. `MetricsMiddleware` — Records request count and latency (Prometheus, optional)
+3. `CircuitBreakerMiddleware` — Fails fast when upstream is unhealthy (fail-closed: errors return JSON, not pass-through)
+4. `RateLimiterMiddleware` — Per-container, per-upstream token bucket
+
+The GitHub gateway additionally enforces security policies via `security_policies.py` (shared with the mitmproxy policy engine): path normalization, merge blocking, operation blocklist, and body inspection.
+
+### Squid Forward Proxy
+
+Squid handles all non-gateway HTTPS traffic on port 8080. Domain lists are generated at startup by `generate_squid_config.py` from `config/allowlist.yaml`:
+
+- **Allowed domains** — HTTPS tunnelled via SNI splice (no TLS decryption)
+- **MITM domains** — Forwarded to mitmproxy via `cache_peer` for credential injection
+- **IP literals** — Blocked by ACLs (dotted decimal, IPv6 brackets, octal, hex, integer encodings)
+- **Unknown domains** — Denied
+
+### Mitmproxy (Conditional)
+
+mitmproxy runs on port 8081 when MITM-required provider credentials are configured or DNS filtering is enabled. It handles TLS interception for providers that lack `*_BASE_URL` env var support. When no MITM providers are configured, no CA certificate is generated.
+
+The mitmproxy addon chain processes requests in order:
+
+1. **container_identity** — Identifies container by source IP, attaches config to request
+2. **policy_engine** — Enforces access policies (evaluated before credentials are injected)
+3. **dns_filter** — Filters DNS queries against allowlist (conditional)
+4. **credential_injector** — Injects API credentials for MITM-required providers
+5. **git_proxy** — Validates git operations, enforces repo authorization and push policies
+6. **rate_limiter** — Per-container, per-upstream rate limiting
+7. **circuit_breaker** — Protects against upstream failures
+8. **metrics** — Records request/response metrics
 
 ### Container Registration
 

@@ -46,11 +46,11 @@ Each pillar blocks specific threat categories. For implementation details, see [
 | Pillar | What It Blocks | What It Doesn't Block |
 |--------|----------------|----------------------|
 | **Read-only Filesystem** | Filesystem writes, system modification, persistent malware | Writes to tmpfs mounts (/tmp, /home/ubuntu) |
-| **Network Isolation** | Unauthorized egress, direct external access, DNS exfiltration, IP spoofing/ARP poisoning (CAP_NET_RAW dropped) | Traffic to allowed domains (GitHub, AI APIs); normal TCP/UDP networking |
+| **Network Isolation** | Unauthorized egress, direct external access, DNS exfiltration, IP spoofing/ARP poisoning (CAP_NET_RAW dropped), direct-IP requests (all encodings blocked) | Traffic to allowed domains (GitHub, AI APIs); normal TCP/UDP networking |
 | **Sudoers Allowlist** | Arbitrary sudo commands, privilege escalation | Allowed commands (apt-get install, service management) |
-| **Credential Isolation** | Credential theft, API key exfiltration, env var scraping | Authorized API calls via proxy |
+| **Credential Isolation** | Credential theft, API key exfiltration, env var scraping | Authorized API calls via gateway/proxy |
 | **Branch Isolation** | Cross-sandbox branch access, unauthorized ref checkout, branch listing leaks | Access to well-known branches (main, master, develop, etc.) and tags |
-| **Git Safety** | Force pushes to protected branches, branch/tag deletion, dangerous GitHub API operations | Git operations on sandbox's own branch |
+| **Git Safety** | Force pushes to protected branches, branch/tag deletion, dangerous GitHub API operations, PR merges (REST and GraphQL), CI/CD pipeline modifications on push | Git operations on sandbox's own branch; commits/pushes to non-restricted files |
 
 ---
 
@@ -70,6 +70,9 @@ Each pillar blocks specific threat categories. For implementation details, see [
 | Session hijacking | IP binding | CAP_NET_RAW dropped | [Session Attacks](#6-session-token-attacks) |
 | DNS exfiltration | Network (DNS filter) | Domain allowlist | [DNS Exfiltration](#7-dns-exfiltration) |
 | Sudo escalation | Sudoers Allowlist | Read-only Filesystem | [Sudo Escalation](#8-sudo-escalation) |
+| IP encoding bypass (SSRF) | IP literal detection (regex + inet_aton) | Domain allowlist | [IP Encoding Bypass](#9-ip-encoding-bypass) |
+| PR merge (REST + GraphQL) | Early-exit merge blocking | GitHub API blocklist (defense-in-depth) | [PR Merge Prevention](#10-pr-merge-prevention) |
+| CI/CD pipeline modification | Push-time file validation | Commit-time file validation | [CI/CD Pipeline Protection](#11-cicd-pipeline-protection) |
 | Proxy pack parsing exploit | Pack size limit + timeout | Fail-closed, isolated tempdir | [Proxy-Side Attack Surface](#proxy-side-attack-surface) |
 
 ---
@@ -132,7 +135,7 @@ In credential isolation mode, sandboxes cannot directly access the `.git` direct
 
 **How it works:**
 
-1. **`.git` is hidden** — The worktree's `.git` file (a gitdir pointer) is bind-mounted to `/dev/null`, preventing the sandbox from reading repository metadata or objects directly
+1. **`.git` is hidden** — The worktree's `.git` file (a gitdir pointer) is bind-mounted to `/dev/null` in docker-compose, then overlaid with a 1KB tmpfs in `entrypoint-root.sh`. The sandbox sees an empty directory via both `ls` and `stat`, with no `/dev/null` fingerprint. If the tmpfs overlay fails, the `/dev/null` bind mount remains as a fallback
 2. **Git wrapper intercepts commands** — `stubs/git-wrapper.sh` is mounted at `/usr/local/bin/git`, taking precedence over `/usr/bin/git`. For any git command under `/workspace`, the wrapper proxies the request to the git API server
 3. **Git API server** — The unified-proxy runs a git API endpoint on port 8083 that receives JSON-encoded git commands, validates them, and executes them against the bare repository
 4. **HMAC-SHA256 authentication** — Each request is signed with a per-sandbox HMAC secret. The signature covers the HTTP method, path, request body hash, timestamp, and a random nonce to prevent replay attacks
@@ -193,7 +196,7 @@ A compromised sandbox could attempt to steal credentials and exfiltrate them.
 | Secondary | Network Isolation | Cannot exfiltrate to unauthorized destinations |
 | UX | Credential Redaction | Masks secrets in command output |
 
-**Why This Works:** Sandboxes receive placeholder values (`CREDENTIAL_PROXY_PLACEHOLDER`) instead of real API keys. The unified-proxy container holds real credentials and injects them into outbound requests. Even if code reads the environment, it gets nothing useful. See [Credential Isolation](credential-isolation.md) for the complete architecture.
+**Why This Works:** Sandboxes receive placeholder values (`CREDENTIAL_PROXY_PLACEHOLDER`) instead of real API keys. The unified-proxy container holds real credentials and injects them into outbound requests via two mechanisms: API gateways (plaintext HTTP endpoints on the internal Docker network for Anthropic on `:9848`, OpenAI on `:9849`, and GitHub on `:9850`) inject credentials without HTTPS interception, while MITM-required providers (Gemini, Tavily, Semantic Scholar, Perplexity, Zhipu) use a dedicated mitmproxy instance. Even if code reads the environment, it gets nothing useful. See [Credential Isolation](credential-isolation.md) for the complete architecture.
 
 ---
 
@@ -306,6 +309,78 @@ If the AI gains unrestricted sudo access, it could bypass container restrictions
 
 ---
 
+### 9. IP Encoding Bypass
+
+Agents could bypass domain-based network filtering by constructing URLs with IP addresses encoded in non-standard formats that resolve to internal or unauthorized hosts.
+
+**Attack Vectors:**
+- Dotted decimal: `http://1.2.3.4/`
+- Octal encoding: `http://0177.0.0.1/` (resolves to 127.0.0.1)
+- Hex encoding: `http://0x7f000001/`
+- Integer encoding: `http://2130706433/` (resolves to 127.0.0.1)
+- Mixed encoding: `http://0x7f.0.0.01/`
+- IPv6 brackets: `http://[::1]/`
+
+**Defense Layers:**
+
+| Layer | Control | Effect |
+|-------|---------|--------|
+| Primary | `is_ip_literal()` in policy engine | Rejects all IP-encoded hostnames before domain allowlist lookup |
+| Secondary | `socket.inet_aton()` fallback | Catches mixed encodings that regex patterns miss |
+| Tertiary | Squid IP literal ACLs | Duplicates IP blocking at the forward proxy layer |
+
+**Why This Works:** The `is_ip_literal()` check runs at the top of the request handler, before `normalize_host()` or any allowlist lookup. It combines regex patterns for common encodings with a `socket.inet_aton()` fallback that handles mixed forms (e.g., `0x7f.0.0.01`). Any all-numeric hostname is either an integer-encoded IP or invalid, and is blocked either way. The check is duplicated in Squid ACLs for defense-in-depth.
+
+---
+
+### 10. PR Merge Prevention
+
+An AI agent could merge a pull request — either through the REST API or a GraphQL mutation — causing irreversible changes to the target branch without human review.
+
+**Attack Vectors:**
+- REST: `PUT /repos/owner/repo/pulls/1/merge`
+- REST: `PUT /repos/owner/repo/pulls/1/auto-merge`
+- GraphQL: `mergePullRequest` mutation
+- GraphQL: `enablePullRequestAutoMerge` mutation
+
+**Defense Layers:**
+
+| Layer | Control | Effect |
+|-------|---------|--------|
+| Primary | Early-exit `is_merge_request()` | Unconditional check before any domain matching, credential injection, or policy evaluation |
+| Secondary | GitHub API blocklist (Step 3) | Redundant fallback — same patterns checked again in `_check_github_blocklist()` |
+| Tertiary | GitHub API gateway policy | Merge blocking duplicated at the gateway layer for defense-in-depth |
+
+**Why This Works:** `is_merge_request()` is the first check in the request handler. It scans both the request path (using `search()` for substring matching) and the request body (for GraphQL mutation keywords). This runs before domain matching or credential injection, so a bug in earlier processing steps cannot bypass merge blocking. The body keyword scan is intentionally broad — false positives block legitimate requests, which is safer than false negatives that allow merges.
+
+---
+
+### 11. CI/CD Pipeline Protection
+
+An agent could modify CI/CD configuration files (GitHub Actions workflows, Makefiles, pre-commit hooks) and push them, enabling persistent compromise outside the sandbox.
+
+**Attack Vectors:**
+- Modifying `.github/workflows/ci.yml` to inject malicious steps
+- Adding a new workflow file to `.github/actions/`
+- Modifying `Makefile`, `Justfile`, or `Taskfile.yml` to run arbitrary commands
+- Altering `.pre-commit-config.yaml` to execute hooks on other developers' machines
+- Modifying `CODEOWNERS` to change approval requirements
+
+**Defense Layers:**
+
+| Layer | Control | Effect |
+|-------|---------|--------|
+| Primary | Push-time file validation | `check_push_files()` enumerates changed files and rejects pushes modifying blocked patterns |
+| Secondary | Commit-time file validation | `check_file_restrictions()` on staged files gives early feedback before push |
+| Tertiary | Path traversal prevention | Paths containing `..` after normalization are rejected |
+| Fail-safe | Fail-closed on diff failure | If `git diff` fails, the push is rejected |
+
+**Configuration:** Blocked and warned patterns are defined in `config/push-file-restrictions.yaml`. Blocked patterns (e.g., `.github/workflows/`, `Makefile`) always reject. Warned patterns (e.g., `package.json`, `Dockerfile`) are logged or rejected depending on `warn_action` setting.
+
+**Why This Works:** The validation runs in the `/git/exec` handler before the push command executes. It enumerates files changed between the remote tracking branch (or default branch for first push) and HEAD, then matches each against the pattern lists. The git API server is single-threaded per sandbox, eliminating TOCTOU races between the check and the push.
+
+---
+
 ## Why These Protections?
 
 ### Mistake Recovery Should Be Easy
@@ -324,6 +399,10 @@ No single control is sufficient. Security comes from multiple overlapping layers
 3. **Read-only Filesystem** prevents persistent damage even if commands execute
 4. **Sudoers Allowlist** restricts privilege escalation even for allowed sudo use
 5. **CAP_NET_RAW dropped** closes Layer 2 attack vectors that bypass higher-level controls
+6. **IP literal blocking** prevents DNS filter bypass via encoded IP addresses
+7. **Early-exit merge blocking** prevents PR merges before any other request processing
+8. **Push-time file validation** prevents CI/CD pipeline modifications from leaving the sandbox
+9. **Gateway credential injection** eliminates MITM for major providers, reducing CA trust surface
 
 Each layer catches what others might miss. See [Security Architecture](security-architecture.md) for the complete model.
 
@@ -393,14 +472,15 @@ The sandbox container is granted `CAP_NET_ADMIN` for iptables DNS firewall rules
 
 ### Mitmproxy CA Trust
 
-The sandbox trusts the unified-proxy's mitmproxy CA certificate for HTTPS interception.
+The sandbox trusts the unified-proxy's mitmproxy CA certificate for HTTPS interception of providers that lack `*_BASE_URL` env var support (Gemini, Tavily, Semantic Scholar, Perplexity, Zhipu). Major providers (Anthropic, OpenAI, GitHub) now route through plaintext HTTP gateways and do not require MITM.
 
 **Mitigations:**
 - The CA private key never enters the sandbox (stored only on the proxy container)
 - The sandbox only receives the public CA certificate (`mitmproxy-ca.pem`)
 - Network isolation ensures only the unified-proxy can use this CA for interception
+- CA generation is gated behind `ENABLE_MITM_FALLBACK` and MITM provider credential detection — when no MITM providers are configured, no CA is generated and mitmproxy runs only for DNS filtering
 
-**Rationale:** Architectural requirement for credential injection. The proxy must terminate TLS to inject real credentials into outbound API requests.
+**Rationale:** MITM is only needed for providers that do not support custom base URL configuration. The gateway architecture eliminates MITM for the highest-traffic providers (Anthropic, OpenAI, GitHub), reducing the CA trust surface. See [Operations](../operations.md#gateway-rollback-procedures) for rollback procedures.
 
 ### Proxy-Side Attack Surface
 

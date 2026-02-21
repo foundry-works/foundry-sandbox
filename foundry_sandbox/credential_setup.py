@@ -323,7 +323,7 @@ def _stage_setup_credentials(
     auditable boundary that prevents real secrets from leaking into sandboxes.
     """
     if not isolate_credentials:
-        log_step("Copying credentials (isolation disabled)")
+        log_step("SECURITY: Credential isolation DISABLED — copying real credentials")
 
         # Gemini OAuth
         gemini_oauth = home / ".gemini" / "oauth_creds.json"
@@ -396,8 +396,8 @@ def _stage_setup_credentials(
         else:
             log_debug("SSH not enabled, skipping SSH key setup")
     else:
+        log_step("SECURITY: Credential isolation ENABLED — using proxy placeholders")
         _audit_credential_op("isolation_active", container_id, "*", success=True)
-        log_debug("Credential isolation enabled, skipping real credentials")
 
 
 def _stage_setup_git_config(container_id: str, home: Path, host_user: str) -> None:
