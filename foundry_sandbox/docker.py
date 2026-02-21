@@ -20,6 +20,8 @@ import tempfile
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Callable
 
+import yaml
+
 if TYPE_CHECKING:
     from foundry_sandbox.models import CredentialPlaceholders
 
@@ -305,8 +307,8 @@ def _wait_for_proxy_health(container_name: str, timeout: int = 55) -> bool:
             )
             if state_result.stdout.strip() == "false":
                 return False
-        except (OSError, subprocess.TimeoutExpired):
-            pass
+        except (OSError, subprocess.TimeoutExpired) as exc:
+            log_debug(f"Proxy health check attempt failed: {exc}")
         _time.sleep(2)
     return False
 
@@ -426,18 +428,23 @@ def _prepare_allowlist_override(
         raise FileNotFoundError(
             f"PROXY_ALLOWLIST_EXTRA_PATH is not a regular file: {host_extra}"
         )
+    # Belt-and-suspenders: reject paths with control characters that could
+    # corrupt YAML output even when using a safe serializer.
+    for ch in ("\n", "\r", "\x00"):
+        if ch in host_extra:
+            raise ValueError(
+                f"PROXY_ALLOWLIST_EXTRA_PATH contains invalid character: {host_extra!r}"
+            )
     container_mount = "/etc/unified-proxy/allowlist-extra.yml"
-    # Quote the host path to handle paths with YAML-significant
-    # characters (colons, spaces, etc.)
-    quoted_host = host_extra.replace("'", "''")
-    override_content = (
-        "services:\n"
-        "  unified-proxy:\n"
-        "    volumes:\n"
-        f"      - '{quoted_host}:{container_mount}:ro'\n"
-        "    environment:\n"
-        f"      - PROXY_ALLOWLIST_EXTRA_PATH={container_mount}\n"
-    )
+    override_dict = {
+        "services": {
+            "unified-proxy": {
+                "volumes": [f"{host_extra}:{container_mount}:ro"],
+                "environment": [f"PROXY_ALLOWLIST_EXTRA_PATH={container_mount}"],
+            }
+        }
+    }
+    override_content = yaml.dump(override_dict, default_flow_style=False)
     f = tempfile.NamedTemporaryFile(
         mode="w", suffix=".yml", prefix="allowlist-extra-",
         delete=False,

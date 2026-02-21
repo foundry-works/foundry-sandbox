@@ -325,6 +325,16 @@ configure_git_identity() {
         fi
     fi
 
+    # Sanitize name and email: strip control characters and truncate to 128 chars.
+    # The GitHub API discovery path above applies the same sanitization via Python,
+    # but env var values (GIT_USER_NAME/GIT_USER_EMAIL) bypass that code path.
+    if [[ -n "${name}" ]]; then
+        name=$(printf '%s' "${name}" | python3 -c "import sys,re; print(re.sub(r'[\x00-\x1f\x7f]','',sys.stdin.read())[:128])" 2>/dev/null) || name="${name:0:128}"
+    fi
+    if [[ -n "${email}" ]]; then
+        email=$(printf '%s' "${email}" | python3 -c "import sys,re; print(re.sub(r'[\x00-\x1f\x7f]','',sys.stdin.read())[:128])" 2>/dev/null) || email="${email:0:128}"
+    fi
+
     if [[ -n "${name}" ]]; then
         git config --global user.name "${name}"
         log "Git identity: user.name = ${name}"

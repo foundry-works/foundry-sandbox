@@ -5,7 +5,7 @@ and body inspection methods.
 """
 
 
-from addons.policy_engine import normalize_path, PolicyDecision, PolicyEngine
+from addons.policy_engine import is_ip_literal, normalize_path, PolicyDecision, PolicyEngine
 
 
 class TestNormalizePath:
@@ -108,6 +108,34 @@ class TestBodyInspection:
         result = engine._check_github_body_policies(
             "PATCH", "/repos/o/r/pulls/1", body, "application/json", "")
         assert result is None
+
+
+class TestIsIpLiteral:
+    """Tests for IP literal detection including IPv6."""
+
+    def test_bare_ipv6_loopback(self):
+        """Bare ::1 should be detected as IP literal."""
+        assert is_ip_literal("::1") is True
+
+    def test_bare_ipv6_full(self):
+        """Full IPv6 address should be detected as IP literal."""
+        assert is_ip_literal("2001:db8::1") is True
+
+    def test_ipv4_mapped_ipv6(self):
+        """IPv4-mapped IPv6 (::ffff:127.0.0.1) should be detected."""
+        assert is_ip_literal("::ffff:127.0.0.1") is True
+
+    def test_bracketed_ipv6_still_detected(self):
+        """Bracketed IPv6 [::1] should be detected by regex pattern."""
+        assert is_ip_literal("[::1]") is True
+
+    def test_regular_hostname_not_ip(self):
+        """Regular hostnames should not be detected as IP literals."""
+        assert is_ip_literal("github.com") is False
+
+    def test_ipv4_still_detected(self):
+        """IPv4 dotted decimal should still be detected."""
+        assert is_ip_literal("127.0.0.1") is True
 
 
 class TestPolicyDecision:

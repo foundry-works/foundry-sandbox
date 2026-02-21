@@ -311,6 +311,23 @@ class TestConfigKeyValidation:
         assert err is not None
         assert "not in permitted list" in err.reason
 
+    def test_wildcard_blocks_four_segment_key(self):
+        """Test remote.origin.proxy.command is blocked (4+ segments)."""
+        err = validate_command(["-c", "remote.origin.proxy.command=evil", "status"])
+        assert err is not None
+        assert "Blocked config key" in err.reason
+
+    def test_wildcard_blocks_extra_segment_pushurl(self):
+        """Test remote.origin.pushurl.extra is blocked (4+ segments)."""
+        err = validate_command(["-c", "remote.origin.pushurl.extra=evil", "status"])
+        assert err is not None
+        assert "Blocked config key" in err.reason
+
+    def test_fewer_segments_still_rejected(self):
+        """Test remote.proxy (fewer segments than pattern) is still rejected."""
+        err = validate_command(["-c", "remote.proxy=evil", "status"])
+        assert err is not None
+
 
 class TestCloneValidation:
     """Tests for clone argument validation."""
@@ -359,6 +376,24 @@ class TestCloneValidation:
                 ["clone", f"https://github.com/{owner}/{repo}"],
             )
             assert err is None, f"Marketplace {marketplace} should be allowed"
+
+    def test_token_only_auth_blocked(self):
+        """Test PAT-only auth (token@) in URL is blocked."""
+        extra, err = validate_clone_args(
+            ["clone", "https://ghp_xxxxxxxxxxxx@github.com/owner/repo"],
+            metadata={"repos": ["owner/repo"]},
+        )
+        assert err is not None
+        assert "not allowed" in err.reason
+
+    def test_username_only_auth_blocked(self):
+        """Test username-only auth (user@) in URL is blocked."""
+        extra, err = validate_clone_args(
+            ["clone", "https://myuser@github.com/owner/repo"],
+            metadata={"repos": ["owner/repo"]},
+        )
+        assert err is not None
+        assert "not allowed" in err.reason
 
 
 class TestPathValidation:

@@ -86,15 +86,6 @@ def _export_feature_flags(
     return enable_opencode, enable_zai
 
 
-def _has_zai_key() -> bool:
-    """Check if ZHIPU_API_KEY is set.
-
-    Returns:
-        True if ZHIPU_API_KEY is set and non-empty.
-    """
-    return bool(os.environ.get("ZHIPU_API_KEY"))
-
-
 def _has_opencode_key() -> bool:
     """Check if OpenCode auth file exists.
 
@@ -149,7 +140,7 @@ def _log_credential_warnings(
         opencode_auth = Path.home() / ".local/share/opencode/auth.json"
         if not opencode_auth.is_file():
             if enable_opencode:
-                if _has_zai_key():
+                if api_keys.has_zai_key():
                     log_warn("OpenCode enabled but auth file not found; relying on ZHIPU_API_KEY fallback (credential isolation).")
                 else:
                     log_warn("OpenCode enabled but auth file not found; OpenCode CLI will not work in credential isolation.")
@@ -163,7 +154,7 @@ def _log_credential_warnings(
             log_warn("Credential isolation: ~/.gemini/oauth_creds.json not found and GEMINI_API_KEY not set; Gemini CLI will not work.")
             log_warn("Run 'gemini auth' or set GEMINI_API_KEY if you plan to use Gemini.")
 
-    if enable_zai and not _has_zai_key():
+    if enable_zai and not api_keys.has_zai_key():
         log_warn("ZAI enabled but ZHIPU_API_KEY not set on host; claude-zai will not work.")
 
     if enable_opencode and not _has_opencode_key() and not uses_isolation:

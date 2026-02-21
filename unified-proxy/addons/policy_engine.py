@@ -95,6 +95,12 @@ def is_ip_literal(host: str) -> bool:
         return True
     except OSError:
         pass
+    # Catch bare IPv6 addresses (::1, 2001:db8::1, ::ffff:127.0.0.1)
+    try:
+        socket.inet_pton(socket.AF_INET6, host)
+        return True
+    except OSError:
+        pass
     return False
 
 

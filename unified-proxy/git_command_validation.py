@@ -208,8 +208,8 @@ _CLONE_SHORT_EMBED_OPTS: Tuple[str, ...] = (
     "-j",
 )
 
-# Base64-safe credential pattern (user:pass@) — reject for clone URLs
-_CLONE_CRED_RE = re.compile(r"://[^/:@]+:[^/:@]+@")
+# Credential pattern — reject any userinfo in clone URLs (user:pass@ or token@)
+_CLONE_CRED_RE = re.compile(r"://[^/@]+@")
 
 # ---------------------------------------------------------------------------
 # Config Key Validation (-c key=value)
@@ -510,7 +510,7 @@ def _matches_wildcard_config(key: str, pattern: str) -> bool:
     parts = pattern.split(".")
     key_parts = key.split(".")
 
-    if len(key_parts) != len(parts):
+    if len(key_parts) < len(parts):
         return False
 
     for p, k in zip(parts, key_parts):
