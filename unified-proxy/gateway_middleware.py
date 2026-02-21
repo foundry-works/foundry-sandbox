@@ -231,7 +231,6 @@ if _HAS_PROMETHEUS:
         "gateway_requests_total",
         "Total HTTP requests processed by API gateways",
         ["container_id", "upstream_host", "method", "status"],
-        registry=None,
     )
 
     GW_REQUEST_LATENCY = Histogram(
@@ -239,21 +238,18 @@ if _HAS_PROMETHEUS:
         "Gateway HTTP request latency in seconds",
         ["container_id", "upstream_host"],
         buckets=[0.01, 0.05, 0.1, 0.25, 0.5, 1.0, 2.5, 5.0, 10.0],
-        registry=None,
     )
 
     GW_RATE_LIMIT_STATE = Gauge(
         "gateway_rate_limit_remaining",
         "Remaining rate limit tokens for a container/upstream",
         ["container_id", "upstream_host"],
-        registry=None,
     )
 
     GW_CIRCUIT_BREAKER_STATE = Gauge(
         "gateway_circuit_breaker_state",
         "Circuit breaker state (0=closed, 1=half-open, 2=open)",
         ["container_id", "upstream_host"],
-        registry=None,
     )
 
 

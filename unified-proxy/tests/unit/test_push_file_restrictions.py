@@ -417,6 +417,27 @@ class TestEnumeratePushChangedFiles:
             files = _enumerate_push_changed_files("/repo", {}, "origin/main")
             assert files is None
 
+    def test_ref_range_before_separator(self):
+        """The revision range must come BEFORE '--' in the git diff command.
+
+        If '--' comes first, git treats the range as a pathspec and silently
+        returns empty output, bypassing file restrictions entirely.
+        """
+        mock_result = MagicMock()
+        mock_result.returncode = 0
+        mock_result.stdout = b"src/main.py\n"
+        with patch(
+            "git_operations.subprocess.run", return_value=mock_result
+        ) as mock_run:
+            _enumerate_push_changed_files("/repo", {}, "origin/main")
+            cmd = mock_run.call_args[0][0]
+            separator_idx = cmd.index("--")
+            range_idx = cmd.index("origin/main..HEAD")
+            assert range_idx < separator_idx, (
+                f"Revision range (index {range_idx}) must come before "
+                f"'--' separator (index {separator_idx}): {cmd}"
+            )
+
 
 # ---------------------------------------------------------------------------
 # check_push_file_restrictions Integration Tests

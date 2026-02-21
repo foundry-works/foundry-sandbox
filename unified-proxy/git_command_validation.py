@@ -505,7 +505,11 @@ def _validate_config_key(pair: str) -> Optional[ValidationError]:
 def _matches_wildcard_config(key: str, pattern: str) -> bool:
     """Match a config key against a wildcard pattern like 'remote.*.proxy'.
 
-    The '*' matches exactly one dotted segment.
+    The '*' matches exactly one dotted segment.  Uses prefix matching so that
+    a pattern like 'remote.*.proxy' also matches keys with additional segments
+    (e.g. 'remote.origin.proxy.extra').  This is intentional: for blocked-key
+    checks it is fail-closed (more keys blocked), and permitted-prefix patterns
+    should be specific enough to avoid over-matching.
     """
     parts = pattern.split(".")
     key_parts = key.split(".")

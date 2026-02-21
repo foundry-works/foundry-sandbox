@@ -358,7 +358,7 @@ async def _proxy_request(request: web.Request) -> web.StreamResponse:
             f"{service_name}: client disconnected during "
             f"{method} {request.path} (container: {container_id})"
         )
-        return web.Response(status=499)
+        return response  # Already prepared, can't send new response
 
 
 # ---------------------------------------------------------------------------
