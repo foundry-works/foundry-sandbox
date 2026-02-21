@@ -27,7 +27,7 @@ PACKAGE_DIR = Path(__file__).resolve().parents[2] / "foundry_sandbox"
 # Layer definitions: module name -> allowed foundry_sandbox imports.
 # Module names are relative to foundry_sandbox (e.g., "constants" for foundry_sandbox.constants).
 
-BASE_MODULES = {"atomic_io", "constants", "errors", "utils", "models", "__init__"}
+BASE_MODULES = {"atomic_io", "constants", "errors", "utils", "models", "pypi_version", "__init__"}
 
 MID_MODULES = {"paths", "config"}
 
@@ -37,12 +37,12 @@ BRIDGE_CALLABLE_MODULES = {
     "compose", "container_configurator", "container_io", "container_setup",
     "credential_setup", "foundry_plugin", "git", "git_path_fixer", "git_worktree",
     "image", "network", "permissions", "proxy", "settings_merge", "stub_manager",
-    "tmux", "tool_configs",
+    "tmux", "tool_configs", "version_check",
 }
 
 # Top-layer modules: unrestricted imports (CLI entrypoints, UI, compatibility shims).
 # These may import Click/Pydantic at module level and from any layer.
-TOP_MODULES = {"cli", "ide", "tui"}
+TOP_MODULES = {"cli", "foundry_upgrade", "ide", "tui"}
 
 # Heavy imports forbidden at module level in bridge-callable modules.
 FORBIDDEN_BRIDGE_IMPORTS = {"click", "pydantic"}
