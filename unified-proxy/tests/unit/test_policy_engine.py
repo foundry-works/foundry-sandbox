@@ -1,12 +1,14 @@
 """Unit tests for the policy engine addon.
 
-Tests normalize_path(), PolicyDecision, and PolicyEngine's GitHub blocklist
-and body inspection methods.
+Tests normalize_path(), PolicyDecision, PolicyEngine identity verification,
+and shared security policy functions (check_github_blocklist,
+check_github_body_policies).
 """
 
 from unittest import mock
 
 from addons.policy_engine import is_ip_literal, normalize_path, PolicyDecision, PolicyEngine
+from security_policies import check_github_blocklist, check_github_body_policies
 
 
 class TestNormalizePath:
@@ -40,73 +42,65 @@ class TestNormalizePath:
 
 
 class TestGitHubBlocklist:
+    """Tests for check_github_blocklist from security_policies.py."""
+
     def test_blocks_pr_merge(self):
-        engine = PolicyEngine()
-        result = engine._check_github_blocklist("PUT", "/repos/owner/repo/pulls/123/merge")
+        result = check_github_blocklist("PUT", "/repos/owner/repo/pulls/123/merge")
         assert result is not None
 
     def test_blocks_release_creation(self):
-        engine = PolicyEngine()
-        result = engine._check_github_blocklist("POST", "/repos/owner/repo/releases")
+        result = check_github_blocklist("POST", "/repos/owner/repo/releases")
         assert result is not None
 
     def test_blocks_auto_merge(self):
-        engine = PolicyEngine()
-        result = engine._check_github_blocklist("PUT", "/repos/o/r/pulls/1/auto-merge")
+        result = check_github_blocklist("PUT", "/repos/o/r/pulls/1/auto-merge")
         assert result is not None
 
     def test_blocks_review_deletion(self):
-        engine = PolicyEngine()
-        result = engine._check_github_blocklist("DELETE", "/repos/o/r/pulls/1/reviews/42")
+        result = check_github_blocklist("DELETE", "/repos/o/r/pulls/1/reviews/42")
         assert result is not None
 
     def test_blocks_git_ref_creation(self):
-        engine = PolicyEngine()
-        result = engine._check_github_blocklist("POST", "/repos/o/r/git/refs")
+        result = check_github_blocklist("POST", "/repos/o/r/git/refs")
         assert result is not None
 
     def test_allows_get_on_blocked_paths(self):
-        engine = PolicyEngine()
-        assert engine._check_github_blocklist("GET", "/repos/o/r/pulls/1/merge") is None
+        assert check_github_blocklist("GET", "/repos/o/r/pulls/1/merge") is None
 
     def test_allows_normal_api_paths(self):
-        engine = PolicyEngine()
-        assert engine._check_github_blocklist("GET", "/repos/o/r/issues") is None
+        assert check_github_blocklist("GET", "/repos/o/r/issues") is None
 
 
 class TestBodyInspection:
+    """Tests for check_github_body_policies from security_policies.py."""
+
     def test_blocks_pr_close_via_state(self):
-        engine = PolicyEngine()
         body = b'{"state": "closed"}'
-        result = engine._check_github_body_policies(
+        result = check_github_body_policies(
             "PATCH", "/repos/o/r/pulls/1", body, "application/json", "")
         assert result is not None
 
     def test_blocks_issue_close_via_state(self):
-        engine = PolicyEngine()
         body = b'{"state": "closed"}'
-        result = engine._check_github_body_policies(
+        result = check_github_body_policies(
             "PATCH", "/repos/o/r/issues/1", body, "application/json", "")
         assert result is not None
 
     def test_blocks_pr_approval(self):
-        engine = PolicyEngine()
         body = b'{"event": "APPROVE"}'
-        result = engine._check_github_body_policies(
+        result = check_github_body_policies(
             "POST", "/repos/o/r/pulls/1/reviews", body, "application/json", "")
         assert result is not None
 
     def test_allows_pr_comment(self):
-        engine = PolicyEngine()
         body = b'{"event": "COMMENT"}'
-        result = engine._check_github_body_policies(
+        result = check_github_body_policies(
             "POST", "/repos/o/r/pulls/1/reviews", body, "application/json", "")
         assert result is None
 
     def test_allows_state_open(self):
-        engine = PolicyEngine()
         body = b'{"state": "open"}'
-        result = engine._check_github_body_policies(
+        result = check_github_body_policies(
             "PATCH", "/repos/o/r/pulls/1", body, "application/json", "")
         assert result is None
 
@@ -154,13 +148,18 @@ class TestIdentityVerification:
         return flow
 
     @mock.patch("addons.policy_engine.get_container_config", return_value=None)
-    def test_unidentified_container_gets_403(self, mock_get_config):
-        """Request with no container identity must be denied with 403."""
+    def test_unidentified_container_gets_denied(self, mock_get_config):
+        """Request with no container identity must be denied."""
         engine = PolicyEngine()
         flow = self._make_flow()
         engine.request(flow)
+        # Verify via policy decision metadata (response object may be a mock
+        # due to mitmproxy.http being mocked in the test environment).
+        decision = flow.metadata.get("policy_decision", {})
+        assert decision.get("allowed") is False
+        assert decision.get("policy_type") == "identity"
+        # Response must have been set (to a 403 via http.Response.make)
         assert flow.response is not None
-        assert flow.response.status_code == 403
 
 
 class TestPolicyDecision:

@@ -115,6 +115,11 @@ PROVIDER_MAP = {
     # OpenAI traffic routes through the API gateway (http://unified-proxy:9849)
     # which handles credential injection and HTTPS forwarding.
     # See unified-proxy/openai_gateway.py.
+    # NOTE: generativelanguage.googleapis.com API-key traffic now routes
+    # through the Gemini gateway (http://unified-proxy:9851) which handles
+    # credential injection and HTTPS forwarding. This entry remains as
+    # fallback for OAuth-mode traffic that still flows through MITM.
+    # See unified-proxy/gemini_gateway.py.
     "generativelanguage.googleapis.com": {
         "header": "x-goog-api-key",
         "env_var": "GOOGLE_API_KEY",

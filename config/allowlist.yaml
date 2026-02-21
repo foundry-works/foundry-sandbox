@@ -28,6 +28,9 @@ domains:
   # and forwards to the upstream over HTTPS.
   # NOTE: api.openai.com and *.api.openai.com removed — OpenAI traffic
   # routes through the gateway (http://unified-proxy:9849).
+  # NOTE: generativelanguage.googleapis.com API-key traffic now routes
+  # through the Gemini gateway (http://unified-proxy:9851). Domain kept
+  # here for defense-in-depth (OAuth-mode traffic still uses MITM).
   - chatgpt.com
   - "*.chatgpt.com"
   - generativelanguage.googleapis.com

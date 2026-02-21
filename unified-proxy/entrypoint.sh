@@ -33,6 +33,7 @@ GIT_API_PID=""
 GATEWAY_PID=""
 OPENAI_GATEWAY_PID=""
 GITHUB_GATEWAY_PID=""
+GEMINI_GATEWAY_PID=""
 
 # MITM mode detection (set by detect_mitm_needed)
 MITM_ENABLED="false"
@@ -138,6 +139,13 @@ cleanup() {
         log "Stopping GitHub gateway (PID ${GITHUB_GATEWAY_PID})..."
         kill -TERM "${GITHUB_GATEWAY_PID}" 2>/dev/null || true
         wait "${GITHUB_GATEWAY_PID}" 2>/dev/null || true
+    fi
+
+    # Stop Gemini gateway if running
+    if [[ -n "${GEMINI_GATEWAY_PID}" ]] && kill -0 "${GEMINI_GATEWAY_PID}" 2>/dev/null; then
+        log "Stopping Gemini gateway (PID ${GEMINI_GATEWAY_PID})..."
+        kill -TERM "${GEMINI_GATEWAY_PID}" 2>/dev/null || true
+        wait "${GEMINI_GATEWAY_PID}" 2>/dev/null || true
     fi
 
     # Stop git API if running
@@ -537,6 +545,40 @@ start_github_gateway() {
     return 1
 }
 
+start_gemini_gateway() {
+    # Gemini API gateway provides plaintext HTTP endpoint on port 9851.
+    # Sandboxes talk HTTP to the gateway; the gateway injects credentials
+    # and forwards over HTTPS to https://generativelanguage.googleapis.com.
+    # NOTE: OAuth login mode (Gemini CLI) still uses MITM path via
+    # oauth2.googleapis.com and accounts.google.com.
+
+    # Only start if a Gemini credential is available
+    if [[ -z "${GEMINI_API_KEY:-}" && -z "${GOOGLE_API_KEY:-}" ]]; then
+        log "No Gemini credential set; skipping Gemini gateway startup"
+        return 0
+    fi
+
+    local port="${GEMINI_GATEWAY_PORT:-9851}"
+    log "Starting Gemini gateway (port ${port})..."
+
+    export PYTHONPATH="/opt/proxy:${PYTHONPATH:-}"
+
+    python3 /opt/proxy/gemini_gateway.py &
+    GEMINI_GATEWAY_PID=$!
+
+    # Wait for the server to start listening
+    for i in {1..20}; do
+        if python3 -c "import socket; s=socket.socket(); s.settimeout(0.5); s.connect(('127.0.0.1', ${port})); s.close()" 2>/dev/null; then
+            log "Gemini gateway ready on port ${port} (PID ${GEMINI_GATEWAY_PID})"
+            return 0
+        fi
+        sleep 0.25
+    done
+
+    log_error "Gemini gateway not ready after 5 seconds"
+    return 1
+}
+
 disable_missing_auth_file() {
     local var_name="$1"
     local auth_path="${!var_name:-}"
@@ -779,6 +821,11 @@ main() {
 
     if ! start_github_gateway; then
         log_error "Failed to start GitHub gateway"
+        exit 1
+    fi
+
+    if ! start_gemini_gateway; then
+        log_error "Failed to start Gemini gateway"
         exit 1
     fi
 

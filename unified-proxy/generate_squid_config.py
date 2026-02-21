@@ -38,7 +38,10 @@ logger = get_logger(__name__)
 # add its domain(s) here too so Squid routes them through mitmproxy.
 MITM_DOMAINS = [
     # Gemini / Google AI
-    "generativelanguage.googleapis.com",
+    # NOTE: generativelanguage.googleapis.com API-key traffic now routes
+    # through the Gemini gateway (http://unified-proxy:9851). This entry
+    # is removed; OAuth-mode traffic uses oauth2.googleapis.com/accounts.google.com
+    # which remain on the MITM path below.
     "aiplatform.googleapis.com",
     "cloudcode-pa.googleapis.com",
     # Tavily

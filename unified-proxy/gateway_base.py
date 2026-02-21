@@ -15,6 +15,7 @@ Port allocation:
   :9848  Anthropic gateway (gateway.py)
   :9849  OpenAI gateway    (openai_gateway.py)
   :9850  GitHub gateway     (github_gateway.py)
+  :9851  Gemini gateway     (gemini_gateway.py)
 """
 
 import asyncio
@@ -86,6 +87,7 @@ _DISPLAY_NAMES = {
     "anthropic-gateway": "Anthropic",
     "openai-gateway": "OpenAI",
     "github-gateway": "GitHub",
+    "gemini-gateway": "Gemini",
 }
 
 # ---------------------------------------------------------------------------
