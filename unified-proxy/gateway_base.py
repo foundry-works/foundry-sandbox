@@ -267,9 +267,19 @@ async def _proxy_request(request: web.Request) -> web.StreamResponse:
         hook_response = await request_hook(request, method, body, container_id)
         if hook_response is not None:
             return hook_response
-        # Re-read credential — the hook may have mutated it in-place or
-        # created a new dict on app["credential"] (e.g., OAuth token refresh).
+        # Re-read credential — the hook may have replaced app["credential"]
+        # (e.g., OAuth token refresh).
         credential = app["credential"]
+        if credential is not None and (
+            not isinstance(credential, dict)
+            or "header" not in credential
+            or "value" not in credential
+        ):
+            logger.error(
+                f"{service_name}: request hook produced invalid credential "
+                f"(container: {container_id})"
+            )
+            return gateway_error(502, "Internal credential configuration error")
 
     # --- 4. Build upstream request ------------------------------------
     upstream_path = request.path
@@ -307,6 +317,7 @@ async def _proxy_request(request: web.Request) -> web.StreamResponse:
     )
 
     # --- 5. Forward to upstream and stream response -------------------
+    response = None  # Track whether StreamResponse was prepared
     try:
         timeout = aiohttp.ClientTimeout(
             total=total_timeout,
@@ -365,10 +376,9 @@ async def _proxy_request(request: web.Request) -> web.StreamResponse:
             f"{service_name}: client disconnected during "
             f"{method} {request.path} (container: {container_id})"
         )
-        try:
+        if response is not None:
             return response  # Already prepared, can't send new response
-        except NameError:
-            return gateway_error(499, "Client disconnected")
+        return gateway_error(499, "Client disconnected")
 
 
 # ---------------------------------------------------------------------------

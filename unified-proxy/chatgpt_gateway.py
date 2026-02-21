@@ -150,16 +150,13 @@ async def _chatgpt_request_hook(
         # event loop — the Codex OAuthTokenManager may do synchronous HTTP
         # via httpx when refreshing expired tokens.
         token = await asyncio.to_thread(_token_manager.get_valid_token)
-        credential = request.app.get("credential")
-        if credential is not None:
-            # Mutate in-place so the local var in _proxy_request sees it
-            credential["value"] = f"Bearer {token}"
-        else:
-            # Credential was None at startup but token manager recovered
-            request.app["credential"] = {
-                "header": "Authorization",
-                "value": f"Bearer {token}",
-            }
+        # Create a new credential dict rather than mutating in-place.
+        # This avoids a race where concurrent requests could clobber each
+        # other's token via the shared dict reference.
+        request.app["credential"] = {
+            "header": "Authorization",
+            "value": f"Bearer {token}",
+        }
     except Exception as e:
         logger.error(f"chatgpt-gateway: OAuth token refresh failed: {e}")
         return gateway_error(502, "ChatGPT OAuth token refresh failed")
@@ -225,11 +222,15 @@ def run_chatgpt_gateway_server(
 
     # TLS listener (port 443) — only if cert exists
     if os.path.isfile(tls_cert) and os.path.isfile(tls_key):
-        ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
-        ctx.load_cert_chain(tls_cert, tls_key)
-        tls_site = web.TCPSite(runner, host, tls_port, ssl_context=ctx)
-        loop.run_until_complete(tls_site.start())
-        logger.info(f"chatgpt-gateway: TLS on {host}:{tls_port}")
+        try:
+            ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+            ctx.load_cert_chain(tls_cert, tls_key)
+            tls_site = web.TCPSite(runner, host, tls_port, ssl_context=ctx)
+            loop.run_until_complete(tls_site.start())
+            logger.info(f"chatgpt-gateway: TLS on {host}:{tls_port}")
+        except (ssl.SSLError, OSError) as exc:
+            logger.error(f"chatgpt-gateway: failed to load TLS cert/key: {exc}")
+            logger.warning("chatgpt-gateway: HTTPS listener disabled due to cert error")
     else:
         logger.warning("chatgpt-gateway: TLS cert not found, HTTPS listener disabled")
 
