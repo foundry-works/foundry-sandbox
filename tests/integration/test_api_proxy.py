@@ -96,8 +96,12 @@ class TestCredentialInjection:
         assert len(auth_set_calls) == 0, "Expected no Authorization injection for OpenAI (routes through gateway)"
 
     def test_github_token_injected(self, injector):
-        """Test GitHub token injection."""
-        flow = MockFlow(host="api.github.com", path="/repos/owner/repo")
+        """Test GitHub token injection.
+
+        Uses uploads.github.com because api.github.com traffic now routes
+        through the GitHub API gateway and is no longer in PROVIDER_MAP.
+        """
+        flow = MockFlow(host="uploads.github.com", path="/repos/owner/repo")
 
         flow.metadata["container"] = MockContainerConfig()
         injector.request(flow)

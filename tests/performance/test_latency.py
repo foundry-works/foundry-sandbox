@@ -27,9 +27,9 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../../unified-proxy"
 from registry import ContainerRegistry
 
 # Import real addon functions for performance testing
-from addons.policy_engine import (
+from addons.policy_engine import normalize_host
+from security_policies import (
     normalize_path,
-    normalize_host,
     GITHUB_MERGE_PR_PATTERN,
     GITHUB_CREATE_RELEASE_PATTERN,
     GITHUB_GIT_REFS_ROOT_PATTERN,
