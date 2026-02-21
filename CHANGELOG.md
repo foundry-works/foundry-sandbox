@@ -5,6 +5,14 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.19.1] - 2026-02-21
+
+### Fixed
+- **Container identity resolution on MITM path** — When Squid's cache_peer forwards MITM traffic to mitmproxy, the TCP source IP is 127.0.0.1 (Squid itself); the container identity addon now recovers the real container IP from X-Forwarded-For (set by `forwarded_for truncate`) and strips XFF before forwarding upstream to prevent information leakage
+
+### Added
+- **`backports.zstd` dependency** — Zstandard decompression support for aiohttp, required by Codex CLI
+
 ## [0.19.0] - 2026-02-21
 
 ### Added
