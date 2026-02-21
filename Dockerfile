@@ -1,3 +1,5 @@
+# TODO: Pin to sha256 digest for reproducible builds:
+#   docker pull ubuntu:24.04 && docker inspect --format='{{index .RepoDigests 0}}' ubuntu:24.04
 FROM ubuntu:24.04
 
 ARG UID=1000
@@ -34,7 +36,9 @@ RUN apt-get update && apt-get install -y \
     && ln -s /usr/bin/python3 /usr/bin/python
 
 # Node.js 22.x (for claude, gemini)
-RUN curl -fsSL https://deb.nodesource.com/setup_22.x | bash - \
+RUN curl -fsSL https://deb.nodesource.com/setup_22.x -o /tmp/nodesource_setup.sh \
+    && bash /tmp/nodesource_setup.sh \
+    && rm -f /tmp/nodesource_setup.sh \
     && apt-get install -y nodejs
 
 # Go 1.23 (for opencode) - auto-detect architecture for Apple Silicon support
@@ -46,9 +50,12 @@ RUN if [ "$INCLUDE_OPENCODE" = "1" ]; then \
 
 # GitHub CLI
 RUN curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg \
-    | gpg --dearmor -o /usr/share/keyrings/githubcli-archive-keyring.gpg \
+        -o /tmp/githubcli-archive-keyring.gpg \
+    && gpg --dearmor -o /usr/share/keyrings/githubcli-archive-keyring.gpg \
+        /tmp/githubcli-archive-keyring.gpg \
+    && rm -f /tmp/githubcli-archive-keyring.gpg \
     && echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" \
-    | tee /etc/apt/sources.list.d/github-cli.list > /dev/null \
+        > /etc/apt/sources.list.d/github-cli.list \
     && apt-get update && apt-get install -y gh \
     && rm -rf /var/lib/apt/lists/*
 
@@ -89,6 +96,8 @@ RUN rm -f /usr/lib/python*/EXTERNALLY-MANAGED
 # Install AI tools globally as root (to /usr/local, survives tmpfs on /home)
 # global-agent is needed for claude-zai to route DNS through the HTTP proxy
 # Pin global-agent@3.0.0 - v4+ has packaging issues (missing dist/ in npm package)
+# NOTE: AI CLI tools are intentionally unpinned to track latest versions.
+# They are the primary workload and must stay current with upstream releases.
 RUN npm install -g @anthropic-ai/claude-code \
     && npm install -g @google/gemini-cli \
     && npm install -g @openai/codex \

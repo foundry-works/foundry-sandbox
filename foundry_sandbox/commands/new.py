@@ -574,23 +574,51 @@ def new(
         log_error(f"Invalid sandbox name '{name}': {name_error}")
         sys.exit(1)
 
-    # Auto-generate unique name for --last / --preset
+    # Auto-generate unique name for --last / --preset.
+    # Save the base name and branch before suffixing so retries can
+    # re-derive cleanly from the originals.
+    base_name = name
+    base_branch = branch
     if last or preset:
-        original_name = name
-        name = find_next_sandbox_name(name)
-        if name != original_name:
-            suffix = name[len(original_name):]
-            branch = f"{branch}{suffix}"
+        name = find_next_sandbox_name(base_name)
+        if name != base_name:
+            suffix = name[len(base_name):]
+            branch = f"{base_branch}{suffix}"
 
-    # Check for existing sandbox
+    # Atomically claim the sandbox name by creating the config directory.
+    # This eliminates the TOCTOU race between find_next_sandbox_name() and
+    # the actual creation.  The config dir (not worktree dir) is the claim
+    # marker because `git worktree add` requires its target to not exist.
+    # The existing _rollback_new() already cleans up config dirs on failure.
     paths = derive_sandbox_paths(name)
     worktree_path = paths.worktree_path
     container = paths.container_name
     override_file = paths.override_file
     claude_config_path = paths.claude_config_path
 
-    if worktree_path.exists():
-        log_error(f"Sandbox name collision: '{name}' already exists")
+    _MAX_NAME_RETRIES = 5
+    for _attempt in range(_MAX_NAME_RETRIES):
+        try:
+            os.makedirs(claude_config_path, exist_ok=False)
+            break  # Successfully claimed the name
+        except FileExistsError:
+            if not (last or preset):
+                log_error(f"Sandbox name collision: '{name}' already exists")
+                sys.exit(1)
+            # Retry with next suffix for --last / --preset
+            name = find_next_sandbox_name(base_name)
+            if name != base_name:
+                suffix = name[len(base_name):]
+                branch = f"{base_branch}{suffix}"
+            else:
+                branch = base_branch
+            paths = derive_sandbox_paths(name)
+            worktree_path = paths.worktree_path
+            container = paths.container_name
+            override_file = paths.override_file
+            claude_config_path = paths.claude_config_path
+    else:
+        log_error(f"Could not claim a unique sandbox name after {_MAX_NAME_RETRIES} attempts")
         sys.exit(1)
 
     # Validate mount paths

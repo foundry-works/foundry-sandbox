@@ -84,10 +84,11 @@ drop_privileges_if_needed() {
             --inh-caps=+net_bind_service --ambient-caps=+net_bind_service \
             -- "$0" "$@"
     elif command -v gosu >/dev/null 2>&1; then
-        log "Warning: setpriv not found; falling back to gosu (DNS port 53 may fail)"
-        exec gosu "${user}" "$0" "$@"
+        log_error "setpriv not found; gosu cannot preserve NET_BIND_SERVICE for DNS port 53"
+        exit 1
     else
-        log_error "Neither setpriv nor gosu found; continuing as root"
+        log_error "Neither setpriv nor gosu found; cannot drop privileges safely"
+        exit 1
     fi
 }
 
@@ -314,11 +315,11 @@ configure_git_identity() {
             if [[ -n "${gh_user}" ]]; then
                 if [[ -z "${name}" ]]; then
                     name=$(printf '%s' "${gh_user}" | python3 -c \
-                        "import sys,json; print(json.load(sys.stdin).get('name',''))" 2>/dev/null) || true
+                        "import sys,json,re; v=json.load(sys.stdin).get('name',''); print(re.sub(r'[\x00-\x1f\x7f]','',v)[:128])" 2>/dev/null) || true
                 fi
                 if [[ -z "${email}" ]]; then
                     email=$(printf '%s' "${gh_user}" | python3 -c \
-                        "import sys,json; print(json.load(sys.stdin).get('email',''))" 2>/dev/null) || true
+                        "import sys,json,re; v=json.load(sys.stdin).get('email',''); print(re.sub(r'[\x00-\x1f\x7f]','',v)[:128])" 2>/dev/null) || true
                 fi
             fi
         fi
@@ -351,6 +352,8 @@ configure_git_credentials() {
 
     # Use a credential helper script that returns the token
     local helper_script="/var/run/proxy/git-credential-helper.sh"
+    mkdir -p /var/run/proxy
+    chmod 0700 /var/run/proxy
     cat > "${helper_script}" <<'HELPER_EOF'
 #!/bin/bash
 # Git credential helper that provides GITHUB_TOKEN for GitHub operations
@@ -379,7 +382,7 @@ case "$1" in
         ;;
 esac
 HELPER_EOF
-    chmod +x "${helper_script}"
+    chmod 0700 "${helper_script}"
 
     # Set the token as an env var for the helper and scope helper to github.com.
     export FOUNDRY_PROXY_GIT_TOKEN="${token}"

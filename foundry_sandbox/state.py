@@ -239,6 +239,36 @@ def _parse_legacy_metadata(path: str | Path) -> dict[str, Any]:
     return data
 
 
+def _load_metadata_from_json(json_path: Path) -> dict[str, Any] | None:
+    """Read and validate metadata from a JSON file without acquiring a lock.
+
+    Callers are responsible for holding the appropriate lock (shared or
+    exclusive) before calling this function.
+
+    Args:
+        json_path: Path to the JSON metadata file.
+
+    Returns:
+        Validated metadata dictionary, or None if the file is empty/missing.
+    """
+    data = load_json(str(json_path))
+    if not data:
+        return None
+    # Auto-derive ssh_mode if missing
+    if not data.get("ssh_mode"):
+        data["ssh_mode"] = "always" if str(data.get("sync_ssh", "0")) == "1" else "disabled"
+    # Validate through Pydantic model — fail fast on bad schema
+    try:
+        model = SandboxMetadata(**data)
+        return model.model_dump()
+    except (ValueError, TypeError) as exc:
+        log_warn(
+            f"Metadata at '{json_path}' failed schema validation: {exc}; "
+            "using raw data (may indicate corruption or version skew)"
+        )
+        return data
+
+
 def load_sandbox_metadata(name: str) -> dict[str, Any] | None:
     """Load sandbox metadata, with auto-migration from legacy format.
 
@@ -259,27 +289,12 @@ def load_sandbox_metadata(name: str) -> dict[str, Any] | None:
             return None
         try:
             with _state_lock(json_path, shared=True):
-                data = load_json(str(json_path))
+                return _load_metadata_from_json(json_path)
         except OSError as exc:
             # Read-only callers (list/status/info) should degrade gracefully when
             # lock creation/acquisition is not permitted for a given sandbox.
             log_debug(f"Skipping metadata for '{name}': lock unavailable ({exc})")
             return None
-        if data:
-            # Auto-derive ssh_mode if missing
-            if not data.get("ssh_mode"):
-                data["ssh_mode"] = "always" if str(data.get("sync_ssh", "0")) == "1" else "disabled"
-            # Validate through Pydantic model — fail fast on bad schema
-            try:
-                model = SandboxMetadata(**data)
-                return model.model_dump()
-            except (ValueError, TypeError) as exc:
-                log_warn(
-                    f"Metadata for '{name}' failed schema validation: {exc}; "
-                    "using raw data (may indicate corruption or version skew)"
-                )
-                return data
-        return None
 
     if legacy_path.exists():
         if not metadata_is_secure(legacy_path):
@@ -289,7 +304,8 @@ def load_sandbox_metadata(name: str) -> dict[str, Any] | None:
             with _state_lock(json_path):
                 # Double-check: another process may have migrated while we waited
                 if json_path.exists():
-                    return load_sandbox_metadata(name)
+                    # Use the lock-free helper to avoid reentrant lock acquisition
+                    return _load_metadata_from_json(json_path)
 
                 try:
                     data = _parse_legacy_metadata(legacy_path)

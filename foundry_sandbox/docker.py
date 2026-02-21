@@ -323,31 +323,22 @@ def _capture_container_logs(container_name: str) -> str:
         return "(failed to capture container logs)"
 
 
-def compose_up(
+def _build_compose_env(
     worktree_path: str,
     claude_config_path: str,
     container: str,
-    override_file: str = "",
-    isolate_credentials: bool = False,
-    repos_dir: str = "",
-    sandbox_id: str = "",
-    anthropic_base_url: str = "",
-    compose_extras: list[str] | None = None,
-) -> None:
-    """Start containers via docker compose up.
+    isolate_credentials: bool,
+    repos_dir: str,
+    sandbox_id: str,
+    anthropic_base_url: str,
+) -> dict[str, str]:
+    """Build the environment dict for docker compose up.
 
-    Sets up required environment variables and runs compose up -d.
+    Handles credential placeholders, git identity, HMAC provisioning,
+    and subnet generation for credential-isolation mode.
 
-    Args:
-        worktree_path: Path to git worktree.
-        claude_config_path: Path to Claude config directory.
-        container: Container/project name.
-        override_file: Optional docker-compose override file.
-        isolate_credentials: Whether to enable credential isolation.
-        repos_dir: Repository directory (for compose volume substitution).
-        sandbox_id: Sandbox ID (for HMAC secret provisioning).
-        anthropic_base_url: Optional Anthropic API base URL override.
-        compose_extras: Optional list of additional compose override file paths.
+    Returns:
+        Environment dictionary ready for subprocess.run().
     """
     env = os.environ.copy()
     env["WORKSPACE_PATH"] = worktree_path
@@ -410,75 +401,138 @@ def compose_up(
         env["SANDBOX_SUBNET"] = subnet
         env["SANDBOX_PROXY_IP"] = proxy_ip
 
-    # Thread PROXY_ALLOWLIST_EXTRA_PATH into container via temp compose override
-    _allowlist_extra_override: str | None = None
+    return env
 
+
+def _prepare_allowlist_override(
+    isolate_credentials: bool,
+    compose_extras: list[str] | None,
+) -> tuple[str | None, list[str] | None]:
+    """Create a temp compose override for PROXY_ALLOWLIST_EXTRA_PATH if needed.
+
+    Returns:
+        Tuple of (temp_file_path or None, updated compose_extras or original).
+        The caller must delete temp_file_path when done.
+    """
+    if not isolate_credentials:
+        return None, compose_extras
+
+    host_extra = os.environ.get("PROXY_ALLOWLIST_EXTRA_PATH", "")
+    if not host_extra:
+        return None, compose_extras
+
+    host_extra = os.path.realpath(host_extra)
+    if not os.path.isfile(host_extra):
+        raise FileNotFoundError(
+            f"PROXY_ALLOWLIST_EXTRA_PATH is not a regular file: {host_extra}"
+        )
+    container_mount = "/etc/unified-proxy/allowlist-extra.yml"
+    # Quote the host path to handle paths with YAML-significant
+    # characters (colons, spaces, etc.)
+    quoted_host = host_extra.replace("'", "''")
+    override_content = (
+        "services:\n"
+        "  unified-proxy:\n"
+        "    volumes:\n"
+        f"      - '{quoted_host}:{container_mount}:ro'\n"
+        "    environment:\n"
+        f"      - PROXY_ALLOWLIST_EXTRA_PATH={container_mount}\n"
+    )
+    f = tempfile.NamedTemporaryFile(
+        mode="w", suffix=".yml", prefix="allowlist-extra-",
+        delete=False,
+    )
+    tmp_path = f.name
+    f.write(override_content)
+    f.close()
+    if compose_extras is None:
+        compose_extras = []
+    compose_extras.append(tmp_path)
+    return tmp_path, compose_extras
+
+
+def _start_proxy_first(
+    compose_cmd: list[str],
+    container: str,
+    env: dict[str, str],
+) -> None:
+    """Two-phase proxy startup with health check and log capture.
+
+    Starts the unified-proxy service independently and waits for it to
+    become healthy before the remaining services are brought up.  On
+    failure, proxy logs are captured for diagnosis.
+    """
+    proxy_cmd = compose_cmd + ["-p", container, "up", "-d", "--no-deps", "unified-proxy"]
+    if get_sandbox_verbose():
+        print(f"+ {' '.join(proxy_cmd)}", file=sys.stderr)
+    proxy_result = subprocess.run(
+        proxy_cmd, env=env, check=False,
+        capture_output=True, timeout=TIMEOUT_DOCKER_COMPOSE,
+    )
+    if proxy_result.returncode != 0:
+        stderr_text = proxy_result.stderr.decode() if isinstance(proxy_result.stderr, bytes) else (proxy_result.stderr or "")
+        raise subprocess.CalledProcessError(
+            proxy_result.returncode, proxy_cmd, output=proxy_result.stdout, stderr=stderr_text,
+        )
+
+    # Wait for proxy health (matches compose healthcheck: start_period=30s + retries=5 * interval=5s)
+    proxy_container = f"{container}-unified-proxy-1"
+    proxy_healthy = _wait_for_proxy_health(proxy_container, timeout=55)
+    if not proxy_healthy:
+        # Capture proxy logs for diagnosis before cleanup
+        logs = _capture_container_logs(proxy_container)
+        # Stop the proxy so compose down can clean up
+        subprocess.run(
+            ["docker", "rm", "-f", proxy_container],
+            capture_output=True, check=False, timeout=TIMEOUT_DOCKER_QUERY,
+        )
+        raise subprocess.CalledProcessError(
+            1, proxy_cmd,
+            stderr=f"unified-proxy failed health check.\n--- Proxy Logs ---\n{logs}",
+        )
+
+
+def compose_up(
+    worktree_path: str,
+    claude_config_path: str,
+    container: str,
+    override_file: str = "",
+    isolate_credentials: bool = False,
+    repos_dir: str = "",
+    sandbox_id: str = "",
+    anthropic_base_url: str = "",
+    compose_extras: list[str] | None = None,
+) -> None:
+    """Start containers via docker compose up.
+
+    Sets up required environment variables and runs compose up -d.
+
+    Args:
+        worktree_path: Path to git worktree.
+        claude_config_path: Path to Claude config directory.
+        container: Container/project name.
+        override_file: Optional docker-compose override file.
+        isolate_credentials: Whether to enable credential isolation.
+        repos_dir: Repository directory (for compose volume substitution).
+        sandbox_id: Sandbox ID (for HMAC secret provisioning).
+        anthropic_base_url: Optional Anthropic API base URL override.
+        compose_extras: Optional list of additional compose override file paths.
+    """
+    env = _build_compose_env(
+        worktree_path, claude_config_path, container,
+        isolate_credentials, repos_dir, sandbox_id, anthropic_base_url,
+    )
+
+    _allowlist_extra_override: str | None = None
     try:
-        if isolate_credentials:
-            host_extra = os.environ.get("PROXY_ALLOWLIST_EXTRA_PATH", "")
-            if host_extra:
-                host_extra = os.path.realpath(host_extra)
-                if not os.path.isfile(host_extra):
-                    raise FileNotFoundError(
-                        f"PROXY_ALLOWLIST_EXTRA_PATH is not a regular file: {host_extra}"
-                    )
-                container_mount = "/etc/unified-proxy/allowlist-extra.yml"
-                # Quote the host path to handle paths with YAML-significant
-                # characters (colons, spaces, etc.)
-                quoted_host = host_extra.replace("'", "''")
-                override_content = (
-                    "services:\n"
-                    "  unified-proxy:\n"
-                    "    volumes:\n"
-                    f"      - '{quoted_host}:{container_mount}:ro'\n"
-                    "    environment:\n"
-                    f"      - PROXY_ALLOWLIST_EXTRA_PATH={container_mount}\n"
-                )
-                f = tempfile.NamedTemporaryFile(
-                    mode="w", suffix=".yml", prefix="allowlist-extra-",
-                    delete=False,
-                )
-                _allowlist_extra_override = f.name
-                f.write(override_content)
-                f.close()
-                if compose_extras is None:
-                    compose_extras = []
-                compose_extras.append(_allowlist_extra_override)
+        _allowlist_extra_override, compose_extras = _prepare_allowlist_override(
+            isolate_credentials, compose_extras,
+        )
 
         compose_cmd = get_compose_command(override_file, isolate_credentials, compose_extras)
 
         if isolate_credentials:
-            # Two-phase startup: start proxy first so we can capture its logs
-            # on failure. A single `up -d` removes all containers on health
-            # check failure, making diagnosis impossible.
-            proxy_cmd = compose_cmd + ["-p", container, "up", "-d", "--no-deps", "unified-proxy"]
-            if get_sandbox_verbose():
-                print(f"+ {' '.join(proxy_cmd)}", file=sys.stderr)
-            proxy_result = subprocess.run(
-                proxy_cmd, env=env, check=False,
-                capture_output=True, timeout=TIMEOUT_DOCKER_COMPOSE,
-            )
-            if proxy_result.returncode != 0:
-                stderr_text = proxy_result.stderr.decode() if isinstance(proxy_result.stderr, bytes) else (proxy_result.stderr or "")
-                raise subprocess.CalledProcessError(
-                    proxy_result.returncode, proxy_cmd, output=proxy_result.stdout, stderr=stderr_text,
-                )
-
-            # Wait for proxy health (matches compose healthcheck: start_period=30s + retries=5 * interval=5s)
-            proxy_container = f"{container}-unified-proxy-1"
-            proxy_healthy = _wait_for_proxy_health(proxy_container, timeout=55)
-            if not proxy_healthy:
-                # Capture proxy logs for diagnosis before cleanup
-                logs = _capture_container_logs(proxy_container)
-                # Stop the proxy so compose down can clean up
-                subprocess.run(
-                    ["docker", "rm", "-f", proxy_container],
-                    capture_output=True, check=False, timeout=TIMEOUT_DOCKER_QUERY,
-                )
-                raise subprocess.CalledProcessError(
-                    1, proxy_cmd,
-                    stderr=f"unified-proxy failed health check.\n--- Proxy Logs ---\n{logs}",
-                )
+            _start_proxy_first(compose_cmd, container, env)
 
         cmd = compose_cmd + ["-p", container, "up", "-d"]
 
