@@ -263,6 +263,8 @@ async def _proxy_request(request: web.Request) -> web.StreamResponse:
         hook_response = await request_hook(request, method, body, container_id)
         if hook_response is not None:
             return hook_response
+        # The hook may have replaced the body (e.g., to inject fields).
+        body = request.get("_gateway_body", body)
         # Re-read credential — the hook may have replaced app["credential"]
         # (e.g., OAuth token refresh).
         credential = app["credential"]
@@ -284,12 +286,25 @@ async def _proxy_request(request: web.Request) -> web.StreamResponse:
     upstream_url = f"{upstream_base_url}{upstream_path}"
 
     # Build headers: forward safe headers, inject credential.
+    # Strip content-encoding/content-length since aiohttp decompresses the
+    # request body on read() — forwarding these would cause a mismatch.
     upstream_headers: dict[str, str] = {}
     for name, value in request.headers.items():
-        if name.lower() not in stripped_headers:
-            if any(value.startswith(marker) for marker in _PLACEHOLDER_MARKERS):
-                continue
-            upstream_headers[name] = value
+        lname = name.lower()
+        if lname in stripped_headers:
+            continue
+        if any(value.startswith(marker) for marker in _PLACEHOLDER_MARKERS):
+            continue
+        # Replace Accept-Encoding to avoid brotli — many CLI clients
+        # cannot decompress it and the gateway passes through raw bytes.
+        if lname == "accept-encoding":
+            upstream_headers[name] = "gzip, deflate"
+            continue
+        # aiohttp decompresses the request body, so these headers no
+        # longer match the forwarded body.
+        if lname in ("content-encoding", "content-length"):
+            continue
+        upstream_headers[name] = value
 
     # Inject credential (if available)
     if credential is not None:
@@ -332,14 +347,38 @@ async def _proxy_request(request: web.Request) -> web.StreamResponse:
                 reason=upstream_resp.reason,
             )
 
+            # Check if we need to decompress brotli manually (aiohttp
+            # auto_decompress has a known bug with the brotli library).
+            content_encoding = (
+                upstream_resp.headers.get("Content-Encoding", "").lower()
+            )
+            needs_decompress = content_encoding == "br"
+
             for name, value in upstream_resp.headers.items():
-                if name.lower() not in _HOP_BY_HOP:
-                    response.headers[name] = value
+                lname = name.lower()
+                if lname in _HOP_BY_HOP:
+                    continue
+                # Strip encoding/length headers when decompressing
+                if needs_decompress and lname in (
+                    "content-encoding", "content-length",
+                ):
+                    continue
+                response.headers[name] = value
 
             await response.prepare(request)
 
-            async for chunk in upstream_resp.content.iter_any():
-                await response.write(chunk)
+            if needs_decompress:
+                import brotli
+                raw = await upstream_resp.read()
+                try:
+                    decompressed = brotli.decompress(raw)
+                except brotli.error:
+                    decompressed = raw  # Forward raw on failure
+                await response.write(decompressed)
+            else:
+                # Stream through without modification
+                async for chunk in upstream_resp.content.iter_any():
+                    await response.write(chunk)
 
             await response.write_eof()
 

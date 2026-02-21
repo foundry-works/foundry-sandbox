@@ -33,6 +33,7 @@ Transparent TLS interception:
 """
 
 import asyncio
+import json
 import os
 import signal
 import ssl
@@ -162,6 +163,20 @@ async def _chatgpt_request_hook(
     except Exception as e:
         logger.error(f"chatgpt-gateway: OAuth token refresh failed: {e}")
         return gateway_error(502, "ChatGPT OAuth token refresh failed")
+
+    # The ChatGPT subscription endpoint requires store=false on Codex
+    # responses requests.  Some Codex CLI versions omit this field,
+    # causing a 400 "Store must be set to false" from upstream.
+    # Inject it when missing to avoid the error.
+    if method == "POST" and request.path.rstrip("/").endswith("/codex/responses"):
+        try:
+            payload = json.loads(body)
+            if payload.get("store") is not False:
+                payload["store"] = False
+                body = json.dumps(payload).encode()
+                request["_gateway_body"] = body
+        except (json.JSONDecodeError, TypeError):
+            pass  # Not JSON — forward as-is
 
     return None  # Continue to upstream forwarding
 
