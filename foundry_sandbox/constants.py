@@ -103,7 +103,7 @@ SANDBOX_NAME_MAX_LENGTH: int = 120
 # Subprocess Timeout Constants (seconds)
 # ============================================================================
 
-TIMEOUT_DOCKER_QUERY: int = 10
+TIMEOUT_DOCKER_QUERY: int = 30
 """Timeout for docker ps/inspect/port/info queries."""
 
 TIMEOUT_DOCKER_COMPOSE: int = 120

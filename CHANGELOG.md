@@ -5,6 +5,17 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.19.4] - 2026-02-21
+
+### Fixed
+- **Gemini OAuth token expiry gives clear 401 error** — Proxy now detects expired Gemini OAuth tokens and returns a helpful 401 with instructions to run `gemini login` + `cast refresh-creds`, instead of silently forwarding a stale token that produces an opaque API error
+- **`cast refresh-creds` can't update Gemini OAuth credentials** — Switched from `docker compose restart` to `up --force-recreate` so the unified-proxy container is fully recreated, ensuring read-only bind-mounted credential files (like Gemini `oauth_creds.json`) are re-read from the host
+- **`cast refresh-creds` times out with many containers** — Increased `TIMEOUT_DOCKER_QUERY` from 10s to 30s to prevent timeouts during `docker ps`/`inspect` queries
+
+### Added
+- **`cast refresh-creds --all`** — Refresh credentials for all running sandboxes at once
+- **OAuth token expiry warnings on `cast new`** — Checks Gemini and Codex OAuth tokens before sandbox creation and warns if they're expired, with an option to continue or abort
+
 ## [0.19.3] - 2026-02-21
 
 ### Fixed

@@ -91,23 +91,34 @@ class GeminiTokenManager:
             "outside the sandbox to refresh your credentials."
         )
 
+    def is_token_expired(self) -> bool:
+        """Check if the current token is expired (thread-safe).
+
+        Returns:
+            True if token is expired or will expire within the buffer period.
+        """
+        with self._lock:
+            return self._is_token_expired()
+
     def get_valid_token(self) -> str:
         """
         Get the access token for injection.
-
-        For Gemini, we don't check expiry here - we just return the token
-        and let the API call fail if it's expired. This gives clearer error
-        messages to the user than a proxy-side check.
 
         Returns:
             OAuth access token
 
         Raises:
-            ValueError: If no token available
+            ValueError: If no token available or token is expired
         """
         with self._lock:
             if self._access_token is None:
                 raise ValueError("No valid access token available")
+            if self._is_token_expired():
+                raise ValueError(
+                    "Gemini OAuth token has expired. "
+                    "Run 'gemini login' on the host, then 'cast refresh-creds' "
+                    "to reload credentials."
+                )
             return self._access_token
 
     def get_placeholder_response(self) -> dict:

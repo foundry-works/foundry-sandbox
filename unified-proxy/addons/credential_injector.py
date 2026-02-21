@@ -482,6 +482,23 @@ class CredentialInjector:
                 f"(container: {container_id or 'unknown'})"
             )
             return True
+        except ValueError as e:
+            # Token expired or missing — return a clear 401 so the user
+            # knows exactly what to do instead of seeing an opaque API error.
+            container_id = self._get_container_id(flow)
+            logger.warning(
+                f"Gemini OAuth token unavailable for {host}: {e} "
+                f"(container: {container_id or 'unknown'})"
+            )
+            flow.response = http.Response.make(
+                401,
+                json.dumps({
+                    "error": str(e),
+                    "hint": "Run 'gemini login' on the host, then 'cast refresh-creds' to reload.",
+                }).encode(),
+                {"Content-Type": "application/json"},
+            )
+            return True
         except Exception as e:
             logger.error(f"Failed to get Gemini OAuth token: {e}")
             flow.response = http.Response.make(

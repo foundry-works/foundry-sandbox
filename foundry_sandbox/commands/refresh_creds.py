@@ -2,10 +2,11 @@
 
 Migrated from commands/refresh-credentials.sh. Supports:
   - Direct mode: Syncs credential files from host to container
-  - Isolation mode: Restarts unified-proxy to reload credentials
+  - Isolation mode: Recreates unified-proxy to reload credentials
   - Auto-detection of sandbox from current directory
   - fzf selection fallback when no sandbox name is provided
   - --last flag to reuse last attached sandbox
+  - --all flag to refresh all running sandboxes
 """
 
 from __future__ import annotations
@@ -57,58 +58,147 @@ def _refresh_direct_mode(container_id: str) -> None:
     Args:
         container_id: Full container ID (e.g., container-dev-1).
     """
-    click.echo("Syncing credentials to sandbox...")
+    click.echo("  Syncing credentials to sandbox...")
 
     try:
         sync_runtime_credentials(container_id)
     except (OSError, subprocess.SubprocessError, RuntimeError) as exc:
-        log_error(f"Failed to sync credentials: {exc}")
-        sys.exit(1)
+        raise RuntimeError(f"Failed to sync credentials: {exc}") from exc
 
-    click.echo("Credentials refreshed successfully.")
+    click.echo("  Credentials refreshed successfully.")
 
 
 def _refresh_isolation_mode(name: str, container: str, override_file: str) -> None:
-    """Refresh credentials in isolation mode by restarting unified-proxy.
+    """Refresh credentials in isolation mode by recreating unified-proxy.
+
+    Uses ``up --force-recreate`` instead of ``restart`` so the container is
+    fully recreated.  This guarantees that bind-mounted credential files
+    (including read-only mounts like Gemini oauth_creds.json) are re-read
+    from the host filesystem on startup.
 
     Args:
         name: Sandbox name.
         container: Container name prefix.
         override_file: Path to docker-compose override file.
     """
-    click.echo("Restarting unified-proxy to reload credentials...")
+    click.echo("  Recreating unified-proxy to reload credentials...")
 
     # Get compose command
     compose_cmd = get_compose_command(override_file, isolate_credentials=True)
 
-    # Restart unified-proxy
+    # Recreate unified-proxy (force-recreate ensures fresh bind mounts)
     try:
         subprocess.run(
-            compose_cmd + ["-p", container, "restart", "unified-proxy"],
+            compose_cmd + [
+                "-p", container,
+                "up", "-d", "--force-recreate", "--no-deps", "unified-proxy",
+            ],
             check=True,
             timeout=TIMEOUT_DOCKER_COMPOSE,
         )
-        click.echo("Credentials refreshed (unified-proxy restarted).")
+        click.echo("  Credentials refreshed (unified-proxy recreated).")
     except subprocess.CalledProcessError as exc:
-        log_error(f"Failed to restart unified-proxy: {exc}")
-        sys.exit(1)
+        raise RuntimeError(f"Failed to recreate unified-proxy: {exc}") from exc
     except (OSError, subprocess.TimeoutExpired) as exc:
-        log_error(f"Error restarting unified-proxy: {exc}")
+        raise RuntimeError(f"Error recreating unified-proxy: {exc}") from exc
+
+
+def _refresh_one(name: str) -> bool:
+    """Refresh credentials for a single sandbox.
+
+    Returns:
+        True on success, False on failure (error is logged).
+    """
+    valid_name, name_error = validate_existing_sandbox_name(name)
+    if not valid_name:
+        log_error(f"{name}: {name_error}")
+        return False
+
+    paths = derive_sandbox_paths(name)
+    container = paths.container_name
+    override_file = paths.override_file
+
+    metadata = load_sandbox_metadata(name)
+    if not metadata:
+        log_error(f"{name}: failed to load metadata")
+        return False
+
+    if not container_is_running(container):
+        log_error(f"{name}: not running")
+        return False
+
+    uses_isolation = _check_isolation_mode(container)
+    container_id = f"{container}-dev-1"
+
+    try:
+        if uses_isolation:
+            _refresh_isolation_mode(name, container, str(override_file))
+        else:
+            _refresh_direct_mode(container_id)
+    except RuntimeError as exc:
+        log_error(f"{name}: {exc}")
+        return False
+
+    return True
+
+
+def _refresh_all() -> None:
+    """Refresh credentials for all running sandboxes."""
+    sandboxes = _list_sandbox_names_shared()
+    if not sandboxes:
+        click.echo("No sandboxes found.")
+        return
+
+    # Filter to running sandboxes
+    running = []
+    for name in sandboxes:
+        paths = derive_sandbox_paths(name)
+        if container_is_running(paths.container_name):
+            running.append(name)
+
+    if not running:
+        click.echo("No running sandboxes found.")
+        return
+
+    click.echo(f"Refreshing credentials for {len(running)} running sandbox(es)...\n")
+    ok = 0
+    failed = 0
+    for name in running:
+        click.echo(f"[{name}]")
+        if _refresh_one(name):
+            ok += 1
+        else:
+            failed += 1
+        click.echo("")
+
+    click.echo(f"Done: {ok} succeeded, {failed} failed.")
+    if failed:
         sys.exit(1)
 
 
 @click.command("refresh-credentials")
 @click.argument("name", required=False, default=None)
 @click.option("--last", "-l", is_flag=True, help="Refresh last attached sandbox")
-def refresh_creds(name: str | None, last: bool) -> None:
+@click.option("--all", "all_sandboxes", is_flag=True, help="Refresh all running sandboxes")
+def refresh_creds(name: str | None, last: bool, all_sandboxes: bool) -> None:
     """Refresh credentials for a running sandbox.
 
-    Syncs credentials from host to container in direct mode, or restarts
+    Syncs credentials from host to container in direct mode, or recreates
     unified-proxy in isolation mode to reload credentials.
 
     NAME is the sandbox name. If not provided, will try to auto-detect from
     current directory or prompt with fzf.
+
+    Use --all to refresh every running sandbox at once.
     """
+
+    # --all mode: iterate over all running sandboxes
+    if all_sandboxes:
+        if name or last:
+            log_error("--all cannot be combined with NAME or --last")
+            sys.exit(1)
+        _refresh_all()
+        return
 
     # Handle --last flag
     if last:
@@ -131,35 +221,6 @@ def refresh_creds(name: str | None, last: bool) -> None:
             _list_sandboxes_simple()
             sys.exit(1)
 
-    valid_name, name_error = validate_existing_sandbox_name(name)
-    if not valid_name:
-        log_error(name_error)
+    click.echo(f"[{name}]")
+    if not _refresh_one(name):
         sys.exit(1)
-
-    # Derive paths
-    paths = derive_sandbox_paths(name)
-    container = paths.container_name
-    override_file = paths.override_file
-
-    # Load metadata
-    metadata = load_sandbox_metadata(name)
-    if not metadata:
-        log_error(f"Failed to load sandbox metadata for '{name}'")
-        sys.exit(1)
-
-    # Check if container is running
-    if not container_is_running(container):
-        log_error(f"Sandbox '{name}' is not running")
-        sys.exit(1)
-
-    # Determine credential isolation mode
-    uses_isolation = _check_isolation_mode(container)
-
-    # Full container ID
-    container_id = f"{container}-dev-1"
-
-    # Refresh based on mode
-    if uses_isolation:
-        _refresh_isolation_mode(name, container, str(override_file))
-    else:
-        _refresh_direct_mode(container_id)
