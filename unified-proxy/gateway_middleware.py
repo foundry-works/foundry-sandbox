@@ -73,8 +73,12 @@ def get_container_id(request: web.Request) -> str:
 # ===================================================================
 
 
-def _identity_error(status: int, message: str) -> web.Response:
-    """Return a JSON error response for identity failures."""
+def _gateway_error(status: int, message: str) -> web.Response:
+    """Return a JSON error response matching the gateway error contract.
+
+    Local duplicate of gateway_base.gateway_error() — kept here to avoid a
+    circular import (gateway_base already imports from this module).
+    """
     import json
     body = json.dumps({"error": {"type": "gateway_error", "message": message}})
     return web.Response(
@@ -111,18 +115,18 @@ class IdentityMiddleware:
         peername = request.remote
         if not peername:
             logger.warning(f"{self.service_name}: request with no remote address")
-            return _identity_error(403, "Unable to determine request source")
+            return _gateway_error(403, "Unable to determine request source")
 
         container = registry.get_by_ip(peername)
         if container is None:
             logger.warning(f"{self.service_name}: unknown source IP: {peername}")
-            return _identity_error(403, "Unknown container — not registered")
+            return _gateway_error(403, "Unknown container — not registered")
         if container.is_expired:
             logger.warning(
                 f"{self.service_name}: expired container: "
                 f"{container.container_id} (IP {peername})"
             )
-            return _identity_error(403, "Container registration expired")
+            return _gateway_error(403, "Container registration expired")
 
         set_container_id(request, container.container_id)
         return await handler(request)
@@ -315,12 +319,9 @@ class RateLimiterMiddleware:
                 f"Rate limiter: denying request from container={container_id} "
                 f"to upstream={self.upstream_host}, retry_after={retry_after_header}s"
             )
-            return web.Response(
-                status=429,
-                text="Too Many Requests: Rate limit exceeded",
-                content_type="text/plain",
-                headers={"Retry-After": retry_after_header},
-            )
+            resp = _gateway_error(429, "Rate limit exceeded")
+            resp.headers["Retry-After"] = retry_after_header
+            return resp
 
         return await handler(request)
 
@@ -386,11 +387,7 @@ class CircuitBreakerMiddleware:
                     f"Circuit breaker: blocking request to {self.upstream_host} "
                     f"(circuit OPEN)"
                 )
-                return web.Response(
-                    status=503,
-                    text="Service Unavailable: Circuit breaker is open",
-                    content_type="text/plain",
-                )
+                return _gateway_error(503, "Circuit breaker is open")
 
         # Request allowed — forward to handler
         try:

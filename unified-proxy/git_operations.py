@@ -461,7 +461,7 @@ def _detect_default_branch(bare_repo_path: str) -> Optional[str]:
             capture_output=True, timeout=SHA_CHECK_TIMEOUT,
         )
         if result.returncode == 0:
-            head_ref = result.stdout.decode().strip()
+            head_ref = result.stdout.decode("utf-8", errors="replace").strip()
             if head_ref.startswith("refs/heads/"):
                 return head_ref[len("refs/heads/"):]
     except (subprocess.TimeoutExpired, OSError):

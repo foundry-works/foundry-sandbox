@@ -380,6 +380,10 @@ async def _health(request: web.Request) -> web.Response:
 
 async def _on_startup(app: web.Application) -> None:
     """Initialize shared resources when the server starts."""
+    old_session = app.get("upstream_session")
+    if old_session and not old_session.closed:
+        await old_session.close()
+
     connector = aiohttp.TCPConnector(
         limit=100,
         limit_per_host=50,

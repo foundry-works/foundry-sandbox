@@ -597,6 +597,7 @@ def new(
     claude_config_path = paths.claude_config_path
 
     _MAX_NAME_RETRIES = 5
+    _seen_names = {name}
     for _attempt in range(_MAX_NAME_RETRIES):
         try:
             os.makedirs(claude_config_path, exist_ok=False)
@@ -607,6 +608,10 @@ def new(
                 sys.exit(1)
             # Retry with next suffix for --last / --preset
             name = find_next_sandbox_name(base_name)
+            if name in _seen_names:
+                log_error(f"Name generation loop: '{name}' already tried")
+                sys.exit(1)
+            _seen_names.add(name)
             if name != base_name:
                 suffix = name[len(base_name):]
                 branch = f"{base_branch}{suffix}"

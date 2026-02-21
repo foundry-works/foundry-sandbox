@@ -18,6 +18,7 @@ Usage:
 import argparse
 import os
 import sys
+import tempfile
 
 # Ensure /opt/proxy is on sys.path so imports work inside the container
 _PROXY_DIR = "/opt/proxy"
@@ -59,6 +60,21 @@ MITM_DOMAINS = [
     # ChatGPT / Codex (OAuth flow)
     "chatgpt.com",
 ]
+
+
+def _atomic_write_lines(
+    output_dir: str, final_path: str, lines: list[str],
+) -> None:
+    """Write *lines* to *final_path* atomically via a temp file + rename."""
+    tmp_fd, tmp_path = tempfile.mkstemp(dir=output_dir, suffix=".tmp")
+    try:
+        with os.fdopen(tmp_fd, "w") as f:
+            for line in lines:
+                f.write(line + "\n")
+        os.rename(tmp_path, final_path)
+    except BaseException:
+        os.unlink(tmp_path)
+        raise
 
 
 def _to_squid_domain(domain: str) -> str:
@@ -109,20 +125,16 @@ def generate_squid_config(output_dir: str = "/etc/squid") -> None:
                 allowed_domains.append(squid_domain)
                 seen.add(squid_domain)
 
-    # Write allowed domains file
+    # Write allowed domains file (atomic: write to temp then rename)
     allowed_path = os.path.join(output_dir, "allowed_domains.txt")
-    with open(allowed_path, "w") as f:
-        for domain in sorted(allowed_domains):
-            f.write(domain + "\n")
+    _atomic_write_lines(output_dir, allowed_path, sorted(allowed_domains))
     logger.info(
         f"Wrote {len(allowed_domains)} allowed domains to {allowed_path}"
     )
 
-    # Write MITM domains file
+    # Write MITM domains file (atomic: write to temp then rename)
     mitm_path = os.path.join(output_dir, "mitm_domains.txt")
-    with open(mitm_path, "w") as f:
-        for domain in sorted(mitm_domains):
-            f.write(domain + "\n")
+    _atomic_write_lines(output_dir, mitm_path, sorted(mitm_domains))
     logger.info(
         f"Wrote {len(mitm_domains)} MITM domains to {mitm_path}"
     )
