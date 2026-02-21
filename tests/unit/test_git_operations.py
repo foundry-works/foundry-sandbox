@@ -621,7 +621,8 @@ class TestProtectedBranchPushValidation:
         """
         metadata = {"sandbox_branch": "test-branch"}
         request = GitExecRequest(args=["push", "origin"])
-        with patch("git_operations.subprocess.run") as mock_run:
+        with patch("git_operations.subprocess.run") as mock_run, \
+             patch("git_operations.check_push_file_restrictions", return_value=None):
             mock_run.return_value = MagicMock(
                 returncode=0, stdout=b"", stderr=b""
             )
