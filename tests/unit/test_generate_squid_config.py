@@ -153,6 +153,33 @@ class TestGenerateSquidConfig:
 
             assert allowed == sorted(allowed)
 
+    def test_exact_and_wildcard_deduplicated(self):
+        """When both example.com and *.example.com exist, only .example.com is emitted.
+
+        Squid fatally errors if both 'example.com' and '.example.com' appear in
+        the same dstdomain ACL because .example.com already covers example.com.
+        """
+        mock_config = _make_mock_config([
+            "chatgpt.com",
+            "*.chatgpt.com",
+            "other.com",
+        ])
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            with patch("generate_squid_config.load_allowlist_config", return_value=mock_config):
+                generate_squid_config(output_dir=tmpdir)
+
+            allowed_path = os.path.join(tmpdir, "allowed_domains.txt")
+            with open(allowed_path) as f:
+                allowed = f.read().splitlines()
+
+            # .chatgpt.com should be present (wildcard form)
+            assert ".chatgpt.com" in allowed
+            # chatgpt.com exact should NOT be present (redundant with .chatgpt.com)
+            assert "chatgpt.com" not in allowed
+            # Unrelated domains should still be present
+            assert "other.com" in allowed
+
     def test_creates_output_directory(self):
         """Creates output directory if it doesn't exist."""
         mock_config = _make_mock_config(["api.example.com"])

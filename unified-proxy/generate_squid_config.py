@@ -115,6 +115,16 @@ def generate_squid_config(output_dir: str = "/etc/squid") -> None:
             allowed_domains.append(squid_domain)
             seen.add(squid_domain)
 
+    # Deduplicate: if both "example.com" and ".example.com" exist, Squid
+    # fatally errors because ".example.com" already covers "example.com"
+    # and all subdomains.  Keep only the wildcard form.
+    wildcard_bases = {d[1:] for d in seen if d.startswith(".")}
+    if wildcard_bases:
+        allowed_domains = [
+            d for d in allowed_domains if d not in wildcard_bases
+        ]
+        seen -= wildcard_bases
+
     # Build MITM domains set (subset that needs credential injection)
     mitm_domains: list[str] = []
     mitm_seen: set[str] = set()
