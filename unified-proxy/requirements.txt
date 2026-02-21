@@ -17,3 +17,6 @@ pyyaml~=6.0
 
 # Prometheus metrics collection and exposition
 prometheus-client~=0.20
+
+# Zstandard decompression support for aiohttp (required by Codex CLI)
+backports.zstd

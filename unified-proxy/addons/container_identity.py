@@ -89,6 +89,18 @@ class ContainerIdentityAddon:
 
         source_ip = client_address[0]
 
+        # When Squid's cache_peer forwards MITM traffic, the TCP source is
+        # 127.0.0.1 (Squid itself).  Recover the real container IP from
+        # X-Forwarded-For which Squid sets via "forwarded_for truncate".
+        if source_ip == "127.0.0.1":
+            xff = flow.request.headers.get("X-Forwarded-For", "")
+            if xff:
+                # truncate mode produces a single IP; take the first just in case
+                source_ip = xff.split(",")[0].strip()
+            # Strip XFF before forwarding to prevent leakage to upstream
+            if "X-Forwarded-For" in flow.request.headers:
+                del flow.request.headers["X-Forwarded-For"]
+
         # Look up container by source IP
         container_config = self.registry.get_by_ip(source_ip)
 
