@@ -493,6 +493,45 @@ class TestProxyRequestHandler:
             assert body["status"] == "ok"
             assert body["service"] == "test-gateway"
 
+    # --- Extra stripped headers ---
+
+    @pytest.mark.asyncio
+    async def test_extra_stripped_headers_removed(self, mock_registry):
+        """Extra stripped headers are removed from upstream requests."""
+        mock_session = MockSession(
+            response=MockUpstreamResponse(status=200, headers={}, body=b""),
+        )
+
+        app = self._create_app(
+            registry=mock_registry,
+            extra_stripped_headers=frozenset({"x-custom-secret"}),
+        )
+
+        async with TestClient(TestServer(app)) as client:
+            app["upstream_session"] = mock_session
+
+            await client.get(
+                "/test",
+                headers={"X-Custom-Secret": "should-be-stripped"},
+            )
+
+            upstream_headers = mock_session.last_call_kwargs["headers"]
+            assert "X-Custom-Secret" not in upstream_headers
+
+    # --- Catch-all exception handler ---
+
+    @pytest.mark.asyncio
+    async def test_unexpected_exception_returns_502(self, app, mock_registry):
+        """Unexpected RuntimeError returns 502 with 'Internal gateway error'."""
+        mock_session = MockSession(error=RuntimeError("something broke"))
+
+        async with TestClient(TestServer(app)) as client:
+            app["upstream_session"] = mock_session
+            resp = await client.get("/test")
+            assert resp.status == 502
+            body = await resp.json()
+            assert "internal gateway error" in body["error"]["message"].lower()
+
     # --- Query string forwarding ---
 
     @pytest.mark.asyncio

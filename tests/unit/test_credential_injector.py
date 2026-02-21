@@ -8,8 +8,9 @@ The conftest adds unified-proxy to sys.path and installs mitmproxy
 mocks, allowing addon imports to work without mitmproxy installed.
 """
 
+import json
 import os
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -207,6 +208,37 @@ class TestNonGitHubHosts:
         assert flow.response is not None
         assert flow.response.status_code == 500
         assert b"credential" in flow.response.content.lower()
+
+
+class TestTavilyBodyInjection:
+    """Tests for Tavily API body-based credential injection."""
+
+    def test_tavily_body_injection_replaces_placeholder(self):
+        """Tavily body injection replaces placeholder api_key with real key."""
+        with patch.dict(os.environ, {
+            "GITHUB_TOKEN": "ghp_test",
+            "TAVILY_API_KEY": "tvly-real-api-key-123",
+        }, clear=False):
+            instance = credential_injector.CredentialInjector()
+
+            flow = MockHTTPFlow(
+                "api.tavily.com", "/search",
+                headers={"Content-Type": "application/json"},
+            )
+            body_text = json.dumps({
+                "api_key": "CRED_PROXY_placeholder",
+                "query": "test search",
+            })
+            flow.request.get_text = MagicMock(return_value=body_text)
+            flow.request.set_text = MagicMock()
+
+            instance.request(flow)
+
+        # Verify set_text was called with updated body containing real API key
+        flow.request.set_text.assert_called_once()
+        updated_body = json.loads(flow.request.set_text.call_args[0][0])
+        assert updated_body["api_key"] == "tvly-real-api-key-123"
+        assert updated_body["query"] == "test search"  # Other fields preserved
 
 
 class TestCredentialRotationAndEdgeCases:

@@ -141,6 +141,15 @@ class TestNormalizePath:
         """Multiple .. segments with // are resolved correctly."""
         assert normalize_path("/a/b/../..//c") == "/c"
 
+    def test_null_bytes_rejected(self):
+        """Paths with null bytes (%00) are rejected as double-encoding."""
+        # %00 decodes to a null byte, but the path still contains '%'
+        # after decoding if double-encoded (%2500), or becomes a bare
+        # null byte if single-encoded (%00). Either way, the path is
+        # sanitized by posixpath.normpath or rejected.
+        result = normalize_path("/repos/%2500/evil")
+        assert result is None  # Double-encoding detected
+
 
 # ---------------------------------------------------------------------------
 # Merge blocking (Step E)

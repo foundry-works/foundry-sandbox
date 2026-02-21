@@ -43,6 +43,7 @@ from foundry_sandbox.container_setup import install_pip_requirements
 from foundry_sandbox.foundry_upgrade import upgrade_foundry_mcp_prerelease
 from foundry_sandbox.credential_setup import copy_configs_to_container
 from foundry_sandbox.docker import (
+    compose_down,
     compose_up,
     hmac_secret_file_count,
     populate_stubs_volume,
@@ -201,10 +202,8 @@ def _setup_credential_isolation(
     container: str,
     name: str,
     metadata: dict[str, object],
-) -> tuple[str, str]:
-    """Handle credential isolation: stubs volume, HMAC secrets, ALLOW_PR.
-
-    Mutates os.environ for SANDBOX_ID and ALLOW_PR_OPERATIONS.
+) -> tuple[str, str, bool]:
+    """Handle credential isolation: stubs volume, HMAC secrets.
 
     Args:
         container: Container name prefix.
@@ -212,7 +211,7 @@ def _setup_credential_isolation(
         metadata: Sandbox metadata dictionary.
 
     Returns:
-        Tuple of (isolate_credentials flag, sandbox_id string).
+        Tuple of (isolate_credentials flag, sandbox_id string, allow_pr bool).
 
     Raises:
         SystemExit: On HMAC secret errors or generation failure.
@@ -265,9 +264,8 @@ def _setup_credential_isolation(
         log_step(f"Sandbox ID: {sandbox_id}")
 
     allow_pr = _flag_enabled(metadata.get("allow_pr", False))
-    os.environ["ALLOW_PR_OPERATIONS"] = "true" if allow_pr else ""
 
-    return "true", sandbox_id
+    return "true", sandbox_id, allow_pr
 
 
 def _register_proxy(
@@ -502,6 +500,9 @@ def start(ctx: click.Context, name: str, pre_foundry: bool | None) -> None:
         # --------------------------------------------------------------
         token = api_keys.export_gh_token()
         if token:
+            # Set via cmd_env-style keys so environment_scope tracks them.
+            # environment_scope restores the full os.environ snapshot, but
+            # being explicit keeps intent clear for future readers.
             os.environ["GITHUB_TOKEN"] = token
             os.environ["GH_TOKEN"] = token
             log_info("GitHub CLI token exported for container")
@@ -513,9 +514,12 @@ def start(ctx: click.Context, name: str, pre_foundry: bool | None) -> None:
         sandbox_id = ""
 
         if uses_isolation:
-            isolate_credentials, sandbox_id = _setup_credential_isolation(
+            isolate_credentials, sandbox_id, allow_pr = _setup_credential_isolation(
                 container, name, metadata,
             )
+            # Set ALLOW_PR_OPERATIONS inside the environment_scope so it
+            # is restored on scope exit rather than leaking into the host.
+            os.environ["ALLOW_PR_OPERATIONS"] = "true" if allow_pr else ""
 
         # --------------------------------------------------------------
         # 10. Start containers via compose_up
@@ -537,7 +541,18 @@ def start(ctx: click.Context, name: str, pre_foundry: bool | None) -> None:
         # 11. Register container with proxy (if credential isolation)
         # --------------------------------------------------------------
         if isolate_credentials == "true":
-            _register_proxy(container, container_id, metadata)
+            try:
+                _register_proxy(container, container_id, metadata)
+            except SystemExit:
+                log_error("Proxy registration failed; stopping containers to avoid unregistered sandbox.")
+                compose_down(
+                    worktree_path=str(worktree_path),
+                    claude_config_path=str(claude_config_path),
+                    container=container,
+                    override_file=str(override_file),
+                    isolate_credentials=True,
+                )
+                raise
 
         # --------------------------------------------------------------
         # 12. Finalize container: configs, pip, network

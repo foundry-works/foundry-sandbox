@@ -26,7 +26,7 @@ from foundry_sandbox.atomic_io import (
 )
 from foundry_sandbox.config import load_json
 from foundry_sandbox.constants import get_claude_configs_dir
-from foundry_sandbox.utils import flag_enabled as _flag_enabled, log_debug, log_warn
+from foundry_sandbox.utils import flag_enabled as _flag_enabled, log_debug, log_error
 from foundry_sandbox.models import CastNewPreset, SandboxMetadata
 from foundry_sandbox.paths import (
     ensure_dir,
@@ -262,11 +262,29 @@ def _load_metadata_from_json(json_path: Path) -> dict[str, Any] | None:
         model = SandboxMetadata(**data)
         return model.model_dump()
     except (ValueError, TypeError) as exc:
-        log_warn(
+        # Differentiate version skew (extra fields from a newer format) from
+        # genuine corruption (missing required fields, wrong types).
+        from pydantic import ValidationError
+
+        if isinstance(exc, ValidationError):
+            error_types = {e["type"] for e in exc.errors()}
+            version_skew_types = {"extra_forbidden"}
+            if error_types and error_types <= version_skew_types:
+                # All errors are about unrecognised extra fields — likely a
+                # newer metadata format.  Return raw data so callers can still
+                # operate on what they understand.
+                log_debug(
+                    f"Metadata at '{json_path}' has extra fields (version skew): {exc}; "
+                    "returning raw data"
+                )
+                return data
+        # Missing required fields, invalid types, or other structural
+        # problems indicate corruption or an incompatible file.
+        log_error(
             f"Metadata at '{json_path}' failed schema validation: {exc}; "
-            "using raw data (may indicate corruption or version skew)"
+            "returning None (possible corruption)"
         )
-        return data
+        return None
 
 
 def load_sandbox_metadata(name: str) -> dict[str, Any] | None:

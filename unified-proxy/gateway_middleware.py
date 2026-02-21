@@ -43,6 +43,7 @@ _PROXY_DIR = "/opt/proxy"
 if _PROXY_DIR not in sys.path:
     sys.path.insert(0, _PROXY_DIR)
 
+from gateway_errors import gateway_error as _gateway_error  # noqa: E402
 from logging_config import get_logger  # noqa: E402
 from registry import ContainerRegistry  # noqa: E402
 
@@ -71,21 +72,6 @@ def get_container_id(request: web.Request) -> str:
 # ===================================================================
 # IdentityMiddleware — resolves container identity before other middleware
 # ===================================================================
-
-
-def _gateway_error(status: int, message: str) -> web.Response:
-    """Return a JSON error response matching the gateway error contract.
-
-    Local duplicate of gateway_base.gateway_error() — kept here to avoid a
-    circular import (gateway_base already imports from this module).
-    """
-    import json
-    body = json.dumps({"error": {"type": "gateway_error", "message": message}})
-    return web.Response(
-        status=status,
-        body=body.encode(),
-        content_type="application/json",
-    )
 
 
 class IdentityMiddleware:
@@ -309,9 +295,10 @@ class RateLimiterMiddleware:
             allowed = bucket.consume(now)
             retry_after = 0.0 if allowed else bucket.get_retry_after()
 
-            # Periodic cleanup of stale buckets
+            # Schedule cleanup as a background task to avoid holding lock
             if now - self.last_cleanup > self.cleanup_interval:
-                self._cleanup_stale_buckets(now)
+                self.last_cleanup = now  # Prevent duplicate scheduling
+                asyncio.create_task(self._async_cleanup(now))
 
         if not allowed:
             retry_after_header = str(int(retry_after) + 1)
@@ -324,6 +311,11 @@ class RateLimiterMiddleware:
             return resp
 
         return await handler(request)
+
+    async def _async_cleanup(self, now: float) -> None:
+        """Acquire lock and run stale bucket cleanup in the background."""
+        async with self.lock:
+            self._cleanup_stale_buckets(now)
 
     def _cleanup_stale_buckets(self, now: float) -> None:
         """Remove buckets that haven't been accessed recently. Must hold lock."""
@@ -339,7 +331,6 @@ class RateLimiterMiddleware:
                 f"Rate limiter: cleaned up {len(stale_keys)} stale buckets, "
                 f"{len(self.buckets)} remaining"
             )
-        self.last_cleanup = now
 
 
 # ===================================================================
@@ -368,6 +359,7 @@ class CircuitBreakerMiddleware:
         self.circuit = CircuitStatus()
         self.lock = asyncio.Lock()
         self.last_cleanup_time = time.time()
+        self._half_open_probe_active = False
 
     @web.middleware
     async def middleware(
@@ -427,16 +419,22 @@ class CircuitBreakerMiddleware:
                     CircuitState.HALF_OPEN,
                     f"recovery timeout ({self.recovery_timeout}s) elapsed",
                 )
+                self._half_open_probe_active = True
                 return True
             return False
 
         if status.state == CircuitState.HALF_OPEN:
+            # Standard pattern: only allow one probe request at a time
+            if self._half_open_probe_active:
+                return False  # Another probe is already in flight
+            self._half_open_probe_active = True
             return True
 
         return False  # Unknown state: fail-closed
 
     def _record_success(self) -> None:
         """Record a successful request. Must hold lock."""
+        self._half_open_probe_active = False
         status = self.circuit
         status.last_success_time = time.time()
         status.failure_count = 0
@@ -451,6 +449,7 @@ class CircuitBreakerMiddleware:
 
     def _record_failure(self) -> None:
         """Record a failed request. Must hold lock."""
+        self._half_open_probe_active = False
         status = self.circuit
         status.last_failure_time = time.time()
         status.success_count = 0

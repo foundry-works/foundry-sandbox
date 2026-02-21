@@ -114,14 +114,14 @@ fi
 
 # 4. Unit tests
 if command -v pytest &>/dev/null; then
-  run_step "Unit tests" pytest tests/unit/ -v --tb=short
+  run_step "Unit tests" pytest tests/unit/ -q --tb=short
 else
   skip_step "Unit tests" "pytest not found"
 fi
 
 # 5. Unified-proxy tests
 if command -v pytest &>/dev/null; then
-  run_step "Unified-proxy tests" pytest unified-proxy/tests/ -v --tb=short
+  run_step "Unified-proxy tests" pytest unified-proxy/tests/ -q --tb=short
 else
   skip_step "Unified-proxy tests" "pytest not found"
 fi
@@ -129,7 +129,7 @@ fi
 # 6. Integration tests (only with --all)
 if $RUN_INTEGRATION; then
   if command -v pytest &>/dev/null; then
-    run_step "Integration tests" pytest tests/integration/ -v --tb=short
+    run_step "Integration tests" pytest tests/integration/ -q --tb=short
   else
     skip_step "Integration tests" "pytest not found"
   fi

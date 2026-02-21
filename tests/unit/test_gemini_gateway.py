@@ -235,11 +235,14 @@ class TestGeminiRequestHook:
         mock_request = MagicMock()
         mock_request.app = {"credential": None}
 
-        with patch.object(gemini_gateway, "_token_manager", None):
+        mock_error_resp = MagicMock(status=502)
+        with patch.object(gemini_gateway, "_token_manager", None), \
+             patch.object(gemini_gateway, "gateway_error", return_value=mock_error_resp) as mock_gw:
             result = await gemini_gateway._gemini_request_hook(
                 mock_request, "POST", b"", "test-container"
             )
-        assert result is not None
+        assert result is mock_error_resp
+        mock_gw.assert_called_once_with(502, "Gemini OAuth credential not configured")
 
     @pytest.mark.asyncio
     async def test_creates_credential_when_none(self):

@@ -20,7 +20,6 @@ Port allocation:
 """
 
 import asyncio
-import json
 import os
 import sys
 from typing import Awaitable, Callable, Optional, Sequence, Tuple
@@ -35,6 +34,7 @@ _PROXY_DIR = "/opt/proxy"
 if _PROXY_DIR not in sys.path:
     sys.path.insert(0, _PROXY_DIR)
 
+from gateway_errors import gateway_error  # noqa: E402
 from gateway_middleware import create_gateway_middlewares, get_container_id  # noqa: E402
 from logging_config import get_logger  # noqa: E402
 from registry import ContainerRegistry  # noqa: E402
@@ -111,17 +111,13 @@ Route = Tuple[str, str]
 
 
 # ---------------------------------------------------------------------------
-# JSON error helpers
+# JSON error helpers — re-exported from gateway_errors for backward compat
 # ---------------------------------------------------------------------------
 
-def gateway_error(status: int, message: str) -> web.Response:
-    """Return a JSON error response matching the gateway error contract."""
-    body = json.dumps({"error": {"type": "gateway_error", "message": message}})
-    return web.Response(
-        status=status,
-        body=body.encode(),
-        content_type="application/json",
-    )
+# gateway_error is imported from gateway_errors above and re-exported here
+# so that existing ``from gateway_base import gateway_error`` calls continue
+# to work without changes.
+__all__ = ["gateway_error", "create_gateway_app", "run_gateway"]
 
 
 # ---------------------------------------------------------------------------
@@ -364,13 +360,13 @@ async def _proxy_request(request: web.Request) -> web.StreamResponse:
             f"{service_name}: upstream connection error for "
             f"{method} {request.path}: {exc} (container: {container_id})"
         )
-        return gateway_error(502, f"Cannot connect to upstream: {exc}")
+        return gateway_error(502, "Cannot connect to upstream")
     except aiohttp.ClientError as exc:
         logger.error(
             f"{service_name}: upstream client error for "
             f"{method} {request.path}: {exc} (container: {container_id})"
         )
-        return gateway_error(502, f"Upstream error: {exc}")
+        return gateway_error(502, "Upstream request failed")
     except ConnectionResetError:
         logger.info(
             f"{service_name}: client disconnected during "
@@ -379,6 +375,15 @@ async def _proxy_request(request: web.Request) -> web.StreamResponse:
         if response is not None:
             return response  # Already prepared, can't send new response
         return gateway_error(499, "Client disconnected")
+    except Exception as exc:
+        logger.error(
+            f"{service_name}: unexpected error for "
+            f"{method} {request.path}: {exc} (container: {container_id})",
+            exc_info=True,
+        )
+        if response is not None:
+            return response  # Already prepared, can't send new response
+        return gateway_error(502, "Internal gateway error")
 
 
 # ---------------------------------------------------------------------------

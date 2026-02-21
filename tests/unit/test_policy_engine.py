@@ -1172,7 +1172,12 @@ class TestEndpointPathEnforcement:
 
         decision = flow.metadata[POLICY_DECISION_KEY]
         assert decision["allowed"] is False
-        assert "double-encoding" in decision["reason"]
+        # Double-encoded paths are now caught fail-closed by is_merge_request's
+        # normalize_path call (returns True when normalization yields None),
+        # so they may be blocked as merge operations rather than reaching the
+        # dedicated double-encoding check downstream.
+        assert ("double-encoding" in decision["reason"]
+                or "Merge operations" in decision["reason"])
 
     @patch("addons.policy_engine.http.Response.make", side_effect=make_mock_response)
     @patch("addons.policy_engine.get_container_config")

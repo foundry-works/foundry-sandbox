@@ -128,12 +128,14 @@ class TestChatGPTRequestHook:
         """Returns 502 when token manager is not available."""
         mock_request = MagicMock()
         mock_request.app = {"credential": None}
-        with patch.object(chatgpt_gateway, "_token_manager", None):
+        mock_error_resp = MagicMock(status=502)
+        with patch.object(chatgpt_gateway, "_token_manager", None), \
+             patch.object(chatgpt_gateway, "gateway_error", return_value=mock_error_resp) as mock_gw:
             result = await chatgpt_gateway._chatgpt_request_hook(
                 mock_request, "POST", b"", "test-container"
             )
-        # gateway_error returns a web.Response mock in test env
-        assert result is not None
+        assert result is mock_error_resp
+        mock_gw.assert_called_once_with(502, "ChatGPT OAuth credential not configured")
 
     @pytest.mark.asyncio
     async def test_refreshes_token_in_place(self):
@@ -168,8 +170,6 @@ class TestRunChatGPTGatewayServer:
 
     def _run_server(self, *, tls_cert_exists: bool, tls_port: int = 8443):
         """Run the server with fully mocked asyncio/aiohttp, returning call records."""
-        web_mod = chatgpt_gateway.web
-
         # Track TCPSite construction calls
         tcp_site_calls: list[tuple] = []
 
@@ -178,9 +178,6 @@ class TestRunChatGPTGatewayServer:
             return MagicMock()
 
         mock_runner = MagicMock()
-        web_mod.AppRunner.return_value = mock_runner
-        web_mod.TCPSite = MagicMock(side_effect=_tcp_site_factory)
-
         mock_app = MagicMock()
 
         # Fully mock the event loop so we don't need real async execution
@@ -195,23 +192,21 @@ class TestRunChatGPTGatewayServer:
             ssl_ctx_instances.append(ctx)
             return ctx
 
-        try:
-            with patch("chatgpt_gateway.asyncio.new_event_loop", return_value=mock_loop), \
-                 patch("chatgpt_gateway.asyncio.set_event_loop"), \
-                 patch("chatgpt_gateway.os.path.isfile", return_value=tls_cert_exists), \
-                 patch("chatgpt_gateway.ssl.SSLContext", side_effect=_mock_ssl_ctx):
-                try:
-                    chatgpt_gateway.run_chatgpt_gateway_server(
-                        app=mock_app,
-                        tls_port=tls_port,
-                        tls_cert="/fake/cert.pem",
-                        tls_key="/fake/key.pem",
-                    )
-                except KeyboardInterrupt:
-                    pass
-        finally:
-            web_mod.TCPSite = MagicMock()
-            web_mod.AppRunner.reset_mock()
+        with patch("chatgpt_gateway.web.AppRunner", return_value=mock_runner), \
+             patch("chatgpt_gateway.web.TCPSite", side_effect=_tcp_site_factory), \
+             patch("chatgpt_gateway.asyncio.new_event_loop", return_value=mock_loop), \
+             patch("chatgpt_gateway.asyncio.set_event_loop"), \
+             patch("chatgpt_gateway.os.path.isfile", return_value=tls_cert_exists), \
+             patch("chatgpt_gateway.ssl.SSLContext", side_effect=_mock_ssl_ctx):
+            try:
+                chatgpt_gateway.run_chatgpt_gateway_server(
+                    app=mock_app,
+                    tls_port=tls_port,
+                    tls_cert="/fake/cert.pem",
+                    tls_key="/fake/key.pem",
+                )
+            except KeyboardInterrupt:
+                pass
 
         return tcp_site_calls, ssl_ctx_instances
 

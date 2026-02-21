@@ -34,6 +34,7 @@ Transparent TLS interception:
 
 import asyncio
 import os
+import signal
 import ssl
 import sys
 from typing import Optional
@@ -150,13 +151,14 @@ async def _chatgpt_request_hook(
         # event loop — the Codex OAuthTokenManager may do synchronous HTTP
         # via httpx when refreshing expired tokens.
         token = await asyncio.to_thread(_token_manager.get_valid_token)
-        # Create a new credential dict rather than mutating in-place.
-        # This avoids a race where concurrent requests could clobber each
-        # other's token via the shared dict reference.
-        request.app["credential"] = {
+        # Store refreshed credential on the app dict. This is safe in the
+        # single-process asyncio model because the dict assignment is atomic
+        # within the event loop (no await between read and write).
+        new_cred = {
             "header": "Authorization",
             "value": f"Bearer {token}",
         }
+        request.app["credential"] = new_cred
     except Exception as e:
         logger.error(f"chatgpt-gateway: OAuth token refresh failed: {e}")
         return gateway_error(502, "ChatGPT OAuth token refresh failed")
@@ -224,6 +226,9 @@ def run_chatgpt_gateway_server(
     if os.path.isfile(tls_cert) and os.path.isfile(tls_key):
         try:
             ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+            ctx.minimum_version = ssl.TLSVersion.TLSv1_2
+            ctx.set_ciphers("ECDHE+AESGCM:ECDHE+CHACHA20:DHE+AESGCM")
+            ctx.options |= ssl.OP_NO_COMPRESSION
             ctx.load_cert_chain(tls_cert, tls_key)
             tls_site = web.TCPSite(runner, host, tls_port, ssl_context=ctx)
             loop.run_until_complete(tls_site.start())
@@ -234,7 +239,21 @@ def run_chatgpt_gateway_server(
     else:
         logger.warning("chatgpt-gateway: TLS cert not found, HTTPS listener disabled")
 
-    loop.run_forever()
+    # Register signal handlers for graceful shutdown (matching web.run_app behavior)
+    shutdown_event = asyncio.Event()
+
+    def _shutdown_handler() -> None:
+        logger.info("chatgpt-gateway: received shutdown signal")
+        shutdown_event.set()
+
+    for sig in (signal.SIGINT, signal.SIGTERM):
+        loop.add_signal_handler(sig, _shutdown_handler)
+
+    try:
+        loop.run_until_complete(shutdown_event.wait())
+    finally:
+        loop.run_until_complete(runner.cleanup())
+        loop.close()
 
 
 # ---------------------------------------------------------------------------

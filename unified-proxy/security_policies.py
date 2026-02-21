@@ -94,13 +94,18 @@ def is_merge_request(path: str, body: bytes) -> bool:
     Returns:
         True if the request appears to be a merge operation.
     """
-    if any(p.search(path) for p in _MERGE_PATH_PATTERNS):
+    normalized = normalize_path(path)
+    if normalized is None:
+        # Double-encoding detected — fail closed (block the request).
+        return True
+
+    if any(p.search(normalized) for p in _MERGE_PATH_PATTERNS):
         return True
 
     # GraphQL: only check the query/mutation field, not the full body.
     # This prevents false positives from PR descriptions or comments
     # that mention "mergePullRequest" as text.
-    if body and path.rstrip("/").endswith("/graphql"):
+    if body and normalized.rstrip("/").endswith("/graphql"):
         try:
             parsed = json.loads(body)
             if isinstance(parsed, dict):

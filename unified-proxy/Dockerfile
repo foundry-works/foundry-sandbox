@@ -58,6 +58,7 @@ COPY github-api-filter.py /opt/proxy/github-api-filter.py
 COPY github_config.py /opt/proxy/github_config.py
 
 # Copy the API gateways, shared base modules, and middleware
+COPY gateway_errors.py /opt/proxy/gateway_errors.py
 COPY gateway_base.py /opt/proxy/gateway_base.py
 COPY security_policies.py /opt/proxy/security_policies.py
 COPY gateway_middleware.py /opt/proxy/gateway_middleware.py

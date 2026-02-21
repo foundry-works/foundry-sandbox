@@ -77,10 +77,7 @@ def create_openai_gateway_app(
         service_name="openai-gateway",
         credential_loader=_load_openai_credential,
         routes=[
-            ("*", "/v1/chat/completions"),
-            ("*", "/v1/completions"),
-            ("*", "/v1/models"),
-            ("*", "/v1/responses"),
+            ("*", "/{path_info:.*}"),
         ],
         port=OPENAI_GATEWAY_PORT,
         bind=OPENAI_GATEWAY_BIND,

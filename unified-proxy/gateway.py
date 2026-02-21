@@ -119,9 +119,7 @@ def create_anthropic_gateway_app(
         service_name="anthropic-gateway",
         credential_loader=_load_anthropic_credential,
         routes=[
-            ("*", "/v1/messages"),
-            ("*", "/v1/complete"),
-            ("*", "/api/oauth/profile"),
+            ("*", "/{path_info:.*}"),
         ],
         port=GATEWAY_PORT,
         bind=GATEWAY_BIND,

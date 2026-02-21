@@ -163,13 +163,14 @@ async def _gemini_request_hook(
         # Run in a thread to avoid blocking the event loop — the token
         # manager acquires a threading.Lock and may do I/O in the future.
         token = await asyncio.to_thread(_token_manager.get_valid_token)
-        # Create a new credential dict rather than mutating in-place.
-        # This avoids a race where concurrent requests could clobber each
-        # other's token via the shared dict reference.
-        request.app["credential"] = {
+        # Store refreshed credential on the app dict. This is safe in the
+        # single-process asyncio model because the dict assignment is atomic
+        # within the event loop (no await between read and write).
+        new_cred = {
             "header": "Authorization",
             "value": f"Bearer {token}",
         }
+        request.app["credential"] = new_cred
     except Exception as e:
         logger.error(f"gemini-gateway: OAuth token error: {e}")
         return gateway_error(502, "Gemini OAuth token refresh failed")
