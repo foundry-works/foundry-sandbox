@@ -57,7 +57,9 @@ COPY gemini-token-manager.py /opt/proxy/gemini_token_manager.py
 COPY github-api-filter.py /opt/proxy/github-api-filter.py
 COPY github_config.py /opt/proxy/github_config.py
 
-# Copy the API gateways and shared middleware
+# Copy the API gateways, shared base modules, and middleware
+COPY gateway_base.py /opt/proxy/gateway_base.py
+COPY security_policies.py /opt/proxy/security_policies.py
 COPY gateway_middleware.py /opt/proxy/gateway_middleware.py
 COPY gateway.py /opt/proxy/gateway.py
 COPY openai_gateway.py /opt/proxy/openai_gateway.py

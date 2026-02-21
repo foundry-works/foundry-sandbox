@@ -31,6 +31,10 @@ logger = get_logger(__name__)
 
 # MITM-required domains: providers that still need mitmproxy for credential
 # injection (from credential_injector.py PROVIDER_MAP + OAuth endpoints).
+#
+# SYNC WARNING: This list must stay in sync with PROVIDER_MAP in
+# addons/credential_injector.py.  If you add a new MITM provider there,
+# add its domain(s) here too so Squid routes them through mitmproxy.
 MITM_DOMAINS = [
     # Gemini / Google AI
     "generativelanguage.googleapis.com",

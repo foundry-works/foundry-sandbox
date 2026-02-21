@@ -102,6 +102,9 @@ ZHIPU_API_HOSTS = [
 ]
 
 
+# SYNC WARNING: If you add a new provider here, also add its domain(s) to
+# MITM_DOMAINS in generate_squid_config.py so Squid routes traffic through
+# mitmproxy for credential injection.
 PROVIDER_MAP = {
     # NOTE: api.anthropic.com removed from PROVIDER_MAP.
     # Anthropic traffic routes through the API gateway (http://unified-proxy:9848)

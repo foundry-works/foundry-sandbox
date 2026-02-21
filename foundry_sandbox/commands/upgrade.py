@@ -40,7 +40,6 @@ def upgrade(use_local: bool) -> None:
         click.echo("Downloading latest installer from GitHub...")
         fd, tmp_path = tempfile.mkstemp(suffix=".sh")
         os.close(fd)
-        os.chmod(tmp_path, 0o700)
         try:
             dl_result = subprocess.run(
                 ["curl", "-fsSL", "-o", tmp_path,
@@ -52,6 +51,7 @@ def upgrade(use_local: bool) -> None:
                 log_error("Failed to download installer")
                 sys.exit(1)
 
+            os.chmod(tmp_path, 0o700)
             click.echo(f"Running installer from {tmp_path}...")
             result = subprocess.run(["bash", tmp_path], check=False)  # no timeout: interactive installer
             sys.exit(result.returncode)

@@ -8,9 +8,10 @@ These run in the asyncio event loop, so they use asyncio.Lock instead of
 threading.Lock.
 
 Middleware stack order (outermost first):
-  1. MetricsMiddleware — records request count and latency
-  2. CircuitBreakerMiddleware — fails fast when upstream is unhealthy
-  3. RateLimiterMiddleware — per-container, per-upstream token bucket
+  1. IdentityMiddleware — resolves container_id from source IP
+  2. MetricsMiddleware — records request count and latency
+  3. CircuitBreakerMiddleware — fails fast when upstream is unhealthy
+  4. RateLimiterMiddleware — per-container, per-upstream token bucket
 """
 
 import asyncio
@@ -43,13 +44,15 @@ if _PROXY_DIR not in sys.path:
     sys.path.insert(0, _PROXY_DIR)
 
 from logging_config import get_logger  # noqa: E402
+from registry import ContainerRegistry  # noqa: E402
 
 logger = get_logger(__name__)
 
 
 # ---------------------------------------------------------------------------
-# Request key: container_id is stashed on the request by the gateway handler
-# after identity validation.  Middleware reads it from there.
+# Request key: container_id is stashed on the request by IdentityMiddleware
+# before other middleware runs, so rate limiting / metrics / circuit breaker
+# can use the real container identity.
 # ---------------------------------------------------------------------------
 
 _CONTAINER_ID_KEY = web.AppKey("container_id", str)
@@ -61,8 +64,68 @@ def set_container_id(request: web.Request, container_id: str) -> None:
 
 
 def get_container_id(request: web.Request) -> str:
-    """Read container_id from the request (set by gateway handler)."""
+    """Read container_id from the request (set by IdentityMiddleware)."""
     return request.get(_CONTAINER_ID_KEY, "unknown")
+
+
+# ===================================================================
+# IdentityMiddleware — resolves container identity before other middleware
+# ===================================================================
+
+
+def _identity_error(status: int, message: str) -> web.Response:
+    """Return a JSON error response for identity failures."""
+    import json
+    body = json.dumps({"error": {"type": "gateway_error", "message": message}})
+    return web.Response(
+        status=status,
+        body=body.encode(),
+        content_type="application/json",
+    )
+
+
+class IdentityMiddleware:
+    """Resolve container identity from source IP before other middleware.
+
+    Must run as the first middleware so that rate limiting, circuit breaking,
+    and metrics all have access to the real container_id.
+    """
+
+    def __init__(self, service_name: str):
+        self.service_name = service_name
+
+    @web.middleware
+    async def middleware(
+        self,
+        request: web.Request,
+        handler: web.RequestHandler,
+    ) -> web.StreamResponse:
+        # Skip identity resolution for health/metrics endpoints
+        if request.path in ("/health", "/internal/metrics"):
+            return await handler(request)
+
+        registry: Optional[ContainerRegistry] = request.app.get("registry")
+        if registry is None:
+            return await handler(request)
+
+        peername = request.remote
+        if not peername:
+            logger.warning(f"{self.service_name}: request with no remote address")
+            return _identity_error(403, "Unable to determine request source")
+
+        container = registry.get_by_ip(peername)
+        if container is None:
+            logger.warning(f"{self.service_name}: unknown source IP: {peername}")
+            return _identity_error(403, "Unknown container — not registered")
+        if container.is_expired:
+            logger.warning(
+                f"{self.service_name}: expired container: "
+                f"{container.container_id} (IP {peername})"
+            )
+            return _identity_error(403, "Container registration expired")
+
+        set_container_id(request, container.container_id)
+        return await handler(request)
 
 
 # ===================================================================
@@ -520,25 +583,31 @@ class MetricsMiddleware:
 
 def create_gateway_middlewares(
     upstream_host: str,
+    service_name: str = "gateway",
 ) -> list:
     """Create the standard middleware stack for a gateway.
 
     Returns a list of aiohttp middleware callables in the correct order.
-    Outermost middleware (metrics) first — aiohttp applies them in order,
+    Outermost middleware runs first — aiohttp applies them in list order,
     so the first middleware in the list wraps all subsequent ones.
+
+    Middleware order: identity → metrics → circuit_breaker → rate_limiter → handler.
 
     Args:
         upstream_host: The upstream host this gateway forwards to
                        (e.g., "api.anthropic.com").
+        service_name: Gateway service name for logging (e.g., "anthropic-gateway").
 
     Returns:
         List of middleware callables.
     """
+    identity = IdentityMiddleware(service_name)
     metrics = MetricsMiddleware(upstream_host)
     circuit_breaker = CircuitBreakerMiddleware(upstream_host)
     rate_limiter = RateLimiterMiddleware(upstream_host)
 
     return [
+        identity.middleware,
         metrics.middleware,
         circuit_breaker.middleware,
         rate_limiter.middleware,

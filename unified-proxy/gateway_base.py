@@ -21,7 +21,7 @@ import asyncio
 import json
 import os
 import sys
-from typing import Callable, Optional, Sequence, Tuple
+from typing import Awaitable, Callable, Optional, Sequence, Tuple
 
 import aiohttp
 from aiohttp import web
@@ -33,7 +33,7 @@ _PROXY_DIR = "/opt/proxy"
 if _PROXY_DIR not in sys.path:
     sys.path.insert(0, _PROXY_DIR)
 
-from gateway_middleware import create_gateway_middlewares, set_container_id  # noqa: E402
+from gateway_middleware import create_gateway_middlewares, get_container_id  # noqa: E402
 from logging_config import get_logger  # noqa: E402
 from registry import ContainerRegistry  # noqa: E402
 
@@ -80,6 +80,14 @@ DEFAULT_REGISTRY_DB_PATH = os.environ.get(
     "REGISTRY_DB_PATH", "/var/lib/unified-proxy/registry.db"
 )
 
+# Canonical display names for gateway services (avoids e.g. "Github" from
+# naive capitalize()).
+_DISPLAY_NAMES = {
+    "anthropic-gateway": "Anthropic",
+    "openai-gateway": "OpenAI",
+    "github-gateway": "GitHub",
+}
+
 # ---------------------------------------------------------------------------
 # Types for gateway configuration
 # ---------------------------------------------------------------------------
@@ -90,7 +98,7 @@ DEFAULT_REGISTRY_DB_PATH = os.environ.get(
 # proceeds.
 RequestHook = Callable[
     [web.Request, str, bytes, str],
-    "asyncio.coroutine",  # actually returns Optional[web.Response]
+    "Awaitable[Optional[web.Response]]",
 ]
 
 # Route: (methods_str, path_pattern) — methods_str is "*" for catch-all or
@@ -165,7 +173,7 @@ def create_gateway_app(
     """
     stripped_headers = _BASE_STRIPPED_HEADERS | extra_stripped_headers
 
-    middlewares = create_gateway_middlewares(upstream_host)
+    middlewares = create_gateway_middlewares(upstream_host, service_name)
     app = web.Application(
         client_max_size=max_request_body,
         middlewares=middlewares,
@@ -219,7 +227,6 @@ def create_gateway_app(
 async def _proxy_request(request: web.Request) -> web.StreamResponse:
     """Forward an API request to the upstream and stream the response."""
     app = request.app
-    registry: ContainerRegistry = app["registry"]
     credential: Optional[dict] = app["credential"]
     upstream_session: aiohttp.ClientSession = app["upstream_session"]
     upstream_base_url: str = app["_gw_upstream_base_url"]
@@ -231,25 +238,11 @@ async def _proxy_request(request: web.Request) -> web.StreamResponse:
     stripped_headers: frozenset = app["_gw_stripped_headers"]
     request_hook = app["_gw_request_hook"]
 
-    # --- 1. Validate container identity -------------------------------
-    peername = request.remote
-    if not peername:
-        logger.warning(f"{service_name}: request with no remote address")
+    # --- 1. Read container identity (set by IdentityMiddleware) --------
+    container_id = get_container_id(request)
+    if container_id == "unknown":
+        logger.warning(f"{service_name}: request reached handler without identity")
         return gateway_error(403, "Unable to determine request source")
-
-    container = registry.get_by_ip(peername)
-    if container is None:
-        logger.warning(f"{service_name}: unknown source IP: {peername}")
-        return gateway_error(403, "Unknown container — not registered")
-    if container.is_expired:
-        logger.warning(
-            f"{service_name}: expired container: "
-            f"{container.container_id} (IP {peername})"
-        )
-        return gateway_error(403, "Container registration expired")
-
-    container_id = container.container_id
-    set_container_id(request, container_id)
 
     # --- 2. Check credential availability -----------------------------
     if credential is None and credential_required:
@@ -257,9 +250,9 @@ async def _proxy_request(request: web.Request) -> web.StreamResponse:
             f"{service_name}: no credential configured "
             f"(container: {container_id})"
         )
+        display = _DISPLAY_NAMES.get(service_name, service_name)
         return gateway_error(
-            502, f"{service_name.split('-')[0].capitalize()} "
-                 f"credential not configured on gateway"
+            502, f"{display} credential not configured on gateway"
         )
 
     # --- 3. Read body and run request hook ----------------------------
@@ -318,7 +311,7 @@ async def _proxy_request(request: web.Request) -> web.StreamResponse:
             headers=upstream_headers,
             data=body,
             timeout=timeout,
-            auto_decompress=True,
+            auto_decompress=False,
         ) as upstream_resp:
             response = web.StreamResponse(
                 status=upstream_resp.status,
