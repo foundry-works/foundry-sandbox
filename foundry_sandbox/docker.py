@@ -149,12 +149,16 @@ def setup_credential_placeholders() -> CredentialPlaceholders:
     # Tavily: Set flag if API key is available on host
     enable_tavily = "1" if os.environ.get("TAVILY_API_KEY") else "0"
 
+    # OpenAI: Only set base URL when API key is available (avoids conflict with Codex subscription mode)
+    openai_base_url = "http://unified-proxy:9849" if os.environ.get("OPENAI_API_KEY") else ""
+
     return CredentialPlaceholders(
         sandbox_anthropic_api_key=anthropic_key,
         sandbox_claude_oauth=claude_oauth,
         sandbox_gemini_api_key=gemini_key,
         sandbox_zhipu_api_key=zhipu_key,
         sandbox_enable_tavily=enable_tavily,
+        sandbox_openai_base_url=openai_base_url,
     )
 
 

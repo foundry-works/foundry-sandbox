@@ -17,7 +17,10 @@ Perplexity conflict:
   env var.
 
 Sandbox configuration:
-  OPENAI_BASE_URL=http://unified-proxy:9849
+  OPENAI_BASE_URL is conditional — only set when the host has OPENAI_API_KEY
+  (API-key mode).  When using Codex subscription mode (no API key), it is
+  left unset so Codex routes through chatgpt.com → TLS interception on
+  port 443.
   OPENAI_API_KEY=CREDENTIAL_PROXY_PLACEHOLDER
 """
 

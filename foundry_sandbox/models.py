@@ -148,6 +148,9 @@ class CredentialPlaceholders(BaseModel):
     sandbox_enable_tavily: str = "0"
     """Whether Tavily is enabled ('0' or '1')."""
 
+    sandbox_openai_base_url: str = ""
+    """OpenAI base URL (conditional: only set when host has OPENAI_API_KEY)."""
+
     def to_env_dict(self) -> dict[str, str]:
         """Convert to uppercase env var dict for backward compatibility with compose_up()."""
         return {
@@ -156,4 +159,5 @@ class CredentialPlaceholders(BaseModel):
             "SANDBOX_GEMINI_API_KEY": self.sandbox_gemini_api_key,
             "SANDBOX_ZHIPU_API_KEY": self.sandbox_zhipu_api_key,
             "SANDBOX_ENABLE_TAVILY": self.sandbox_enable_tavily,
+            "SANDBOX_OPENAI_BASE_URL": self.sandbox_openai_base_url,
         }

@@ -18,7 +18,7 @@ import os
 import sys
 from typing import Optional
 
-from mitmproxy import http
+from mitmproxy import connection, http
 from mitmproxy.flow import Flow
 
 from logging_config import get_logger
@@ -43,6 +43,12 @@ REPOS_BASE_DIR = os.environ.get(
 
 # Global registry instance (initialized in load())
 _registry: Optional[ContainerRegistry] = None
+
+# Store real client IPs extracted from CONNECT-level XFF headers.
+# For HTTPS CONNECT tunnels, Squid sets XFF on the outer CONNECT request,
+# but mitmproxy's request() hook fires on inner (decrypted) requests which
+# don't carry XFF. The http_connect handler captures the real IP here.
+_connect_real_ips: dict[int, str] = {}  # id(client_conn) -> real IP
 
 
 class ContainerIdentityAddon:
@@ -75,6 +81,24 @@ class ContainerIdentityAddon:
         """Called when addon is loaded."""
         logger.info("Container identity addon loaded")
 
+    def http_connect(self, flow: http.HTTPFlow) -> None:
+        """Extract real client IP from CONNECT-level XFF header.
+
+        For HTTPS CONNECT tunnels through Squid, XFF is set on the outer
+        CONNECT request but not on the inner decrypted requests. Store the
+        real IP so request() can use it for container identity resolution.
+        """
+        source_ip = flow.client_conn.peername[0] if flow.client_conn.peername else None
+        if source_ip == "127.0.0.1":
+            xff = flow.request.headers.get("X-Forwarded-For", "")
+            if xff:
+                real_ip = xff.split(",")[0].strip()
+                _connect_real_ips[id(flow.client_conn)] = real_ip
+
+    def client_disconnected(self, client: connection.Client) -> None:
+        """Clean up stored CONNECT-level IPs when client disconnects."""
+        _connect_real_ips.pop(id(client), None)
+
     def request(self, flow: http.HTTPFlow) -> None:
         """Process incoming request to identify container.
 
@@ -89,14 +113,18 @@ class ContainerIdentityAddon:
 
         source_ip = client_address[0]
 
-        # When Squid's cache_peer forwards MITM traffic, the TCP source is
-        # 127.0.0.1 (Squid itself).  Recover the real container IP from
-        # X-Forwarded-For which Squid sets via "forwarded_for truncate".
+        # When Squid's cache_peer forwards traffic, the TCP source is
+        # 127.0.0.1 (Squid itself).  Recover the real container IP:
+        # 1. CONNECT tunnel: use IP from CONNECT-level XFF (stored by http_connect)
+        # 2. Plain HTTP: use request-level XFF (set by Squid forwarded_for truncate)
         if source_ip == "127.0.0.1":
-            xff = flow.request.headers.get("X-Forwarded-For", "")
-            if xff:
-                # truncate mode produces a single IP; take the first just in case
-                source_ip = xff.split(",")[0].strip()
+            real_ip = _connect_real_ips.get(id(flow.client_conn))
+            if real_ip:
+                source_ip = real_ip
+            else:
+                xff = flow.request.headers.get("X-Forwarded-For", "")
+                if xff:
+                    source_ip = xff.split(",")[0].strip()
             # Strip XFF before forwarding to prevent leakage to upstream
             if "X-Forwarded-For" in flow.request.headers:
                 del flow.request.headers["X-Forwarded-For"]
