@@ -315,7 +315,7 @@ class PolicyEngine:
                 container_id=None,
             )
             self._log_decision(decision, method, raw_host, path)
-            flow.metadata[POLICY_DECISION_KEY] = decision.to_dict()
+            self._deny_request(flow, decision)
             return
 
         container_id = container_config.container_id

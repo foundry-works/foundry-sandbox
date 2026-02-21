@@ -4,6 +4,7 @@ Tests normalize_path(), PolicyDecision, and PolicyEngine's GitHub blocklist
 and body inspection methods.
 """
 
+from unittest import mock
 
 from addons.policy_engine import is_ip_literal, normalize_path, PolicyDecision, PolicyEngine
 
@@ -136,6 +137,30 @@ class TestIsIpLiteral:
     def test_ipv4_still_detected(self):
         """IPv4 dotted decimal should still be detected."""
         assert is_ip_literal("127.0.0.1") is True
+
+
+class TestIdentityVerification:
+    """Tests that unidentified containers get a proper 403 denial."""
+
+    def _make_flow(self, host="api.github.com", path="/repos/o/r", method="GET"):
+        flow = mock.MagicMock()
+        flow.request.method = method
+        flow.request.pretty_host = host
+        flow.request.path = path
+        flow.request.content = b""
+        flow.metadata = {}
+        flow.response = None
+        flow.client_conn.peername = ("192.168.1.100", 12345)
+        return flow
+
+    @mock.patch("addons.policy_engine.get_container_config", return_value=None)
+    def test_unidentified_container_gets_403(self, mock_get_config):
+        """Request with no container identity must be denied with 403."""
+        engine = PolicyEngine()
+        flow = self._make_flow()
+        engine.request(flow)
+        assert flow.response is not None
+        assert flow.response.status_code == 403
 
 
 class TestPolicyDecision:

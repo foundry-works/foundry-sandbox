@@ -358,7 +358,10 @@ async def _proxy_request(request: web.Request) -> web.StreamResponse:
             f"{service_name}: client disconnected during "
             f"{method} {request.path} (container: {container_id})"
         )
-        return response  # Already prepared, can't send new response
+        try:
+            return response  # Already prepared, can't send new response
+        except NameError:
+            return gateway_error(499, "Client disconnected")
 
 
 # ---------------------------------------------------------------------------

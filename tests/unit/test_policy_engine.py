@@ -140,8 +140,9 @@ class TestDefaultDeny:
         assert decision["container_id"] is None
         assert "verification failed" in decision["reason"].lower()
 
-        # Verify: no response created (container_identity addon handles this)
-        assert mock_flow.response is None
+        # Verify: 403 response created by _deny_request()
+        assert mock_flow.response is not None
+        assert mock_flow.response.status_code == 403
 
     @patch("addons.policy_engine.get_container_config")
     @patch("addons.policy_engine.logger")
