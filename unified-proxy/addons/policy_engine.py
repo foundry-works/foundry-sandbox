@@ -473,7 +473,7 @@ class PolicyEngine:
             return
 
         # Step 2b: Endpoint path enforcement (for hosts with endpoint config)
-        endpoint_block = self._check_endpoint_paths(host, method, path)
+        endpoint_block = self._check_endpoint_paths(host, method, normalized_path)
         if endpoint_block:
             decision = PolicyDecision(
                 allowed=False,
@@ -564,20 +564,20 @@ class PolicyEngine:
         return False
 
     def _check_endpoint_paths(
-        self, host: str, method: str, raw_path: str
+        self, host: str, method: str, path: str
     ) -> Optional[str]:
         """Check endpoint path enforcement for hosts with endpoint config.
 
         For hosts that have http_endpoints entries in the allowlist, validates
-        that the normalized request path matches at least one allowed path
-        pattern using segment-aware matching. Then checks against blocked_paths.
+        that the request path matches at least one allowed path pattern using
+        segment-aware matching. Then checks against blocked_paths.
 
         Hosts without endpoint entries use domain-level allowlisting only.
 
         Args:
             host: Request host.
             method: HTTP method.
-            raw_path: Raw request path (may include query string).
+            path: Normalized request path.
 
         Returns:
             Block reason if request should be blocked, None if allowed.
@@ -596,13 +596,6 @@ class PolicyEngine:
         if endpoint is None:
             return None
 
-        # Normalize the path with strict security rules
-        normalized = normalize_path(raw_path)
-        if normalized is None:
-            return (
-                f"Path rejected: double-encoding detected in request to {host}"
-            )
-
         # Enforce HTTP method allowlist for this host's endpoint config
         allowed_methods = {m.upper() for m in endpoint.methods}
         if method.upper() not in allowed_methods:
@@ -610,18 +603,18 @@ class PolicyEngine:
 
         # Check if the path matches any allowed endpoint path pattern
         path_allowed = any(
-            segment_match(pattern, normalized) for pattern in endpoint.paths
+            segment_match(pattern, path) for pattern in endpoint.paths
         )
         if not path_allowed:
             return (
-                f"Path '{normalized}' not in allowed paths for {host}"
+                f"Path '{path}' not in allowed paths for {host}"
             )
 
         # Check against blocked paths
         for bp in self._allowlist.blocked_paths:
-            if normalize_host(bp.host) == host and bp.matches(normalized):
+            if normalize_host(bp.host) == host and bp.matches(path):
                 return (
-                    f"Path '{normalized}' is blocked by policy for {host}"
+                    f"Path '{path}' is blocked by policy for {host}"
                 )
 
         return None
@@ -654,28 +647,28 @@ class PolicyEngine:
         """
         # Block PR merge operations
         # (Redundant fallback — primary check is Step E early-exit)
-        if method == "PUT" and GITHUB_MERGE_PR_PATTERN.match(path):
+        if method == "PUT" and GITHUB_MERGE_PR_PATTERN.fullmatch(path):
             return "GitHub PR merge operations are blocked by policy"
 
         # Block release creation
-        if method == "POST" and GITHUB_CREATE_RELEASE_PATTERN.match(path):
+        if method == "POST" and GITHUB_CREATE_RELEASE_PATTERN.fullmatch(path):
             return "GitHub release creation is blocked by policy"
 
         # Block Git ref mutations (branch/tag create/update/delete via REST API)
-        if method == "POST" and GITHUB_GIT_REFS_ROOT_PATTERN.match(path):
+        if method == "POST" and GITHUB_GIT_REFS_ROOT_PATTERN.fullmatch(path):
             return "GitHub git ref creation is blocked by policy"
-        if method in {"PATCH", "DELETE"} and GITHUB_GIT_REFS_SUBPATH_PATTERN.match(path):
+        if method in {"PATCH", "DELETE"} and GITHUB_GIT_REFS_SUBPATH_PATTERN.fullmatch(path):
             return "GitHub git ref mutation is blocked by policy"
 
         # Block auto-merge enablement/disablement
         # (Redundant fallback — primary check is Step E early-exit)
         # Defense-in-depth: also blocked in github-api-filter.py
-        if method in ("PUT", "DELETE") and GITHUB_AUTO_MERGE_PATTERN.match(path):
+        if method in ("PUT", "DELETE") and GITHUB_AUTO_MERGE_PATTERN.fullmatch(path):
             return "GitHub auto-merge operations are blocked by policy"
 
         # Block review deletion (prevents removing blocking reviews)
         # Defense-in-depth: also blocked in github-api-filter.py
-        if method == "DELETE" and GITHUB_DELETE_REVIEW_PATTERN.match(path):
+        if method == "DELETE" and GITHUB_DELETE_REVIEW_PATTERN.fullmatch(path):
             return "Deleting pull request reviews is blocked by policy"
 
         return None
@@ -709,7 +702,7 @@ class PolicyEngine:
             return None
 
         # POST: PR review approval check
-        if method == "POST" and GITHUB_PR_REVIEW_PATTERN.match(path):
+        if method == "POST" and GITHUB_PR_REVIEW_PATTERN.fullmatch(path):
             # Reject compressed bodies
             if content_encoding:
                 return (
@@ -744,8 +737,8 @@ class PolicyEngine:
 
         # Only inspect PR and issue endpoints
         if not (
-            GITHUB_PATCH_PR_PATTERN.match(path)
-            or GITHUB_PATCH_ISSUE_PATTERN.match(path)
+            GITHUB_PATCH_PR_PATTERN.fullmatch(path)
+            or GITHUB_PATCH_ISSUE_PATTERN.fullmatch(path)
         ):
             return None
 
@@ -799,7 +792,7 @@ class PolicyEngine:
         # Block state:closed (PR close / issue close)
         state = parsed.get("state")
         if state is not None and str(state).lower() == "closed":
-            if GITHUB_PATCH_PR_PATTERN.match(path):
+            if GITHUB_PATCH_PR_PATTERN.fullmatch(path):
                 return "Closing pull requests via API is blocked by policy"
             else:
                 return "Closing issues via API is blocked by policy"

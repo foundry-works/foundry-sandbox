@@ -166,9 +166,12 @@ async def _proxy_request(request: web.Request) -> web.StreamResponse:
     body = await request.read()
 
     # Build headers: forward safe headers, inject credential.
+    _PLACEHOLDER_MARKERS = ("CRED_PROXY_", "CREDENTIAL_PROXY_PLACEHOLDER")
     upstream_headers: dict[str, str] = {}
     for name, value in request.headers.items():
         if name.lower() not in _STRIPPED_HEADERS:
+            if any(marker in value for marker in _PLACEHOLDER_MARKERS):
+                continue
             upstream_headers[name] = value
 
     # Inject credential

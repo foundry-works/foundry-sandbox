@@ -13,8 +13,6 @@ import sys
 from unittest import mock
 from unittest.mock import patch
 
-import pytest
-
 # github_gateway.py imports aiohttp at module level.  Install a minimal
 # mock so the module can be imported without aiohttp installed.
 if "aiohttp" not in sys.modules:

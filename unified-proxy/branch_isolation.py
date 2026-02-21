@@ -350,7 +350,7 @@ def _is_allowed_ref(
         prefix, _, branch_part = base.partition("/")
         if not _is_allowed_branch_name(base, sandbox_branch, base_branch):
             # Not an allowed branch name as-is, try as remote/branch
-            if branch_part:
+            if branch_part and re.fullmatch(r"[A-Za-z0-9_-]+", prefix):
                 return _is_allowed_branch_name(
                     branch_part, sandbox_branch, base_branch
                 )

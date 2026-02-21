@@ -157,7 +157,7 @@ def _compile_segment_pattern(pattern: str) -> re.Pattern:
     i = 0
     while i < len(pattern):
         if pattern[i : i + 2] == "**":
-            regex_parts.append(r".+")
+            regex_parts.append(r".+?")
             i += 2
             continue
         if pattern[i] == "*":
@@ -186,7 +186,7 @@ def segment_match(pattern: str, path: str) -> bool:
         True if path matches the pattern.
     """
     compiled = _compile_segment_pattern(pattern)
-    return compiled.match(path) is not None
+    return compiled.fullmatch(path) is not None
 
 
 @dataclass
@@ -218,7 +218,7 @@ class BlockedPathConfig:
         Returns:
             True if the path matches any blocked pattern.
         """
-        return any(m.match(path) is not None for m in self._compiled_matchers)
+        return any(m.fullmatch(path) is not None for m in self._compiled_matchers)
 
 
 @dataclass

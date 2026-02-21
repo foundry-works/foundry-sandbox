@@ -450,6 +450,7 @@ def _prepare_allowlist_override(
         delete=False,
     )
     tmp_path = f.name
+    os.chmod(tmp_path, 0o600)
     f.write(override_content)
     f.close()
     if compose_extras is None:
@@ -975,8 +976,8 @@ def proxy_cleanup(container: str, container_id: str) -> None:
     os.environ["CONTAINER_NAME"] = container
     try:
         cleanup_proxy_registration(container_id)
-    except (OSError, subprocess.SubprocessError):
-        pass
+    except (OSError, subprocess.SubprocessError) as e:
+        log_warn(f"Proxy cleanup failed for {container}: {e}")
     finally:
         if prev_container_name is None:
             os.environ.pop("CONTAINER_NAME", None)

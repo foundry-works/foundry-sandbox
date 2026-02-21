@@ -215,34 +215,34 @@ def _check_github_blocklist(method: str, path: str) -> Optional[str]:
     Returns block reason if request should be blocked, None otherwise.
     """
     # Block PR merge operations (redundant with early-exit merge check)
-    if method == "PUT" and _GITHUB_MERGE_PR_PATTERN.match(path):
+    if method == "PUT" and _GITHUB_MERGE_PR_PATTERN.fullmatch(path):
         return "GitHub PR merge operations are blocked by policy"
 
     # Block release creation
-    if method == "POST" and _GITHUB_CREATE_RELEASE_PATTERN.match(path):
+    if method == "POST" and _GITHUB_CREATE_RELEASE_PATTERN.fullmatch(path):
         return "GitHub release creation is blocked by policy"
 
     # Block repo merge API (branch merges)
-    if method == "POST" and _GITHUB_REPO_MERGES_PATTERN.match(path):
+    if method == "POST" and _GITHUB_REPO_MERGES_PATTERN.fullmatch(path):
         return "GitHub repo merge operations are blocked by policy"
 
     # Block Git ref mutations (branch/tag create/update/delete via REST API)
-    if method == "POST" and _GITHUB_GIT_REFS_ROOT_PATTERN.match(path):
+    if method == "POST" and _GITHUB_GIT_REFS_ROOT_PATTERN.fullmatch(path):
         return "GitHub git ref creation is blocked by policy"
-    if method in {"PATCH", "DELETE"} and _GITHUB_GIT_REFS_SUBPATH_PATTERN.match(path):
+    if method in {"PATCH", "DELETE"} and _GITHUB_GIT_REFS_SUBPATH_PATTERN.fullmatch(path):
         return "GitHub git ref mutation is blocked by policy"
 
     # Block auto-merge enablement/disablement
-    if method in ("PUT", "DELETE") and _GITHUB_AUTO_MERGE_PATTERN.match(path):
+    if method in ("PUT", "DELETE") and _GITHUB_AUTO_MERGE_PATTERN.fullmatch(path):
         return "GitHub auto-merge operations are blocked by policy"
 
     # Block review deletion (prevents removing blocking reviews)
-    if method == "DELETE" and _GITHUB_DELETE_REVIEW_PATTERN.match(path):
+    if method == "DELETE" and _GITHUB_DELETE_REVIEW_PATTERN.fullmatch(path):
         return "Deleting pull request reviews is blocked by policy"
 
     # Block dangerous endpoints (webhooks, deploy keys, secrets, etc.)
     for pattern in _BLOCKED_PATH_PATTERNS:
-        if pattern.match(path):
+        if pattern.fullmatch(path):
             return f"Path '{path}' is blocked by policy"
 
     return None
@@ -273,7 +273,7 @@ def _check_github_body_policies(
         return None
 
     # POST: PR review approval check
-    if method == "POST" and _GITHUB_PR_REVIEW_PATTERN.match(path):
+    if method == "POST" and _GITHUB_PR_REVIEW_PATTERN.fullmatch(path):
         if content_encoding:
             return (
                 "Compressed request bodies are not allowed for "
@@ -306,8 +306,8 @@ def _check_github_body_policies(
 
     # PATCH: PR/issue close check
     if not (
-        _GITHUB_PATCH_PR_PATTERN.match(path)
-        or _GITHUB_PATCH_ISSUE_PATTERN.match(path)
+        _GITHUB_PATCH_PR_PATTERN.fullmatch(path)
+        or _GITHUB_PATCH_ISSUE_PATTERN.fullmatch(path)
     ):
         return None
 
@@ -347,7 +347,7 @@ def _check_github_body_policies(
 
     state = parsed.get("state")
     if state is not None and str(state).lower() == "closed":
-        if _GITHUB_PATCH_PR_PATTERN.match(path):
+        if _GITHUB_PATCH_PR_PATTERN.fullmatch(path):
             return "Closing pull requests via API is blocked by policy"
         else:
             return "Closing issues via API is blocked by policy"
@@ -413,20 +413,11 @@ async def _proxy_request(request: web.Request) -> web.StreamResponse:
     # Stash container_id for middleware (rate limiter, metrics, etc.)
     set_container_id(request, container_id)
 
-    # --- 2. Read body and apply security policies -------------------------
-    body = await request.read()
+    # --- 2. Apply security policies ---------------------------------------
     method = request.method.upper()
     raw_path = request.path
 
-    # Step E: Early-exit merge blocking (unconditional)
-    if _is_merge_request(raw_path, body):
-        logger.warning(
-            f"Blocked merge operation: {method} {raw_path} "
-            f"(container: {container_id})"
-        )
-        return _policy_error("Merge operations are not permitted")
-
-    # Normalize path for policy checks
+    # Normalize path for policy checks (before reading body)
     normalized_path = _normalize_path(raw_path)
     if normalized_path is None:
         logger.warning(
@@ -435,7 +426,7 @@ async def _proxy_request(request: web.Request) -> web.StreamResponse:
         )
         return _policy_error("Path rejected: double-encoding detected")
 
-    # Step 3: GitHub blocklist
+    # Step 3: GitHub blocklist (path-only, no body needed)
     block_reason = _check_github_blocklist(method, normalized_path)
     if block_reason:
         logger.warning(
@@ -443,6 +434,17 @@ async def _proxy_request(request: web.Request) -> web.StreamResponse:
             f"(container: {container_id})"
         )
         return _policy_error(block_reason)
+
+    # Read body for merge check and body policies
+    body = await request.read()
+
+    # Step E: Early-exit merge blocking (unconditional, needs body for GraphQL keywords)
+    if _is_merge_request(raw_path, body):
+        logger.warning(
+            f"Blocked merge operation: {method} {raw_path} "
+            f"(container: {container_id})"
+        )
+        return _policy_error("Merge operations are not permitted")
 
     # Step 3b: Body inspection
     content_type = request.headers.get("content-type", "")
@@ -464,9 +466,12 @@ async def _proxy_request(request: web.Request) -> web.StreamResponse:
     upstream_url = f"{UPSTREAM_BASE_URL}{upstream_path}"
 
     # Build headers: forward safe headers, inject credential.
+    _PLACEHOLDER_MARKERS = ("CRED_PROXY_", "CREDENTIAL_PROXY_PLACEHOLDER")
     upstream_headers: dict[str, str] = {}
     for name, value in request.headers.items():
         if name.lower() not in _STRIPPED_HEADERS:
+            if any(marker in value for marker in _PLACEHOLDER_MARKERS):
+                continue
             upstream_headers[name] = value
 
     # Inject credential (if available)

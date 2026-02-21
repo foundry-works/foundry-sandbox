@@ -1572,9 +1572,6 @@ class TestRefEnumPass2Fallback:
 # ---------------------------------------------------------------------------
 
 
-import os
-
-
 class TestResolveBareRepoPath:
     """Test symlink boundary enforcement in resolve_bare_repo_path."""
 
