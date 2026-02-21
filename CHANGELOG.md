@@ -5,6 +5,20 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.19.0] - 2026-02-21
+
+### Added
+- **Dedicated API gateways** — Migrates API traffic from mitmproxy addons to purpose-built gateways (GitHub, OpenAI, Gemini, ChatGPT) with a Squid forward proxy, reducing credential exposure surface and improving auditability
+- **Gemini API gateway** — New gateway with OAuth support for Gemini API traffic
+- **ChatGPT gateway** — New gateway with transparent TLS interception for ChatGPT API traffic
+- **Shared gateway infrastructure** — Extracts `gateway_base.py`, `gateway_middleware.py`, and `security_policies.py` as reusable modules for consistent auth injection, rate limiting, circuit breaking, and error handling
+- **Documentation** — Security feature gap analysis, provider base URL research, mitmproxy elimination analysis, gateway rollback procedures, threat model updates, and security review plan
+
+### Fixed
+- **Security hardening** — Closes IPv6 IP literal bypass, git diff arg order bypass, identity bypass, ConnectionResetError crash, credential detection in clone URLs, symlink boundary checks, placeholder filter gaps, and more
+- **Squid forward proxy** — Resolves container startup issues including domain dedup conflicts, PID file paths, effective user configuration, and log directory permissions
+- **Test coverage** — Adds comprehensive unit tests for policy engine, gateway middleware, GitHub gateway, branch isolation, push/commit file restrictions, git command validation, and git API auth
+
 ## [0.18.2] - 2026-02-20
 
 ### Fixed
