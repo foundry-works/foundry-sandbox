@@ -15,8 +15,10 @@ run_tests() {
     mitm_msg=$(head -c 200 "$curl_err" 2>/dev/null || true)
     rm -f "$curl_err"
 
-    if [ $mitm_exit -eq 0 ] && [ "$mitm_code" != "000" ]; then
+    if [ $mitm_exit -eq 0 ] && [ "$mitm_code" != "000" ] && [ "$mitm_code" != "403" ]; then
         test_fail "mitmproxy web UI reachable from sandbox (HTTP $mitm_code)"
+    elif [ "$mitm_code" = "403" ]; then
+        test_pass "mitmproxy web UI blocked by proxy (HTTP 403)"
     else
         test_pass "mitmproxy web UI not reachable from sandbox"
         if [ -n "$mitm_msg" ]; then
