@@ -112,5 +112,6 @@ VOLUME ["/etc/proxy/credentials", "/etc/proxy/certs", "/var/run/proxy"]
 # Default environment variables
 ENV PROXY_MODE=regular
 ENV PROXY_LOG_LEVEL=info
+ENV PYTHONUNBUFFERED=1
 
 ENTRYPOINT ["/opt/proxy/entrypoint.sh"]

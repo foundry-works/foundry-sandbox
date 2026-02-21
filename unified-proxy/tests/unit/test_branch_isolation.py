@@ -1626,6 +1626,49 @@ class TestResolveBareRepoPath:
         result = resolve_bare_repo_path(str(repo))
         assert result == str(git_dir.resolve())
 
+# ---------------------------------------------------------------------------
+# Rebase isolation
+# ---------------------------------------------------------------------------
+
+
+class TestRebaseIsolation:
+    """Test rebase --root and --onto isolation."""
+
+    def test_rebase_onto_disallowed_blocked(self):
+        """rebase --onto <disallowed> must be blocked."""
+        err = validate_branch_isolation(
+            ["rebase", "--onto", OTHER, "main"], META
+        )
+        assert err is not None
+        assert OTHER in err.reason
+
+    def test_rebase_onto_own_branch_allowed(self):
+        assert validate_branch_isolation(
+            ["rebase", "--onto", SANDBOX, "main"], META
+        ) is None
+
+    def test_rebase_onto_well_known_allowed(self):
+        assert validate_branch_isolation(
+            ["rebase", "--onto", "main", SANDBOX], META
+        ) is None
+
+    def test_rebase_root_disallowed_blocked(self):
+        """rebase --root with a disallowed upstream ref must be blocked."""
+        err = validate_branch_isolation(
+            ["rebase", "--root", OTHER], META
+        )
+        assert err is not None
+        assert OTHER in err.reason
+
+    def test_rebase_root_own_branch_allowed(self):
+        assert validate_branch_isolation(
+            ["rebase", "--root", SANDBOX], META
+        ) is None
+
+
+class TestResolveBareRepoPathWorktreeChain:
+    """Additional resolve_bare_repo_path tests for worktree chains."""
+
     def test_worktree_chain_commondir_escape_returns_none(self, tmp_path):
         """Worktree -> gitdir -> commondir chain escaping boundary returns None."""
         # Nest the worktree so boundary = tmp_path / "projects"

@@ -167,6 +167,23 @@ class TestRateLimiting:
             assert len(passed) == 2, f"Expected 2 requests to pass (capacity=2), got {len(passed)}"
             assert len(blocked) == 3, f"Expected 3 requests blocked (5 total - 2 capacity), got {len(blocked)}"
 
+    def test_per_container_isolation(self, rate_limiter):
+        """Exhausting rate limit for container-1 must not affect container-2."""
+        config_1 = MockContainerConfig(container_id="container-1")
+        config_2 = MockContainerConfig(container_id="container-2")
+
+        # Exhaust container-1's capacity (2 tokens)
+        with mock.patch("addons.rate_limiter.get_container_config", return_value=config_1):
+            for _ in range(3):
+                flow = MockFlow(host="api.anthropic.com")
+                rate_limiter.request(flow)
+
+        # container-2 should still have full capacity
+        with mock.patch("addons.rate_limiter.get_container_config", return_value=config_2):
+            flow = MockFlow(host="api.anthropic.com")
+            rate_limiter.request(flow)
+            assert flow.response is None, "container-2 should not be rate-limited"
+
 
 class TestCircuitBreaker:
     """Test circuit breaker behavior."""
