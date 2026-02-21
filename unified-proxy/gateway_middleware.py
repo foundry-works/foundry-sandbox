@@ -424,7 +424,7 @@ class CircuitBreakerMiddleware:
 
         if status.state == CircuitState.OPEN:
             if status.last_failure_time is None:
-                return True
+                return False  # Fail-closed: OPEN state must block
             if now - status.last_failure_time >= self.recovery_timeout:
                 self._transition_state(
                     CircuitState.HALF_OPEN,
@@ -436,7 +436,7 @@ class CircuitBreakerMiddleware:
         if status.state == CircuitState.HALF_OPEN:
             return True
 
-        return True
+        return False  # Unknown state: fail-closed
 
     def _record_success(self) -> None:
         """Record a successful request. Must hold lock."""

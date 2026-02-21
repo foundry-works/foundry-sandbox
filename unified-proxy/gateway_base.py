@@ -274,7 +274,7 @@ async def _proxy_request(request: web.Request) -> web.StreamResponse:
     upstream_headers: dict[str, str] = {}
     for name, value in request.headers.items():
         if name.lower() not in stripped_headers:
-            if any(marker in value for marker in _PLACEHOLDER_MARKERS):
+            if any(value.startswith(marker) for marker in _PLACEHOLDER_MARKERS):
                 continue
             upstream_headers[name] = value
 

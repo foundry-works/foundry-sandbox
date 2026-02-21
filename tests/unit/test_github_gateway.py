@@ -132,6 +132,15 @@ class TestNormalizePath:
         """Single-encoded / (%2F) decodes normally."""
         assert normalize_path("/repos/owner%2Frepo") == "/repos/owner/repo"
 
+    def test_normpath_before_slash_collapse(self):
+        """Path with .. and // is normalized correctly (normpath first)."""
+        # /foo/ + .. = / + /bar = /bar (.. navigates up from foo)
+        assert normalize_path("/foo//..//bar") == "/bar"
+
+    def test_dotdot_with_double_slash(self):
+        """Multiple .. segments with // are resolved correctly."""
+        assert normalize_path("/a/b/../..//c") == "/c"
+
 
 # ---------------------------------------------------------------------------
 # Merge blocking (Step E)
@@ -453,3 +462,40 @@ class TestCheckGitHubBodyPolicies:
             "application/json", "",
         )
         assert result is not None
+
+
+# ---------------------------------------------------------------------------
+# Placeholder credential filter (gateway_base._PLACEHOLDER_MARKERS)
+# ---------------------------------------------------------------------------
+
+
+class TestPlaceholderFilter:
+    """Tests that placeholder credential values are filtered by startswith."""
+
+    def test_placeholder_prefix_is_stripped(self):
+        """Header value starting with CRED_PROXY_ is a placeholder."""
+        from gateway_base import _PLACEHOLDER_MARKERS
+
+        value = "CRED_PROXY_abc123"
+        assert any(value.startswith(m) for m in _PLACEHOLDER_MARKERS)
+
+    def test_substring_match_is_not_stripped(self):
+        """Header value containing CRED_PROXY_ mid-string is NOT a placeholder."""
+        from gateway_base import _PLACEHOLDER_MARKERS
+
+        value = "my-token-has-CRED_PROXY_in-it"
+        assert not any(value.startswith(m) for m in _PLACEHOLDER_MARKERS)
+
+    def test_full_placeholder_is_stripped(self):
+        """CREDENTIAL_PROXY_PLACEHOLDER prefix is a placeholder."""
+        from gateway_base import _PLACEHOLDER_MARKERS
+
+        value = "CREDENTIAL_PROXY_PLACEHOLDER"
+        assert any(value.startswith(m) for m in _PLACEHOLDER_MARKERS)
+
+    def test_real_token_passes_through(self):
+        """A real bearer token is not mistaken for a placeholder."""
+        from gateway_base import _PLACEHOLDER_MARKERS
+
+        value = "ghp_AbCdEf1234567890"
+        assert not any(value.startswith(m) for m in _PLACEHOLDER_MARKERS)
