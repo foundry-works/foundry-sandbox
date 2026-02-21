@@ -180,6 +180,28 @@ class TestGenerateSquidConfig:
             # Unrelated domains should still be present
             assert "other.com" in allowed
 
+    def test_mitm_domain_with_wildcard_deduplicated(self):
+        """MITM domains covered by a wildcard don't reintroduce the exact form.
+
+        github.com is both in MITM_DOMAINS and has *.github.com in the
+        allowlist.  The exact form must not appear in the final output.
+        """
+        mock_config = _make_mock_config([
+            "github.com",
+            "*.github.com",
+        ])
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            with patch("generate_squid_config.load_allowlist_config", return_value=mock_config):
+                generate_squid_config(output_dir=tmpdir)
+
+            allowed_path = os.path.join(tmpdir, "allowed_domains.txt")
+            with open(allowed_path) as f:
+                allowed = f.read().splitlines()
+
+            assert ".github.com" in allowed
+            assert "github.com" not in allowed
+
     def test_creates_output_directory(self):
         """Creates output directory if it doesn't exist."""
         mock_config = _make_mock_config(["api.example.com"])
