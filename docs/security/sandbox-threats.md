@@ -220,6 +220,11 @@ Malicious npm packages, Python libraries, or other dependencies may contain code
 
 **Why This Works:** When a malicious package runs `process.env.ANTHROPIC_API_KEY`, it gets `CREDENTIAL_PROXY_PLACEHOLDER`. When it tries to send this to `evil.com`, network isolation blocks the request. Even if it attempts raw packet crafting to bypass network rules, CAP_NET_RAW is dropped. See [Supply Chain Attack Scenario](credential-isolation.md#scenario-1-malicious-npm-package-in-sandbox-supply-chain-attack) in the credential isolation threat model for a detailed walkthrough.
 
+**Package installation is intentionally enabled.** Both `pip install` and `npm install` work inside sandboxes — package registries (pypi.org, npmjs.org, etc.) are on the domain allowlist and routed through Squid. This is safe because the existing defense stack neutralizes supply chain risk:
+- **Credential isolation** — packages see only placeholder values, not real API keys
+- **Network isolation** — exfiltration to unauthorized domains is blocked
+- **Ephemeral storage** — packages install to tmpfs (`~/.local/`), which clears on sandbox restart; no persistent foothold is possible
+
 ---
 
 ### 5. Lateral Movement

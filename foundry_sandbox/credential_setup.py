@@ -207,10 +207,8 @@ def _stage_setup_claude_config(
 
     # Statusline
     log_step("Copying statusline config")
-    statusline_conf = home / ".claude" / "statusline.conf"
-    if not statusline_conf.exists():
-        script_dir = Path(os.environ.get("SCRIPT_DIR", "/workspace"))
-        statusline_conf = script_dir / "statusline.conf"
+    script_dir = Path(os.environ.get("SCRIPT_DIR", "/workspace"))
+    statusline_conf = script_dir / "statusline.conf"
     if statusline_conf.exists():
         copy_file_to_container(
             container_id, str(statusline_conf),
@@ -680,10 +678,8 @@ def sync_runtime_credentials(
             log_warn("Claude settings merge was incomplete; some settings may be missing")
 
     # Copy statusline.conf (quiet)
-    statusline_conf = home / ".claude" / "statusline.conf"
-    if not statusline_conf.exists():
-        script_dir = Path(os.environ.get("SCRIPT_DIR", "/workspace"))
-        statusline_conf = script_dir / "statusline.conf"
+    script_dir = Path(os.environ.get("SCRIPT_DIR", "/workspace"))
+    statusline_conf = script_dir / "statusline.conf"
     if statusline_conf.exists():
         copy_file_to_container_quiet(
             container_id,

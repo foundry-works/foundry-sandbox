@@ -26,10 +26,12 @@ from branch_isolation import (
     _is_allowed_branch_name,
     _is_allowed_ref,
     _is_allowed_short_ref_token,
+    _looks_like_path,
     _strip_rev_suffixes,
     filter_ref_listing_output,
     filter_stderr_branch_refs,
     get_subcommand_args,
+    normalize_pathspec_args,
     resolve_bare_repo_path,
     validate_branch_isolation,
     validate_sha_reachability,
@@ -1690,3 +1692,162 @@ class TestResolveBareRepoPathWorktreeChain:
         (wt / ".git").write_text(f"gitdir: {worktree_gitdir}")
         result = resolve_bare_repo_path(str(wt))
         assert result is None
+
+
+# ---------------------------------------------------------------------------
+# normalize_pathspec_args
+# ---------------------------------------------------------------------------
+
+
+class TestNormalizePathspecArgs:
+    """Test auto-insertion of -- for ref-reading commands with path-like args."""
+
+    def test_diff_with_file_path_gets_separator(self):
+        args = ["diff", "docs/operations.md"]
+        new_args, expanded = normalize_pathspec_args(args, META)
+        assert expanded is True
+        assert new_args == ["diff", "--", "docs/operations.md"]
+
+    def test_log_with_file_path_gets_separator(self):
+        args = ["log", "README.md"]
+        new_args, expanded = normalize_pathspec_args(args, META)
+        assert expanded is True
+        assert new_args == ["log", "--", "README.md"]
+
+    def test_show_with_file_path_gets_separator(self):
+        args = ["show", "src/main.py"]
+        new_args, expanded = normalize_pathspec_args(args, META)
+        assert expanded is True
+        assert new_args == ["show", "--", "src/main.py"]
+
+    def test_blame_with_file_path_gets_separator(self):
+        args = ["blame", "lib/utils.js"]
+        new_args, expanded = normalize_pathspec_args(args, META)
+        assert expanded is True
+        assert new_args == ["blame", "--", "lib/utils.js"]
+
+    def test_diff_with_relative_path_gets_separator(self):
+        args = ["diff", "./foo.txt"]
+        new_args, expanded = normalize_pathspec_args(args, META)
+        assert expanded is True
+        assert new_args == ["diff", "--", "./foo.txt"]
+
+    def test_diff_with_parent_relative_path_gets_separator(self):
+        args = ["diff", "../bar.txt"]
+        new_args, expanded = normalize_pathspec_args(args, META)
+        assert expanded is True
+        assert new_args == ["diff", "--", "../bar.txt"]
+
+    def test_existing_separator_not_duplicated(self):
+        args = ["diff", "--", "docs/operations.md"]
+        new_args, expanded = normalize_pathspec_args(args, META)
+        assert expanded is False
+        assert new_args == args
+
+    def test_allowed_ref_not_touched(self):
+        # Own sandbox branch should pass through unchanged
+        args = ["log", SANDBOX]
+        new_args, expanded = normalize_pathspec_args(args, META)
+        assert expanded is False
+        assert new_args == args
+
+    def test_allowed_ref_HEAD_not_touched(self):
+        args = ["diff", "HEAD"]
+        new_args, expanded = normalize_pathspec_args(args, META)
+        assert expanded is False
+        assert new_args == args
+
+    def test_non_ref_reading_command_not_touched(self):
+        # push is not a ref-reading command
+        args = ["push", "docs/foo.md"]
+        new_args, expanded = normalize_pathspec_args(args, META)
+        assert expanded is False
+        assert new_args == args
+
+    def test_no_metadata_returns_unchanged(self):
+        args = ["diff", "foo.md"]
+        new_args, expanded = normalize_pathspec_args(args, None)
+        assert expanded is False
+
+    def test_flags_with_values_skipped(self):
+        # -n is a value flag — its argument should not be treated as a path
+        args = ["log", "-n", "5", "docs/foo.md"]
+        new_args, expanded = normalize_pathspec_args(args, META)
+        assert expanded is True
+        assert new_args == ["log", "-n", "5", "--", "docs/foo.md"]
+
+    def test_ref_and_path_mixed(self):
+        # HEAD is a valid ref, docs/foo.md is a path — insert -- before the path
+        args = ["diff", "HEAD", "docs/foo.md"]
+        new_args, expanded = normalize_pathspec_args(args, META)
+        assert expanded is True
+        assert new_args == ["diff", "HEAD", "--", "docs/foo.md"]
+
+    def test_multiple_paths(self):
+        # Only inserts -- before the first path-like arg
+        args = ["diff", "a.py", "b.py"]
+        new_args, expanded = normalize_pathspec_args(args, META)
+        assert expanded is True
+        assert new_args == ["diff", "--", "a.py", "b.py"]
+
+    def test_global_flags_preserved(self):
+        args = ["-c", "core.pager=cat", "diff", "foo.md"]
+        new_args, expanded = normalize_pathspec_args(args, META)
+        assert expanded is True
+        assert new_args == ["-c", "core.pager=cat", "diff", "--", "foo.md"]
+
+    def test_extensionless_non_ref_not_expanded(self):
+        # A bare name without extension that fails ref check is NOT auto-expanded
+        # (could be a typo'd branch name — safer to let the error through)
+        args = ["diff", "nonexistent_branch"]
+        new_args, expanded = normalize_pathspec_args(args, META)
+        assert expanded is False
+
+    def test_checkout_with_file_path_gets_separator(self):
+        args = ["checkout", "docs/foo.md"]
+        new_args, expanded = normalize_pathspec_args(args, META)
+        assert expanded is True
+        assert new_args == ["checkout", "--", "docs/foo.md"]
+
+    def test_checkout_with_branch_create_not_expanded(self):
+        # -b creates a new branch — don't interfere
+        args = ["checkout", "-b", "new-branch", "docs/foo.md"]
+        new_args, expanded = normalize_pathspec_args(args, META)
+        assert expanded is False
+
+    def test_switch_with_file_path_gets_separator(self):
+        args = ["switch", "src/main.py"]
+        new_args, expanded = normalize_pathspec_args(args, META)
+        assert expanded is True
+        assert new_args == ["switch", "--", "src/main.py"]
+
+    def test_checkout_existing_separator_not_duplicated(self):
+        args = ["checkout", "--", "foo.txt"]
+        new_args, expanded = normalize_pathspec_args(args, META)
+        assert expanded is False
+
+
+class TestLooksLikePath:
+    """Test the _looks_like_path heuristic."""
+
+    def test_file_with_extension(self):
+        assert _looks_like_path("README.md") is True
+        assert _looks_like_path("src/main.py") is True
+        assert _looks_like_path("docs/guide.txt") is True
+
+    def test_relative_path(self):
+        assert _looks_like_path("./foo") is True
+        assert _looks_like_path("../bar") is True
+
+    def test_bare_name_no_extension(self):
+        assert _looks_like_path("main") is False
+        assert _looks_like_path("develop") is False
+
+    def test_dotfile(self):
+        assert _looks_like_path(".gitignore") is True
+
+    def test_sha_like(self):
+        assert _looks_like_path("abc123def456") is False
+
+    def test_range_operator(self):
+        assert _looks_like_path("HEAD..main") is False

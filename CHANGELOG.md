@@ -5,6 +5,20 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.20.0] - 2026-02-21
+
+### Added
+- **Gemini OAuth auto-refresh** — Proxy now automatically refreshes expired Gemini OAuth tokens using Google's token endpoint with the public Gemini CLI client credentials, instead of returning 401 errors; refreshed tokens are persisted to `oauth_creds.json` for future sessions
+- **Pathspec auto-expansion for branch isolation** — `git diff docs/foo.md`, `git log README.md`, `git blame src/main.py` and similar ref-reading commands now auto-insert `--` before path-like arguments, preventing false branch isolation rejections when users omit the `--` separator
+- **Package installation in sandboxes** — `pip install` and `npm install` now work out of the box; `PIP_USER=1` env var routes pip installs to `~/.local/` on the read-only root filesystem; new red-team test module validates pip, npm, and system-level install boundaries
+- **GitHub Actions API read access** — Added read-only allowlist paths for actions runs, workflows, jobs, and artifacts so `gh run view`, `gh workflow list`, etc. work in sandboxes
+- **Gemini trusted folders** — Entrypoint pre-trusts `/workspace` in `~/.gemini/trustedFolders.json` to avoid interactive Gemini CLI trust prompt
+
+### Changed
+- **GitHub API routing moved to MITM path** — `api.github.com` re-added to mitmproxy credential injection because `gh` CLI does not support `GITHUB_API_URL`; the gateway (`:9850`) now handles only git operations; Squid MITM intercepts, credential injector replaces placeholder `GH_TOKEN`, and `policy_engine.py` enforces security policies
+- **Statusline config uses bundled file** — Always copies the project-bundled `statusline.conf` instead of looking for `~/.claude/statusline.conf` on the host
+- **Removed OAuth token expiry warnings from `cast new`** — No longer needed since Gemini tokens auto-refresh and Codex tokens self-refresh via refresh_token
+
 ## [0.19.4] - 2026-02-21
 
 ### Fixed

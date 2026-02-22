@@ -111,7 +111,7 @@ RUN if [ "$INCLUDE_OPENCODE" = "1" ]; then \
 RUN pip3 install foundry-mcp pypdf pytest-asyncio hypothesis cc-context-stats pyright
 
 # Install tavily-mcp globally (npm package for web search MCP server)
-# Baked into image because npm is blocked in credential isolation mode
+# Pre-installed to avoid runtime installation delay
 RUN npm install -g tavily-mcp
 
 # Fix ESM module resolution for OpenCode SDK wrapper (only if INCLUDE_OPENCODE=1)
@@ -176,6 +176,9 @@ ENV HOME="/home/ubuntu"
 # Set up paths for user (use /home/ubuntu for compatibility - symlinked if different user)
 ENV PATH="/usr/local/go/bin:/home/ubuntu/go/bin:/home/ubuntu/.local/bin:$PATH"
 ENV GOPATH="/home/ubuntu/go"
+# Default pip to user-mode installs (~/.local/) so "pip install foo" works on read-only root FS.
+# Must be set AFTER build-time "RUN pip3 install ..." commands (which install to /usr/local/).
+ENV PIP_USER=1
 
 ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]
 CMD ["/bin/bash"]

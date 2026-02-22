@@ -15,6 +15,11 @@ mkdir -p "$HOME/.claude" \
          "$HOME/.foundry-mcp/errors" \
          "$HOME/.foundry-mcp/metrics"
 
+# Pre-trust /workspace for Gemini CLI (avoids interactive prompt)
+cat > "$HOME/.gemini/trustedFolders.json" << 'EOF'
+{"/workspace":"TRUST_FOLDER"}
+EOF
+
 # Only create OpenCode directories if enabled
 if [ "${SANDBOX_ENABLE_OPENCODE:-0}" = "1" ]; then
     mkdir -p "$HOME/.config/opencode" \
@@ -50,7 +55,7 @@ npm config set prefix "$HOME/.local" 2>/dev/null || true
 touch ~/.sudo_as_admin_successful
 
 # Add foundry-upgrade alias for easy MCP plugin updates
-echo "alias foundry-upgrade='pip install --pre --upgrade foundry-mcp'" >> ~/.bashrc
+echo "alias foundry-upgrade='pip install --pre --upgrade --user foundry-mcp'" >> ~/.bashrc
 
 # Claude Code with ZAI GLM models (opt-in; requires ZHIPU_API_KEY on host)
 # Requires global-agent for Node.js proxy support (installed in Dockerfile)
@@ -116,7 +121,7 @@ GH_WRAPPER
 # CLI tools are pre-installed in the image
 # To update manually: npm update -g @anthropic-ai/claude-code @google/gemini-cli @openai/codex opencode-ai
 
-# tavily-mcp is now baked into the Docker image (npm blocked in credential isolation)
+# tavily-mcp is now baked into the Docker image (pre-installed to avoid runtime delay)
 # This is a fallback for older images - use SANDBOX_ENABLE_TAVILY flag from host
 if [ "${SANDBOX_ENABLE_TAVILY:-0}" = "1" ] || { [ -n "${TAVILY_API_KEY:-}" ] && [ "${TAVILY_API_KEY}" != "CREDENTIAL_PROXY_PLACEHOLDER" ]; }; then
     if ! command -v tavily-mcp >/dev/null 2>&1; then

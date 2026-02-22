@@ -5,10 +5,9 @@ version: "1.0"
 
 domains:
   # GitHub
-  # NOTE: api.github.com credential injection has moved to the gateway
-  # (http://unified-proxy:9850). Domain kept here for defense-in-depth —
-  # policy_engine still enforces endpoint/blocklist rules on any direct
-  # MITM requests that bypass the gateway.
+  # NOTE: api.github.com is on the MITM path because gh CLI does not
+  # support GITHUB_API_URL. Credential injection and policy enforcement
+  # happen via mitmproxy (credential_injector + policy_engine).
   - github.com
   - "*.github.com"
   - api.github.com
@@ -77,10 +76,9 @@ domains:
 # HTTP endpoint allowlist for fine-grained API access control
 # Each endpoint specifies host, allowed methods, and allowed paths
 http_endpoints:
-  # GitHub API — credential injection has moved to the gateway
-  # (http://unified-proxy:9850), but endpoint enforcement remains here as
-  # defense-in-depth for any direct api.github.com requests that bypass
-  # the gateway through the MITM proxy path.
+  # GitHub API — gh CLI traffic flows through the MITM path
+  # (Squid → mitmproxy credential injector → api.github.com).
+  # The gateway (:9850) handles git operations only.
   # *  matches exactly one path segment (does not span /)
   # ** matches one or more characters and may span /
   - host: api.github.com
@@ -134,6 +132,15 @@ http_endpoints:
       - "/repos/*/*/pulls/*/reviews/**"
       # Commit statuses
       - "/repos/*/*/statuses/*"
+      # Actions (read-only: runs, workflows, jobs, artifacts)
+      - "/repos/*/*/actions/runs"
+      - "/repos/*/*/actions/runs/**"
+      - "/repos/*/*/actions/workflows"
+      - "/repos/*/*/actions/workflows/**"
+      - "/repos/*/*/actions/jobs"
+      - "/repos/*/*/actions/jobs/**"
+      - "/repos/*/*/actions/artifacts"
+      - "/repos/*/*/actions/artifacts/**"
       # Check runs / check suites
       - "/repos/*/*/check-runs"
       - "/repos/*/*/check-runs/*"

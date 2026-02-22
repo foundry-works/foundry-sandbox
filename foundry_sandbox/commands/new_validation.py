@@ -11,13 +11,9 @@ import sys
 
 import click
 
-from foundry_sandbox.api_keys import (
-    check_claude_key_required,
-    check_codex_token_expiry,
-    check_gemini_token_expiry,
-)
+from foundry_sandbox.api_keys import check_claude_key_required
 from foundry_sandbox.image import check_image_freshness
-from foundry_sandbox.utils import log_error, log_warn
+from foundry_sandbox.utils import log_error
 from foundry_sandbox.validate import check_docker_network_capacity, validate_git_url, validate_mount_path
 
 
@@ -49,20 +45,6 @@ def _validate_preconditions(
         ok, msg = check_claude_key_required()
         if not ok:
             log_error("Sandbox creation cancelled - Claude authentication required.")
-            sys.exit(1)
-
-    # Check for expired OAuth tokens and prompt to continue
-    token_warnings: list[str] = []
-    ok, msg = check_gemini_token_expiry()
-    if not ok:
-        token_warnings.append(msg)
-    ok, msg = check_codex_token_expiry()
-    if not ok:
-        token_warnings.append(msg)
-    if token_warnings:
-        for w in token_warnings:
-            log_warn(w)
-        if not click.confirm("Continue with expired token(s)?", default=False):
             sys.exit(1)
 
     for copy_spec in copies:

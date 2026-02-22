@@ -148,23 +148,19 @@ class TestGitHubComCredentialInjection:
 class TestGitHubApiCredentialInjection:
     """Tests for GitHub credential injection.
 
-    api.github.com has been removed from PROVIDER_MAP — it routes through
-    the GitHub gateway (http://unified-proxy:9850) instead of MITM.
-    uploads.github.com remains on the MITM path for file uploads.
+    api.github.com is on the MITM path because gh CLI does not support
+    GITHUB_API_URL.  The credential injector replaces the placeholder
+    GH_TOKEN with the real token.  uploads.github.com also remains on
+    the MITM path for file uploads.
     """
 
-    def test_api_github_com_not_in_provider_map(self):
-        """api.github.com should NOT be in PROVIDER_MAP (routes through gateway)."""
-        assert "api.github.com" not in credential_injector.PROVIDER_MAP
-
-    def test_api_github_com_passes_through(self, injector):
-        """Requests to api.github.com should pass through without injection."""
-        flow = MockHTTPFlow("api.github.com", "/repos/owner/repo")
-        injector.request(flow)
-
-        # Not in PROVIDER_MAP, so no injection and no error
-        assert flow.response is None
-        assert flow.request.headers.get("Authorization", "") == ""
+    def test_api_github_com_in_provider_map(self):
+        """api.github.com should be in PROVIDER_MAP (MITM credential injection)."""
+        assert "api.github.com" in credential_injector.PROVIDER_MAP
+        config = credential_injector.PROVIDER_MAP["api.github.com"]
+        assert config["header"] == "Authorization"
+        assert config["env_var"] == "GITHUB_TOKEN"
+        assert config["format"] == "bearer"
 
     def test_uploads_github_com_injection(self, injector):
         """Should inject token for uploads.github.com requests."""

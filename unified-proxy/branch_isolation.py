@@ -856,6 +856,123 @@ def _validate_ref_reading_isolation(
 
 
 # ---------------------------------------------------------------------------
+# Pathspec Auto-Expansion
+# ---------------------------------------------------------------------------
+
+# File extensions that strongly indicate a path rather than a ref.
+# Kept intentionally broad – false positives are harmless (git will just
+# report "file not found"), while false negatives produce a confusing
+# branch-isolation error.
+_PATH_EXTENSION_RE = re.compile(
+    r"\.[A-Za-z0-9]{1,10}$"
+)
+
+
+def _looks_like_path(arg: str) -> bool:
+    """Heuristic: does *arg* look like a file path rather than a git ref?
+
+    Returns True for arguments that contain a file extension, start with
+    ``./`` or ``../``, or contain path separator characters combined with
+    an extension-like suffix.  Returns False for range operators (``..``,
+    ``...``) and revision suffixes.
+    """
+    # Range operators are refs, not paths
+    if ".." in arg and not arg.startswith(".."):
+        return False
+    if arg.startswith("./") or arg.startswith("../"):
+        return True
+    # Contains a file extension (e.g. "docs/foo.md", "README.txt")
+    if _PATH_EXTENSION_RE.search(arg):
+        return True
+    return False
+
+
+def normalize_pathspec_args(
+    args: List[str],
+    metadata: Optional[dict],
+) -> Tuple[List[str], bool]:
+    """Auto-insert ``--`` for ref-reading commands when args look like paths.
+
+    When a user runs ``git diff docs/foo.md`` without a ``--`` separator,
+    branch isolation treats ``docs/foo.md`` as a ref and blocks it.  This
+    function detects the pattern and rewrites the args to insert ``--``
+    before the first path-like positional argument.
+
+    Applies to ref-reading commands (diff, log, show, blame, etc.) and
+    checkout/switch (when not in branch-creation mode) when:
+
+    - Branch isolation metadata is present
+    - No ``--`` already exists in the subcommand args
+    - At least one positional arg fails ref validation AND looks like a path
+
+    Args:
+        args: Full git argument list (without the ``git`` binary itself).
+        metadata: Container metadata (must contain ``sandbox_branch``).
+
+    Returns:
+        ``(args, True)`` if the args were rewritten, ``(args, False)``
+        otherwise.  The original *args* list is never mutated.
+    """
+    if not metadata or not metadata.get("sandbox_branch"):
+        return args, False
+
+    sandbox_branch = metadata.get("sandbox_branch")
+    base_branch = _normalize_base_branch(metadata.get("from_branch"))
+
+    subcommand, sub_args, _ = get_subcommand_args(args)
+    if subcommand is None:
+        return args, False
+
+    # Already has -- separator
+    if "--" in sub_args:
+        return args, False
+
+    # Determine which value flags to use and whether to skip
+    if subcommand in _REF_READING_CMDS:
+        value_flags = _REF_READING_VALUE_FLAGS
+    elif subcommand in ("checkout", "switch"):
+        # Don't expand when creating a branch (-b, -B, -c, -C, --orphan)
+        for a in sub_args:
+            if a in _BRANCH_CREATE_FLAGS:
+                return args, False
+            if "=" in a and a.split("=", 1)[0] in _BRANCH_CREATE_FLAGS:
+                return args, False
+        value_flags = _CHECKOUT_VALUE_FLAGS
+    else:
+        return args, False
+
+    # Find the index (in the full args list) of the first positional arg
+    # that fails ref validation but looks like a file path.
+    # We need to walk the full args list to find the correct insertion point.
+    sub_start = len(args) - len(sub_args)
+    skip_next = False
+    insert_idx = None
+
+    for i, a in enumerate(sub_args):
+        if skip_next:
+            skip_next = False
+            continue
+        if a in value_flags:
+            skip_next = True
+            continue
+        if "=" in a and a.split("=", 1)[0] in value_flags:
+            continue
+        if a.startswith("-"):
+            continue
+        # Positional arg — check if it fails ref validation but looks like a path
+        if not _is_allowed_ref(a, sandbox_branch, base_branch) and _looks_like_path(a):
+            insert_idx = sub_start + i
+            break
+
+    if insert_idx is None:
+        return args, False
+
+    # Insert -- before the first path-like positional
+    new_args = list(args[:insert_idx]) + ["--"] + list(args[insert_idx:])
+    return new_args, True
+
+
+# ---------------------------------------------------------------------------
 # SHA Reachability Enforcement
 # ---------------------------------------------------------------------------
 

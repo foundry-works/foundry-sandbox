@@ -56,7 +56,12 @@ MITM_DOMAINS = [
     # Zhipu AI
     "api.z.ai",
     "open.bigmodel.cn",
-    # GitHub (uploads + main site for git credential injection)
+    # GitHub (API + uploads + main site for credential injection)
+    # NOTE: api.github.com must be on the MITM path because gh CLI does NOT
+    # support GITHUB_API_URL — it always connects to api.github.com directly.
+    # The credential injector replaces the placeholder GH_TOKEN with the real
+    # token.  Policy enforcement uses policy_engine.py (shared with the gateway).
+    "api.github.com",
     "uploads.github.com",
     "github.com",
     # OAuth endpoints

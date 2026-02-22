@@ -12,7 +12,7 @@ No host installation required. The plugin is fetched from GitHub and configured 
 
 ### Statusline
 
-If you use [cc-context-stats](https://github.com/luongnv89/cc-context-stats), place your `statusline.conf` in `~/.claude/statusline.conf` and it will be copied into new sandboxes. The Docker image includes `claude-statusline`, so the statusline works out of the box.
+The Docker image includes `claude-statusline` and a bundled `statusline.conf`, so the statusline works out of the box.
 
 ### LSPs
 
@@ -41,7 +41,7 @@ The sandbox automatically copies configuration files from your host into contain
 |--------|-------------|---------|
 | `~/.claude.json` | `/home/ubuntu/.claude.json` | Claude Code preferences (host file only) |
 | `~/.claude/settings.json` | `/home/ubuntu/.claude/settings.json` | Claude Code settings |
-| `~/.claude/statusline.conf` | `/home/ubuntu/.claude/statusline.conf` | Optional Claude statusline config (cc-context-stats; `claude-statusline` is bundled in the image) |
+| (bundled) `statusline.conf` | `/home/ubuntu/.claude/statusline.conf` | Claude statusline config (`claude-statusline` is bundled in the image) |
 | `~/.gitconfig` | `/home/ubuntu/.gitconfig` | Git configuration |
 | `~/.ssh/` | `/home/ubuntu/.ssh/` | SSH config/keys (when enabled) |
 | `~/.config/gh/` | `/home/ubuntu/.config/gh/` | GitHub CLI (from `gh auth login`) |

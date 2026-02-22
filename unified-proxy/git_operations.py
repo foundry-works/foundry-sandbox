@@ -42,6 +42,7 @@ from branch_types import (
     get_subcommand_args,
 )
 from branch_isolation import (
+    normalize_pathspec_args,
     resolve_bare_repo_path,
     validate_branch_isolation,
     validate_sha_reachability,
@@ -941,6 +942,19 @@ def execute_git(
             command_args=args,
             reason="Bare push auto-expanded with sandbox branch",
             matched_rule="push_normalization",
+            request_id=req_id,
+        )
+
+    # Auto-insert -- for ref-reading commands when args look like file paths
+    args, pathspec_expanded = normalize_pathspec_args(args, metadata)
+    if pathspec_expanded:
+        audit_log(
+            event="pathspec_auto_expanded",
+            action=" ".join(args[:3]),
+            decision="allow",
+            command_args=args,
+            reason="Auto-inserted -- before path-like arguments",
+            matched_rule="pathspec_normalization",
             request_id=req_id,
         )
 

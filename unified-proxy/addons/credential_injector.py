@@ -150,14 +150,19 @@ PROVIDER_MAP = {
         "env_var": "ZHIPU_API_KEY",
         "format": "value",
     },
-    # NOTE: api.github.com removed from PROVIDER_MAP.
-    # GitHub API traffic routes through the API gateway (http://unified-proxy:9850)
-    # which handles credential injection, security policy enforcement, and
-    # HTTPS forwarding. See unified-proxy/github_gateway.py.
-
+    # GitHub API: must be on MITM path because gh CLI does NOT support
+    # GITHUB_API_URL — it always connects directly to api.github.com.
+    # The gateway (:9850) remains as a secondary path for git operations.
+    # Policy enforcement uses policy_engine.py (shared with the gateway).
+    "api.github.com": {
+        "header": "Authorization",
+        "env_var": "GITHUB_TOKEN",
+        "fallback_env_var": "GH_TOKEN",
+        "format": "bearer",
+    },
     # GitHub uploads and github.com remain on the MITM path because
     # uploads.github.com is used for release asset uploads which the gh CLI
-    # accesses via URLs returned from the API (not GITHUB_API_URL).
+    # accesses via URLs returned from the API.
     "uploads.github.com": {
         "header": "Authorization",
         "env_var": "GITHUB_TOKEN",
@@ -480,23 +485,6 @@ class CredentialInjector:
             logger.info(
                 f"Injected real OAuth token for Gemini ({host}) "
                 f"(container: {container_id or 'unknown'})"
-            )
-            return True
-        except ValueError as e:
-            # Token expired or missing — return a clear 401 so the user
-            # knows exactly what to do instead of seeing an opaque API error.
-            container_id = self._get_container_id(flow)
-            logger.warning(
-                f"Gemini OAuth token unavailable for {host}: {e} "
-                f"(container: {container_id or 'unknown'})"
-            )
-            flow.response = http.Response.make(
-                401,
-                json.dumps({
-                    "error": str(e),
-                    "hint": "Run 'gemini login' on the host, then 'cast refresh-creds' to reload.",
-                }).encode(),
-                {"Content-Type": "application/json"},
             )
             return True
         except Exception as e:

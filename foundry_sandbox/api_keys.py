@@ -9,20 +9,14 @@ No Click or Pydantic imports at module level (bridge-callable constraint).
 
 from __future__ import annotations
 
-import base64
-import json
 import os
 import shutil
 import subprocess
-import time
 from pathlib import Path
 from typing import Any
 
 from foundry_sandbox.constants import TIMEOUT_LOCAL_CMD
 from foundry_sandbox.utils import log_step
-
-# Consider a token expired if it expires within this window.
-_TOKEN_EXPIRY_BUFFER_SECONDS = 300  # 5 minutes
 
 
 # ============================================================================
@@ -105,97 +99,6 @@ def has_zai_key() -> bool:
     if not key:
         return False
     return key not in ("CREDENTIAL_PROXY_PLACEHOLDER", "PROXY_PLACEHOLDER_OPENCODE") and not key.startswith("CRED_PROXY_")
-
-
-def _extract_jwt_exp(token: str) -> float:
-    """Extract the ``exp`` claim from a JWT without verifying the signature.
-
-    Returns:
-        Unix timestamp, or 0 on any parse failure.
-    """
-    try:
-        parts = token.split(".")
-        if len(parts) != 3:
-            return 0
-        payload_b64 = parts[1]
-        padding = 4 - len(payload_b64) % 4
-        if padding < 4:
-            payload_b64 += "=" * padding
-        payload = json.loads(base64.urlsafe_b64decode(payload_b64))
-        exp = payload.get("exp")
-        return float(exp) if isinstance(exp, (int, float)) else 0
-    except Exception:
-        return 0
-
-
-def check_gemini_token_expiry() -> tuple[bool, str]:
-    """Check whether the Gemini OAuth token on disk is expired.
-
-    Returns:
-        ``(True, "")`` if the token is valid or not present (nothing to warn
-        about).  ``(False, message)`` if the token file exists but the token
-        has expired or will expire within the buffer window.
-    """
-    oauth_file = Path.home() / ".gemini" / "oauth_creds.json"
-    if not oauth_file.is_file():
-        return True, ""
-    try:
-        data = json.loads(oauth_file.read_text())
-    except (json.JSONDecodeError, OSError):
-        return True, ""  # can't parse — not our problem to block on
-
-    expiry_ms = data.get("expiry_date", 0)
-    if not expiry_ms:
-        return True, ""
-
-    expires_at = expiry_ms / 1000.0
-    if time.time() >= (expires_at - _TOKEN_EXPIRY_BUFFER_SECONDS):
-        return False, (
-            "Warning: Gemini OAuth token is expired.\n"
-            "  Run 'gemini login' to refresh before creating a sandbox."
-        )
-    return True, ""
-
-
-def check_codex_token_expiry() -> tuple[bool, str]:
-    """Check whether the Codex OAuth token on disk is expired.
-
-    Codex can auto-refresh via its refresh_token, so this is advisory — it
-    tells the user their access token needs a refresh cycle on first use.
-
-    Returns:
-        ``(True, "")`` if valid or not present.
-        ``(False, message)`` if the token is expired.
-    """
-    auth_file = Path.home() / ".codex" / "auth.json"
-    if not auth_file.is_file():
-        return True, ""
-    try:
-        data = json.loads(auth_file.read_text())
-    except (json.JSONDecodeError, OSError):
-        return True, ""
-
-    tokens = data.get("tokens", data)
-    access_token = tokens.get("access_token", "")
-
-    # Prefer JWT exp claim
-    expires_at = _extract_jwt_exp(access_token) if access_token else 0
-
-    # Fallback to explicit fields
-    if expires_at == 0:
-        raw = data.get("expires_at") or data.get("last_refresh", 0)
-        if isinstance(raw, (int, float)):
-            expires_at = float(raw)
-
-    if expires_at == 0:
-        return True, ""  # can't determine — don't warn
-
-    if time.time() >= (expires_at - _TOKEN_EXPIRY_BUFFER_SECONDS):
-        return False, (
-            "Warning: Codex OAuth token is expired.\n"
-            "  Run 'codex auth' to refresh, or it will auto-refresh on first use."
-        )
-    return True, ""
 
 
 def opencode_enabled() -> bool:
