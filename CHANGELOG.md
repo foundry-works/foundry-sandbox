@@ -5,6 +5,11 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.20.8] - 2026-02-22
+
+### Fixed
+- **Git wrapper python3 heredoc executes response file as script** — `python3 <<'PY' "$FILE"` treats `$FILE` as the script to execute, ignoring the heredoc; added `-` argument to force stdin reading so the JSON response is properly parsed instead of executed as Python code
+
 ## [0.20.7] - 2026-02-22
 
 ### Fixed
