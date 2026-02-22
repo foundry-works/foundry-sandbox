@@ -721,6 +721,8 @@ def new(
             stderr = getattr(exc, "stderr", None)
             if stderr:
                 import textwrap
+                if isinstance(stderr, bytes):
+                    stderr = stderr.decode(errors="replace")
                 log_error(textwrap.indent(stderr.strip(), "  "))
             log_info("Cleaning up partial sandbox resources...")
             _rollback_new(worktree_path, claude_config_path, container, override_file)

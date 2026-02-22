@@ -5,6 +5,24 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.20.5] - 2026-02-22
+
+### Fixed
+- **`cast new` crash on bytes stderr** — `subprocess.CalledProcessError.stderr` can be `bytes` when `text=` is not set; the error handler now decodes before calling `.strip()`, preventing a `TypeError` crash during rollback logging
+- **Docker compose timeout too short** — Increased `TIMEOUT_DOCKER_COMPOSE` from 120s to 300s and made it configurable via `CAST_COMPOSE_TIMEOUT` environment variable
+
+## [0.20.4] - 2026-02-22
+
+### Fixed
+- **Statusline config not copied into sandbox** — `SCRIPT_DIR` env var was never set during `cast new`, so the bundled `statusline.conf` path resolved to a non-existent `/workspace` directory; now uses `Path(__file__)`-based resolution consistent with the rest of the codebase
+- **E402 lint errors in credential_setup.py** — Reordered imports to satisfy ruff's module-level import position checks
+
+## [0.20.3] - 2026-02-22
+
+### Fixed
+- **Sandbox worktrees created from stale branch refs** — When `cast new repo branch` ran without `--from`, the bare repo's `refs/heads/<branch>` was never updated from the remote, causing worktrees to check out the commit from the original clone; now fetches and updates the ref before worktree creation
+- **Foundry upgrade test assertion wrong call** — `_enable_user_site_packages` added an extra `subprocess.run` call, so the test was asserting on the MCP config patch instead of the pip install command
+
 ## [0.20.2] - 2026-02-22
 
 ### Fixed
