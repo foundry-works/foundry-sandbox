@@ -154,6 +154,15 @@ def setup_credential_placeholders() -> CredentialPlaceholders:
     # mode still routes through chatgpt.com → TLS interception on port 443.
     openai_base_url = "http://unified-proxy:9849"
 
+    # User-defined services: generate placeholders for any with env var set on host
+    from foundry_sandbox.user_services import load_user_services
+
+    user_placeholders: dict[str, str] = {}
+    for svc in load_user_services():
+        if os.environ.get(svc.env_var):
+            user_placeholders[svc.env_var] = _credential_placeholder()
+            log_debug(f"User service '{svc.name}': placeholder generated for {svc.env_var}")
+
     return CredentialPlaceholders(
         sandbox_anthropic_api_key=anthropic_key,
         sandbox_claude_oauth=claude_oauth,
@@ -161,6 +170,7 @@ def setup_credential_placeholders() -> CredentialPlaceholders:
         sandbox_zhipu_api_key=zhipu_key,
         sandbox_enable_tavily=enable_tavily,
         sandbox_openai_base_url=openai_base_url,
+        user_service_placeholders=user_placeholders,
     )
 
 
@@ -465,6 +475,70 @@ def _prepare_allowlist_override(
     return tmp_path, compose_extras
 
 
+def _prepare_user_services_override(
+    isolate_credentials: bool,
+    compose_extras: list[str] | None,
+) -> tuple[str | None, list[str] | None]:
+    """Create a temp compose override that mounts user-services.yaml and threads env vars.
+
+    Returns:
+        Tuple of (temp_file_path or None, updated compose_extras or original).
+        The caller must delete temp_file_path when done.
+    """
+    if not isolate_credentials:
+        return None, compose_extras
+
+    from foundry_sandbox.user_services import load_user_services, find_user_services_path
+
+    services = load_user_services()
+    if not services:
+        return None, compose_extras
+
+    config_path = find_user_services_path()
+    if config_path is None:
+        return None, compose_extras
+
+    config_path = os.path.realpath(config_path)
+    container_mount = "/etc/unified-proxy/user-services.yaml"
+
+    # Build compose override: mount config + pass env vars
+    proxy_volumes = [f"{config_path}:{container_mount}:ro"]
+    proxy_env: list[str] = []
+    dev_env: list[str] = []
+
+    for svc in services:
+        # Pass real env var to proxy (compose inherits from host)
+        proxy_env.append(svc.env_var)
+        # Pass placeholder to dev container
+        dev_env.append(f"{svc.env_var}=${{SANDBOX_{svc.env_var}:-}}")
+
+    override_dict: dict[str, object] = {
+        "services": {
+            "unified-proxy": {
+                "volumes": proxy_volumes,
+                "environment": proxy_env,
+            },
+            "dev": {
+                "environment": dev_env,
+            },
+        }
+    }
+
+    override_content = yaml.dump(override_dict, default_flow_style=False)
+    f = tempfile.NamedTemporaryFile(
+        mode="w", suffix=".yml", prefix="user-services-",
+        delete=False,
+    )
+    tmp_path = f.name
+    os.chmod(tmp_path, 0o600)
+    f.write(override_content)
+    f.close()
+    if compose_extras is None:
+        compose_extras = []
+    compose_extras.append(tmp_path)
+    return tmp_path, compose_extras
+
+
 def _start_proxy_first(
     compose_cmd: list[str],
     container: str,
@@ -537,11 +611,19 @@ def compose_up(
         isolate_credentials, repos_dir, sandbox_id, anthropic_base_url,
     )
 
-    _allowlist_extra_override: str | None = None
+    _compose_overrides: list[str] = []
     try:
-        _allowlist_extra_override, compose_extras = _prepare_allowlist_override(
+        allowlist_tmp, compose_extras = _prepare_allowlist_override(
             isolate_credentials, compose_extras,
         )
+        if allowlist_tmp:
+            _compose_overrides.append(allowlist_tmp)
+
+        user_svc_tmp, compose_extras = _prepare_user_services_override(
+            isolate_credentials, compose_extras,
+        )
+        if user_svc_tmp:
+            _compose_overrides.append(user_svc_tmp)
 
         compose_cmd = get_compose_command(override_file, isolate_credentials, compose_extras)
 
@@ -564,9 +646,9 @@ def compose_up(
                 compose_result.returncode, cmd, output=compose_result.stdout, stderr=stderr_text,
             )
     finally:
-        if _allowlist_extra_override:
+        for tmp_path in _compose_overrides:
             try:
-                os.unlink(_allowlist_extra_override)
+                os.unlink(tmp_path)
             except OSError:
                 pass
 

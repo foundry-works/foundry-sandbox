@@ -246,6 +246,18 @@ def get_cli_status() -> list[str]:
     else:
         lines.append("Search: not configured")
 
+    # User-defined services
+    try:
+        from foundry_sandbox.user_services import load_user_services
+
+        for svc in load_user_services():
+            configured = bool(os.environ.get(svc.env_var))
+            lines.append(
+                f"{svc.name}: {'configured' if configured else 'not configured'}"
+            )
+    except Exception:
+        pass  # Don't break status display if user-services.yaml is malformed
+
     return lines
 
 
