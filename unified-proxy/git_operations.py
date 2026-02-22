@@ -794,14 +794,16 @@ def check_commit_file_restrictions(
     Returns:
         None if allowed, ValidationError if restricted files are staged.
     """
-    # Load file restrictions config (fail closed on error)
+    # Load file restrictions config (warn-and-allow on error — security
+    # boundary is at push time via check_push_file_restrictions)
     try:
         config = get_file_restrictions_config()
     except ConfigError as exc:
-        logger.warning("File restrictions config unavailable: %s", exc)
-        return ValidationError(
-            "File restrictions config unavailable; commit blocked (fail-closed)"
+        logger.warning(
+            "File restrictions config unavailable at commit time, "
+            "allowing commit (push-time validation remains active): %s", exc,
         )
+        return None
 
     # Enumerate staged files
     resolved_cwd = os.path.realpath(repo_root)
@@ -809,11 +811,13 @@ def check_commit_file_restrictions(
     changed_files = _enumerate_staged_files(resolved_cwd, env)
 
     if changed_files is None:
-        # Fail closed: can't enumerate staged files
-        return ValidationError(
+        # Warn-and-allow: can't enumerate staged files, but push-time
+        # validation (check_push_file_restrictions) will still enforce.
+        logger.warning(
             "Cannot enumerate staged files for commit file validation; "
-            "commit blocked (fail-closed)"
+            "allowing commit (push-time validation remains active)"
         )
+        return None
 
     if not changed_files:
         return None  # No staged files
@@ -854,12 +858,19 @@ def _enumerate_staged_files(
             env=env,
         )
         if result.returncode != 0:
+            stderr_out = result.stderr.decode("utf-8", errors="replace").strip()
+            logger.warning(
+                "git diff --cached failed (exit %d): %s",
+                result.returncode,
+                stderr_out or "(no stderr)",
+            )
             return None
         output = result.stdout.decode("utf-8", errors="replace").strip()
         if not output:
             return []
         return output.splitlines()
-    except (subprocess.TimeoutExpired, OSError):
+    except (subprocess.TimeoutExpired, OSError) as exc:
+        logger.warning("git diff --cached raised exception: %s", exc)
         return None
 
 

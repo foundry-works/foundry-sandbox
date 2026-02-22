@@ -318,9 +318,6 @@ if [[ $CURL_EXIT -ne 0 ]] || [[ "$HTTP_CODE" == "000" ]]; then
     exit 1
 fi
 
-RESPONSE=$(cat "$RESPONSE_FILE")
-rm -f "$RESPONSE_FILE" "$HTTP_CODE_FILE"
-
 # Handle HTTP errors
 case "$HTTP_CODE" in
     200)
@@ -330,56 +327,81 @@ case "$HTTP_CODE" in
         exit 1
         ;;
     429)
-        RETRY_AFTER=$(echo "$RESPONSE" | jq -r '.retry_after // empty' 2>/dev/null || true)
+        RETRY_AFTER=$(python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); v=d.get("retry_after",""); print(v if v else "")' "$RESPONSE_FILE" 2>/dev/null || true)
         if [[ -n "$RETRY_AFTER" ]]; then
             echo "error: git rate limit exceeded. Try again in ${RETRY_AFTER}s." >&2
         else
             echo "error: git rate limit exceeded." >&2
         fi
+        rm -f "$RESPONSE_FILE" "$HTTP_CODE_FILE"
         exit 1
         ;;
     400)
-        ERROR_MSG=$(echo "$RESPONSE" | jq -r '.error // "bad request"' 2>/dev/null || echo "bad request")
+        ERROR_MSG=$(python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); print(d.get("error","bad request"))' "$RESPONSE_FILE" 2>/dev/null || echo "bad request")
+        rm -f "$RESPONSE_FILE" "$HTTP_CODE_FILE"
         echo "error: $ERROR_MSG" >&2
         exit 1
         ;;
     422)
-        ERROR_MSG=$(echo "$RESPONSE" | jq -r '.error // "validation failed"' 2>/dev/null || echo "validation failed")
+        ERROR_MSG=$(python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); print(d.get("error","validation failed"))' "$RESPONSE_FILE" 2>/dev/null || echo "validation failed")
+        rm -f "$RESPONSE_FILE" "$HTTP_CODE_FILE"
         echo "error: $ERROR_MSG" >&2
         exit 1
         ;;
     *)
+        rm -f "$RESPONSE_FILE" "$HTTP_CODE_FILE"
         echo "error: git proxy returned HTTP $HTTP_CODE" >&2
         exit 1
         ;;
 esac
 
-# Parse response
-EXIT_CODE=$(echo "$RESPONSE" | jq -r '.exit_code // 0' 2>/dev/null || echo 1)
-STDOUT=$(echo "$RESPONSE" | jq -r '.stdout // ""' 2>/dev/null || true)
-STDERR=$(echo "$RESPONSE" | jq -r '.stderr // ""' 2>/dev/null || true)
-STDOUT_B64=$(echo "$RESPONSE" | jq -r '.stdout_b64 // ""' 2>/dev/null || true)
+# Parse response with python3 (avoids jq pipe failures that silently default exit_code to 1)
+PARSED_EXIT=$(mktemp)
+PARSED_STDOUT=$(mktemp)
+PARSED_STDERR=$(mktemp)
+trap 'rm -f "$RESPONSE_FILE" "$HTTP_CODE_FILE" "$PARSED_EXIT" "$PARSED_STDOUT" "$PARSED_STDERR"; cleanup 2' INT
+trap 'rm -f "$RESPONSE_FILE" "$HTTP_CODE_FILE" "$PARSED_EXIT" "$PARSED_STDOUT" "$PARSED_STDERR"; cleanup 15' TERM
 
-# Fall back to stdout_b64 when stdout is empty
-if [[ -z "$STDOUT" && -n "$STDOUT_B64" ]]; then
-    STDOUT=$(STDOUT_B64="$STDOUT_B64" python3 <<'PY' 2>/dev/null || true
-import base64, sys, os
-data = os.environ.get("STDOUT_B64", "").strip()
+python3 <<'PY' "$RESPONSE_FILE" "$PARSED_EXIT" "$PARSED_STDOUT" "$PARSED_STDERR"
+import base64, json, sys
+
+response_file, exit_file, stdout_file, stderr_file = sys.argv[1:5]
 try:
-    decoded = base64.b64decode(data)
-    sys.stdout.write(decoded.decode("utf-8", errors="replace"))
-except Exception:
-    pass
+    with open(response_file, "r") as f:
+        data = json.load(f)
+    exit_code = int(data.get("exit_code", 0))
+    stdout = data.get("stdout", "")
+    stderr = data.get("stderr", "")
+    stdout_b64 = data.get("stdout_b64", "")
+    # Fall back to stdout_b64 when stdout is empty
+    if not stdout and stdout_b64:
+        try:
+            stdout = base64.b64decode(stdout_b64).decode("utf-8", errors="replace")
+        except Exception:
+            pass
+except Exception as exc:
+    print(f"warning: git wrapper: failed to parse proxy response: {exc}", file=sys.stderr)
+    exit_code = 1
+    stdout = ""
+    stderr = ""
+
+with open(exit_file, "w") as f:
+    f.write(str(exit_code))
+with open(stdout_file, "w") as f:
+    f.write(stdout)
+with open(stderr_file, "w") as f:
+    f.write(stderr)
 PY
-    )
-fi
+
+EXIT_CODE=$(cat "$PARSED_EXIT" 2>/dev/null || echo 1)
 
 # Output results
-if [[ -n "$STDOUT" ]]; then
-    printf '%s\n' "$STDOUT"
+if [[ -s "$PARSED_STDOUT" ]]; then
+    cat "$PARSED_STDOUT"
 fi
-if [[ -n "$STDERR" ]]; then
-    printf '%s\n' "$STDERR" >&2
+if [[ -s "$PARSED_STDERR" ]]; then
+    cat "$PARSED_STDERR" >&2
 fi
 
+rm -f "$RESPONSE_FILE" "$HTTP_CODE_FILE" "$PARSED_EXIT" "$PARSED_STDOUT" "$PARSED_STDERR"
 exit "$EXIT_CODE"

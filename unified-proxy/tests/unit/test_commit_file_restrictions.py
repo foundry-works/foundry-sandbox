@@ -213,18 +213,25 @@ class TestCheckCommitFileRestrictions:
             assert err is not None
             assert "package.json" in err.reason
 
-    def test_config_unavailable_fails_closed(self):
-        """Commit is blocked when config cannot be loaded."""
+    def test_config_unavailable_warns_and_allows(self):
+        """Commit is allowed (with warning) when config cannot be loaded.
+
+        The security boundary is at push time, so commit-time config
+        failures should not block the developer.
+        """
         with patch(
             "git_operations.get_file_restrictions_config",
             side_effect=ConfigError("file not found"),
         ):
             err = check_commit_file_restrictions("/repo", META)
-            assert err is not None
-            assert "fail-closed" in err.reason
+            assert err is None
 
-    def test_diff_failure_fails_closed(self, config_file):
-        """Commit is blocked when git diff --cached fails."""
+    def test_diff_failure_warns_and_allows(self, config_file):
+        """Commit is allowed (with warning) when git diff --cached fails.
+
+        Push-time validation (check_push_file_restrictions) still enforces
+        file restrictions as the actual security boundary.
+        """
         fail_result = self._make_diff_result("", returncode=128)
 
         with patch(
@@ -236,8 +243,7 @@ class TestCheckCommitFileRestrictions:
             "git_operations.build_clean_env", return_value={}
         ):
             err = check_commit_file_restrictions("/repo", META)
-            assert err is not None
-            assert "fail-closed" in err.reason
+            assert err is None
 
     def test_no_staged_files_passes(self, config_file):
         """Commit with no staged files passes."""

@@ -12,7 +12,7 @@ import os
 import re
 import subprocess
 import time
-from typing import Dict, Generator, List, Optional
+from typing import Any, Dict, Generator, List, Optional
 
 from branch_types import GIT_BINARY
 from git_command_validation import SUBPROCESS_TIMEOUT
@@ -118,7 +118,7 @@ def _git_config_get(
 
 def _read_remote_urls_from_bare_config(
     bare_repo: Optional[str],
-) -> Dict[str, Dict[str, list]]:
+) -> Dict[str, Dict[str, Any]]:
     """Parse remote URLs directly from a bare repo config file.
 
     Returns mapping: remote -> {"url": str|None, "pushurls": [str]}.
@@ -128,7 +128,7 @@ def _read_remote_urls_from_bare_config(
     config_path = os.path.join(bare_repo, "config")
     if not os.path.isfile(config_path):
         return {}
-    remotes: Dict[str, Dict[str, list]] = {}
+    remotes: Dict[str, Dict[str, Any]] = {}
     current: Optional[str] = None
     try:
         with open(config_path, "r", encoding="utf-8", errors="replace") as f:

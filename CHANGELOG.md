@@ -5,6 +5,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.20.7] - 2026-02-22
+
+### Fixed
+- **Git operations returning spurious exit code 1 in sandboxes** — Replaced jq-based response parsing in `git-wrapper.sh` with python3 to avoid silent pipe failures that defaulted `exit_code` to 1; changed commit-time file restriction checks from fail-closed to warn-and-allow since the security boundary is at push time; added diagnostic logging to `_enumerate_staged_files` for easier debugging
+- **Pyright type errors in unified-proxy** — Added `[tool.pyright]` config with `extraPaths` for import resolution; fixed `_read_remote_urls_from_bare_config` return type from `Dict[str, Dict[str, list]]` to `Dict[str, Dict[str, Any]]` to match actual mixed-type values
+
 ## [0.20.6] - 2026-02-22
 
 ### Fixed
