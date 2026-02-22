@@ -61,25 +61,25 @@ run_tests() {
 
     # Test 6: npm install -g succeeds (installs to ~/.local/ via npm prefix)
     info "Testing npm install -g..."
-    NPM_G_OUTPUT=$(npm install -g is-odd 2>&1)
+    NPM_G_OUTPUT=$(npm install -g semver 2>&1)
     NPM_G_EXIT=$?
     if [[ $NPM_G_EXIT -eq 0 ]]; then
-        test_pass "npm install -g is-odd succeeded"
+        test_pass "npm install -g semver succeeded"
     else
         info "npm output: $(echo "$NPM_G_OUTPUT" | tail -3)"
-        test_fail "npm install -g is-odd failed (exit: $NPM_G_EXIT)"
+        test_fail "npm install -g semver failed (exit: $NPM_G_EXIT)"
     fi
 
     # Test 7: Globally installed npm binary is executable
     info "Testing globally installed npm binary is executable..."
-    if command -v is-odd >/dev/null 2>&1; then
-        test_pass "is-odd binary found in PATH"
+    if command -v semver >/dev/null 2>&1; then
+        test_pass "semver binary found in PATH"
     else
         # Check if it's in ~/.local/bin even if not in PATH for current shell
-        if [[ -x "$HOME/.local/bin/is-odd" ]]; then
-            test_pass "is-odd binary found at ~/.local/bin/is-odd"
+        if [[ -x "$HOME/.local/bin/semver" ]]; then
+            test_pass "semver binary found at ~/.local/bin/semver"
         else
-            test_fail "is-odd binary not found after npm install -g"
+            test_fail "semver binary not found after npm install -g"
         fi
     fi
 

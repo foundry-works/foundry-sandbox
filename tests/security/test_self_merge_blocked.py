@@ -77,6 +77,7 @@ def _curl_status_and_header(docker_exec, method, url, data=None, extra_headers=N
     return status, blocked_header
 
 
+@pytest.mark.usefixtures("mitm_functional")
 class TestSelfMergePrevention:
     """Integration tests verifying the proxy blocks self-merge operations.
 
@@ -84,6 +85,11 @@ class TestSelfMergePrevention:
     GitHub API endpoint that would allow the sandbox to merge or approve
     its own pull requests.  The proxy must intercept these requests and
     return 403 Forbidden.
+
+    The ``mitm_functional`` fixture (via usefixtures) verifies that the
+    mitmproxy MITM interception path is working before any test runs.
+    If MITM is not functional, all tests in this class skip with a
+    diagnostic message instead of producing misleading failures.
     """
 
     def test_gh_pr_merge_blocked(self, docker_exec, proxy_reachable):
@@ -108,11 +114,13 @@ class TestSelfMergePrevention:
 
         assert status == "403", (
             f"Expected 403 for PUT .../pulls/{PR_NUMBER}/merge, got {status}. "
-            "The proxy must block PR merge requests to prevent self-merge."
+            "The proxy must block PR merge requests to prevent self-merge. "
+            "Check proxy container logs in the pytest warnings for diagnostics."
         )
         assert blocked == "true", (
             f"Missing X-Sandbox-Blocked header — 403 may have come from "
-            f"GitHub rather than the proxy (header={blocked!r})."
+            f"GitHub rather than the proxy (header={blocked!r}). "
+            f"Check proxy container logs in the pytest warnings for diagnostics."
         )
 
     def test_auto_merge_enable_blocked(self, docker_exec, proxy_reachable):
@@ -133,11 +141,13 @@ class TestSelfMergePrevention:
 
         assert status == "403", (
             f"Expected 403 for PUT .../pulls/{PR_NUMBER}/auto-merge, got {status}. "
-            "The proxy must block auto-merge enablement to prevent self-merge."
+            "The proxy must block auto-merge enablement to prevent self-merge. "
+            "Check proxy container logs in the pytest warnings for diagnostics."
         )
         assert blocked == "true", (
             f"Missing X-Sandbox-Blocked header — 403 may have come from "
-            f"GitHub rather than the proxy (header={blocked!r})."
+            f"GitHub rather than the proxy (header={blocked!r}). "
+            f"Check proxy container logs in the pytest warnings for diagnostics."
         )
 
     def test_pr_review_create_blocked(self, docker_exec, proxy_reachable):
@@ -164,11 +174,13 @@ class TestSelfMergePrevention:
         assert status == "403", (
             f"Expected 403 for POST .../pulls/{PR_NUMBER}/reviews "
             f"(event=APPROVE), got {status}. "
-            "The proxy must block self-approval reviews."
+            "The proxy must block self-approval reviews. "
+            "Check proxy container logs in the pytest warnings for diagnostics."
         )
         assert blocked == "true", (
             f"Missing X-Sandbox-Blocked header — 403 may have come from "
-            f"GitHub rather than the proxy (header={blocked!r})."
+            f"GitHub rather than the proxy (header={blocked!r}). "
+            f"Check proxy container logs in the pytest warnings for diagnostics."
         )
 
     def test_graphql_merge_mutation_blocked(self, docker_exec, proxy_reachable):
@@ -195,9 +207,11 @@ class TestSelfMergePrevention:
 
         assert status == "403", (
             f"Expected 403 for GraphQL mergePullRequest mutation, got {status}. "
-            "The proxy must block GraphQL merge mutations to prevent self-merge."
+            "The proxy must block GraphQL merge mutations to prevent self-merge. "
+            "Check proxy container logs in the pytest warnings for diagnostics."
         )
         assert blocked == "true", (
             f"Missing X-Sandbox-Blocked header — 403 may have come from "
-            f"GitHub rather than the proxy (header={blocked!r})."
+            f"GitHub rather than the proxy (header={blocked!r}). "
+            f"Check proxy container logs in the pytest warnings for diagnostics."
         )
