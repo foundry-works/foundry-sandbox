@@ -1,128 +1,118 @@
 # Foundry Sandbox
 
-Safe, ephemeral workspaces for AI-assisted coding—isolate mistakes, not productivity.
+[![CI](https://github.com/foundry-works/foundry-sandbox/actions/workflows/ci.yml/badge.svg)](https://github.com/foundry-works/foundry-sandbox/actions/workflows/ci.yml)
+[![PyPI](https://img.shields.io/pypi/v/foundry-sandbox)](https://pypi.org/project/foundry-sandbox/)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+[![Built for Claude Code](https://img.shields.io/badge/Built_for-Claude_Code-cc785c)](https://docs.anthropic.com/en/docs/claude-code)
 
-## Overview
+Ephemeral Docker workspaces that isolate AI coding agents from your credentials and host system.
 
-Your API keys and tokens are exposed to everything running on your machine—including malicious dependencies, compromised tools, and AI assistants that might leak them. Supply chain attacks are increasingly common, and a single `npm install` can run arbitrary code with access to your credentials.
+## What It Does
 
-Foundry Sandbox provides ephemeral Docker workspaces where credentials never enter the container. A unified proxy holds your real API keys and tokens on the host, injecting them into outbound requests only after validation. Code running inside the sandbox—whether it's an AI assistant, a build script, or a malicious package—never sees the actual credentials.
+Foundry Sandbox runs your code and AI assistants inside ephemeral Docker containers where **credentials never enter the sandbox**. A unified proxy on the host holds your real API keys and tokens, injecting them into outbound requests only after policy validation. Code running inside — whether an AI assistant, a build script, or a malicious dependency — never sees the actual credentials.
 
-Beyond credential isolation, sandboxes provide defense in depth:
+```
++------------------+     +------------------------------+     +------------------+
+|    Sandbox       |     |       Unified Proxy          |     |  External APIs   |
+|                  |     |                              |     |                  |
+|  AI assistants,  |---->|  API gateways (per-provider) |---->|  GitHub, Claude, |
+|  build scripts,  |     |  Network allowlist (Squid)   |     |  OpenAI, Gemini  |
+|  your code       |     |  Git policy engine           |     |                  |
+|                  |     |                              |     |                  |
+|  [no real creds] |     |  [all credentials]           |     |                  |
++------------------+     +------------------------------+     +------------------+
+```
 
-- **Read-only filesystem** — Prevents destructive commands like `rm -rf /`
-- **Network allowlists** — Egress restricted to approved domains (GitHub, AI APIs, etc.)
-- **Disposable worktrees** — Each sandbox is a git worktree; create in seconds, destroy with zero trace
-- **Multi-tool ready** — Claude Code, Gemini CLI, Codex CLI, and OpenCode pre-installed
+Multiple independent security layers provide defense in depth:
 
-The result: run AI assistants and untrusted code with the confidence that your credentials and host system are protected by multiple independent security layers.
+| Layer | What it does |
+|-------|-------------|
+| Credential isolation | API keys never enter the container; injected by proxy on egress |
+| Read-only filesystem | Prevents destructive commands (`rm -rf /` is a no-op) |
+| Network allowlists | Egress restricted to approved domains only |
+| Branch isolation | Each sandbox sees only its own branch; other branches are hidden |
+| Git safety | Protected branches, force-push blocking, GitHub API controls |
 
-Finally, in addition to providing tight security guardrails, this sandbox is designed to enable spec-driven development using the `foundry-mcp` server and `claude-foundry` plugin, which are automatically installed and pre-configured.
+Each sandbox is a git worktree — create one in seconds, destroy it with zero trace.
 
 ## Key Features
 
-- **Ephemeral Workspaces** - Git worktrees per sandbox; destroy when done with no trace
-- **Defense in Depth** - Multiple security pillars enforced by Docker and the kernel
-- **Multiple AI Tools** - Claude Code, Gemini CLI, Codex CLI, and OpenCode pre-installed
-- **Fast Creation** - Worktrees share git objects; new sandboxes spin up in seconds
-- **Network Control** - Limited (allowlist), host-only, or no network access
-- **Credential Isolation** - API keys stay outside sandboxes via proxy (enabled by default)
-- **Branch Isolation** - Each sandbox restricted to its own git branch; other sandboxes' branches hidden
-- **Git Safety** - Protected branch enforcement, force-push blocking, GitHub API operation controls
-- **Presets & History** - Save configurations as presets; repeat last command with `cast repeat`
-- **Volume Mounts** - Mount host directories read-write or read-only
-- **JSON Output** - All commands support `--json` for scripting and automation
+**Security**
+- Credential isolation via unified proxy (enabled by default)
+- Network control: allowlist, host-only, or no network
+- Branch isolation and git safety policies
 
-## Prerequisites
+**Developer experience**
+- Claude Code, Gemini CLI, and Codex CLI are pre-installed
+- Fast creation: worktrees share git objects, new sandboxes spin up in seconds
+- Presets and history: save configurations, repeat last command with `cast repeat`
+- Spec-driven development: [foundry-mcp](https://github.com/foundry-works/claude-foundry) server pre-configured for Claude Code
 
-| Requirement | Version | Check Command |
-|-------------|---------|---------------|
-| Docker | 20.10+ | `docker --version` |
-| Git | 2.x+ | `git --version` |
-| Bash | 4.x+ | `bash --version` |
-| tmux | 3.x+ | `tmux -V` |
-| Python | 3.10+ | `python3 --version` |
+**Automation**
+- Volume mounts (read-write or read-only)
+- All commands support `--json` for scripting
 
-Linux and macOS supported natively. Windows users need WSL2. macOS ships Bash 3.2—install Bash 4+ via `brew install bash`. Python 3.10+ is required.
+## Quick Start
 
-## Installation
-
-### Full install (recommended)
+**1. Install**
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/foundry-works/foundry-sandbox/main/install.sh | bash
 ```
 
-This will clone to `~/.foundry-sandbox`, add the `cast` alias to your shell, enable tab completion, and build the Docker image.
+Clones to `~/.foundry-sandbox`, adds the `cast` command, enables tab completion, and builds the Docker image. Also available on [PyPI](https://pypi.org/project/foundry-sandbox/) (`pipx install foundry-sandbox`). See [Getting Started](docs/getting-started.md) for manual install, uninstall, and prerequisites.
 
-For manual installation or uninstall instructions, see [Getting Started](docs/getting-started.md).
-
-### PyPI package
-
-`foundry-sandbox` is published on PyPI and provides the `cast` Python entry point:
+**2. Set up credentials**
 
 ```bash
-pipx install foundry-sandbox
-# or
-pip install foundry-sandbox
+claude setup-token              # Claude Code
+codex login                     # Codex CLI (ChatGPT subscription)
+gh auth login                   # GitHub (for private repos and push)
+gemini auth                     # Gemini CLI (if using)
 ```
 
-Important: full sandbox operation still requires repository runtime assets (`docker-compose.yml`, `docker-compose.credential-isolation.yml`, `unified-proxy/`, `stubs/`). Use the installer above (or clone the repo and run `pip install -e .`) for a complete setup.
+Credentials stay on the host — the proxy injects them into requests so they never enter the sandbox. See [Configuration](docs/configuration.md) for all supported API keys.
 
-## Quick Start
+**3. Create a sandbox**
 
-**1. Create a sandbox**
+Use the guided wizard to create a new sandbox.
 
 ```bash
 cast new
 ```
 
-The guided wizard walks you through repo selection, branch strategy, and options. It detects your current repo and offers smart defaults.
+**4. Work inside**
 
-For scripting or quick one-liners:
-
-```bash
-cast new owner/repo              # From GitHub
-cast new .                       # From current repo/branch
-cast new . feature-branch main   # Create new branch from main
-```
-
-**2. Run an AI assistant**
+Launch your favorite AI agent.
 
 ```bash
 claude              # Claude Code
 gemini              # Gemini CLI
 codex               # Codex CLI
-opencode            # OpenCode
 ```
 
-**3. Commit and push your changes**
+**4. Commit, push**
+
+Ask your AI agent to commit and push changes.
+
+**5. Destroy**
+
+CTRL+D to exit the sandbox, then from host:
 
 ```bash
-git add -A && git commit -m "Add feature"
-git push origin HEAD
+cast destroy <sandbox-name> --yes   # Remove worktree and container
 ```
 
-**4. Destroy when done**
+## Prerequisites
 
-```bash
-cast destroy sandbox-name --yes
-```
-
-**Tip: Save configurations for reuse**
-
-```bash
-cast new owner/repo feature --wd packages/app --save-as myproject  # save preset
-cast new --preset myproject                                         # reuse later
-cast repeat                                                         # repeat last command
-```
+Docker 20.10+, Git 2.x+, Bash 4+, tmux 3+, Python 3.10+. Linux and macOS supported natively; Windows requires WSL2. macOS ships Bash 3.2 — install 4+ via `brew install bash`.
 
 ## Limitations
 
-- **Not a targeted-attack boundary** - Protects against automated threats (supply chain attacks, credential-stealing packages) and AI mistakes, but not a targeted human attacker with Docker access on the host
-- **Requires Docker** - No native process isolation; container overhead applies
-- **Linux/macOS focus** - Windows requires WSL2
-- **No GPU passthrough** - GPU workloads need additional Docker configuration
+- **Not a targeted-attack boundary** — defends against supply-chain attacks and AI mistakes, not a determined human attacker with host-level Docker access
+- **Requires Docker** — no native process isolation
+- **Linux/macOS** — Windows requires WSL2
+- **No GPU passthrough** — needs additional Docker configuration
 
 ## Documentation
 
@@ -133,7 +123,7 @@ cast repeat                                                         # repeat las
 | [Workflows](docs/usage/workflows.md) | Common patterns and recipes |
 | [Configuration](docs/configuration.md) | API keys, plugins, and config files |
 | [Architecture](docs/architecture.md) | Technical design and diagrams |
-| [Security Model](docs/security/security-model.md) | Threats, defenses, hardening, and security assumptions — organized by pillar |
+| [Security Model](docs/security/security-model.md) | Threat model, defenses, and hardening |
 | [Operations](docs/operations.md) | Proxy operations runbook |
 | [Observability](docs/observability.md) | Metrics and debugging |
 | [Contributing](docs/development/contributing.md) | For contributors |
