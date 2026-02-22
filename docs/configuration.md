@@ -110,6 +110,93 @@ export SANDBOX_TMUX_SCROLLBACK=200000
 export SANDBOX_TMUX_MOUSE=0
 ```
 
+## User-Defined Services
+
+Define custom API services for automatic credential injection and proxy allowlisting. This lets you add new API providers (e.g., OpenRouter, Groq) without modifying the codebase.
+
+### Config File
+
+Create `config/user-services.yaml` (or copy `config/user-services.yaml.example`):
+
+```yaml
+version: "1"
+
+services:
+  - name: OpenRouter
+    env_var: OPENROUTER_API_KEY
+    domain: openrouter.ai
+    header: Authorization
+    format: bearer
+    paths: ["/api/**"]
+
+  - name: CustomService
+    env_var: CUSTOM_API_KEY
+    domain: api.custom.example
+    header: X-Api-Key
+    format: value
+```
+
+### Field Reference
+
+| Field | Required | Description |
+|-------|----------|-------------|
+| `name` | Yes | Display name shown in CLI status output |
+| `env_var` | Yes | Host environment variable holding the real API key. Must match `[A-Z_][A-Z0-9_]*` |
+| `domain` | Yes | Target domain for credential injection and allowlisting |
+| `header` | Yes | HTTP header name for credential injection (e.g., `Authorization`, `X-Api-Key`) |
+| `format` | Yes | `bearer` (injects `Bearer <key>`) or `value` (injects raw key) |
+| `methods` | No | Allowed HTTP methods. Default: all standard methods (`GET`, `POST`, `PUT`, `DELETE`, `PATCH`, `OPTIONS`, `HEAD`) |
+| `paths` | No | Allowed URL path globs. Default: `["/**"]` (all paths). Uses the same glob syntax as the proxy allowlist |
+
+### Config File Search Order
+
+1. `FOUNDRY_USER_SERVICES_PATH` environment variable (explicit path)
+2. `./config/user-services.yaml` (relative to project root)
+
+If no file is found, the system proceeds without user-defined services.
+
+### What Happens at Runtime
+
+For each service where the corresponding `env_var` is set on the host:
+
+1. **CLI status** — `cast new` displays the service as "configured" or "not configured"
+2. **Placeholder generation** — The sandbox receives a placeholder value (e.g., `CRED_PROXY_<hex>`) instead of the real key
+3. **Proxy credential injection** — The unified proxy injects the real API key into outbound requests matching the service's domain
+4. **Allowlist expansion** — The domain is added to the proxy's allowlist and MITM interception list
+
+### Verifying a Service
+
+```bash
+# 1. Set the API key on your host
+export OPENROUTER_API_KEY="sk-or-..."
+
+# 2. Create a sandbox — check status output
+cast new owner/repo feature
+# Should show: "OpenRouter: configured"
+
+# 3. From inside the sandbox, test the service
+curl -X POST https://openrouter.ai/api/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -d '{}'
+# The proxy injects the real key — check proxy logs for injection confirmation
+```
+
+### Limitations
+
+User-defined services support **header-based credential injection only**. The following patterns from built-in providers are not supported:
+
+- OAuth token refresh flows (e.g., Claude OAuth)
+- Request body injection (e.g., API keys embedded in JSON payloads)
+- File-based credential loading (e.g., Gemini settings files)
+
+### Conflict Resolution
+
+If a user-defined service specifies a domain that already exists in the built-in provider map, the user entry is **skipped** with a warning. Built-in providers cannot be overridden.
+
+### Security
+
+User-defined services expand the proxy's allowlist and MITM interception scope. The config file is host-side only and requires the same trust level as other host-side configuration. See [Security Model: User-Defined Services](security/security-model.md#user-defined-services) for details.
+
 ## Push File Restrictions
 
 Sandboxes enforce push-time file restrictions to prevent agents from modifying CI/CD pipelines, build system files, or other sensitive configuration that could enable persistent compromise outside the sandbox. Restrictions are defined in `config/push-file-restrictions.yaml`.

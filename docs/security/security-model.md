@@ -489,6 +489,19 @@ In credential isolation mode, the sandbox inherits `read_only: true` from the ba
 
 The sandbox container is granted `CAP_NET_ADMIN` for iptables DNS firewall rules. Privilege drop to uid 1000 via gosu occurs after iptables rules are set in `entrypoint-root.sh`. After privilege drop, the unprivileged user cannot modify iptables rules (requires effective uid 0). `CAP_NET_RAW` is separately dropped to prevent raw socket abuse.
 
+### User-Defined Services
+
+User-defined services (`config/user-services.yaml`) expand the proxy's security perimeter by adding new entries to the domain allowlist, MITM interception list, and credential injection map. A misconfigured config file could allowlist unintended domains or enable credential injection to untrusted services.
+
+**Trust model:** The config file is host-side only, bind-mounted read-only into the proxy container. It requires the same trust level as other host-side configuration (e.g., `docker-compose.yml`, `.env` files). The sandbox cannot modify it.
+
+**Safeguards:**
+- Built-in provider domains cannot be overridden — user entries for existing domains are skipped with a warning
+- The config is validated at load time; malformed entries reject the entire file
+- Domain entries go through the same allowlist merge and deduplication logic as `PROXY_ALLOWLIST_EXTRA_PATH`
+
+See [Configuration: User-Defined Services](../configuration.md#user-defined-services) for setup and field reference.
+
 ### Mitmproxy CA Trust
 
 The sandbox trusts the unified-proxy's mitmproxy CA certificate for HTTPS interception of providers that lack `*_BASE_URL` env var support (see [Architecture: Mitmproxy](../architecture.md#mitmproxy-conditional) for the current list). Major providers (Anthropic, OpenAI, GitHub) route through plaintext HTTP gateways and do not require MITM.

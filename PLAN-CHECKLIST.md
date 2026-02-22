@@ -34,9 +34,9 @@
 - [ ] `unified-proxy/config.py`: Integrate into `load_allowlist_config()` after extra path merge, skip merge if None
 
 ## Phase 4: Documentation
-- [ ] Create `config/user-services.yaml.example` with documented examples (bearer, value, custom headers, methods/paths)
-- [ ] `docs/configuration.md`: Add "User-Defined Services" section (format, search order, verification, limitations)
-- [ ] `docs/security/security-model.md`: Add note on allowlist expansion trust model
+- [x] Create `config/user-services.yaml.example` with documented examples (bearer, value, custom headers, methods/paths)
+- [x] `docs/configuration.md`: Add "User-Defined Services" section (format, search order, verification, limitations)
+- [x] `docs/security/security-model.md`: Add note on allowlist expansion trust model
 
 ## Phase 5: Testing
 - [ ] Unit tests for `foundry_sandbox/user_services.py`: valid config loads correctly
