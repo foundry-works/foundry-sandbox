@@ -25,6 +25,9 @@ from foundry_sandbox.constants import (
     get_sandbox_debug,
     get_sandbox_home,
 )
+
+# Repository root — used to locate bundled files like statusline.conf
+_REPO_ROOT = Path(__file__).resolve().parent.parent
 from foundry_sandbox.container_io import (
     copy_dir_to_container,
     copy_dir_to_container_quiet,
@@ -207,8 +210,7 @@ def _stage_setup_claude_config(
 
     # Statusline
     log_step("Copying statusline config")
-    script_dir = Path(os.environ.get("SCRIPT_DIR", "/workspace"))
-    statusline_conf = script_dir / "statusline.conf"
+    statusline_conf = _REPO_ROOT / "statusline.conf"
     if statusline_conf.exists():
         copy_file_to_container(
             container_id, str(statusline_conf),
@@ -678,8 +680,7 @@ def sync_runtime_credentials(
             log_warn("Claude settings merge was incomplete; some settings may be missing")
 
     # Copy statusline.conf (quiet)
-    script_dir = Path(os.environ.get("SCRIPT_DIR", "/workspace"))
-    statusline_conf = script_dir / "statusline.conf"
+    statusline_conf = _REPO_ROOT / "statusline.conf"
     if statusline_conf.exists():
         copy_file_to_container_quiet(
             container_id,
