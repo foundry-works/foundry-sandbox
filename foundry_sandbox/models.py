@@ -58,6 +58,9 @@ class SandboxMetadata(BaseModel):
     copies: list[str] = Field(default_factory=list)
     """List of copy specifications (host:container)."""
 
+    compose_extras: list[str] = Field(default_factory=list)
+    """List of compose extra file paths (relative to project root)."""
+
 
 class CastNewPreset(BaseModel):
     """Structured representation of cast-new preset arguments.
@@ -107,6 +110,9 @@ class CastNewPreset(BaseModel):
     copies: list[str] = Field(default_factory=list)
     """List of copy specifications (host:container)."""
 
+    compose_extras: list[str] = Field(default_factory=list)
+    """List of compose extra file paths (relative to project root)."""
+
 
 class ProxyRegistration(BaseModel):
     """Metadata passed to proxy registration API.
@@ -151,9 +157,12 @@ class CredentialPlaceholders(BaseModel):
     sandbox_openai_base_url: str = ""
     """OpenAI base URL (conditional: only set when host has OPENAI_API_KEY)."""
 
+    user_service_placeholders: dict[str, str] = Field(default_factory=dict)
+    """Placeholders for user-defined services (env_var -> placeholder)."""
+
     def to_env_dict(self) -> dict[str, str]:
         """Convert to uppercase env var dict for backward compatibility with compose_up()."""
-        return {
+        env = {
             "SANDBOX_ANTHROPIC_API_KEY": self.sandbox_anthropic_api_key,
             "SANDBOX_CLAUDE_OAUTH": self.sandbox_claude_oauth,
             "SANDBOX_GEMINI_API_KEY": self.sandbox_gemini_api_key,
@@ -161,3 +170,6 @@ class CredentialPlaceholders(BaseModel):
             "SANDBOX_ENABLE_TAVILY": self.sandbox_enable_tavily,
             "SANDBOX_OPENAI_BASE_URL": self.sandbox_openai_base_url,
         }
+        for env_var, placeholder in self.user_service_placeholders.items():
+            env[f"SANDBOX_{env_var}"] = placeholder
+        return env

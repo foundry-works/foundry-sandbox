@@ -1,0 +1,71 @@
+# User-Defined Services
+#
+# Define custom API services for credential injection and proxy allowlisting.
+# Copy this file to config/user-services.yaml and uncomment the services you need.
+#
+# Each service gets:
+#   - A credential placeholder injected into the sandbox (sandbox never sees real key)
+#   - Automatic proxy credential injection on matching outbound requests
+#   - Domain added to the proxy allowlist and MITM interception list
+#
+# Config file search order:
+#   1. FOUNDRY_USER_SERVICES_PATH environment variable
+#   2. ./config/user-services.yaml (relative to project root)
+#
+# Limitations (MVP):
+#   - Header-based credential injection only
+#   - No OAuth token refresh flows
+#   - No request body injection
+#   - No file-based credential loading
+#
+# See docs/configuration.md for full documentation.
+
+version: "1"
+
+services:
+  # --- Bearer token example (Authorization: Bearer <key>) ---
+  #
+  # - name: OpenRouter
+  #   env_var: OPENROUTER_API_KEY
+  #   domain: openrouter.ai
+  #   header: Authorization
+  #   format: bearer
+  #   paths: ["/api/**"]
+
+  # --- Bearer token with multiple path prefixes ---
+  #
+  # - name: Groq
+  #   env_var: GROQ_API_KEY
+  #   domain: api.groq.com
+  #   header: Authorization
+  #   format: bearer
+  #   paths: ["/openai/**", "/v1/**"]
+
+  # --- Raw value example (X-Api-Key: <key>) ---
+  #
+  # - name: CustomService
+  #   env_var: CUSTOM_API_KEY
+  #   domain: api.custom.example
+  #   header: X-Api-Key
+  #   format: value
+
+  # --- Restricted methods ---
+  #
+  # - name: ReadOnlyAPI
+  #   env_var: READONLY_API_KEY
+  #   domain: api.readonly.example
+  #   header: Authorization
+  #   format: bearer
+  #   methods: [GET]
+  #   paths: ["/v1/**"]
+
+# Field reference:
+#
+#   name       (required)  Display name shown in CLI status output
+#   env_var    (required)  Host environment variable holding the real API key
+#                          Must match [A-Z_][A-Z0-9_]*
+#   domain     (required)  Target domain for credential injection
+#   header     (required)  HTTP header name for credential injection
+#   format     (required)  "bearer" -> "Bearer <key>", "value" -> raw key
+#   methods    (optional)  Allowed HTTP methods (default: all standard methods)
+#   paths      (optional)  Allowed URL path globs (default: ["/**"])

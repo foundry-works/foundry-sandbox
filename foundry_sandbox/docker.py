@@ -154,6 +154,15 @@ def setup_credential_placeholders() -> CredentialPlaceholders:
     # mode still routes through chatgpt.com → TLS interception on port 443.
     openai_base_url = "http://unified-proxy:9849"
 
+    # User-defined services: generate placeholders for any with env var set on host
+    from foundry_sandbox.user_services import load_user_services
+
+    user_placeholders: dict[str, str] = {}
+    for svc in load_user_services():
+        if os.environ.get(svc.env_var):
+            user_placeholders[svc.env_var] = _credential_placeholder()
+            log_debug(f"User service '{svc.name}': placeholder generated for {svc.env_var}")
+
     return CredentialPlaceholders(
         sandbox_anthropic_api_key=anthropic_key,
         sandbox_claude_oauth=claude_oauth,
@@ -161,6 +170,7 @@ def setup_credential_placeholders() -> CredentialPlaceholders:
         sandbox_zhipu_api_key=zhipu_key,
         sandbox_enable_tavily=enable_tavily,
         sandbox_openai_base_url=openai_base_url,
+        user_service_placeholders=user_placeholders,
     )
 
 
@@ -236,6 +246,141 @@ def generate_sandbox_subnet(project_name: str) -> tuple[str, str]:
         f"Could not find an unused /24 subnet for project '{project_name}' "
         f"after {16} attempts. Consider removing unused Docker networks."
     )
+
+
+# ============================================================================
+# Compose Extras Collection
+# ============================================================================
+
+
+def _collect_compose_extras(
+    extra_paths: list[str] | None = None,
+    strict: bool = True,
+) -> list[str]:
+    """Collect compose extras from auto-discovery, env var, and caller paths.
+
+    Sources are collected in precedence order (later overrides earlier in
+    docker-compose merge semantics):
+
+    1. Auto-discovered: ``config/docker-compose.*.yml`` (sorted by name)
+    2. ``FOUNDRY_COMPOSE_EXTRAS`` env var (colon-separated paths)
+    3. *extra_paths* parameter (additional paths from caller)
+
+    All paths are resolved to absolute before validation and deduplication.
+    Deduplication preserves the earliest occurrence when the same file is
+    referenced via different relative/absolute paths.
+
+    This function does **not** include the temp overrides for
+    allowlist/user-services — those are added separately by their existing
+    ``_prepare_*`` functions.
+
+    Args:
+        extra_paths: Optional list of additional compose override file paths.
+        strict: If True (default), raise FileNotFoundError for missing paths.
+            If False, skip missing paths with a warning (suitable for teardown).
+
+    Returns:
+        Deduplicated list of validated absolute paths.
+
+    Raises:
+        FileNotFoundError: If *strict* is True and any path does not exist
+            or is not a regular file.
+    """
+    # (original_path, source_label) — source_label used in error messages
+    raw_paths: list[tuple[str, str]] = []
+
+    # 1. Auto-discovery: config/docker-compose.*.yml
+    config_dir = _script_dir() / "config"
+    if config_dir.is_dir():
+        discovered = sorted(config_dir.glob("docker-compose.*.yml"))
+        for p in discovered:
+            raw_paths.append((str(p), "auto-discovered"))
+
+    # 2. FOUNDRY_COMPOSE_EXTRAS env var (colon-separated)
+    env_extras = os.environ.get("FOUNDRY_COMPOSE_EXTRAS", "")
+    if env_extras:
+        for segment in env_extras.split(":"):
+            segment = segment.strip()
+            if segment:
+                raw_paths.append((segment, "FOUNDRY_COMPOSE_EXTRAS"))
+
+    # 3. Caller-provided extra paths
+    if extra_paths:
+        for cli_path in extra_paths:
+            raw_paths.append((cli_path, "extra_paths"))
+
+    # Resolve, validate, deduplicate
+    seen: set[Path] = set()
+    result: list[str] = []
+    for original, source in raw_paths:
+        resolved = Path(original).resolve()
+        if not resolved.exists() or not resolved.is_file():
+            if strict:
+                raise FileNotFoundError(
+                    f"Compose extras path does not exist or is not a regular file: "
+                    f"{original} (source: {source})"
+                )
+            log_warn(f"Compose extras path not found, skipping: {original} (source: {source})")
+            continue
+        if resolved not in seen:
+            seen.add(resolved)
+            result.append(str(resolved))
+
+    if result:
+        log_debug(f"Compose extras collected: {result}")
+
+    return result
+
+
+def resolve_metadata_compose_extras(metadata: dict[str, object]) -> list[str]:
+    """Resolve compose extras from metadata (relative paths) to absolute paths.
+
+    Paths stored in metadata are relative to the project root.  This function
+    resolves them back to absolute paths, skipping any that no longer exist
+    (with a warning).
+
+    Args:
+        metadata: Sandbox metadata dictionary.
+
+    Returns:
+        List of absolute paths to existing compose extra files.
+    """
+    raw = metadata.get("compose_extras", [])
+    if not isinstance(raw, list):
+        return []
+    project_root = _script_dir()
+    result: list[str] = []
+    for rel_path in raw:
+        if not isinstance(rel_path, str) or not rel_path:
+            continue
+        resolved = (project_root / rel_path).resolve()
+        if resolved.is_file():
+            result.append(str(resolved))
+        else:
+            log_warn(f"Compose extra from metadata not found, skipping: {rel_path}")
+    return result
+
+
+def relativize_compose_extras(paths: list[str]) -> list[str]:
+    """Convert absolute compose extra paths to project-root-relative strings.
+
+    Falls back to the absolute path for any path that is outside the project
+    root.
+
+    Args:
+        paths: List of (possibly absolute) file paths.
+
+    Returns:
+        List of relative path strings (or absolute if outside project root).
+    """
+    project_root = _script_dir()
+    result: list[str] = []
+    for p in paths:
+        try:
+            result.append(str(Path(p).resolve().relative_to(project_root)))
+        except ValueError:
+            result.append(str(Path(p).resolve()))
+    return result
 
 
 # ============================================================================
@@ -456,12 +601,77 @@ def _prepare_allowlist_override(
         delete=False,
     )
     tmp_path = f.name
-    os.chmod(tmp_path, 0o600)
     f.write(override_content)
     f.close()
-    if compose_extras is None:
-        compose_extras = []
-    compose_extras.append(tmp_path)
+    os.chmod(tmp_path, 0o600)
+    compose_extras = list(compose_extras or []) + [tmp_path]
+    return tmp_path, compose_extras
+
+
+def _prepare_user_services_override(
+    isolate_credentials: bool,
+    compose_extras: list[str] | None,
+) -> tuple[str | None, list[str] | None]:
+    """Create a temp compose override that mounts user-services.yaml and threads env vars.
+
+    Returns:
+        Tuple of (temp_file_path or None, updated compose_extras or original).
+        The caller must delete temp_file_path when done.
+    """
+    if not isolate_credentials:
+        return None, compose_extras
+
+    from foundry_sandbox.user_services import load_user_services, find_user_services_path
+
+    # Resolve path first, then pass to load_user_services() to avoid a
+    # redundant filesystem check (load_user_services would call
+    # find_user_services_path() internally if no path is given).
+    raw_config_path = find_user_services_path()
+    if raw_config_path is None:
+        return None, compose_extras
+
+    services = load_user_services(path=raw_config_path)
+    if not services:
+        return None, compose_extras
+
+    config_path = os.path.realpath(raw_config_path)
+    container_mount = "/etc/unified-proxy/user-services.yaml"
+
+    # Build compose override: mount config + pass env vars
+    proxy_volumes = [f"{config_path}:{container_mount}:ro"]
+    proxy_env: list[str] = []
+    dev_env: list[str] = []
+
+    for svc in services:
+        # Pass real env var to proxy (compose inherits from host)
+        proxy_env.append(svc.env_var)
+        # Pass placeholder to dev container (only if host env var is set,
+        # so unconfigured services don't get empty-string env vars)
+        if os.environ.get(svc.env_var):
+            dev_env.append(f"{svc.env_var}=${{SANDBOX_{svc.env_var}}}")
+
+    override_dict: dict[str, object] = {
+        "services": {
+            "unified-proxy": {
+                "volumes": proxy_volumes,
+                "environment": proxy_env,
+            },
+            "dev": {
+                "environment": dev_env,
+            },
+        }
+    }
+
+    override_content = yaml.dump(override_dict, default_flow_style=False)
+    f = tempfile.NamedTemporaryFile(
+        mode="w", suffix=".yml", prefix="user-services-",
+        delete=False,
+    )
+    tmp_path = f.name
+    f.write(override_content)
+    f.close()
+    os.chmod(tmp_path, 0o600)
+    compose_extras = list(compose_extras or []) + [tmp_path]
     return tmp_path, compose_extras
 
 
@@ -537,11 +747,23 @@ def compose_up(
         isolate_credentials, repos_dir, sandbox_id, anthropic_base_url,
     )
 
-    _allowlist_extra_override: str | None = None
+    # Collect sidecar extras (auto-discovery + env var + caller paths).
+    # The _prepare_* functions below will append their temp overrides after.
+    compose_extras = _collect_compose_extras(extra_paths=compose_extras) or None
+
+    _compose_overrides: list[str] = []
     try:
-        _allowlist_extra_override, compose_extras = _prepare_allowlist_override(
+        allowlist_tmp, compose_extras = _prepare_allowlist_override(
             isolate_credentials, compose_extras,
         )
+        if allowlist_tmp:
+            _compose_overrides.append(allowlist_tmp)
+
+        user_svc_tmp, compose_extras = _prepare_user_services_override(
+            isolate_credentials, compose_extras,
+        )
+        if user_svc_tmp:
+            _compose_overrides.append(user_svc_tmp)
 
         compose_cmd = get_compose_command(override_file, isolate_credentials, compose_extras)
 
@@ -564,9 +786,9 @@ def compose_up(
                 compose_result.returncode, cmd, output=compose_result.stdout, stderr=stderr_text,
             )
     finally:
-        if _allowlist_extra_override:
+        for tmp_path in _compose_overrides:
             try:
-                os.unlink(_allowlist_extra_override)
+                os.unlink(tmp_path)
             except OSError:
                 pass
 
@@ -617,6 +839,10 @@ def compose_down(
         # compose down does not create networks so the values are unused.
         env.setdefault("SANDBOX_SUBNET", "10.0.0.0/24")
         env.setdefault("SANDBOX_PROXY_IP", "10.0.0.2")
+
+    # Collect sidecar extras (auto-discovery + env var + caller paths).
+    # Use strict=False: during teardown, files may already be gone.
+    compose_extras = _collect_compose_extras(extra_paths=compose_extras, strict=False) or None
 
     compose_cmd = get_compose_command(override_file, isolate_credentials, compose_extras)
     cmd = compose_cmd + ["-p", container, "down"]

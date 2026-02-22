@@ -27,6 +27,7 @@ if _PROXY_DIR not in sys.path:
 
 from config import load_allowlist_config  # noqa: E402
 from logging_config import get_logger  # noqa: E402
+from user_services import load_proxy_user_services  # noqa: E402
 
 logger = get_logger(__name__)
 
@@ -71,6 +72,15 @@ MITM_DOMAINS = [
     # NOTE: chatgpt.com removed — traffic routes through the ChatGPT gateway
     # (:9852/:443) via /etc/hosts DNS redirect. See chatgpt_gateway.py.
 ]
+
+
+def _load_user_mitm_domains() -> list[str]:
+    """Load user-defined service domains for MITM interception."""
+    services = load_proxy_user_services()
+    domains = [svc.domain for svc in services]
+    if domains:
+        logger.info("user-services: adding %d MITM domain(s): %s", len(domains), ", ".join(domains))
+    return domains
 
 
 def _atomic_write_lines(
@@ -124,9 +134,11 @@ def generate_squid_config(output_dir: str = "/etc/squid") -> None:
             seen.add(squid_domain)
 
     # Build MITM domains set (subset that needs credential injection)
+    # Extend with user-defined service domains before dedup
+    all_mitm_sources = list(MITM_DOMAINS) + _load_user_mitm_domains()
     mitm_domains: list[str] = []
     mitm_seen: set[str] = set()
-    for domain in MITM_DOMAINS:
+    for domain in all_mitm_sources:
         squid_domain = _to_squid_domain(domain)
         if squid_domain not in mitm_seen:
             mitm_domains.append(squid_domain)

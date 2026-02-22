@@ -16,6 +16,8 @@ from typing import List, Optional, Dict, Any, Tuple
 
 import yaml
 
+from user_services import ProxyUserService, load_proxy_user_services
+
 
 class ConfigError(Exception):
     """Exception raised for configuration errors."""
@@ -903,6 +905,44 @@ def _parse_extra_allowlist(file_path: str) -> AllowlistConfig:
     )
 
 
+def _synthesize_allowlist_from_user_services(
+    services: List[ProxyUserService],
+) -> Optional[AllowlistConfig]:
+    """Build a partial AllowlistConfig from user-defined services.
+
+    For each service, creates a domain entry and an HTTP endpoint with the
+    service's configured methods and paths.
+
+    Args:
+        services: List of user-defined services (from shared loader).
+
+    Returns:
+        A partial AllowlistConfig suitable for merging, or None if
+        the services list is empty.
+    """
+    if not services:
+        return None
+
+    domains: List[str] = []
+    endpoints: List[HttpEndpointConfig] = []
+
+    for svc in services:
+        domains.append(svc.domain)
+        endpoints.append(
+            HttpEndpointConfig(
+                host=svc.domain,
+                methods=list(svc.methods),
+                paths=list(svc.paths),
+            )
+        )
+
+    return AllowlistConfig._partial(
+        version="1",
+        domains=domains,
+        http_endpoints=endpoints,
+    )
+
+
 def load_allowlist_config(
     path: Optional[str] = None, extra_path: Optional[str] = None
 ) -> AllowlistConfig:
@@ -1012,8 +1052,16 @@ def load_allowlist_config(
         if os.environ.get("PROXY_ALLOWLIST_EXTRA_PATH"):
             resolved_extra = env_extra
 
-    if not resolved_extra:
-        return base_config
+    merged = base_config
+    if resolved_extra:
+        extra_config = _parse_extra_allowlist(resolved_extra)
+        merged = merge_allowlist_configs(merged, extra_config)
 
-    extra_config = _parse_extra_allowlist(resolved_extra)
-    return merge_allowlist_configs(base_config, extra_config)
+    # Merge user-defined services into the allowlist
+    user_services_config = _synthesize_allowlist_from_user_services(
+        load_proxy_user_services()
+    )
+    if user_services_config is not None:
+        merged = merge_allowlist_configs(merged, user_services_config)
+
+    return merged

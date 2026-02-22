@@ -34,6 +34,7 @@ import click
 from foundry_sandbox import api_keys
 from foundry_sandbox.docker import (
     apply_network_restrictions as _apply_network_restrictions_shared,
+    resolve_metadata_compose_extras,
     uses_credential_isolation as _uses_credential_isolation_shared,
 )
 from foundry_sandbox.paths import resolve_ssh_agent_sock
@@ -410,8 +411,9 @@ def _finalize_container(
 @click.argument("name")
 # Tri-state: None = use persisted metadata, True/False = explicit override
 @click.option("--pre-foundry/--no-pre-foundry", default=None, help="Upgrade foundry-mcp to pre-release on start")
+@click.option("--compose-extra", "compose_extras", multiple=True, type=click.Path(exists=True), help="Additional docker-compose override file")
 @click.pass_context
-def start(ctx: click.Context, name: str, pre_foundry: bool | None) -> None:
+def start(ctx: click.Context, name: str, pre_foundry: bool | None, compose_extras: tuple[str, ...]) -> None:
     """Start a stopped sandbox container."""
     valid_name, name_error = validate_existing_sandbox_name(name)
     if not valid_name:
@@ -525,6 +527,11 @@ def start(ctx: click.Context, name: str, pre_foundry: bool | None) -> None:
         # 10. Start containers via compose_up
         # --------------------------------------------------------------
         repos_dir = str(get_repos_dir())
+
+        # Merge compose extras: metadata (persisted) + CLI (per-invocation)
+        merged_extras = resolve_metadata_compose_extras(metadata)
+        merged_extras.extend(str(Path(p).resolve()) for p in compose_extras)
+
         compose_up(
             worktree_path=str(worktree_path),
             claude_config_path=str(claude_config_path),
@@ -533,6 +540,7 @@ def start(ctx: click.Context, name: str, pre_foundry: bool | None) -> None:
             isolate_credentials=(isolate_credentials == "true"),
             repos_dir=repos_dir,
             sandbox_id=sandbox_id,
+            compose_extras=merged_extras or None,
         )
 
         container_id = f"{container}-dev-1"
@@ -551,6 +559,7 @@ def start(ctx: click.Context, name: str, pre_foundry: bool | None) -> None:
                     container=container,
                     override_file=str(override_file),
                     isolate_credentials=True,
+                    compose_extras=merged_extras or None,
                 )
                 raise
 

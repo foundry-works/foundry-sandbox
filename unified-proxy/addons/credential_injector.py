@@ -40,6 +40,7 @@ from mitmproxy import http
 
 from addons.container_identity import get_container_config
 from logging_config import get_logger
+from user_services import load_proxy_user_services
 
 logger = get_logger(__name__)
 
@@ -183,17 +184,41 @@ class CredentialInjector:
 
     def __init__(self):
         self.credentials_cache = {}
+        self.provider_map = dict(PROVIDER_MAP)
         self.oauth_manager: Optional[OAuthTokenManager] = None
         self.opencode_manager: Optional[OpenCodeKeyManager] = None
         self.gemini_manager: Optional[GeminiTokenManager] = None
+        self._load_user_services()
         self._load_credentials()
         self._init_oauth_manager()
         self._init_opencode_manager()
         self._init_gemini_manager()
 
+    def _load_user_services(self):
+        """Load user-defined services and add to provider_map.
+
+        Entries whose domain already exists in the built-in PROVIDER_MAP are
+        skipped with a warning to prevent user configs from overriding
+        built-in providers.
+        """
+        services = load_proxy_user_services()
+        for svc in services:
+            if svc.domain in PROVIDER_MAP:
+                logger.warning(
+                    "user-services: skipping %s — domain %s conflicts with built-in provider",
+                    svc.name, svc.domain,
+                )
+                continue
+            self.provider_map[svc.domain] = {
+                "header": svc.header,
+                "env_var": svc.env_var,
+                "format": svc.format,
+            }
+            logger.info("user-services: registered %s (%s)", svc.name, svc.domain)
+
     def _load_credentials(self):
         """Load credentials from environment variables into cache."""
-        for host, config in PROVIDER_MAP.items():
+        for host, config in self.provider_map.items():
             env_var = config["env_var"]
             fallback_env_var = config.get("fallback_env_var")
             alt_env_var = config.get("alt_env_var")
@@ -589,7 +614,7 @@ class CredentialInjector:
         self._handle_tavily_body_injection(flow)
 
         # 6. Host-based API key injection (existing behavior)
-        if host not in PROVIDER_MAP:
+        if host not in self.provider_map:
             return
 
         if host not in self.credentials_cache:

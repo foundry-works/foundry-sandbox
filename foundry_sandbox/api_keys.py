@@ -16,7 +16,7 @@ from pathlib import Path
 from typing import Any
 
 from foundry_sandbox.constants import TIMEOUT_LOCAL_CMD
-from foundry_sandbox.utils import log_step
+from foundry_sandbox.utils import log_debug, log_step
 
 
 # ============================================================================
@@ -245,6 +245,18 @@ def get_cli_status() -> list[str]:
         lines.append(f"Search: {', '.join(providers)}")
     else:
         lines.append("Search: not configured")
+
+    # User-defined services
+    try:
+        from foundry_sandbox.user_services import load_user_services
+
+        for svc in load_user_services():
+            configured = bool(os.environ.get(svc.env_var))
+            lines.append(
+                f"{svc.name}: {'configured' if configured else 'not configured'}"
+            )
+    except Exception as exc:
+        log_debug(f"Could not load user services for status display: {exc}")
 
     return lines
 

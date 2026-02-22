@@ -101,6 +101,7 @@ def write_sandbox_metadata(
     enable_zai: bool = False,
     mounts: list[str] | None = None,
     copies: list[str] | None = None,
+    compose_extras: list[str] | None = None,
 ) -> None:
     """Write sandbox metadata to a JSON file.
 
@@ -122,6 +123,7 @@ def write_sandbox_metadata(
         enable_zai: Whether to enable ZAI.
         mounts: List of Docker mount specs.
         copies: List of copy specs.
+        compose_extras: List of compose extra file paths (relative to project root).
     """
     # Validate through Pydantic model before persisting
     model = SandboxMetadata(
@@ -141,6 +143,7 @@ def write_sandbox_metadata(
         enable_zai=enable_zai,
         mounts=mounts or [],
         copies=copies or [],
+        compose_extras=compose_extras or [],
     )
     data = model.model_dump()
 
@@ -476,6 +479,7 @@ def _write_cast_new_json(
     enable_zai: bool = False,
     mounts: list[str] | None = None,
     copies: list[str] | None = None,
+    compose_extras: list[str] | None = None,
 ) -> str:
     """Write cast-new JSON to a file.
 
@@ -498,6 +502,7 @@ def _write_cast_new_json(
         enable_zai=enable_zai,
         mounts=mounts or [],
         copies=copies or [],
+        compose_extras=compose_extras or [],
     )
 
     timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
@@ -534,6 +539,7 @@ def save_last_cast_new(
     enable_zai: bool = False,
     mounts: list[str] | None = None,
     copies: list[str] | None = None,
+    compose_extras: list[str] | None = None,
 ) -> str:
     """Save the most recent cast-new command.
 
@@ -549,6 +555,7 @@ def save_last_cast_new(
         network_mode=network_mode, sync_ssh=sync_ssh,
         enable_opencode=enable_opencode, enable_zai=enable_zai,
         mounts=mounts, copies=copies,
+        compose_extras=compose_extras,
     )
 
 
@@ -569,6 +576,7 @@ def save_cast_preset(
     enable_zai: bool = False,
     mounts: list[str] | None = None,
     copies: list[str] | None = None,
+    compose_extras: list[str] | None = None,
 ) -> None:
     """Save a named cast-new preset.
 
@@ -585,6 +593,7 @@ def save_cast_preset(
         network_mode=network_mode, sync_ssh=sync_ssh,
         enable_opencode=enable_opencode, enable_zai=enable_zai,
         mounts=mounts, copies=copies,
+        compose_extras=compose_extras,
     )
 
 

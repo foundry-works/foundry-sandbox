@@ -129,6 +129,7 @@ def _new_setup(
     enable_opencode_flag: str,
     enable_zai_flag: str,
     anthropic_base_url: str,
+    compose_extras: list[str] | None = None,
 ) -> None:
     """Inner setup logic for the ``new`` command, extracted for rollback."""
     # Clone/fetch bare repo
@@ -196,7 +197,10 @@ def _new_setup(
     else:
         add_ssh_agent_to_override(str(override_file), "")
 
-    # Write metadata
+    # Write metadata — store compose extras as relative paths for portability
+    from foundry_sandbox.docker import relativize_compose_extras
+    relative_extras = relativize_compose_extras(compose_extras or [])
+
     write_sandbox_metadata(
         name=name,
         repo_url=repo_url,
@@ -214,6 +218,7 @@ def _new_setup(
         enable_zai=enable_zai_flag == "1",
         mounts=list(mounts),
         copies=list(copies),
+        compose_extras=relative_extras,
     )
 
     container_id = f"{container}-dev-1"
@@ -277,6 +282,7 @@ def _new_setup(
         repos_dir=str(get_repos_dir()) if isolate_credentials else "",
         sandbox_id=sandbox_id,
         anthropic_base_url=anthropic_base_url,
+        compose_extras=compose_extras,
     )
 
     # Register with proxy
