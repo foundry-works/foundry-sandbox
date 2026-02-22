@@ -45,6 +45,7 @@ COPY __init__.py /opt/proxy/__init__.py
 COPY registry.py /opt/proxy/registry.py
 COPY config.py /opt/proxy/config.py
 COPY logging_config.py /opt/proxy/logging_config.py
+COPY user_services.py /opt/proxy/user_services.py
 COPY internal_api.py /opt/proxy/internal_api.py
 COPY pktline.py /opt/proxy/pktline.py
 
