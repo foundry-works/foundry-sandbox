@@ -11,7 +11,7 @@ import sys
 
 import click
 
-from foundry_sandbox.constants import CONTAINER_USER, TIMEOUT_PIP_INSTALL, get_sandbox_verbose
+from foundry_sandbox.constants import CONTAINER_HOME, CONTAINER_USER, TIMEOUT_DOCKER_EXEC, TIMEOUT_PIP_INSTALL, get_sandbox_verbose
 from foundry_sandbox.utils import log_debug, log_info, log_warn
 
 
@@ -39,6 +39,51 @@ def _get_installed_version(container_id: str) -> str:
         if line.startswith("Version:"):
             return line.split(":", 1)[1].strip()
     return ""
+
+
+def _enable_user_site_packages(container_id: str) -> None:
+    """Remove ``-s`` flag from foundry-mcp MCP config in the container.
+
+    When a pre-release is installed via ``pip install --pre`` it lands in user
+    site-packages (``~/.local/``) because ``PIP_USER=1`` is set in the image.
+    The default MCP config uses ``python -s -m foundry_mcp.server`` which
+    tells Python to *skip* user site-packages, so the pre-release would be
+    invisible to the MCP server.  This helper patches both Claude JSON config
+    files to drop the ``-s`` flag after a successful pre-release install.
+    """
+    container_home = CONTAINER_HOME
+    script = f'''
+import json, os
+
+for path in ["{container_home}/.claude.json", "{container_home}/.claude/.claude.json"]:
+    if not os.path.exists(path):
+        continue
+    try:
+        with open(path) as f:
+            data = json.load(f)
+    except (json.JSONDecodeError, OSError):
+        continue
+    fmcp = data.get("mcpServers", {{}}).get("foundry-mcp")
+    if not fmcp:
+        continue
+    args = fmcp.get("args", [])
+    if isinstance(args, list) and "-s" in args:
+        args.remove("-s")
+        fmcp["args"] = args
+        with open(path, "w") as f:
+            json.dump(data, f, indent=2)
+            f.write("\\n")
+'''
+    result = subprocess.run(
+        ["docker", "exec", "-u", CONTAINER_USER, "-i", container_id,
+         "python3", "-c", script],
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=TIMEOUT_DOCKER_EXEC,
+    )
+    if result.returncode != 0:
+        log_debug(f"Failed to update MCP config for pre-release: {result.stderr}")
 
 
 def upgrade_foundry_mcp_prerelease(
@@ -97,4 +142,12 @@ def upgrade_foundry_mcp_prerelease(
 
     version = _get_installed_version(container_id)
     log_info(f"foundry-mcp {version or 'pre-release'} installed successfully")
+
+    # Remove the -s (skip user site-packages) flag from the MCP server config.
+    # PIP_USER=1 installs the pre-release to ~/.local/ (user site-packages),
+    # but the MCP config uses "python -s" which skips that directory.  Without
+    # this fix the MCP server would silently keep running the global stable
+    # version even after a successful pre-release upgrade.
+    _enable_user_site_packages(container_id)
+
     return version
