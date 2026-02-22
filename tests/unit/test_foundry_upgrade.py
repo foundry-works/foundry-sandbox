@@ -69,8 +69,9 @@ class TestUpgradeSuccess:
     def test_latest_prerelease(self, mock_run: MagicMock, mock_ver: MagicMock) -> None:
         result = upgrade_foundry_mcp_prerelease("ctr-1")
         assert result == "1.2.0a3"
-        # Should use bare package spec (no ==)
-        cmd = mock_run.call_args[0][0]
+        # First subprocess.run call is the pip install; subsequent calls are
+        # from _enable_user_site_packages patching MCP config.
+        cmd = mock_run.call_args_list[0][0][0]
         assert "foundry-mcp" in cmd
         assert not any("==" in arg for arg in cmd)
 
@@ -79,7 +80,7 @@ class TestUpgradeSuccess:
     def test_pinned_version(self, mock_run: MagicMock, mock_ver: MagicMock) -> None:
         result = upgrade_foundry_mcp_prerelease("ctr-1", pin_version="1.2.0a3")
         assert result == "1.2.0a3"
-        cmd = mock_run.call_args[0][0]
+        cmd = mock_run.call_args_list[0][0][0]
         assert "foundry-mcp==1.2.0a3" in cmd
 
 
