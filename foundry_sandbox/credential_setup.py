@@ -16,6 +16,9 @@ import subprocess
 import time
 from pathlib import Path
 
+import json as _json_mod
+from datetime import datetime, timezone
+
 from foundry_sandbox.constants import (
     CONTAINER_HOME,
     CONTAINER_READY_ATTEMPTS,
@@ -25,9 +28,6 @@ from foundry_sandbox.constants import (
     get_sandbox_debug,
     get_sandbox_home,
 )
-
-# Repository root — used to locate bundled files like statusline.conf
-_REPO_ROOT = Path(__file__).resolve().parent.parent
 from foundry_sandbox.container_io import (
     copy_dir_to_container,
     copy_dir_to_container_quiet,
@@ -37,8 +37,8 @@ from foundry_sandbox.container_io import (
 )
 from foundry_sandbox.utils import log_debug, log_step, log_warn
 
-import json as _json_mod
-from datetime import datetime, timezone
+# Repository root — used to locate bundled files like statusline.conf
+_REPO_ROOT = Path(__file__).resolve().parent.parent
 
 
 def _audit_credential_op(operation: str, container_id: str, target: str, *, success: bool) -> None:
