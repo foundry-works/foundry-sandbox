@@ -1,6 +1,6 @@
 # Threat Model
 
-This document defines what Foundry Sandbox protects against, why these protections exist, and how they're implemented.
+This document defines **what threats exist** and how each defense addresses them. For **implementation details** of each security control (config, bypasses, testing), see [Security Architecture](security-architecture.md).
 
 ## Documentation Map
 
@@ -61,13 +61,13 @@ Each pillar blocks specific threat categories. For implementation details, see [
 | Threat | Primary Defense | Secondary Defense | Details |
 |--------|-----------------|-------------------|---------|
 | Filesystem destruction | Read-only Filesystem | Sudoers Allowlist | [Filesystem Threats](#1-filesystem-destruction) |
-| Local git destruction | Read-only Worktree | — | [Git Threats](#2-git-operations) |
+| Local git destruction | Ephemeral worktree + git shadow mode | — | [Git Threats](#2-git-operations) |
 | Remote git destruction | Unified proxy (force-push blocking) | — | [Git Threats](#2-git-operations) |
 | Credential theft | Credential Isolation | Network Isolation | [Credential Threats](#3-credential-theft) |
 | Supply chain attacks | Credential Isolation | Network + CAP_NET_RAW | [Supply Chain](#4-supply-chain-attacks) |
 | Lateral movement | Network (ICC=false) | CAP_NET_RAW dropped | [Lateral Movement](#5-lateral-movement) |
 | Cross-sandbox branch access | Branch Isolation | Output filtering | [Branch Isolation](#branch-isolation) |
-| Session hijacking | IP binding | CAP_NET_RAW dropped | [Session Attacks](#6-session-token-attacks) |
+| Session hijacking | IP binding | CAP_NET_RAW dropped | [Session Attacks](#6-container-registration-attacks) |
 | DNS exfiltration | Network (DNS filter) | Domain allowlist | [DNS Exfiltration](#7-dns-exfiltration) |
 | Sudo escalation | Sudoers Allowlist | Read-only Filesystem | [Sudo Escalation](#8-sudo-escalation) |
 | IP encoding bypass (SSRF) | IP literal detection (regex + inet_aton) | Domain allowlist | [IP Encoding Bypass](#9-ip-encoding-bypass) |
@@ -117,7 +117,10 @@ Git commands can destroy work that may be unrecoverable. We distinguish between 
 
 | Layer | Control | Effect |
 |-------|---------|--------|
-| Primary | Read-only Worktree | Worktree files cannot be modified—`git reset --hard` silently fails |
+| Primary | Ephemeral worktree | Worktree is a cheap git worktree — destroy and recreate if damaged |
+| Secondary | Git shadow mode | `.git` hidden; local git commands proxied through API with policy enforcement |
+
+Local destructive commands (`git reset --hard`, `git clean -f`) can modify the worktree because `/workspace` is mounted read-write. The mitigation is that worktrees are ephemeral and cheap to recreate (`cast destroy && cast new`). In credential isolation mode, git shadow mode adds an additional layer: the `.git` directory is hidden and all git operations go through the proxy's policy engine.
 
 *Remote git destruction:*
 
@@ -127,7 +130,7 @@ Git commands can destroy work that may be unrecoverable. We distinguish between 
 | Secondary | Protected branch enforcement | Blocks ALL direct pushes to main/master/release/production (not just force pushes) |
 | Tertiary | Bot mode restrictions | In bot mode, pushes restricted to `sandbox/*` branches only |
 
-**Why This Works:** For local destruction, the read-only filesystem is the actual security control—writes fail regardless of how commands are invoked. For remote destruction, the unified proxy's `git_proxy` addon parses git pkt-line protocol data to detect and block force pushes, branch deletions, and unauthorized repository access. See [Read-only Filesystem](security-architecture.md#read-only-filesystem) for local protection details.
+**Why This Works:** For local destruction, worktrees are ephemeral — they can be destroyed and recreated cheaply. In credential isolation mode, git shadow mode hides `.git` and routes all git operations through the proxy's policy engine, preventing unauthorized destructive operations. For remote destruction, the unified proxy's `git_proxy` addon parses git pkt-line protocol data to detect and block force pushes, branch deletions, and unauthorized repository access.
 
 #### Git Shadow Mode
 
@@ -249,26 +252,26 @@ One compromised sandbox could attempt to attack or access another sandbox runnin
 
 ---
 
-### 6. Session Token Attacks
+### 6. Container Registration Attacks
 
-Attackers could attempt to steal session tokens and use them from other locations.
+Attackers could attempt to steal or forge container registration details and use them from other locations.
 
 **Attack Vectors:**
-- Reading session token from proxy internal socket
-- Network sniffing to capture tokens in transit
-- IP spoofing to bypass session IP binding
-- Waiting for session reuse from different context
+- Reading registration details from proxy internal socket
+- Network sniffing to capture registration data in transit
+- IP spoofing to bypass container IP binding
+- Reusing stale registrations from destroyed containers
 
 **Defense Layers:**
 
 | Layer | Control | Effect |
 |-------|---------|--------|
-| Primary | IP binding | Sessions only valid from originating container IP |
+| Primary | IP binding | Registrations only valid from originating container IP |
 | Secondary | CAP_NET_RAW dropped | Cannot spoof source IP addresses |
-| Tertiary | Explicit unregistration | Sessions removed on sandbox destroy; optional TTL if configured |
-| Network | ICC=false | Cannot access other containers to reuse their sessions |
+| Tertiary | Explicit unregistration | Registrations removed on sandbox destroy; optional TTL if configured |
+| Network | ICC=false | Cannot access other containers to reuse their registrations |
 
-**Why This Works:** Even if an attacker obtains a session token, it's bound to the container's IP address. Using it from another location fails validation. IP spoofing would require CAP_NET_RAW, which is dropped. See [Session Token Scenario](credential-isolation.md#scenario-4-session-token-theft-and-reuse) in the credential isolation threat model for the complete analysis.
+**Why This Works:** Even if an attacker obtains registration details, they're bound to the container's IP address. Using them from another location fails validation. IP spoofing would require CAP_NET_RAW, which is dropped. See [Container Registration Scenario](credential-isolation.md#scenario-4-container-registration-theft-and-reuse) in the credential isolation threat model for the complete analysis.
 
 ---
 
@@ -310,7 +313,7 @@ If the AI gains unrestricted sudo access, it could bypass container restrictions
 | Primary | Sudoers Allowlist | Only whitelisted commands permitted |
 | Secondary | Read-only Filesystem | Even with sudo, can't write to read-only mounts |
 
-**Why This Works:** The sudoers allowlist permits only safe commands (`sudo apt-get install *`, `sudo service * start/stop/restart/status`). There's no fallback `PASSWD:ALL` line. Even if a command were somehow permitted, the read-only filesystem would block destructive writes. See [Sudoers Allowlist](security-architecture.md#sudoers-allowlist) for the implementation.
+**Why This Works:** The sudoers allowlist enumerates every allowed command explicitly — no wildcards. Only `apt-get update` is permitted (not `apt-get install`), and only specific services (postgresql, redis-server) with specific actions. There's no fallback `PASSWD:ALL` line. Even if a command were somehow permitted, the read-only filesystem would block destructive writes. See [Sudoers Allowlist](security-architecture.md#sudoers-allowlist) for the implementation.
 
 ---
 
@@ -454,15 +457,14 @@ If credential isolation is disabled (`--no-isolate-credentials`), the AI can rea
 
 ### Container Filesystem Write Capability
 
-The sandbox container runs with `read_only: false` (required for DNS configuration and tmpfs setup).
+In credential isolation mode, the sandbox inherits `read_only: true` from the base compose file. DNS configuration is handled at compose level (`dns:`, `extra_hosts:`) and the root entrypoint only runs iptables rules before dropping privileges. The `CAP_NET_ADMIN` capability is required for iptables but is only useful during the root-phase initialization (see below).
 
 **Mitigations:**
-- Non-root user (uid 1000 via gosu) limits write scope
+- `read_only: true` inherited from base compose — system directories are immutable
+- Non-root user (uid 1000 via gosu) after iptables setup
 - Network isolation (`internal: true`) prevents data exfiltration
 - Tmpfs `/home` means writes don't persist across restarts
-- The worktree is mounted read-only; `/workspace/.git` is a tmpfs overlay
-
-**Rationale:** Full read-only mode prevents DNS firewall setup via iptables. Shell override protections (e.g., custom shells) were removed as they were bypassable via `/bin/rm` or direct binary execution, making them security theater rather than a real control.
+- The worktree's `.git` is hidden via `/dev/null` bind mount + tmpfs overlay
 
 ### NET_ADMIN Capability
 

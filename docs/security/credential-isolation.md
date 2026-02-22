@@ -318,7 +318,7 @@ This section documents what IS implemented to address the primary threats.
 | Git operation filtering | `git_proxy.py` addon blocks dangerous operations | Force push, history rewriting |
 | Branch isolation | `branch_isolation.py` enforces per-sandbox branch access | Cross-sandbox branch access |
 | Protected branch enforcement | `git_policies.py` blocks pushes to main/master/release/production | Protected branch modification |
-| GitHub API endpoint filtering | `github-api-filter.py` blocks dangerous API operations | Repo deletion, secret access, unsafe PR operations |
+| GitHub API endpoint filtering | `security_policies.py` blocks dangerous API operations | Repo deletion, secret access, unsafe PR operations |
 | Rate limiting | `rate_limiter.py` addon | Resource exhaustion |
 | Circuit breaker | `circuit_breaker.py` addon | Cascading failures |
 

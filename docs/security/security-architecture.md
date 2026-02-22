@@ -1,6 +1,8 @@
 # Security Architecture
 
-Foundry Sandbox implements defense in depth with multiple security controls. This document distinguishes between **security pillars** (kernel/Docker-enforced, cannot bypass from inside container) and **operational conveniences** (helpful but bypassable).
+This document describes **what security controls are in place** and how they're implemented. For **what threats exist** and how each control addresses them, see [Threat Model](sandbox-threats.md).
+
+The controls are organized into **security pillars** (kernel/Docker-enforced, cannot bypass from inside container) and **operational conveniences** (helpful but bypassable).
 
 ## Overview
 
@@ -62,13 +64,13 @@ services:
     read_only: true
 ```
 
-**Credential isolation mode** overrides this to `read_only: false` because the root entrypoint needs to configure DNS via iptables and write `/etc/resolv.conf`. This is an accepted risk with mitigations:
-- Non-root user (uid 1000 via gosu) limits write scope
+**Credential isolation mode** inherits `read_only: true` from the base compose file. DNS configuration is handled at compose level via `dns:` and `extra_hosts:` directives (Docker 29+ makes `/etc/resolv.conf` read-only). The root entrypoint (`entrypoint-root.sh`) only configures iptables DNS firewall rules and drops privileges via `gosu` — it does not need a writable root filesystem.
+
+Additional protections:
+- Non-root user (uid 1000 via gosu) after iptables setup
 - Network isolation (`internal: true`) prevents data exfiltration
 - Tmpfs `/home` means writes don't persist across restarts
-- The worktree `/workspace/.git` is hidden via bind mount to `/dev/null`
-
-See [Container Filesystem Write Capability](sandbox-threats.md#container-filesystem-write-capability) in the threat model for the full analysis.
+- The worktree `/workspace/.git` is hidden via `/dev/null` bind mount + tmpfs overlay
 
 **What it blocks (in base mode):**
 - `rm -rf /` via any method (including `/bin/rm`)
@@ -124,21 +126,18 @@ Additional domains via `SANDBOX_ALLOWED_DOMAINS` environment variable.
 
 **Source:** `safety/sudoers-allowlist`
 
-**Allowed commands:**
-- Package management: `sudo apt-get update`, `sudo apt-get install *`
-- Service management: `sudo service * start/stop/restart/status`
+**Allowed commands (no wildcards — every argument is enumerated):**
+- Package management: `sudo apt-get update` (install is **not** allowed — install dev tools at image build time)
+- Service management: `sudo service postgresql|redis-server start|stop|restart|status`
+- Network mode switching: `sudo network-mode status|limited|host-only|none|list|help`
+- Network firewall: `sudo network-firewall.sh`
+- DNS configuration: `sudo tee /etc/resolv.conf`
 
-Everything else is denied—no fallback `PASSWD:ALL` line.
+Everything else is denied — no fallback `PASSWD:ALL` line. All sudo I/O is audit-logged to `/var/log/sudo-audit.log`.
 
 **Extending the allowlist:**
 
-```bash
-# Example: Allow npm and pip
-ubuntu ALL=(ALL) NOPASSWD: /usr/bin/npm *
-ubuntu ALL=(ALL) NOPASSWD: /usr/bin/pip *
-```
-
-Then rebuild: `cast build`
+Edit `safety/sudoers-allowlist` with explicit command paths (no wildcards), then rebuild: `cast build`
 
 **Bypass:** Cannot be bypassed from userspace. The kernel enforces sudoers rules.
 
@@ -231,7 +230,7 @@ python -c "import os; print(os.environ)"  # Different interpreter
 | Credential isolation | Unified-proxy architecture | No (without proxy compromise) | Protect credentials |
 | Operator approval | TTY check | No (from non-interactive) | Human-in-the-loop |
 | Branch isolation | git_operations + branch_isolation.py | No (from container) | Prevent cross-sandbox git access |
-| Git safety | git_policies.py + github-api-filter.py | No (from container) | Protected branches, force-push blocking, API controls |
+| Git safety | git_policies.py + security_policies.py | No (from container) | Protected branches, force-push blocking, API controls |
 | Credential redaction | Shell functions | **Yes** | Defense in depth |
 
 ---

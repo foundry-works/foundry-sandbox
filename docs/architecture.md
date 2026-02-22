@@ -177,10 +177,8 @@ Container Start
       │ (credential isolation enabled)      │ (standard mode)
       ▼                                     │
 entrypoint-root.sh (as root)                │
-  • Configure DNS → unified-proxy                 │
-  • Add internal services to /etc/hosts     │
   • Set up DNS firewall (iptables)          │
-  • Mask /proc/kcore                         │
+  • Overlay .git with tmpfs                 │
   • Drop privileges (gosu)                  │
       │                                     │
       ▼                                     ▼
@@ -196,6 +194,8 @@ entrypoint.sh (as ubuntu) ◄─────────────────
       ▼
 Execute passed command (default: /bin/bash)
 ```
+
+**Note:** DNS configuration (`/etc/resolv.conf`, `/etc/hosts`) is handled at compose level via `dns:` and `extra_hosts:` directives, not by `entrypoint-root.sh`. Docker 29+ makes these files read-only when `read_only: true` is set.
 
 ### Git Path Translation
 

@@ -101,71 +101,15 @@ clear_context()
 
 ## Recommended Alerts
 
-### Critical Alerts
+> These alerts are relevant for team or multi-tenant deployments where Prometheus is configured. For single-user setups, the debugging workflows below are typically sufficient.
 
-```yaml
-# Circuit breaker opened (upstream failing)
-- alert: ProxyCircuitBreakerOpen
-  expr: proxy_circuit_breaker_state == 2
-  for: 1m
-  labels:
-    severity: critical
-  annotations:
-    summary: "Circuit breaker open for {{ $labels.upstream_host }}"
-    description: "Container {{ $labels.container_id }} circuit to {{ $labels.upstream_host }} is open"
-
-# High error rate
-- alert: ProxyHighErrorRate
-  expr: |
-    sum(rate(proxy_requests_total{status=~"5.."}[5m]))
-    / sum(rate(proxy_requests_total[5m])) > 0.1
-  for: 5m
-  labels:
-    severity: critical
-  annotations:
-    summary: "High proxy error rate"
-    description: "Error rate exceeds 10% for 5 minutes"
-```
-
-### Warning Alerts
-
-```yaml
-# Rate limit approaching
-- alert: ProxyRateLimitLow
-  expr: proxy_rate_limit_remaining < 10
-  for: 2m
-  labels:
-    severity: warning
-  annotations:
-    summary: "Rate limit running low"
-    description: "Container {{ $labels.container_id }} has few rate limit tokens remaining"
-
-# High latency
-- alert: ProxyHighLatency
-  expr: |
-    histogram_quantile(0.95,
-      rate(proxy_request_duration_seconds_bucket[5m])
-    ) > 5
-  for: 5m
-  labels:
-    severity: warning
-  annotations:
-    summary: "High proxy latency"
-    description: "P95 latency exceeds 5 seconds"
-
-# DNS resolution slow
-- alert: ProxyDNSSlowResolution
-  expr: |
-    histogram_quantile(0.95,
-      rate(proxy_dns_duration_seconds_bucket[5m])
-    ) > 0.1
-  for: 5m
-  labels:
-    severity: warning
-  annotations:
-    summary: "Slow DNS resolution"
-    description: "P95 DNS latency exceeds 100ms"
-```
+| Alert | Expression | Severity | Trigger |
+|-------|-----------|----------|---------|
+| Circuit breaker open | `proxy_circuit_breaker_state == 2` | Critical | Upstream failing for 1m |
+| High error rate | `5xx rate / total rate > 0.1` | Critical | >10% errors for 5m |
+| Rate limit low | `proxy_rate_limit_remaining < 10` | Warning | Few tokens remaining for 2m |
+| High latency | `p95 request duration > 5s` | Warning | Sustained for 5m |
+| Slow DNS | `p95 DNS duration > 100ms` | Warning | Sustained for 5m |
 
 ## Debugging Workflows
 

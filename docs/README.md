@@ -11,8 +11,7 @@ The key insight: AI assistants can hallucinate dangerous commands or act without
 - **Git shadow mode** - `.git` hidden from sandboxes; all git operations proxied through authenticated API with policy enforcement
 - **Security guardrails** - Defense in depth with multiple safety layers
 - **Pre-installed AI tools** - Claude Code, Gemini CLI, Codex CLI, OpenCode ready to use
-- **Filesystem protection** - Read-only root in base mode; non-root user with network isolation in credential isolation mode
-- **Tmpfs isolation** - Home directory resets on container restart
+- **Filesystem protection** - Read-only root filesystem; non-root user; writable areas are RAM-backed and reset on restart
 
 ## Quick Start
 

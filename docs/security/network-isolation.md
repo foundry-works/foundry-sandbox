@@ -7,12 +7,15 @@ This document explains the credential isolation network architecture, its securi
 The credential isolation system prevents sandbox containers from directly accessing credentials (GitHub tokens, API keys) while still allowing them to perform authenticated operations through a controlled proxy.
 
 ```
-+------------------+     +------------------+     +------------------+
-|    Sandbox       |     |  Unified Proxy   |     |  External APIs   |
-|    (dev)         |---->|  (mitmproxy +    |---->|  (GitHub, Anthro-|
-|                  |     |   DNS filter)    |     |   pic, OpenAI)   |
-|  [placeholders]  |     |  [ALL CREDS]     |     |                  |
-+------------------+     +------------------+     +------------------+
++------------------+     +------------------------------+     +------------------+
+|    Sandbox       |     |       Unified Proxy          |     |  External APIs   |
+|    (dev)         |     |                              |     |  (GitHub, Anthro- |
+|                  |---->|  API Gateways (9848-9852)    |---->|   pic, OpenAI,   |
+|  [placeholders]  |     |  Squid SNI filter (:8080)    |     |   Gemini, etc.)  |
+|                  |     |  mitmproxy (:8081, optional)  |     |                  |
+|                  |     |  DNS filter (:53)            |     |                  |
+|                  |     |  [ALL CREDS]                 |     |                  |
++------------------+     +------------------------------+     +------------------+
 ```
 
 ## Security Layers
@@ -34,19 +37,30 @@ networks:
 
 ### Layer 2: Proxy Routing
 
-All outbound traffic from the sandbox is routed through the unified proxy:
+Outbound traffic is routed through the unified proxy via three mechanisms:
 
-- `HTTP_PROXY` and `HTTPS_PROXY` point to `unified-proxy:8080`
-- Sandbox uses placeholder API keys (`CREDENTIAL_PROXY_PLACEHOLDER`)
-- Unified proxy intercepts requests and injects real credentials
-- mitmproxy CA certificate trusted by sandbox for HTTPS interception
-- Git operations in shadow mode go through the git API server (port 8083), not the HTTPS proxy. HTTPS git push/fetch credentials are injected via `FOUNDRY_PROXY_GIT_TOKEN` in the proxy's subprocess environment
+**API Gateways (plaintext HTTP, no MITM):**
+Major providers route through dedicated gateways on the internal Docker network. The sandbox connects via `*_BASE_URL` env vars. Gateways inject real credentials and forward to upstream over HTTPS.
+
+| Gateway | Port | Provider |
+|---------|------|----------|
+| Anthropic | 9848 | `ANTHROPIC_BASE_URL=http://unified-proxy:9848` |
+| OpenAI | 9849 | MITM path (Squid) — `OPENAI_BASE_URL` intentionally unset |
+| GitHub | 9850 | `GITHUB_API_URL=http://unified-proxy:9850` |
+| Gemini | 9851 | `GOOGLE_GEMINI_BASE_URL=http://unified-proxy:9851` |
+| ChatGPT/Codex | 9852 | `CHATGPT_BASE_URL=http://unified-proxy:9852` + TLS on :443 |
+
+**Squid Forward Proxy (SNI-based domain filtering):**
+All other HTTPS traffic routes through `HTTP_PROXY`/`HTTPS_PROXY` pointing to Squid on port 8080. Squid uses SNI splicing to tunnel allowed domains without TLS decryption. MITM-required domains are forwarded to mitmproxy via `cache_peer`. IP literals and unknown domains are denied.
+
+**Git API Server (shadow mode):**
+Git operations in credential isolation mode go through the git API server (port 8083), not the HTTPS proxy. HTTPS git push/fetch credentials are injected via `FOUNDRY_PROXY_GIT_TOKEN` in the proxy's subprocess environment.
 
 ```yaml
 environment:
   - HTTP_PROXY=http://unified-proxy:8080
   - HTTPS_PROXY=http://unified-proxy:8080
-  - NO_PROXY=localhost,127.0.0.1,unified-proxy
+  - NO_PROXY=localhost,127.0.0.1,unified-proxy,chatgpt.com
 ```
 
 ### Layer 3: DNS Isolation
