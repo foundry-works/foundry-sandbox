@@ -20,10 +20,10 @@ from foundry_sandbox.utils import log_debug, log_warn
 
 __all__ = ["UserService", "UserServiceConfigError", "find_user_services_path", "load_user_services"]
 
-# In-process cache keyed by resolved path.  No TTL or file-mtime
-# invalidation — suitable for short-lived CLI invocations only.
-# Use _clear_cache() in tests to reset between test cases.
-_cache: dict[str, list["UserService"]] = {}
+# In-process cache keyed by resolved path.  Entries are invalidated when
+# the file's mtime changes so long-lived processes (e.g. test runners)
+# pick up edits automatically.  Use _clear_cache() in tests to reset.
+_cache: dict[str, tuple[float, list["UserService"]]] = {}
 
 
 def _clear_cache() -> None:
@@ -43,6 +43,10 @@ _VALID_HTTP_METHODS = frozenset(
 _DEFAULT_METHODS = ["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS", "HEAD"]
 
 _DEFAULT_PATHS = ["/**"]
+
+_REQUIRED_FIELDS = ("name", "env_var", "domain", "header", "format")
+
+_VALID_FORMATS = ("bearer", "value")
 
 
 @dataclass
@@ -98,7 +102,7 @@ def _validate_service(entry: dict[str, object], index: int) -> UserService:
     prefix = f"services[{index}]"
 
     # Required fields
-    for field_name in ("name", "env_var", "domain", "header", "format"):
+    for field_name in _REQUIRED_FIELDS:
         if field_name not in entry:
             raise UserServiceConfigError(f"{prefix}: missing required field '{field_name}'")
 
@@ -118,11 +122,11 @@ def _validate_service(entry: dict[str, object], index: int) -> UserService:
         raise UserServiceConfigError(f"{prefix}: 'domain' cannot be empty")
     if not _DOMAIN_RE.match(domain):
         raise UserServiceConfigError(
-            f"{prefix}: 'domain' must be a bare hostname (no scheme, path, or whitespace), got '{domain}'"
+            f"{prefix}: 'domain' must be a bare ASCII hostname (no scheme, path, or whitespace), got '{domain}'"
         )
     if not header:
         raise UserServiceConfigError(f"{prefix}: 'header' cannot be empty")
-    if fmt not in ("bearer", "value"):
+    if fmt not in _VALID_FORMATS:
         raise UserServiceConfigError(
             f"{prefix}: 'format' must be 'bearer' or 'value', got '{fmt}'"
         )
@@ -184,8 +188,14 @@ def load_user_services(path: str | None = None) -> list[UserService]:
         return []
 
     cache_key = str(Path(resolved).resolve())
+    try:
+        current_mtime = Path(cache_key).stat().st_mtime
+    except OSError:
+        current_mtime = 0.0
     if cache_key in _cache:
-        return list(_cache[cache_key])
+        cached_mtime, cached_services = _cache[cache_key]
+        if cached_mtime == current_mtime:
+            return list(cached_services)
 
     try:
         with open(resolved) as f:
@@ -236,5 +246,5 @@ def load_user_services(path: str | None = None) -> list[UserService]:
             seen_env_vars[svc.env_var] = svc.name
 
     log_debug(f"user-services: loaded {len(services)} service(s) from {resolved}")
-    _cache[cache_key] = services
+    _cache[cache_key] = (current_mtime, services)
     return list(services)

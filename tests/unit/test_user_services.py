@@ -336,7 +336,7 @@ class TestLoadUserServicesValidation:
                 "format": "bearer",
             }],
         })
-        with pytest.raises(UserServiceConfigError, match="bare hostname"):
+        with pytest.raises(UserServiceConfigError, match="bare ASCII hostname"):
             load_user_services(path=path)
 
     def test_domain_with_path_rejected(self, tmp_path):
@@ -351,7 +351,7 @@ class TestLoadUserServicesValidation:
                 "format": "bearer",
             }],
         })
-        with pytest.raises(UserServiceConfigError, match="bare hostname"):
+        with pytest.raises(UserServiceConfigError, match="bare ASCII hostname"):
             load_user_services(path=path)
 
     def test_domain_with_whitespace_rejected(self, tmp_path):
@@ -366,7 +366,7 @@ class TestLoadUserServicesValidation:
                 "format": "bearer",
             }],
         })
-        with pytest.raises(UserServiceConfigError, match="bare hostname"):
+        with pytest.raises(UserServiceConfigError, match="bare ASCII hostname"):
             load_user_services(path=path)
 
     def test_empty_header(self, tmp_path):
@@ -611,6 +611,20 @@ class TestSchemaConsistency:
         cli_names = [f.name for f in dataclasses.fields(UserService)]
         proxy_names = [f.name for f in dataclasses.fields(proxy_mod.ProxyUserService)]
         assert cli_names == proxy_names
+
+    def test_required_fields_match(self):
+        """_REQUIRED_FIELDS is identical in both modules."""
+        from foundry_sandbox.user_services import _REQUIRED_FIELDS as cli_fields
+        import user_services as proxy_mod
+
+        assert cli_fields == proxy_mod._REQUIRED_FIELDS
+
+    def test_valid_formats_match(self):
+        """_VALID_FORMATS is identical in both modules."""
+        from foundry_sandbox.user_services import _VALID_FORMATS as cli_formats
+        import user_services as proxy_mod
+
+        assert cli_formats == proxy_mod._VALID_FORMATS
 
 
 if __name__ == "__main__":

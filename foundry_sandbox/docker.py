@@ -623,15 +623,17 @@ def _prepare_user_services_override(
 
     from foundry_sandbox.user_services import load_user_services, find_user_services_path
 
-    services = load_user_services()
-    if not services:
-        return None, compose_extras
-
-    # Services loaded successfully — resolve the config path for bind-mounting.
-    # find_user_services_path() must return non-None here since load succeeded.
+    # Resolve path first, then pass to load_user_services() to avoid a
+    # redundant filesystem check (load_user_services would call
+    # find_user_services_path() internally if no path is given).
     raw_config_path = find_user_services_path()
     if raw_config_path is None:
         return None, compose_extras
+
+    services = load_user_services(path=raw_config_path)
+    if not services:
+        return None, compose_extras
+
     config_path = os.path.realpath(raw_config_path)
     container_mount = "/etc/unified-proxy/user-services.yaml"
 

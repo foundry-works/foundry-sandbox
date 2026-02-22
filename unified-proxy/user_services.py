@@ -33,6 +33,10 @@ _DEFAULT_METHODS = ["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS", "HEAD"]
 
 _DEFAULT_PATHS = ["/**"]
 
+_REQUIRED_FIELDS = ("name", "env_var", "domain", "header", "format")
+
+_VALID_FORMATS = ("bearer", "value")
+
 _DEFAULT_PATH = "/etc/unified-proxy/user-services.yaml"
 
 
@@ -128,7 +132,7 @@ def _parse_entry(
         return None
 
     # Required fields
-    for field_name in ("name", "env_var", "domain", "header", "format"):
+    for field_name in _REQUIRED_FIELDS:
         if field_name not in entry:
             logger.warning(
                 "user-services: %s missing '%s' in %s", prefix, field_name, file_path
@@ -146,7 +150,7 @@ def _parse_entry(
         return None
     if not _DOMAIN_RE.match(domain):
         logger.warning(
-            "user-services: %s invalid domain '%s' (must be bare hostname, no scheme/path/whitespace) in %s",
+            "user-services: %s invalid domain '%s' (must be bare ASCII hostname, no scheme/path/whitespace) in %s",
             prefix, domain, file_path,
         )
         return None
@@ -155,7 +159,7 @@ def _parse_entry(
             "user-services: %s invalid env_var '%s' in %s", prefix, env_var, file_path
         )
         return None
-    if fmt not in ("bearer", "value"):
+    if fmt not in _VALID_FORMATS:
         logger.warning(
             "user-services: %s format must be 'bearer' or 'value', got '%s' in %s",
             prefix, fmt, file_path,
