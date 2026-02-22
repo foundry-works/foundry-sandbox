@@ -74,6 +74,8 @@ def _is_within_boundary(resolved: str, boundary: str) -> bool:
     Both paths must already be canonicalized via ``os.path.realpath()``.
     Returns True when *resolved* equals *boundary* or is a child path.
     """
+    if boundary == os.sep:
+        return resolved.startswith(os.sep)
     return resolved == boundary or resolved.startswith(boundary + os.sep)
 
 

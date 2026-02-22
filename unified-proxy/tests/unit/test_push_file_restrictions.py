@@ -611,6 +611,118 @@ class TestCheckPushFileRestrictions:
             assert err is not None
             assert "Path traversal" in err.reason
 
+    def test_from_branch_fallback_when_bare_repo_unavailable(self, config_file):
+        """When bare repo is unavailable, from_branch metadata is used."""
+        fail_result = self._make_diff_result("", returncode=128)
+        ok_result = self._make_diff_result("src/main.py\n")
+
+        call_count = 0
+
+        def run_side_effect(*args, **kwargs):
+            nonlocal call_count
+            call_count += 1
+            if call_count <= 1:
+                return fail_result  # Remote branch diff fails
+            return ok_result  # from_branch diff succeeds
+
+        meta = {**META, "from_branch": "main"}
+
+        with patch(
+            "git_operations.get_file_restrictions_config",
+            return_value=load_file_restrictions_config(config_file),
+        ), patch(
+            "git_operations.subprocess.run", side_effect=run_side_effect
+        ), patch(
+            "git_operations.build_clean_env", return_value={}
+        ), patch(
+            "git_operations.resolve_bare_repo_path", return_value=None
+        ):
+            err = check_push_file_restrictions(
+                ["origin", BRANCH], "/repo", meta
+            )
+            assert err is None
+            assert call_count == 2
+
+    def test_from_branch_fallback_after_default_branch_fallback_fails(
+        self, config_file
+    ):
+        """All three fallbacks tried: remote, default branch, from_branch."""
+        fail_result = self._make_diff_result("", returncode=128)
+        ok_result = self._make_diff_result("src/main.py\n")
+
+        call_count = 0
+
+        def run_side_effect(*args, **kwargs):
+            nonlocal call_count
+            call_count += 1
+            if call_count <= 2:
+                return fail_result  # Remote + default branch fail
+            return ok_result  # from_branch succeeds
+
+        meta = {**META, "from_branch": "main"}
+
+        with patch(
+            "git_operations.get_file_restrictions_config",
+            return_value=load_file_restrictions_config(config_file),
+        ), patch(
+            "git_operations.subprocess.run", side_effect=run_side_effect
+        ), patch(
+            "git_operations.build_clean_env", return_value={}
+        ), patch(
+            "git_operations.resolve_bare_repo_path", return_value="/bare.git"
+        ), patch(
+            "git_operations._detect_default_branch", return_value="main"
+        ):
+            err = check_push_file_restrictions(
+                ["origin", BRANCH], "/repo", meta
+            )
+            assert err is None
+            assert call_count == 3
+
+    def test_all_fallbacks_fail_including_from_branch_blocks(self, config_file):
+        """Fail-closed preserved when all fallbacks fail."""
+        fail_result = self._make_diff_result("", returncode=128)
+
+        meta = {**META, "from_branch": "main"}
+
+        with patch(
+            "git_operations.get_file_restrictions_config",
+            return_value=load_file_restrictions_config(config_file),
+        ), patch(
+            "git_operations.subprocess.run", return_value=fail_result
+        ), patch(
+            "git_operations.build_clean_env", return_value={}
+        ), patch(
+            "git_operations.resolve_bare_repo_path", return_value="/bare.git"
+        ), patch(
+            "git_operations._detect_default_branch", return_value="main"
+        ):
+            err = check_push_file_restrictions(
+                ["origin", BRANCH], "/repo", meta
+            )
+            assert err is not None
+            assert "fail-closed" in err.reason
+
+    def test_no_from_branch_in_metadata_still_blocks(self, config_file):
+        """Backward compat: metadata without from_branch still fail-closes."""
+        fail_result = self._make_diff_result("", returncode=128)
+
+        with patch(
+            "git_operations.get_file_restrictions_config",
+            return_value=load_file_restrictions_config(config_file),
+        ), patch(
+            "git_operations.subprocess.run", return_value=fail_result
+        ), patch(
+            "git_operations.build_clean_env", return_value={}
+        ), patch(
+            "git_operations.resolve_bare_repo_path", return_value=None
+        ):
+            err = check_push_file_restrictions(
+                ["origin", BRANCH], "/repo", META
+            )
+            assert err is not None
+            assert "fail-closed" in err.reason
+
     def test_explicit_refspec_uses_target(self, config_file):
         """Push with explicit refspec uses the target branch for diff."""
         diff_result = self._make_diff_result("src/main.py\n")

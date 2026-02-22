@@ -699,6 +699,13 @@ def check_push_file_restrictions(
                 resolved_cwd, env, default_branch,
             )
 
+    if changed_files is None and metadata:
+        from_branch = metadata.get("from_branch")
+        if from_branch:
+            changed_files = _enumerate_push_changed_files(
+                resolved_cwd, env, from_branch,
+            )
+
     if changed_files is None:
         # Fail closed: can't enumerate files
         return ValidationError(

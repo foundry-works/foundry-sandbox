@@ -26,6 +26,7 @@ from branch_isolation import (
     _is_allowed_branch_name,
     _is_allowed_ref,
     _is_allowed_short_ref_token,
+    _is_within_boundary,
     _looks_like_path,
     _strip_rev_suffixes,
     filter_ref_listing_output,
@@ -1851,3 +1852,34 @@ class TestLooksLikePath:
 
     def test_range_operator(self):
         assert _looks_like_path("HEAD..main") is False
+
+
+# ---------------------------------------------------------------------------
+# _is_within_boundary
+# ---------------------------------------------------------------------------
+
+
+class TestIsWithinBoundary:
+    """Test boundary checking for resolved paths."""
+
+    def test_child_path(self):
+        assert _is_within_boundary("/home/user/repo", "/home/user") is True
+
+    def test_exact_match(self):
+        assert _is_within_boundary("/home/user", "/home/user") is True
+
+    def test_outside_boundary(self):
+        assert _is_within_boundary("/etc/passwd", "/home/user") is False
+
+    def test_partial_name_no_match(self):
+        """'/home/username' should NOT match boundary '/home/user'."""
+        assert _is_within_boundary("/home/username", "/home/user") is False
+
+    def test_root_boundary_child(self):
+        assert _is_within_boundary("/git-workspace", "/") is True
+
+    def test_root_boundary_deep_child(self):
+        assert _is_within_boundary("/git-workspace/.git", "/") is True
+
+    def test_root_boundary_exact(self):
+        assert _is_within_boundary("/", "/") is True
