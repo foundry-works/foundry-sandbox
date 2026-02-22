@@ -1,6 +1,6 @@
 # Foundry Sandbox
 
-[![CI](https://github.com/foundry-works/foundry-sandbox/actions/workflows/ci.yml/badge.svg)](https://github.com/foundry-works/foundry-sandbox/actions/workflows/ci.yml)
+[![CI](https://github.com/foundry-works/foundry-sandbox/actions/workflows/test.yml/badge.svg)](https://github.com/foundry-works/foundry-sandbox/actions/workflows/test.yml)
 [![PyPI](https://img.shields.io/pypi/v/foundry-sandbox)](https://pypi.org/project/foundry-sandbox/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Built for Claude Code](https://img.shields.io/badge/Built_for-Claude_Code-cc785c)](https://docs.anthropic.com/en/docs/claude-code)
