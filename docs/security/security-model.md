@@ -678,4 +678,4 @@ python3 -c "import socket; socket.socket(socket.AF_INET, socket.SOCK_RAW, socket
 ## See Also
 
 - [Configuration: Push File Restrictions](../configuration.md#push-file-restrictions) — File restriction patterns
-- [ADR-009: API Gateways](../adr/009-api-gateways.md) — Gateway architecture decision
+- [ADR-007: API Gateways](../adr/007-api-gateways.md) — Gateway architecture decision

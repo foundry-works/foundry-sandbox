@@ -59,10 +59,8 @@ claude
 | [ADR-003: Policy Engine](adr/003-policy-engine.md) | Policy engine design for access control | Accepted |
 | [ADR-004: DNS Integration](adr/004-dns-integration.md) | DNS filtering integration with unified proxy | Accepted |
 | [ADR-005: Failure Modes](adr/005-failure-modes.md) | Failure modes and readiness design | Accepted |
-| [ADR-006: Legacy Bridge Sunset](adr/006-legacy-bridge-sunset.md) | Legacy bridge removal and migration | Completed |
-| [ADR-007: Container Config Deprecation](adr/007-container-config-deprecation.md) | Container config deprecation and cleanup | Completed |
-| [ADR-008: Allowlist Layering](adr/008-allowlist-layering.md) | Layered allowlist architecture for network access | Accepted |
-| [ADR-009: API Gateways](adr/009-api-gateways.md) | API gateway routing and credential injection | Accepted |
+| [ADR-006: Allowlist Layering](adr/006-allowlist-layering.md) | Layered allowlist architecture for network access | Accepted |
+| [ADR-007: API Gateways](adr/007-api-gateways.md) | API gateway routing and credential injection | Accepted |
 
 ### Development
 

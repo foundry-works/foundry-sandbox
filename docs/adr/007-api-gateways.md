@@ -1,4 +1,4 @@
-# ADR-009: Dedicated API Gateways with Squid Forward Proxy
+# ADR-007: Dedicated API Gateways with Squid Forward Proxy
 
 ## Status
 
@@ -147,4 +147,4 @@ The GitHub gateway enforces security policies via a request hook that runs after
 - `unified-proxy/squid.conf` — Squid configuration
 - [Operations: Gateway Rollback](../operations.md#gateway-rollback-procedures)
 - [Threat Model: Credential Theft](../security/security-model.md#credential-isolation)
-- ADR-003: Policy Engine (related access control context)
+- [ADR-003: Policy Engine](003-policy-engine.md) (related access control context)

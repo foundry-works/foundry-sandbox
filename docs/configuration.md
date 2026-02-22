@@ -199,7 +199,7 @@ This is a **fail-closed** mechanism:
 
 No partial allowlist startup is permitted. This prevents silent security degradation from misconfigured extras.
 
-For detailed merge canonicalization rules and precedence logic, see [ADR-008: Allowlist Layering](adr/008-allowlist-layering.md).
+For detailed merge canonicalization rules and precedence logic, see [ADR-006: Allowlist Layering](adr/006-allowlist-layering.md).
 
 ## Internal API: Docker Compose Overrides
 

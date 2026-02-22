@@ -328,7 +328,7 @@ The unified-proxy handles credential isolation, API proxying, and security polic
 
 Sandboxes connect to API gateways via provider-specific `*_BASE_URL` environment variables. Gateways accept plaintext HTTP on the internal Docker network, validate container identity, inject real credentials, and forward to the upstream provider over HTTPS. Responses are streamed back chunk-by-chunk without buffering. The GitHub gateway additionally enforces security policies — see [Git Safety](security/security-model.md#git-safety).
 
-For the gateway architecture decision, routing table, shared infrastructure details, and rollback procedures, see [ADR-009](adr/009-api-gateways.md).
+For the gateway architecture decision, routing table, shared infrastructure details, and rollback procedures, see [ADR-007](adr/007-api-gateways.md).
 
 ### Squid Forward Proxy
 
