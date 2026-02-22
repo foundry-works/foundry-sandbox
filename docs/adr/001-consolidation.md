@@ -118,5 +118,5 @@ Implement a single **unified-proxy** service that handles all proxy responsibili
 - `unified-proxy/addons/` — mitmproxy addon chain
 - `docker-compose.credential-isolation.yml` — Single-service composition
 - [Security Model](../security/security-model.md) — Security pillars overview
-- [Credential Isolation](../security/credential-isolation.md) — Credential isolation threat model
+- [Security Model: Credential Isolation](../security/security-model.md#credential-isolation) — Credential isolation threat model
 - [Architecture](../architecture.md) — System architecture documentation

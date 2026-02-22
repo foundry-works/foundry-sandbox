@@ -162,13 +162,11 @@ export GITHUB_TOKEN="ghp_..."     # required for private repos / push
 
 # Claude Code
 export CLAUDE_CODE_OAUTH_TOKEN="..."   # get via: claude setup-token
-
-# Gemini CLI: gemini auth    |  Codex CLI: codex login
 ```
 
 Credentials are passed into containers automatically. Public repos work without a GitHub token but may be rate limited.
 
-See [Commands: Environment Variables](usage/commands.md#environment-variables) for the full reference.
+See [Commands: Environment Variables](usage/commands.md#environment-variables) for the full reference including keys for Gemini, Codex, and search providers.
 
 ### CI / Non-Interactive Mode
 

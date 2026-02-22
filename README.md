@@ -134,10 +134,8 @@ cast repeat                                                         # repeat las
 | [Configuration](docs/configuration.md) | API keys, plugins, and config files |
 | [Architecture](docs/architecture.md) | Technical design and diagrams |
 | [Security Model](docs/security/security-model.md) | Threats, defenses, hardening, and security assumptions — organized by pillar |
-| [Credential Isolation](docs/security/credential-isolation.md) | Network architecture and threat model |
 | [Operations](docs/operations.md) | Proxy operations runbook |
 | [Observability](docs/observability.md) | Metrics and debugging |
-| [Certificates](docs/certificates.md) | CA certificate management |
 | [Contributing](docs/development/contributing.md) | For contributors |
 
 ## Support

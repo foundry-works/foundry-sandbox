@@ -10,6 +10,7 @@ This guide covers operational procedures for the unified proxy: restart procedur
 - [DNS Configuration](#dns-configuration)
 - [HMAC Secret Rotation](#hmac-secret-rotation)
 - [Gateway Rollback](#gateway-rollback-procedures)
+- [Certificate Management](#certificate-management)
 - [Emergency Procedures](#emergency-procedures)
 
 **Troubleshooting:**
@@ -307,7 +308,7 @@ If p95 > 100ms, consider DNS fallback mode.
 
 **Symptom:** `SSL certificate problem: unable to get local issuer certificate`
 
-See [Certificates: Troubleshooting](certificates.md#troubleshooting) for diagnosis steps and common causes.
+See [Certificate Troubleshooting](#certificate-troubleshooting) for diagnosis steps and common causes.
 
 ### Git Operations Failing
 
@@ -625,10 +626,90 @@ docker exec <sandbox-container> curl -s https://api.anthropic.com/v1/messages -I
 
 **MITM-required providers:** Gemini (`GOOGLE_API_KEY`, `GEMINI_API_KEY`), Tavily (`TAVILY_API_KEY`), Semantic Scholar (`SEMANTIC_SCHOLAR_API_KEY`), Perplexity (`PERPLEXITY_API_KEY`), Zhipu (`ZHIPU_API_KEY`). These providers lack `*_BASE_URL` env var support and always require MITM when their credentials are set.
 
+## Certificate Management
+
+Mitmproxy CA certificate management for HTTPS interception in credential isolation mode.
+
+### How It Works
+
+When MITM-required provider credentials are configured (see [Architecture: Mitmproxy](architecture.md#mitmproxy-conditional) for the current list), the unified proxy generates a CA certificate and uses it to intercept HTTPS traffic for credential injection. Major providers (Anthropic, OpenAI, GitHub) route through plaintext HTTP gateways and do not require MITM or CA trust.
+
+```
+unified-proxy                          sandbox container
+┌──────────────┐                      ┌────────────────────────┐
+│ Generate CA  │                      │ Trust combined bundle  │
+│ Build combined│──── mitm-certs ────│ /certs/ca-certificates │
+│ CA bundle    │     volume (ro)     │ .crt (system CAs +     │
+│              │                      │ mitmproxy CA)          │
+└──────────────┘                      └────────────────────────┘
+```
+
+#### Generation
+
+The proxy's `entrypoint.sh` generates the CA on first startup via `mitmdump`, then builds a combined bundle (system CAs + mitmproxy CA) at `/etc/proxy/certs/ca-certificates.crt`. This avoids running `update-ca-certificates` inside the sandbox (which requires a writable root filesystem).
+
+#### Distribution
+
+The combined bundle is shared via a Docker volume (`mitm-certs`), mounted read-only in the sandbox at `/certs/`.
+
+#### Trust Configuration
+
+Environment variables are set in `docker-compose.credential-isolation.yml`:
+
+| Variable | Value | Consumers |
+|----------|-------|-----------|
+| `NODE_EXTRA_CA_CERTS` | `/certs/ca-certificates.crt` | Node.js |
+| `REQUESTS_CA_BUNDLE` | `/certs/ca-certificates.crt` | Python requests |
+| `SSL_CERT_FILE` | `/certs/ca-certificates.crt` | OpenSSL |
+| `CURL_CA_BUNDLE` | `/certs/ca-certificates.crt` | curl |
+| `GIT_SSL_CAINFO` | `/certs/ca-certificates.crt` | git |
+
+### Certificate Rotation
+
+Certificates rotate automatically when the sandbox is destroyed and recreated (`cast destroy && cast new`). Manual rotation:
+
+```bash
+# Stop sandbox and proxy
+docker compose -f docker-compose.credential-isolation.yml down
+
+# Remove the certificate volume
+docker volume rm <project>_mitm-certs
+
+# Restart - proxy generates new certificate
+docker compose -f docker-compose.credential-isolation.yml up -d
+```
+
+### Certificate Troubleshooting
+
+**Symptom:** `SSL certificate problem: unable to get local issuer certificate`
+
+```bash
+# Inside sandbox: verify combined bundle exists
+ls -la /certs/ca-certificates.crt
+
+# Verify env vars are set
+echo $NODE_EXTRA_CA_CERTS
+
+# Test HTTPS through proxy
+curl -v https://api.github.com 2>&1 | head -20
+```
+
+**Common causes:**
+1. Combined bundle not generated — proxy may have failed to start mitmproxy
+2. Volume not mounted — check `mitm-certs` volume in `docker compose ps`
+3. Proxy not ready — sandbox started before proxy healthcheck passed
+
+### Security Properties
+
+- **Isolation**: Each sandbox project has its own CA
+- **Read-only mount**: Sandboxes cannot modify the CA certificate
+- **No persistence**: CA is regenerated on sandbox recreation
+- **Scope limited**: CA only trusted within the sandbox container
+- **Reduced surface**: Major providers use gateways (no MITM), limiting CA trust to MITM-required providers only
+
 ## See Also
 
-- [Architecture](architecture.md) - System components
-- [Observability](observability.md) - Metrics and debugging
-- [Certificates](certificates.md) - CA management
-- [ADR-005](adr/005-failure-modes.md) - Failure modes and recovery design
-- [ADR-004](adr/004-dns-integration.md) - DNS integration decision
+- [Architecture](architecture.md) — System components
+- [Observability](observability.md) — Metrics and debugging
+- [ADR-005](adr/005-failure-modes.md) — Failure modes and recovery design
+- [ADR-004](adr/004-dns-integration.md) — DNS integration decision

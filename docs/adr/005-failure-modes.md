@@ -264,7 +264,7 @@ Once the proxy passes healthcheck, sandbox (`dev`) container starts:
 
 - **Single Proxy Container:** One service to monitor (simpler than multi-service, but single point of failure)
 - **Healthcheck Overhead:** ~0.5% CPU to perform health checks every 5-10 seconds (negligible)
-- **TLS MITM:** Explicit design choice to intercept HTTPS; documented in credential-isolation.md threat model
+- **TLS MITM:** Explicit design choice to intercept HTTPS; documented in [Security Model](../security/security-model.md#mitmproxy-ca-trust)
 
 ## Alternatives Considered
 
@@ -311,11 +311,11 @@ Store sessions in Redis/database external to the proxy.
 
 ## References
 
-- [docker-compose.credential-isolation.yml](/workspace/docker-compose.credential-isolation.yml) - Healthcheck configuration
-- [Security Model](/workspace/docs/security/security-model.md) - Security pillars overview
-- [Credential Isolation](/workspace/docs/security/credential-isolation.md) - Credential isolation threat model
-- [entrypoint-root.sh](/workspace/entrypoint-root.sh) - DNS firewall and startup initialization
-- [entrypoint.sh](/workspace/entrypoint.sh) - Sandbox user-level startup
-- [unified-proxy/entrypoint.sh](/workspace/unified-proxy/entrypoint.sh) - Proxy startup with internal API, addon validation, and mitmproxy
-- [unified-proxy/registry.py](/workspace/unified-proxy/registry.py) - SQLite-backed container registry
+- `docker-compose.credential-isolation.yml` - Healthcheck configuration
+- [Security Model](../security/security-model.md) — Security pillars overview
+- [Security Model: Credential Isolation](../security/security-model.md#credential-isolation) — Credential isolation threat model
+- `entrypoint-root.sh` - DNS firewall and startup initialization
+- `entrypoint.sh` - Sandbox user-level startup
+- `unified-proxy/entrypoint.sh` - Proxy startup with internal API, addon validation, and mitmproxy
+- `unified-proxy/registry.py` - SQLite-backed container registry
 - Docker Compose Documentation: [depends_on with service_healthy condition](https://docs.docker.com/compose/compose-file/compose-file-v3/#depends_on)

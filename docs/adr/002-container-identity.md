@@ -297,9 +297,9 @@ This explicit signal is more reliable than inferring from IP changes alone.
 
 ## References
 
-- [Security Model](../security/security-model.md) - Security pillars, credential isolation, and network controls
-- [Credential Isolation](../security/credential-isolation.md) - Network architecture and firewall rules
-- [Architecture](../architecture.md) - System overview and component interactions
+- [Security Model](../security/security-model.md) — Security pillars, credential isolation, and network controls
+- [Security Model: Credential Isolation](../security/security-model.md#credential-isolation) — Network architecture and firewall rules
+- [Architecture](../architecture.md) — System overview and component interactions
 - `unified-proxy/addons/container_identity.py` — Identity addon implementation
 - `unified-proxy/registry.py` — SQLite-backed container registry
 - `unified-proxy/internal_api.py` — Registration REST API

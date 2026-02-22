@@ -175,9 +175,9 @@ entrypoint-root.sh (as root)
 
 ## References
 
-- [Credential Isolation](../security/credential-isolation.md) - Network architecture and proxy session management
-- Domain Allowlist - `config/allowlist.yaml`
-- [Security Model](../security/security-model.md) - Threat model and defense-in-depth overview
+- [Security Model: Credential Isolation](../security/security-model.md#credential-isolation) — Network architecture and proxy session management
+- Domain Allowlist — `config/allowlist.yaml`
+- [Security Model](../security/security-model.md) — Threat model and defense-in-depth overview
 
 ### Implementation Files
 

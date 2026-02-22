@@ -165,6 +165,6 @@ docker logs unified-proxy 2>&1 | grep 'protected_branch'
 
 ## See Also
 
-- [Architecture](architecture.md) - System components
-- [ADR-005](adr/005-failure-modes.md) - Failure modes and resilience
-- [Operations](operations.md) - Operational procedures
+- [Architecture](architecture.md) — System components
+- [ADR-005](adr/005-failure-modes.md) — Failure modes and resilience
+- [Operations](operations.md) — Operational procedures

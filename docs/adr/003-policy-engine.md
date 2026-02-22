@@ -467,7 +467,7 @@ Support hot-reloading policies without proxy restart.
 
 ## References
 
-- [Security Model](../security/security-model.md) - Security design principles
-- [Credential Isolation](../security/credential-isolation.md) - Threat model and network architecture
-- [Current Allowlist Implementation](../../config/allowlist.yaml) - Domain allowlist configuration
-- [Architecture Overview](../architecture.md) - System architecture context
+- [Security Model](../security/security-model.md) — Security design principles
+- [Security Model: Credential Isolation](../security/security-model.md#credential-isolation) — Threat model and network architecture
+- [Current Allowlist Implementation](../../config/allowlist.yaml) — Domain allowlist configuration
+- [Architecture Overview](../architecture.md) — System architecture context

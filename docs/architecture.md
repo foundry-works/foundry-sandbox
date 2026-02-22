@@ -12,6 +12,7 @@ This document explains the technical design of Foundry Sandbox: how components f
 - [Entrypoint Flow](#entrypoint-flow)
 - [Component Interactions](#component-interactions)
 - [Unified Proxy Architecture](#unified-proxy-architecture)
+- [Service Dependencies](#service-dependencies)
 
 ## System Overview
 
@@ -325,22 +326,17 @@ The unified-proxy handles credential isolation, API proxying, and security polic
 
 ### API Gateways
 
-Sandboxes connect to API gateways via provider-specific `*_BASE_URL` environment variables. Gateways accept plaintext HTTP on the internal Docker network, validate container identity, inject real credentials, and forward to the upstream provider over HTTPS. Responses are streamed back chunk-by-chunk without buffering.
+Sandboxes connect to API gateways via provider-specific `*_BASE_URL` environment variables. Gateways accept plaintext HTTP on the internal Docker network, validate container identity, inject real credentials, and forward to the upstream provider over HTTPS. Responses are streamed back chunk-by-chunk without buffering. The GitHub gateway additionally enforces security policies — see [Git Safety](security/security-model.md#git-safety).
 
-Each gateway is a thin wrapper around `gateway_base.py`, which provides a factory function (`create_gateway_app()`) that builds a fully configured aiohttp application. The per-gateway module specifies the upstream URL, credential loading logic, route table, and optional request hook. All gateways share a middleware stack (identity validation, metrics, circuit breaker, rate limiter) defined in `gateway_middleware.py`. The GitHub gateway additionally enforces security policies — see [Security Model: Credential Isolation](security/security-model.md#credential-isolation) and [Git Safety](security/security-model.md#git-safety) for details.
+For the gateway architecture decision, routing table, shared infrastructure details, and rollback procedures, see [ADR-009](adr/009-api-gateways.md).
 
 ### Squid Forward Proxy
 
-Squid handles all non-gateway HTTPS traffic on port 8080. Domain lists are generated at startup by `generate_squid_config.py` from `config/allowlist.yaml`:
-
-- **Allowed domains** — HTTPS tunnelled via SNI splice (no TLS decryption)
-- **MITM domains** — Forwarded to mitmproxy via `cache_peer` for credential injection
-- **IP literals** — Blocked by ACLs (dotted decimal, IPv6 brackets, octal, hex, integer encodings)
-- **Unknown domains** — Denied
+Squid handles all non-gateway HTTPS traffic on port 8080, performing SNI-based domain filtering against `config/allowlist.yaml`. Allowed domains are tunnelled without TLS decryption; MITM-required domains are forwarded to mitmproxy; IP literals and unknown domains are denied.
 
 ### Mitmproxy (Conditional)
 
-mitmproxy runs on port 8081 when MITM-required provider credentials are configured or DNS filtering is enabled. It handles TLS interception for providers that lack `*_BASE_URL` env var support. When no MITM providers are configured, no CA certificate is generated. The addon chain (shown in the diagram above) handles identity resolution, policy enforcement, credential injection, and observability — see [Security Model: Credential Isolation](security/security-model.md#credential-isolation) for policy details.
+mitmproxy runs on port 8081 when MITM-required provider credentials are configured or DNS filtering is enabled. It handles TLS interception for providers that lack `*_BASE_URL` env var support. When no MITM providers are configured, no CA certificate is generated.
 
 ### Container Registration
 
@@ -396,6 +392,31 @@ In credential isolation mode, the `.git` directory is hidden from sandboxes (bin
 4. Each sandbox has a unique HMAC secret (provisioned at creation time) stored in a shared Docker volume
 5. The git API authenticates requests, applies policy checks (force-push blocking, branch deletion blocking, repo authorization), validates branch isolation via `branch_isolation.py`, then executes the real git command against the bare repository
 6. `git_operations.py` uses `fcntl.flock` to serialize concurrent fetch operations per bare repo, preventing corruption from parallel fetches
+
+## Service Dependencies
+
+```
+unified-proxy ───────> dev (sandbox)
+```
+
+The unified proxy must be healthy before the sandbox starts:
+
+```yaml
+depends_on:
+  unified-proxy:
+    condition: service_healthy
+```
+
+The healthcheck verifies the internal API is responsive via Unix socket:
+
+```yaml
+healthcheck:
+  test: ["CMD", "curl", "-sf", "--unix-socket", "/var/run/proxy/internal.sock", "http://localhost/internal/health"]
+  interval: 5s
+  timeout: 5s
+  retries: 5
+  start_period: 10s
+```
 
 ## See Also
 

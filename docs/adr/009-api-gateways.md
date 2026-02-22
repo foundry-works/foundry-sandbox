@@ -40,65 +40,7 @@ Route API traffic through five dedicated HTTP gateways for providers that suppor
 
 ### Architecture
 
-```
-┌──────────────────────────────────┐
-│         SANDBOX CONTAINER        │
-│                                  │
-│  HTTP_PROXY=http://proxy:8080    │
-│  ANTHROPIC_BASE_URL=http://proxy:9848        │
-│  OPENAI_BASE_URL=http://proxy:9849           │
-│  GITHUB_API_URL=http://proxy:9850            │
-│  GOOGLE_GEMINI_BASE_URL=http://proxy:9851    │
-│  chatgpt.com → proxy IP (via /etc/hosts)      │
-│                                  │
-│  SDK calls ──► gateway (direct)  │
-│  Other HTTPS ──► Squid (proxy)   │
-└──────────┬───────────────────────┘
-           │ Docker internal network
-           │ (plaintext HTTP)
-┌──────────▼───────────────────────────────────────┐
-│                  UNIFIED PROXY                    │
-│                                                   │
-│  ┌──────────────────────────────────────────────┐ │
-│  │           API GATEWAYS (aiohttp)             │ │
-│  │                                              │ │
-│  │  :9848  Anthropic ──► api.anthropic.com       │ │
-│  │  :9849  OpenAI    ──► api.openai.com         │ │
-│  │  :9850  GitHub    ──► api.github.com         │ │
-│  │  :9851  Gemini    ──► generativelanguage..   │ │
-│  │  :9852  ChatGPT   ──► chatgpt.com (HTTP)     │ │
-│  │  :443   ChatGPT   ──► chatgpt.com (TLS)     │ │
-│  │                                              │ │
-│  │  Shared: gateway_base.py (factory)           │ │
-│  │          gateway_middleware.py (identity,     │ │
-│  │            rate limit, circuit breaker,       │ │
-│  │            metrics)                           │ │
-│  │          security_policies.py (GitHub)        │ │
-│  └──────────────────────────────────────────────┘ │
-│                                                   │
-│  ┌──────────────────────────────────────────────┐ │
-│  │       SQUID FORWARD PROXY (:8080)            │ │
-│  │                                              │ │
-│  │  Allowed domains  ──► direct HTTPS tunnel    │ │
-│  │  MITM domains     ──► mitmproxy (:8081)      │ │
-│  │  IP literals      ──► deny                   │ │
-│  │  Unknown domains  ──► deny                   │ │
-│  └──────────────────────────────────────────────┘ │
-│                                                   │
-│  ┌──────────────────────────────────────────────┐ │
-│  │    MITMPROXY (:8081, conditional)            │ │
-│  │                                              │ │
-│  │  TLS interception for MITM-required          │ │
-│  │  providers (Tavily, Perplexity, etc.)        │ │
-│  │  DNS filtering (when enabled)                │ │
-│  └──────────────────────────────────────────────┘ │
-│                                                   │
-│  ┌──────────────────┐  ┌────────────────────────┐ │
-│  │ Internal API     │  │ Git API (:8083)        │ │
-│  │ (Flask, Unix)    │  │ (HMAC-authenticated)   │ │
-│  └──────────────────┘  └────────────────────────┘ │
-└───────────────────────────────────────────────────┘
-```
+For the current architecture diagram, see [Architecture: Unified Proxy](../architecture.md#unified-proxy-architecture).
 
 ### Request routing
 

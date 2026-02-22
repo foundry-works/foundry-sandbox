@@ -273,7 +273,32 @@ sudo rm /tmp/test
 
 Sandbox containers hold zero real credentials — only placeholder values. The unified proxy (a separate container) holds all real tokens and injects them into outbound requests. Container registration binds each sandbox to its IP address.
 
-Even if code reads the environment, it gets nothing useful — `ANTHROPIC_API_KEY` returns `CREDENTIAL_PROXY_PLACEHOLDER`. See [Credential Isolation](credential-isolation.md) for the full architecture, network topology, and threat model.
+```
++------------------+     +------------------------------+     +------------------+
+|    Sandbox       |     |       Unified Proxy          |     |  External APIs   |
+|    (dev)         |     |                              |     |  (GitHub, Anthro- |
+|                  |---->|  API Gateways (9848-9852)    |---->|   pic, OpenAI,   |
+|  [placeholders]  |     |  Squid SNI filter (:8080)    |     |   Gemini, etc.)  |
+|                  |     |  mitmproxy (:8081, optional)  |     |                  |
+|                  |     |  DNS filter (:53)            |     |                  |
+|                  |     |  [ALL CREDS]                 |     |                  |
++------------------+     +------------------------------+     +------------------+
+```
+
+Even if code reads the environment, it gets nothing useful — `ANTHROPIC_API_KEY` returns `CREDENTIAL_PROXY_PLACEHOLDER`.
+
+#### Credential Exposure Matrix
+
+| Credential | Unified Proxy | Sandbox |
+|------------|---------------|---------|
+| GITHUB_TOKEN / GH_TOKEN | Yes | No (empty) |
+| ANTHROPIC_API_KEY | Yes | Placeholder |
+| OPENAI_API_KEY | Yes | Placeholder |
+| GOOGLE_API_KEY | Yes | Placeholder |
+| Other API Keys | Yes | Placeholder |
+| FOUNDRY_PROXY_GIT_TOKEN | Yes (subprocess env only) | No (never exposed) |
+
+The unified proxy holds all real credentials. Sandboxes never see real values.
 
 **Hardening — placeholder filtering:** Sandbox-supplied headers containing placeholder credential markers (`CRED_PROXY_`, `CREDENTIAL_PROXY_PLACEHOLDER`) are stripped before forwarding to upstream APIs. Filtering uses `startswith()` rather than substring matching to prevent false positives on legitimate values.
 
@@ -452,7 +477,7 @@ Sandboxes can send data to allowed services (GitHub, AI APIs). A compromised san
 
 If credential isolation is disabled (`--no-isolate-credentials`), the AI can read real environment variables containing credentials.
 
-**Rationale:** Credential isolation is opt-out for compatibility. When disabled, the user accepts that credentials may be exposed. See [Credential Isolation](credential-isolation.md) for why you should keep it enabled.
+**Rationale:** Credential isolation is opt-out for compatibility. When disabled, the user accepts that credentials may be exposed. Keep it enabled unless you have a specific compatibility need.
 
 ### Container Filesystem Write Capability
 
@@ -491,6 +516,58 @@ The unified-proxy runs `git unpack-objects` on untrusted pack data received from
 Rate limiters, circuit breakers, and nonce replay stores reset on proxy restart.
 
 **Mitigations:** Rate limiter reset only allows a brief burst before new limits take effect. Nonce replay protection is bounded by the HMAC timestamp window. Circuit breakers reset to closed (healthy) state, which is the safe default.
+
+### Rate Limiting on Git Operations
+
+Rate limiting on git operations and container registration limits are not implemented.
+
+**Rationale:**
+1. The proxy operates within a trusted orchestration environment. Container registration is only accessible from the orchestrator (Unix socket), not from sandboxed containers.
+2. Resource exhaustion affects availability, not confidentiality/integrity, and can be mitigated at the infrastructure layer (container resource limits, orchestrator-level controls).
+3. Rate limiting adds state management, clock dependencies, and configuration complexity that increases attack surface for the primary threats.
+4. Upstream GitHub API already enforces rate limits per token.
+5. Each sandbox is isolated — a sandbox exhausting resources only affects itself.
+
+**Accepted risks:** A compromised orchestrator could register many containers (mitigated by: orchestrator is trusted). A single sandbox could make many git requests (mitigated by: GitHub rate limits, container resource limits). Registry could grow large (mitigated by: explicit unregistration on destroy, optional TTL-based cleanup).
+
+### Custom Seccomp/AppArmor Profiles
+
+Custom seccomp and AppArmor profiles are not specified in Dockerfiles.
+
+**Rationale:**
+1. Docker's default seccomp profile already blocks ~44 dangerous syscalls including `ptrace`, `mount`, `reboot`, `kexec_load`, `init_module`.
+2. Container escape is a Docker/kernel infrastructure-level concern, not application-level.
+3. AppArmor profiles must be installed on the Docker host — operational configuration outside this codebase's scope.
+4. The primary threats (credential theft, unauthorized repository access) are mitigated by the proxy's authentication, network isolation, and allowlists — not syscall filtering.
+
+**Accepted risks:** A kernel/Docker vulnerability could allow container escape (mitigated by: infrastructure patching). Exotic syscall-based attacks possible (mitigated by: Docker default seccomp, read-only filesystem, network isolation).
+
+### Mutual TLS (mTLS) for Internal Traffic
+
+Proxy-to-sandbox communication uses plaintext HTTP over Docker internal network, not mTLS.
+
+**Rationale:**
+1. The internal network prevents direct container-to-container traffic. iptables rules restrict egress. Only the unified proxy is reachable from sandboxes.
+2. To intercept Docker bridge traffic, an attacker must have already compromised a container — at that point, mTLS wouldn't prevent credential access.
+3. mTLS adds significant operational complexity: certificate generation per sandbox, distribution, rotation, revocation, and debugging in ephemeral containers.
+4. Existing mitigations are sufficient: container registration with IP binding, explicit unregistration, network isolation via Docker bridge + iptables, read-only filesystem.
+
+**Accepted risks:** Network-level MITM on Docker bridge (mitigated by: network isolation, attacker would need container escape first). Registration data interception in transit (mitigated by: IP binding, network isolation).
+
+### Basic Auth Container Registration
+
+When using Basic auth (git credential helper flow), the proxy identifies the container by its source IP address from the container registry, not by a shared secret. An attacker who can spoof the container's IP could impersonate it.
+
+**Mitigations:** CAP_NET_RAW is dropped to prevent IP spoofing. Docker network isolation prevents cross-network IP spoofing. IP binding via container registry provides strong protection within isolated Docker networks. Registrations are managed by the orchestrator (trusted component). Explicit unregistration on sandbox destroy limits exposure window.
+
+### Attack Scenarios
+
+| Scenario | Attack | Outcome |
+|----------|--------|---------|
+| **Supply chain** (malicious npm package) | Package reads env vars, attempts direct HTTPS, DNS exfiltration, raw packet crafting | Gets placeholder values only; all exfiltration paths blocked by network isolation, DNS filter, and CAP_NET_RAW dropped |
+| **AI token probing** | AI-generated code searches filesystem and memory for tokens | Finds only placeholder values — real credentials never enter the sandbox |
+| **Lateral movement** | Compromised Sandbox A attempts to reach Sandbox B via direct connection, ARP/IP spoofing, or DNS rebinding | Blocked by separate isolated networks, CAP_NET_RAW dropped, and DNS filter |
+| **Registration theft** | Attacker obtains registration details, attempts reuse from different location | Rejected by IP binding; registrations removed on destroy; new registration requires orchestrator (Unix socket) |
 
 ---
 
@@ -546,8 +623,59 @@ Security measures are covered by:
 - **Red team modules** — `tests/redteam/modules/18-ip-encoding-bypass.sh`, `tests/redteam/modules/19-merge-early-exit.sh`
 - **Integration tests** — `tests/integration/test_api_proxy.py`, `tests/security/test_credential_isolation.py`
 
+### Manual Verification
+
+**Network isolation:**
+
+```bash
+# Check network config
+docker network inspect credential-isolation
+
+# From sandbox: verify direct external access blocked
+curl -v https://github.com 2>&1 | grep -E "(Connection refused|timed out)"
+
+# From sandbox: verify proxy-routed access works
+git clone https://github.com/owner/repo.git  # Should work
+
+# From sandbox: verify DNS filtering
+dig @8.8.8.8 github.com  # Should fail (blocked by iptables)
+dig github.com  # Should work (uses unified-proxy DNS)
+```
+
+**Credential isolation:**
+
+```bash
+# From sandbox: verify real credentials not exposed
+echo $GITHUB_TOKEN  # Should be empty
+echo $ANTHROPIC_API_KEY  # Should be CREDENTIAL_PROXY_PLACEHOLDER
+
+# From sandbox: verify credential injection works
+git clone https://github.com/allowed/repo.git  # Should work
+curl -H "Authorization: Bearer $ANTHROPIC_API_KEY" https://api.anthropic.com/v1/messages  # Should work via proxy
+```
+
+**Container registration:**
+
+```bash
+# From host: verify container is registered
+docker exec <proxy-container> curl -s --unix-socket /var/run/proxy/internal.sock http://localhost/internal/containers
+```
+
+**CAP_NET_RAW (supply chain protection):**
+
+```bash
+# From sandbox: verify CAP_NET_RAW is dropped
+cat /proc/self/status | grep CapEff
+# Decode capabilities (requires capsh on host):
+# capsh --decode=<hex_value>
+# Should NOT include cap_net_raw (bit 13)
+
+# From sandbox: verify raw socket creation fails
+python3 -c "import socket; socket.socket(socket.AF_INET, socket.SOCK_RAW, socket.IPPROTO_ICMP)"
+# Should raise: PermissionError: [Errno 1] Operation not permitted
+```
+
 ## See Also
 
-- [Credential Isolation](credential-isolation.md) — Full architecture, network topology, and threat model
 - [Configuration: Push File Restrictions](../configuration.md#push-file-restrictions) — File restriction patterns
 - [ADR-009: API Gateways](../adr/009-api-gateways.md) — Gateway architecture decision
