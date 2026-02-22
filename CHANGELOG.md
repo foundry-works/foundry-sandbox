@@ -5,6 +5,11 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.20.1] - 2026-02-22
+
+### Fixed
+- **Pre-release foundry-mcp not used by MCP server** — Choosing pre-release in `cast new` installed the beta to user site-packages (`~/.local/`) via `PIP_USER=1`, but the MCP server config used `python -s` which skips that directory; the server silently kept running the global stable version. Now `upgrade_foundry_mcp_prerelease` removes the `-s` flag from the MCP config after a successful install so the pre-release is actually loaded.
+
 ## [0.20.0] - 2026-02-21
 
 ### Added
