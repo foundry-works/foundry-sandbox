@@ -147,31 +147,11 @@ Edit `safety/sudoers-allowlist` with explicit command paths (no wildcards), then
 
 **Implementation:** `docker-compose.credential-isolation.yml`
 
-**How it works:**
+**How it works:** Sandbox containers hold zero real credentials — only placeholder values. The unified proxy (a separate container) holds all real tokens and injects them into outbound requests. Container registration binds each sandbox to its IP address.
 
-The sandbox contains **zero real credentials**:
+**Bypass:** Cannot be bypassed without compromising the unified-proxy container itself.
 
-| Credential | Where it lives | What sandbox sees |
-|------------|----------------|-------------------|
-| GITHUB_TOKEN / GH_TOKEN | Unified Proxy container | Nothing (empty) |
-| ANTHROPIC_API_KEY | Unified Proxy container | `CREDENTIAL_PROXY_PLACEHOLDER` |
-| OPENAI_API_KEY | Unified Proxy container | `CREDENTIAL_PROXY_PLACEHOLDER` |
-| Other API keys | Unified Proxy container | `CREDENTIAL_PROXY_PLACEHOLDER` |
-| FOUNDRY_PROXY_GIT_TOKEN | Unified Proxy subprocess env only | Nothing (never exposed) |
-
-- Real credentials never enter sandbox containers
-- Sandboxes are registered with the proxy via container registration
-- Unified proxy injects real credentials into outbound requests
-- AI cannot exfiltrate credentials that don't exist in its environment
-
-**What this means:**
-- Environment variable inspection yields only placeholders
-- Memory scraping yields nothing useful
-- Exfiltration attempts get placeholder values, not real secrets
-
-**Bypass:** Cannot be bypassed without compromising the unified-proxy container itself (which runs outside the sandbox).
-
-**Reference:** [Credential Isolation](credential-isolation.md)
+**Reference:** [Credential Isolation](credential-isolation.md) for the full threat model, [Security Overview](index.md#credential-exposure) for the credential exposure matrix.
 
 ---
 

@@ -36,6 +36,14 @@ Foundry Sandbox implements **defense in depth** with multiple security layers:
                                  +-----------------------------+
 ```
 
+## Reading Guide
+
+- **Quick orientation →** Continue reading this page for a summary of all security properties
+- **Threat model →** [Sandbox Threats](sandbox-threats.md) — what we defend against (AI-as-threat-actor)
+- **Defense implementation →** [Security Architecture](security-architecture.md) — how each control works, with bypass analysis
+- **Deep dives →** [Credential Isolation](credential-isolation.md) and [Network Isolation](network-isolation.md) — detailed threat models for specific subsystems
+- **Hardening →** [Hardening](hardening.md) — input validation, identity controls, network resilience
+
 ## Key Security Properties
 
 ### Credential Isolation

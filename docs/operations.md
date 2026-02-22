@@ -1,6 +1,26 @@
 # Operations Runbook
 
-This guide covers operational procedures for the unified proxy: restart procedures, recovery from failures, DNS fallback activation, and troubleshooting common issues.
+This guide covers operational procedures for the unified proxy: restart procedures, recovery from failures, DNS configuration, and troubleshooting common issues.
+
+## Contents
+
+**Runbooks:**
+- [Proxy Restart Procedure](#proxy-restart-procedure)
+- [SQLite Recovery](#sqlite-recovery-procedure)
+- [DNS Configuration](#dns-configuration)
+- [HMAC Secret Rotation](#hmac-secret-rotation)
+- [Gateway Rollback](#gateway-rollback-procedures)
+- [Emergency Procedures](#emergency-procedures)
+
+**Troubleshooting:**
+- [Proxy Won't Start](#proxy-wont-start)
+- [Containers Not Registered](#containers-not-registered)
+- [High Latency](#high-latency)
+- [Certificate Errors](#certificate-errors)
+- [Git Operations Failing](#git-operations-failing)
+- [Branch Isolation Errors](#branch-isolation-errors)
+- [Git Fetch Hangs](#git-fetch-hangs)
+- [Request Blocked Unexpectedly](#request-blocked-unexpectedly)
 
 ## Proxy Restart Procedure
 
@@ -121,15 +141,13 @@ docker exec unified-proxy sqlite3 -header -csv /var/lib/unified-proxy/registry.d
   "SELECT container_id, ip_address, datetime(registered_at, 'unixepoch') as registered, ttl_seconds FROM containers;"
 ```
 
-## DNS Fallback Activation
+## DNS Configuration
 
-The proxy supports two DNS modes: DNS-enabled (with filtering) and DNS-disabled (fallback).
+DNS filtering is **enabled by default** for full defense-in-depth security. When enabled:
 
-### When to Activate Fallback
-
-- mitmproxy DNS mode fails go/no-go criteria (latency > 50ms p99)
-- DNS filtering causes legitimate requests to fail
-- Emergency bypass for debugging
+1. **NXDOMAIN for blocked domains** — Prevents DNS-level reconnaissance
+2. **DNS bypass protection** — Containers cannot query external DNS servers (iptables rules block port 53 to non-proxy destinations)
+3. **Complete domain isolation** — Domain names cannot leak to external resolvers
 
 ### Check Current DNS Mode
 
@@ -140,9 +158,21 @@ docker exec unified-proxy printenv PROXY_ENABLE_DNS
 
 Output: `true` (DNS enabled) or empty/false (DNS disabled)
 
+### DNS Mode Comparison
+
+| Feature | DNS Enabled | DNS Disabled (Fallback) |
+|---------|-------------|-------------------------|
+| Domain allowlist filtering | DNS + Firewall | Firewall only |
+| NXDOMAIN for blocked domains | Yes | No (upstream DNS resolves) |
+| Defense in depth | Full | Reduced |
+| Latency overhead | +5-20ms | None |
+
 ### Activate DNS Fallback
 
-**Step 1: Edit docker-compose override**
+Use DNS fallback when:
+- mitmproxy DNS mode fails go/no-go criteria (latency > 50ms p99)
+- DNS filtering causes legitimate requests to fail
+- Emergency bypass for debugging
 
 Create or edit `docker-compose.override.yml`:
 
@@ -153,13 +183,18 @@ services:
       - PROXY_ENABLE_DNS=false
 ```
 
-**Step 2: Restart proxy**
+Or set the environment variable when starting the sandbox:
+
 ```bash
-docker compose -f docker-compose.credential-isolation.yml up -d unified-proxy
+PROXY_ENABLE_DNS=false cast new myproject
 ```
 
-**Step 3: Verify DNS mode disabled**
+Then restart the proxy:
+
 ```bash
+docker compose -f docker-compose.credential-isolation.yml up -d unified-proxy
+
+# Verify DNS mode disabled
 docker logs unified-proxy 2>&1 | grep -i "dns"
 # Should show: "DNS filtering enabled" is absent
 ```
@@ -176,42 +211,7 @@ docker compose -f docker-compose.credential-isolation.yml up -d unified-proxy
 docker logs unified-proxy 2>&1 | grep "DNS filtering enabled"
 ```
 
-### DNS Fallback Implications
-
-| Feature | DNS Enabled | DNS Disabled (Fallback) |
-|---------|-------------|-------------------------|
-| Domain allowlist filtering | DNS + Firewall | Firewall only |
-| NXDOMAIN for blocked domains | Yes | No (upstream DNS resolves) |
-| Defense in depth | Full | Reduced |
-| Latency overhead | +5-20ms | None |
-
-**Security note:** DNS fallback reduces defense in depth. Use only when necessary.
-
-### DNS Filtering (Enabled by Default)
-
-DNS filtering is **enabled by default** for full defense-in-depth security. When enabled:
-
-1. **NXDOMAIN for blocked domains** - Prevents DNS-level reconnaissance
-2. **DNS bypass protection** - Containers cannot query external DNS servers (iptables rules block port 53 to non-proxy destinations)
-3. **Complete domain isolation** - Domain names cannot leak to external resolvers
-
-To disable DNS filtering for debugging:
-
-```yaml
-# docker-compose.override.yml
-services:
-  unified-proxy:
-    environment:
-      - PROXY_ENABLE_DNS=false
-```
-
-Or set the environment variable when starting the sandbox:
-
-```bash
-PROXY_ENABLE_DNS=false cast new myproject
-```
-
-**Note:** Disabling DNS filtering reduces defense in depth. Use only when necessary for debugging.
+**Security note:** Disabling DNS filtering reduces defense in depth. Use only when necessary for debugging.
 
 ## Troubleshooting
 

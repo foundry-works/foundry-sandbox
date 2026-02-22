@@ -4,6 +4,22 @@ Complete reference for all `cast` commands.
 
 > The `cast` CLI is installed via `pip install -e .` and can also be invoked as `python3 -m foundry_sandbox.cli`.
 
+## Contents
+
+**Lifecycle:** [new](#cast-new) | [repeat](#cast-repeat) | [attach](#cast-attach) | [reattach](#cast-reattach) | [start](#cast-start) | [stop](#cast-stop) | [destroy](#cast-destroy) | [destroy-all](#cast-destroy-all)
+
+**Presets:** [preset](#cast-preset)
+
+**Status & Info:** [list](#cast-list) | [status](#cast-status) | [info](#cast-info) | [config](#cast-config)
+
+**Maintenance:** [build](#cast-build) | [prune](#cast-prune) | [refresh-credentials](#cast-refresh-credentials) | [upgrade](#cast-upgrade) | [help](#cast-help)
+
+**Reference:** [Environment Variables](#environment-variables)
+
+---
+
+## Lifecycle Commands
+
 ## cast new
 
 Create a new sandbox from a repository.
@@ -139,97 +155,6 @@ cast new owner/repo feature --wd packages/app
 
 # Later, repeat the same setup
 cast repeat
-```
-
----
-
-## cast preset
-
-Manage saved presets for `cast new`.
-
-### Synopsis
-
-```
-cast preset list
-cast preset show <name>
-cast preset delete <name>
-```
-
-### Commands
-
-| Command | Description |
-|---------|-------------|
-| `list` | List all saved presets |
-| `show <name>` | Show preset details (JSON) |
-| `delete <name>` | Delete a preset |
-
-### Examples
-
-```bash
-# Save a preset when creating a sandbox
-cast new owner/repo feature --wd packages/app --save-as myproject
-
-# List all presets
-cast preset list
-
-# Show preset details
-cast preset show myproject
-
-# Use a preset
-cast new --preset myproject
-
-# Delete a preset
-cast preset delete myproject
-```
-
-### Notes
-
-Presets are stored in `~/.sandboxes/presets/` as JSON files. The last `cast new` command is stored in `~/.sandboxes/.last-cast-new.json` for the `--last` flag.
-
----
-
-## cast list
-
-List all sandboxes.
-
-### Synopsis
-
-```
-cast list [--json]
-```
-
-### Options
-
-| Option | Description |
-|--------|-------------|
-| `--json` | Output in JSON format |
-
-### Examples
-
-```bash
-# Human-readable output
-cast list
-
-# JSON output
-cast list --json
-```
-
-### Output
-
-Human-readable:
-```
-Sandboxes:
-───────────────────────────────────────
-  repo-feature-branch     running
-  repo-sandbox-20240115   stopped
-```
-
-JSON:
-```json
-[
-  {"name": "repo-feature-branch", "status": "running", ...},
-  {"name": "repo-sandbox-20240115", "status": "stopped", ...}
-]
 ```
 
 ---
@@ -412,6 +337,135 @@ cast destroy repo-feature-branch --keep-worktree
 
 ---
 
+## cast destroy-all
+
+Destroy all sandboxes with double confirmation.
+
+### Synopsis
+
+```
+cast destroy-all [options]
+```
+
+### Options
+
+| Option | Description |
+|--------|-------------|
+| `--keep-worktree` | Remove containers but keep worktrees |
+
+### Behavior
+
+1. Lists all sandboxes that will be destroyed
+2. Requires double confirmation (type "yes" twice)
+3. Destroys each sandbox sequentially
+
+### Examples
+
+```bash
+# Destroy everything
+cast destroy-all
+
+# Remove containers only, keep worktrees
+cast destroy-all --keep-worktree
+```
+
+---
+
+## Presets
+
+## cast preset
+
+Manage saved presets for `cast new`.
+
+### Synopsis
+
+```
+cast preset list
+cast preset show <name>
+cast preset delete <name>
+```
+
+### Commands
+
+| Command | Description |
+|---------|-------------|
+| `list` | List all saved presets |
+| `show <name>` | Show preset details (JSON) |
+| `delete <name>` | Delete a preset |
+
+### Examples
+
+```bash
+# Save a preset when creating a sandbox
+cast new owner/repo feature --wd packages/app --save-as myproject
+
+# List all presets
+cast preset list
+
+# Show preset details
+cast preset show myproject
+
+# Use a preset
+cast new --preset myproject
+
+# Delete a preset
+cast preset delete myproject
+```
+
+### Notes
+
+Presets are stored in `~/.sandboxes/presets/` as JSON files. The last `cast new` command is stored in `~/.sandboxes/.last-cast-new.json` for the `--last` flag.
+
+---
+
+## Status & Info
+
+## cast list
+
+List all sandboxes.
+
+### Synopsis
+
+```
+cast list [--json]
+```
+
+### Options
+
+| Option | Description |
+|--------|-------------|
+| `--json` | Output in JSON format |
+
+### Examples
+
+```bash
+# Human-readable output
+cast list
+
+# JSON output
+cast list --json
+```
+
+### Output
+
+Human-readable:
+```
+Sandboxes:
+───────────────────────────────────────
+  repo-feature-branch     running
+  repo-sandbox-20240115   stopped
+```
+
+JSON:
+```json
+[
+  {"name": "repo-feature-branch", "status": "running", ...},
+  {"name": "repo-sandbox-20240115", "status": "stopped", ...}
+]
+```
+
+---
+
 ## cast status
 
 Show sandbox status.
@@ -463,25 +517,28 @@ Sandbox: repo-feature-branch
 
 ---
 
-## cast build
+## cast info
 
-Build or rebuild the Docker image.
+Show combined config and status.
 
 ### Synopsis
 
 ```
-cast build
+cast info [--json]
 ```
 
-### Behavior
+### Options
 
-- Runs `docker compose build` with current user's UID/GID
-- Image is tagged as `foundry-sandbox:latest`
+| Option | Description |
+|--------|-------------|
+| `--json` | Output in JSON format |
 
 ### Examples
 
 ```bash
-cast build
+cast info
+
+cast info --json
 ```
 
 ---
@@ -530,6 +587,31 @@ Checks
 
 ---
 
+## Maintenance
+
+## cast build
+
+Build or rebuild the Docker image.
+
+### Synopsis
+
+```
+cast build
+```
+
+### Behavior
+
+- Runs `docker compose build` with current user's UID/GID
+- Image is tagged as `foundry-sandbox:latest`
+
+### Examples
+
+```bash
+cast build
+```
+
+---
+
 ## cast prune
 
 Remove orphaned configuration directories.
@@ -562,66 +644,6 @@ cast prune -f
 
 # JSON output
 cast prune --json
-```
-
----
-
-## cast info
-
-Show combined config and status.
-
-### Synopsis
-
-```
-cast info [--json]
-```
-
-### Options
-
-| Option | Description |
-|--------|-------------|
-| `--json` | Output in JSON format |
-
-### Examples
-
-```bash
-cast info
-
-cast info --json
-```
-
----
-
-## cast destroy-all
-
-Destroy all sandboxes with double confirmation.
-
-### Synopsis
-
-```
-cast destroy-all [options]
-```
-
-### Options
-
-| Option | Description |
-|--------|-------------|
-| `--keep-worktree` | Remove containers but keep worktrees |
-
-### Behavior
-
-1. Lists all sandboxes that will be destroyed
-2. Requires double confirmation (type "yes" twice)
-3. Destroys each sandbox sequentially
-
-### Examples
-
-```bash
-# Destroy everything
-cast destroy-all
-
-# Remove containers only, keep worktrees
-cast destroy-all --keep-worktree
 ```
 
 ---

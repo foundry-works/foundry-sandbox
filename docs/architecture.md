@@ -2,6 +2,18 @@
 
 This document explains the technical design of Foundry Sandbox: how components fit together, why certain decisions were made, and how data flows through the system.
 
+## Contents
+
+- [System Overview](#system-overview)
+- [Sandbox Lifecycle](#sandbox-lifecycle)
+- [Git Worktree Strategy](#git-worktree-strategy)
+- [Docker Container Design](#docker-container-design)
+- [State Management](#state-management)
+- [Entrypoint Flow](#entrypoint-flow)
+- [Code Organization](#code-organization)
+- [Component Interactions](#component-interactions)
+- [Unified Proxy Architecture](#unified-proxy-architecture)
+
 ## System Overview
 
 ```
