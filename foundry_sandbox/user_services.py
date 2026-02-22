@@ -185,7 +185,7 @@ def load_user_services(path: str | None = None) -> list[UserService]:
 
     cache_key = str(Path(resolved).resolve())
     if cache_key in _cache:
-        return _cache[cache_key]
+        return list(_cache[cache_key])
 
     try:
         with open(resolved) as f:
@@ -216,6 +216,25 @@ def load_user_services(path: str | None = None) -> list[UserService]:
             raise UserServiceConfigError(f"services[{i}] must be a mapping in {resolved}")
         services.append(_validate_service(entry, i))
 
+    # Check for duplicate domains/env_vars within the config
+    seen_domains: dict[str, str] = {}
+    seen_env_vars: dict[str, str] = {}
+    for svc in services:
+        if svc.domain in seen_domains:
+            log_warn(
+                f"user-services: duplicate domain '{svc.domain}' "
+                f"(service '{svc.name}' conflicts with '{seen_domains[svc.domain]}')"
+            )
+        else:
+            seen_domains[svc.domain] = svc.name
+        if svc.env_var in seen_env_vars:
+            log_warn(
+                f"user-services: duplicate env_var '{svc.env_var}' "
+                f"(service '{svc.name}' conflicts with '{seen_env_vars[svc.env_var]}')"
+            )
+        else:
+            seen_env_vars[svc.env_var] = svc.name
+
     log_debug(f"user-services: loaded {len(services)} service(s) from {resolved}")
     _cache[cache_key] = services
-    return services
+    return list(services)

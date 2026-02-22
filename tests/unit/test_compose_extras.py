@@ -283,18 +283,19 @@ class TestComposeDownExtras:
         assert str(extra2) in cmd
 
     @patch("foundry_sandbox.docker.subprocess.run", return_value=_completed())
-    def test_compose_down_invalid_extra_raises(self, mock_run, tmp_path):
-        """Test: compose_down with invalid extra raises FileNotFoundError."""
-        with pytest.raises(FileNotFoundError):
-            compose_down(
-                worktree_path="/tmp/work",
-                claude_config_path="/tmp/config",
-                container="test-container",
-                compose_extras=["/nonexistent/extra.yml"],
-            )
+    def test_compose_down_invalid_extra_skipped(self, mock_run, tmp_path):
+        """Test: compose_down skips missing extras gracefully (teardown resilience)."""
+        # Should not raise — compose_down uses strict=False so missing files
+        # are skipped with a warning instead of aborting teardown.
+        compose_down(
+            worktree_path="/tmp/work",
+            claude_config_path="/tmp/config",
+            container="test-container",
+            compose_extras=["/nonexistent/extra.yml"],
+        )
 
-        # subprocess.run may have been called for auto-detect, but error should occur
-        # before the final down command is issued
+        # The down command should still be issued (without the invalid extra)
+        assert mock_run.called
 
     @patch("foundry_sandbox.docker.subprocess.run", return_value=_completed())
     def test_compose_down_passes_env_vars(self, mock_run, tmp_path):

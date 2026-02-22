@@ -230,7 +230,7 @@ class TestPrepareUserServicesOverride:
 
     @patch("foundry_sandbox.user_services.find_user_services_path")
     @patch("foundry_sandbox.user_services.load_user_services")
-    def test_creates_override_with_mount_and_env(self, mock_load, mock_find, tmp_path):
+    def test_creates_override_with_mount_and_env(self, mock_load, mock_find, tmp_path, monkeypatch):
         from foundry_sandbox.user_services import UserService
         from foundry_sandbox.docker import _prepare_user_services_override
 
@@ -243,6 +243,8 @@ class TestPrepareUserServicesOverride:
                 domain="openrouter.ai", header="Authorization", format="bearer",
             ),
         ]
+        # Host env var must be set for dev container env to be generated
+        monkeypatch.setenv("OPENROUTER_API_KEY", "sk-or-test")
 
         try:
             result_path, result_extras = _prepare_user_services_override(
@@ -263,10 +265,10 @@ class TestPrepareUserServicesOverride:
             proxy_env = override["services"]["unified-proxy"]["environment"]
             assert "OPENROUTER_API_KEY" in proxy_env
 
-            # Verify dev env
+            # Verify dev env — only present when host env var is set
             dev_env = override["services"]["dev"]["environment"]
             assert any("OPENROUTER_API_KEY" in e for e in dev_env)
-            assert any("${SANDBOX_OPENROUTER_API_KEY:-}" in e for e in dev_env)
+            assert any("${SANDBOX_OPENROUTER_API_KEY}" in e for e in dev_env)
 
             # Verify compose_extras updated
             assert result_extras is not None
@@ -304,18 +306,11 @@ class TestPrepareUserServicesOverride:
             if result_path and os.path.exists(result_path):
                 os.unlink(result_path)
 
-    @patch("foundry_sandbox.user_services.find_user_services_path", return_value=None)
-    @patch("foundry_sandbox.user_services.load_user_services")
-    def test_returns_none_when_config_path_not_found(self, mock_load, mock_find):
-        from foundry_sandbox.user_services import UserService
+    @patch("foundry_sandbox.user_services.load_user_services", return_value=[])
+    def test_returns_none_when_no_config_file(self, mock_load):
+        """No config file → load_user_services returns [] → no override."""
         from foundry_sandbox.docker import _prepare_user_services_override
 
-        mock_load.return_value = [
-            UserService(
-                name="Svc", env_var="KEY",
-                domain="d.com", header="H", format="bearer",
-            ),
-        ]
         result_path, result_extras = _prepare_user_services_override(
             isolate_credentials=True, compose_extras=None,
         )

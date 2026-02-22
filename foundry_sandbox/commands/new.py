@@ -246,8 +246,12 @@ def _persist_sandbox_state(
         copies: Copy specifications.
         save_as: Preset name to save as (empty to skip).
         name: Sandbox name.
-        compose_extras: Compose extra file paths (relative to project root).
+        compose_extras: Compose extra file paths (absolute or relative).
     """
+    # Relativize compose extras for portable storage
+    from foundry_sandbox.docker import relativize_compose_extras
+    compose_extras = tuple(relativize_compose_extras(list(compose_extras)))
+
     save_last_cast_new(
         repo=repo_url,
         branch=branch,
@@ -722,11 +726,8 @@ def new(
             _rollback_new(worktree_path, claude_config_path, container, override_file)
             sys.exit(1)
 
-        # Save state: last command, preset, last attach
-        # Store compose extras as relative paths so metadata stays portable
-        from foundry_sandbox.docker import relativize_compose_extras
-        _relative_extras = relativize_compose_extras(list(compose_extras))
-
+        # Save state: last command, preset, last attach.
+        # _persist_sandbox_state relativizes compose extras internally.
         _persist_sandbox_state(
             repo_url=repo_url,
             branch=branch,
@@ -744,7 +745,7 @@ def new(
             copies=copies,
             save_as=save_as,
             name=name,
-            compose_extras=tuple(_relative_extras),
+            compose_extras=compose_extras,
         )
 
         # Success message

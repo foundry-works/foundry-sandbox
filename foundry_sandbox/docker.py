@@ -253,7 +253,10 @@ def generate_sandbox_subnet(project_name: str) -> tuple[str, str]:
 # ============================================================================
 
 
-def _collect_compose_extras(extra_paths: list[str] | None = None) -> list[str]:
+def _collect_compose_extras(
+    extra_paths: list[str] | None = None,
+    strict: bool = True,
+) -> list[str]:
     """Collect compose extras from auto-discovery, env var, and caller paths.
 
     Sources are collected in precedence order (later overrides earlier in
@@ -273,12 +276,15 @@ def _collect_compose_extras(extra_paths: list[str] | None = None) -> list[str]:
 
     Args:
         extra_paths: Optional list of additional compose override file paths.
+        strict: If True (default), raise FileNotFoundError for missing paths.
+            If False, skip missing paths with a warning (suitable for teardown).
 
     Returns:
         Deduplicated list of validated absolute paths.
 
     Raises:
-        FileNotFoundError: If any path does not exist or is not a regular file.
+        FileNotFoundError: If *strict* is True and any path does not exist
+            or is not a regular file.
     """
     # (original_path, source_label) — source_label used in error messages
     raw_paths: list[tuple[str, str]] = []
@@ -309,10 +315,13 @@ def _collect_compose_extras(extra_paths: list[str] | None = None) -> list[str]:
     for original, source in raw_paths:
         resolved = Path(original).resolve()
         if not resolved.exists() or not resolved.is_file():
-            raise FileNotFoundError(
-                f"Compose extras path does not exist or is not a regular file: "
-                f"{original} (source: {source})"
-            )
+            if strict:
+                raise FileNotFoundError(
+                    f"Compose extras path does not exist or is not a regular file: "
+                    f"{original} (source: {source})"
+                )
+            log_warn(f"Compose extras path not found, skipping: {original} (source: {source})")
+            continue
         if resolved not in seen:
             seen.add(resolved)
             result.append(str(resolved))
@@ -614,15 +623,16 @@ def _prepare_user_services_override(
 
     from foundry_sandbox.user_services import load_user_services, find_user_services_path
 
-    config_path = find_user_services_path()
-    if config_path is None:
-        return None, compose_extras
-
-    services = load_user_services(path=config_path)
+    services = load_user_services()
     if not services:
         return None, compose_extras
 
-    config_path = os.path.realpath(config_path)
+    # Services loaded successfully — resolve the config path for bind-mounting.
+    # find_user_services_path() must return non-None here since load succeeded.
+    raw_config_path = find_user_services_path()
+    if raw_config_path is None:
+        return None, compose_extras
+    config_path = os.path.realpath(raw_config_path)
     container_mount = "/etc/unified-proxy/user-services.yaml"
 
     # Build compose override: mount config + pass env vars
@@ -633,8 +643,10 @@ def _prepare_user_services_override(
     for svc in services:
         # Pass real env var to proxy (compose inherits from host)
         proxy_env.append(svc.env_var)
-        # Pass placeholder to dev container
-        dev_env.append(f"{svc.env_var}=${{SANDBOX_{svc.env_var}:-}}")
+        # Pass placeholder to dev container (only if host env var is set,
+        # so unconfigured services don't get empty-string env vars)
+        if os.environ.get(svc.env_var):
+            dev_env.append(f"{svc.env_var}=${{SANDBOX_{svc.env_var}}}")
 
     override_dict: dict[str, object] = {
         "services": {
@@ -826,8 +838,9 @@ def compose_down(
         env.setdefault("SANDBOX_SUBNET", "10.0.0.0/24")
         env.setdefault("SANDBOX_PROXY_IP", "10.0.0.2")
 
-    # Collect sidecar extras (auto-discovery + env var + caller paths)
-    compose_extras = _collect_compose_extras(extra_paths=compose_extras) or None
+    # Collect sidecar extras (auto-discovery + env var + caller paths).
+    # Use strict=False: during teardown, files may already be gone.
+    compose_extras = _collect_compose_extras(extra_paths=compose_extras, strict=False) or None
 
     compose_cmd = get_compose_command(override_file, isolate_credentials, compose_extras)
     cmd = compose_cmd + ["-p", container, "down"]

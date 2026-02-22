@@ -94,6 +94,25 @@ def load_proxy_user_services(
         if svc is not None:
             services.append(svc)
 
+    # Warn about duplicate domains/env_vars within the config
+    seen_domains: dict[str, str] = {}
+    seen_env_vars: dict[str, str] = {}
+    for svc in services:
+        if svc.domain in seen_domains:
+            logger.warning(
+                "user-services: duplicate domain '%s' (service '%s' conflicts with '%s')",
+                svc.domain, svc.name, seen_domains[svc.domain],
+            )
+        else:
+            seen_domains[svc.domain] = svc.name
+        if svc.env_var in seen_env_vars:
+            logger.warning(
+                "user-services: duplicate env_var '%s' (service '%s' conflicts with '%s')",
+                svc.env_var, svc.name, seen_env_vars[svc.env_var],
+            )
+        else:
+            seen_env_vars[svc.env_var] = svc.name
+
     logger.info("user-services: loaded %d service(s) from %s", len(services), resolved)
     return services
 
