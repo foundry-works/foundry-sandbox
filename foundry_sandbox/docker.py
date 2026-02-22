@@ -249,6 +249,81 @@ def generate_sandbox_subnet(project_name: str) -> tuple[str, str]:
 
 
 # ============================================================================
+# Compose Extras Collection
+# ============================================================================
+
+
+def _collect_compose_extras(cli_extras: list[str] | None = None) -> list[str]:
+    """Collect compose extras from auto-discovery, env var, and CLI flag.
+
+    Sources are collected in precedence order (later overrides earlier in
+    docker-compose merge semantics):
+
+    1. Auto-discovered: ``config/docker-compose.*.yml`` (sorted by name)
+    2. ``FOUNDRY_COMPOSE_EXTRAS`` env var (colon-separated paths)
+    3. *cli_extras* parameter (from ``--compose-extra`` flag)
+
+    All paths are resolved to absolute before validation and deduplication.
+    Deduplication preserves the earliest occurrence when the same file is
+    referenced via different relative/absolute paths.
+
+    This function does **not** include the temp overrides for
+    allowlist/user-services — those are added separately by their existing
+    ``_prepare_*`` functions.
+
+    Args:
+        cli_extras: Optional list of paths from the ``--compose-extra`` CLI flag.
+
+    Returns:
+        Deduplicated list of validated absolute paths.
+
+    Raises:
+        FileNotFoundError: If any path does not exist or is not a regular file.
+    """
+    # (original_path, source_label) — source_label used in error messages
+    raw_paths: list[tuple[str, str]] = []
+
+    # 1. Auto-discovery: config/docker-compose.*.yml
+    config_dir = _script_dir() / "config"
+    if config_dir.is_dir():
+        discovered = sorted(config_dir.glob("docker-compose.*.yml"))
+        for p in discovered:
+            raw_paths.append((str(p), "auto-discovered"))
+
+    # 2. FOUNDRY_COMPOSE_EXTRAS env var (colon-separated)
+    env_extras = os.environ.get("FOUNDRY_COMPOSE_EXTRAS", "")
+    if env_extras:
+        for segment in env_extras.split(":"):
+            segment = segment.strip()
+            if segment:
+                raw_paths.append((segment, "FOUNDRY_COMPOSE_EXTRAS"))
+
+    # 3. CLI extras (--compose-extra flag)
+    if cli_extras:
+        for cli_path in cli_extras:
+            raw_paths.append((cli_path, "--compose-extra"))
+
+    # Resolve, validate, deduplicate
+    seen: set[Path] = set()
+    result: list[str] = []
+    for original, source in raw_paths:
+        resolved = Path(original).resolve()
+        if not resolved.exists() or not resolved.is_file():
+            raise FileNotFoundError(
+                f"Compose extras path does not exist or is not a regular file: "
+                f"{original} (source: {source})"
+            )
+        if resolved not in seen:
+            seen.add(resolved)
+            result.append(str(resolved))
+
+    if result:
+        log_debug(f"Compose extras collected: {result}")
+
+    return result
+
+
+# ============================================================================
 # Compose Command Building
 # ============================================================================
 
@@ -611,6 +686,10 @@ def compose_up(
         isolate_credentials, repos_dir, sandbox_id, anthropic_base_url,
     )
 
+    # Collect sidecar extras (auto-discovery + env var + CLI flag).
+    # The _prepare_* functions below will append their temp overrides after.
+    compose_extras = _collect_compose_extras(cli_extras=compose_extras) or None
+
     _compose_overrides: list[str] = []
     try:
         allowlist_tmp, compose_extras = _prepare_allowlist_override(
@@ -699,6 +778,9 @@ def compose_down(
         # compose down does not create networks so the values are unused.
         env.setdefault("SANDBOX_SUBNET", "10.0.0.0/24")
         env.setdefault("SANDBOX_PROXY_IP", "10.0.0.2")
+
+    # Collect sidecar extras (auto-discovery + env var + CLI flag)
+    compose_extras = _collect_compose_extras(cli_extras=compose_extras) or None
 
     compose_cmd = get_compose_command(override_file, isolate_credentials, compose_extras)
     cmd = compose_cmd + ["-p", container, "down"]

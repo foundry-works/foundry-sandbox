@@ -58,6 +58,9 @@ class SandboxMetadata(BaseModel):
     copies: list[str] = Field(default_factory=list)
     """List of copy specifications (host:container)."""
 
+    compose_extras: list[str] = Field(default_factory=list)
+    """List of compose extra file paths (relative to project root)."""
+
 
 class CastNewPreset(BaseModel):
     """Structured representation of cast-new preset arguments.
@@ -106,6 +109,9 @@ class CastNewPreset(BaseModel):
 
     copies: list[str] = Field(default_factory=list)
     """List of copy specifications (host:container)."""
+
+    compose_extras: list[str] = Field(default_factory=list)
+    """List of compose extra file paths (relative to project root)."""
 
 
 class ProxyRegistration(BaseModel):

@@ -71,6 +71,32 @@ def _string_value(value: object) -> str:
     return "" if value is None else str(value)
 
 
+def _resolve_metadata_compose_extras(metadata: dict[str, object]) -> list[str]:
+    """Resolve compose extras from metadata (relative paths) to absolute paths.
+
+    Paths stored in metadata are relative to the project root. This function
+    resolves them back to absolute paths, skipping any that no longer exist
+    (with a warning).
+
+    Returns:
+        List of absolute paths to existing compose extra files.
+    """
+    raw = metadata.get("compose_extras", [])
+    if not isinstance(raw, list):
+        return []
+    project_root = Path(__file__).resolve().parent.parent.parent
+    result: list[str] = []
+    for rel_path in raw:
+        if not isinstance(rel_path, str) or not rel_path:
+            continue
+        resolved = (project_root / rel_path).resolve()
+        if resolved.is_file():
+            result.append(str(resolved))
+        else:
+            log_warn(f"Compose extra from metadata not found, skipping: {rel_path}")
+    return result
+
+
 def _export_feature_flags(
     metadata: dict[str, object],
     env: dict[str, str],
@@ -410,8 +436,9 @@ def _finalize_container(
 @click.argument("name")
 # Tri-state: None = use persisted metadata, True/False = explicit override
 @click.option("--pre-foundry/--no-pre-foundry", default=None, help="Upgrade foundry-mcp to pre-release on start")
+@click.option("--compose-extra", "compose_extras", multiple=True, type=click.Path(exists=True), help="Additional docker-compose override file")
 @click.pass_context
-def start(ctx: click.Context, name: str, pre_foundry: bool | None) -> None:
+def start(ctx: click.Context, name: str, pre_foundry: bool | None, compose_extras: tuple[str, ...]) -> None:
     """Start a stopped sandbox container."""
     valid_name, name_error = validate_existing_sandbox_name(name)
     if not valid_name:
@@ -525,6 +552,11 @@ def start(ctx: click.Context, name: str, pre_foundry: bool | None) -> None:
         # 10. Start containers via compose_up
         # --------------------------------------------------------------
         repos_dir = str(get_repos_dir())
+
+        # Merge compose extras: metadata (persisted) + CLI (per-invocation)
+        merged_extras = _resolve_metadata_compose_extras(metadata)
+        merged_extras.extend(str(Path(p).resolve()) for p in compose_extras)
+
         compose_up(
             worktree_path=str(worktree_path),
             claude_config_path=str(claude_config_path),
@@ -533,6 +565,7 @@ def start(ctx: click.Context, name: str, pre_foundry: bool | None) -> None:
             isolate_credentials=(isolate_credentials == "true"),
             repos_dir=repos_dir,
             sandbox_id=sandbox_id,
+            compose_extras=merged_extras or None,
         )
 
         container_id = f"{container}-dev-1"
@@ -551,6 +584,7 @@ def start(ctx: click.Context, name: str, pre_foundry: bool | None) -> None:
                     container=container,
                     override_file=str(override_file),
                     isolate_credentials=True,
+                    compose_extras=merged_extras or None,
                 )
                 raise
 

@@ -1,28 +1,28 @@
 # Implementation Checklist
 
 ## Phase 1: Auto-discovery and env var loading
-- [ ] Add `_collect_compose_extras(cli_extras=None) -> list[str]` to `foundry_sandbox/docker.py`
-- [ ] Implement auto-discovery: glob `config/docker-compose.*.yml`, sorted by name
-- [ ] Implement `FOUNDRY_COMPOSE_EXTRAS` env var parsing (colon-separated, skip empty segments)
-- [ ] Append `cli_extras` after env var paths
-- [ ] Resolve all paths to absolute via `Path.resolve()` before validation and dedup
-- [ ] Validate all resolved paths exist and are regular files (`FileNotFoundError` with clear message showing original path)
-- [ ] Deduplicate on resolved absolute paths, preserving earliest occurrence
-- [ ] Log final extras list at DEBUG level
-- [ ] Wire `_collect_compose_extras()` into `compose_up()` — call before `get_compose_command()`, merge with existing temp overrides
-- [ ] Wire `_collect_compose_extras()` into `compose_down()` — pass sidecar extras so custom networks/volumes are cleaned up
+- [x] Add `_collect_compose_extras(cli_extras=None) -> list[str]` to `foundry_sandbox/docker.py`
+- [x] Implement auto-discovery: glob `config/docker-compose.*.yml`, sorted by name
+- [x] Implement `FOUNDRY_COMPOSE_EXTRAS` env var parsing (colon-separated, skip empty segments)
+- [x] Append `cli_extras` after env var paths
+- [x] Resolve all paths to absolute via `Path.resolve()` before validation and dedup
+- [x] Validate all resolved paths exist and are regular files (`FileNotFoundError` with clear message showing original path)
+- [x] Deduplicate on resolved absolute paths, preserving earliest occurrence
+- [x] Log final extras list at DEBUG level
+- [x] Wire `_collect_compose_extras()` into `compose_up()` — call before `get_compose_command()`, merge with existing temp overrides
+- [x] Wire `_collect_compose_extras()` into `compose_down()` — pass sidecar extras so custom networks/volumes are cleaned up
 
 ## Phase 2: CLI flag + metadata persistence
-- [ ] `foundry_sandbox/commands/new.py`: Add `--compose-extra` Click option (`multiple=True`, `click.Path(exists=True)`)
-- [ ] `foundry_sandbox/commands/new_setup.py`: Add `compose_extras` keyword parameter to `_new_setup()`
-- [ ] Pass CLI extras through to `compose_up()` via `compose_extras` parameter
-- [ ] `foundry_sandbox/models.py`: Add `compose_extras: list[str]` to `SandboxMetadata`
-- [ ] `foundry_sandbox/models.py`: Add `compose_extras: list[str]` to `CastNewPreset`
-- [ ] Store paths **relative to project root** in metadata (resolve to absolute at load time)
-- [ ] `foundry_sandbox/commands/start.py`: Add `--compose-extra` Click option (`multiple=True`, `click.Path(exists=True)`)
-- [ ] `foundry_sandbox/commands/start.py`: Load `compose_extras` from metadata, merge with CLI extras, pass to `compose_up()`
-- [ ] `foundry_sandbox/commands/start.py`: Pass merged extras to error-path `compose_down()` call
-- [ ] `foundry_sandbox/commands/stop.py`: Load `compose_extras` from metadata, pass to `compose_down()`
+- [x] `foundry_sandbox/commands/new.py`: Add `--compose-extra` Click option (`multiple=True`, `click.Path(exists=True)`)
+- [x] `foundry_sandbox/commands/new_setup.py`: Add `compose_extras` keyword parameter to `_new_setup()`
+- [x] Pass CLI extras through to `compose_up()` via `compose_extras` parameter
+- [x] `foundry_sandbox/models.py`: Add `compose_extras: list[str]` to `SandboxMetadata`
+- [x] `foundry_sandbox/models.py`: Add `compose_extras: list[str]` to `CastNewPreset`
+- [x] Store paths **relative to project root** in metadata (resolve to absolute at load time)
+- [x] `foundry_sandbox/commands/start.py`: Add `--compose-extra` Click option (`multiple=True`, `click.Path(exists=True)`)
+- [x] `foundry_sandbox/commands/start.py`: Load `compose_extras` from metadata, merge with CLI extras, pass to `compose_up()`
+- [x] `foundry_sandbox/commands/start.py`: Pass merged extras to error-path `compose_down()` call
+- [x] `foundry_sandbox/commands/stop.py`: Load `compose_extras` from metadata, pass to `compose_down()`
 - [ ] Verify metadata survives stop/start cycle
 
 ## Phase 3: Documentation + templates

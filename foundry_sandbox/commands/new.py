@@ -225,6 +225,7 @@ def _persist_sandbox_state(
     copies: tuple[str, ...],
     save_as: str,
     name: str,
+    compose_extras: tuple[str, ...] = (),
 ) -> None:
     """Save last command, preset (if --save-as), and last attach state.
 
@@ -245,6 +246,7 @@ def _persist_sandbox_state(
         copies: Copy specifications.
         save_as: Preset name to save as (empty to skip).
         name: Sandbox name.
+        compose_extras: Compose extra file paths (relative to project root).
     """
     save_last_cast_new(
         repo=repo_url,
@@ -261,6 +263,7 @@ def _persist_sandbox_state(
         enable_zai=with_zai,
         mounts=list(mounts),
         copies=list(copies),
+        compose_extras=list(compose_extras),
     )
 
     save_last_attach(name)
@@ -282,6 +285,7 @@ def _persist_sandbox_state(
             enable_zai=with_zai,
             mounts=list(mounts),
             copies=list(copies),
+            compose_extras=list(compose_extras),
         )
 
 
@@ -378,6 +382,7 @@ def _handle_new_ide_and_attach(
 @click.option("--from", "from_flag", metavar="BRANCH", help="Base branch (alias for from_branch arg)")
 @click.option("--name", "name_override", metavar="NAME", help="Override auto-generated sandbox name")
 @click.option("--anthropic-base-url", metavar="URL", help="Override Anthropic API base URL")
+@click.option("--compose-extra", "compose_extras", multiple=True, type=click.Path(exists=True), help="Additional docker-compose override file")
 @click.pass_context
 def new(
     ctx: click.Context,
@@ -407,6 +412,7 @@ def new(
     from_flag: str,
     name_override: str,
     anthropic_base_url: str,
+    compose_extras: tuple[str, ...],
 ) -> None:
     """Create a new sandbox with worktree and container."""
 
@@ -695,6 +701,7 @@ def new(
                 enable_opencode_flag=enable_opencode_flag,
                 enable_zai_flag=enable_zai_flag,
                 anthropic_base_url=anthropic_base_url or "",
+                compose_extras=list(compose_extras),
             )
         except _SetupError as exc:
             log_error(str(exc))
@@ -716,6 +723,18 @@ def new(
             sys.exit(1)
 
         # Save state: last command, preset, last attach
+        # Store compose extras as relative paths so metadata stays portable
+        from pathlib import Path as _Path
+        _project_root = _Path(__file__).resolve().parent.parent.parent
+        _relative_extras: list[str] = []
+        for _extra in compose_extras:
+            try:
+                _relative_extras.append(
+                    str(_Path(_extra).resolve().relative_to(_project_root))
+                )
+            except ValueError:
+                _relative_extras.append(str(_Path(_extra).resolve()))
+
         _persist_sandbox_state(
             repo_url=repo_url,
             branch=branch,
@@ -733,6 +752,7 @@ def new(
             copies=copies,
             save_as=save_as,
             name=name,
+            compose_extras=tuple(_relative_extras),
         )
 
         # Success message
