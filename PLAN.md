@@ -1,176 +1,273 @@
-# Plan: User-Configurable API Keys and Services
+# Plan: Sidecar Container Extension Points
 
 ## Context
 
-Adding a new API key/service to foundry-sandbox (e.g., OpenRouter for multi-model routing) currently requires modifying 6+ files across both the CLI and proxy codebases. This makes it impossible for downstream projects to add custom services without forking. The goal is a single config file that users can drop in to define custom API keys and services, with the system handling placeholder generation, credential injection, and domain allowlisting automatically.
+Adding a sibling container to a sandbox (e.g., Redis for caching, a local vector DB, a dev database) requires manually writing a docker-compose override, knowing the internal network topology, and invoking `docker compose` with the right `-f` chain. Teardown must mirror the same chain. None of this is integrated into `cast`.
+
+The `compose_extras` parameter already exists end-to-end in `docker.py` — `get_compose_command()`, `compose_up()`, and `compose_down()` all accept it, with path validation and correct `-f` ordering. It's used in production for `PROXY_ALLOWLIST_EXTRA_PATH` and user-services mounting. The infrastructure is tested (886 lines in `test_compose_extras.py`). What's missing is the user-facing layer: CLI flags, auto-discovery, and documentation.
 
 ## Design
 
-A new `config/user-services.yaml` file defines custom services. The CLI reads it to generate placeholders and display status. It gets mounted into the proxy container, which reads it to dynamically extend its credential injection and allowlist.
+Three complementary ways to attach sidecar compose overrides, plus documentation so users don't have to reverse-engineer the network topology.
 
-### Config File Format
+### Extension Mechanisms
 
-```yaml
-# config/user-services.yaml
-version: "1"
+**1. `--compose-extra` CLI flag** — explicit, per-invocation
 
-services:
-  - name: OpenRouter
-    env_var: OPENROUTER_API_KEY
-    domain: openrouter.ai
-    header: Authorization       # HTTP header for credential injection
-    format: bearer              # "bearer" -> "Bearer <key>", "value" -> raw key
-    paths: ["/api/**"]          # optional, defaults to ["/**"]
-    methods: [GET, POST]        # optional, defaults to [GET, POST, PUT, DELETE, PATCH, OPTIONS, HEAD]
-
-  - name: Groq
-    env_var: GROQ_API_KEY
-    domain: api.groq.com
-    header: Authorization
-    format: bearer
-    paths: ["/openai/**"]
-
-  - name: CustomService
-    env_var: CUSTOM_API_KEY
-    domain: api.custom.example
-    header: X-Api-Key           # works with any header name
-    format: value               # injects raw key value (no "Bearer " prefix)
+```bash
+cast new my-sandbox --compose-extra ./config/docker-compose.redis.yml
+cast start my-sandbox --compose-extra ./extra-override.yml
 ```
 
-### Limitations (MVP)
+Accepts one or more paths. Validated at invocation time. On `cast new`, stored in sandbox metadata so subsequent `cast start` / `cast stop` can reconstruct the same `-f` chain without re-specifying. On `cast start`, merged with any metadata-persisted extras for that invocation (but not re-persisted — use `cast new` to set the permanent baseline).
 
-This config supports header-based credential injection only. The following patterns from built-in providers are **not** supported for user-defined services:
+**2. Auto-discovery from `config/`** — convention-based, zero-flag
 
-- OAuth token refresh flows (Claude OAuth)
-- Request body injection (Zhipu-style API keys embedded in JSON payloads)
-- File-based credential loading (Gemini settings files)
+```
+config/
+  user-services.yaml              # API services (existing)
+  docker-compose.redis.yml        # Sidecar (auto-discovered)
+  docker-compose.chromadb.yml     # Another sidecar (auto-discovered)
+```
 
-These could be added in a future version if demand warrants it.
+Any file matching `config/docker-compose.*.yml` is automatically included. No flags needed — drop a file in, it gets picked up. Files are sorted by name for deterministic ordering.
 
-### Security Note
+Note: `.example` files don't match the glob. This directory is a **live-fire zone** — any matching file is included unconditionally. Temporary or work-in-progress files should use a different extension (e.g., `.yml.disabled`, `.yml.bak`) to avoid accidental inclusion. This will be called out in the documentation.
 
-User-defined services expand the proxy's allowlist and MITM domain list. A misconfigured `user-services.yaml` could allowlist domains that bypass the proxy's security model. This is by design — the config file is host-side only and requires the same trust level as other host-side configuration. This will be documented in `docs/security/security-model.md`.
+**3. `FOUNDRY_COMPOSE_EXTRAS` env var** — persistent, no flags or file placement
+
+```bash
+export FOUNDRY_COMPOSE_EXTRAS="/path/to/docker-compose.redis.yml:/path/to/another.yml"
+```
+
+Colon-separated paths. Same pattern as `PROXY_ALLOWLIST_EXTRA_PATH` and `FOUNDRY_USER_SERVICES_PATH`.
+
+### Precedence
+
+All three mechanisms stack. The final `-f` chain is:
+
+```
+base → credential-isolation → user override → auto-discovered → env var → CLI flag
+```
+
+Later files override earlier ones (standard docker-compose merge behavior).
+
+### Teardown (`compose_down`) Behavior
+
+`compose_down()` does **not** call the `_prepare_allowlist_override()` or `_prepare_user_services_override()` functions — those temp overrides are only generated during `compose_up()`. This is fine: `docker compose down` tears down all services in the Compose project regardless of which `-f` files are passed, because it operates on the project name, not the file list. The `-f` files are only needed during `down` to resolve project name and custom networks/volumes for cleanup.
+
+The sidecar extras **are** passed to `compose_down()` so that any custom networks or named volumes defined in the sidecar overrides are properly cleaned up.
+
+### Network Topology
+
+Sidecars can attach to these networks:
+
+| Network | Type | Purpose |
+|---------|------|---------|
+| `credential-isolation` | Internal bridge | Sandbox ↔ proxy (existing) |
+| `proxy-egress` | External bridge | Proxy/sidecars → internet (existing) |
+| Custom (e.g., `redis-internal`) | Internal bridge | Sandbox ↔ sidecar (user-defined) |
+
+**Pattern A: Internal-only sidecar** — sandbox talks to it, no internet access. Define a custom internal network shared between the `dev` service and the sidecar.
+
+**Pattern B: Sidecar with egress** — sidecar also needs to reach external servers (e.g., downloading models). Attach the sidecar to both a custom internal network and `proxy-egress`.
+
+### Not Doing
+
+- A `config/sidecars.yaml` abstraction on top of compose. Compose files are already declarative — wrapping them in another YAML just moves complexity without reducing it.
+- A separate `config/sidecars.d/` directory for auto-discovery. The `config/` convention is already established and adding a subdirectory fragments discoverability. The glob pattern is explicit enough, and documentation will make the "live-fire" nature clear.
+
+## Example: Redis (Internal-Only Sidecar)
+
+```yaml
+# config/docker-compose.redis.yml
+services:
+  redis:
+    image: redis:7-alpine
+    expose:
+      - "6379"
+    networks:
+      redis-internal: {}
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  dev:
+    networks:
+      - redis-internal
+    environment:
+      - REDIS_URL=redis://redis:6379
+    depends_on:
+      redis:
+        condition: service_healthy
+
+networks:
+  redis-internal:
+    driver: bridge
+    internal: true
+```
+
+With auto-discovery, dropping this into `config/` is all that's needed. `cast new` picks it up, `cast stop` tears it down.
+
+## Example: Ollama (Sidecar With Egress)
+
+```yaml
+# config/docker-compose.ollama.yml
+services:
+  ollama:
+    image: ollama/ollama:latest
+    expose:
+      - "11434"
+    networks:
+      ollama-internal: {}
+      proxy-egress: {}       # needs internet to pull models
+    volumes:
+      - ollama-models:/root/.ollama
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:11434/api/tags || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 30s
+
+  dev:
+    networks:
+      - ollama-internal
+    environment:
+      - OLLAMA_HOST=http://ollama:11434
+    depends_on:
+      ollama:
+        condition: service_healthy
+
+networks:
+  ollama-internal:
+    driver: bridge
+    internal: true
+
+volumes:
+  ollama-models:
+```
 
 ## Implementation
 
-### Phase 1: Config loader modules
+### Phase 1: Auto-discovery and env var loading
 
-**New file: `foundry_sandbox/user_services.py`** (~120 lines)
+**Modify: `foundry_sandbox/docker.py`** -- new `_collect_compose_extras()`
 
-- `UserService` dataclass: `name`, `env_var`, `domain`, `header`, `format`, `methods`, `paths`
-  - `methods` defaults to `["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS", "HEAD"]`
-  - `paths` defaults to `["/**"]`
-- `load_user_services(path=None) -> list[UserService]`: search order is explicit path -> `FOUNDRY_USER_SERVICES_PATH` env -> `./config/user-services.yaml`. Returns empty list if no file found. **Logs which path was resolved** for debuggability.
-- Validation: env_var matches `[A-Z_][A-Z0-9_]*`, domain is non-empty, format is `bearer` or `value`, header is non-empty, methods entries are valid HTTP methods, paths entries are non-empty strings
-- Path glob syntax (`/**`, `/api/**`) must use the same matching semantics as the existing allowlist `paths` field in `unified-proxy/config.py` — reuse the same matcher, do not introduce a second glob implementation
-- `find_user_services_path() -> str | None`: returns the resolved path (needed for mounting into proxy)
+Centralize all compose extras collection into one function (~50 lines):
 
-**New file: `unified-proxy/user_services.py`** (~60 lines)
+- `_collect_compose_extras(cli_extras=None) -> list[str]`:
+  - Start with auto-discovered files: glob `config/docker-compose.*.yml` relative to project root, sorted by name
+  - Append paths from `FOUNDRY_COMPOSE_EXTRAS` env var (colon-split, skip empty segments)
+  - Append `cli_extras` (from `--compose-extra` flag)
+  - Resolve all paths to absolute (`Path.resolve()`) before validation and deduplication
+  - Validate all resolved paths exist and are regular files (raise `FileNotFoundError` with clear message showing the original path)
+  - Return deduplicated list preserving order — dedup on resolved absolute paths so `./config/foo.yml` and `/abs/path/config/foo.yml` are recognized as the same file
+  - Log the final list at DEBUG level for troubleshootability
 
-Shared proxy-side YAML loader so that `credential_injector.py`, `generate_squid_config.py`, and `config.py` all use a single parser:
+This function is called by `compose_up()` and `compose_down()` before passing extras to `get_compose_command()`. It does **not** include the temp overrides for allowlist/user-services — those are added separately by their existing `_prepare_*` functions.
 
-- `ProxyUserService` dataclass: `name`, `env_var`, `domain`, `header`, `format`, `methods`, `paths`
-- `load_proxy_user_services(path="/etc/unified-proxy/user-services.yaml") -> list[ProxyUserService]`: reads and validates the YAML. Returns empty list if file not found or malformed (logs warning on parse errors). Called once per proxy startup; callers cache the result.
+### Phase 2: CLI flag + metadata persistence
 
-This avoids three independent YAML parsers diverging if the schema changes. **Note:** `ProxyUserService` and `UserService` share the same YAML schema — both files should cross-reference each other with a comment to keep them in sync.
+**Modify: `foundry_sandbox/commands/new.py`** -- add Click option
 
-### Dependency Note
+- Add `--compose-extra` Click option (`multiple=True`, type `click.Path(exists=True)`)
+- Pass through to `_new_setup()` as `compose_extras`
 
-The CLI-side loader (`foundry_sandbox/user_services.py`) requires PyYAML. Verify `pyyaml` is listed in `pyproject.toml` dependencies; add it if missing. The proxy side already has `pyyaml~=6.0` in `unified-proxy/requirements.txt`.
+**Modify: `foundry_sandbox/commands/new_setup.py`** -- accept and forward `compose_extras`
 
-### Phase 2: CLI-side integration (placeholder generation + status)
+- Add `compose_extras` keyword parameter (list of paths) to `_new_setup()`
+- Pass to `compose_up()` via existing `compose_extras` parameter
 
-**Modify: `foundry_sandbox/models.py`** -- `CredentialPlaceholders`
-- Add field: `user_service_placeholders: dict[str, str] = Field(default_factory=dict)`
-- Extend `to_env_dict()`: for each entry, add `SANDBOX_{env_var}: placeholder` (e.g., `SANDBOX_OPENROUTER_API_KEY: CRED_PROXY_<hex>`)
+**Modify: `foundry_sandbox/models.py`** -- persist in sandbox metadata
 
-**Modify: `foundry_sandbox/docker.py`** -- `setup_credential_placeholders()`
-- After existing hardcoded logic, call `load_user_services()`
-- For each service where `os.environ.get(svc.env_var)` is truthy, generate a placeholder via `_credential_placeholder()`
-- Store in `user_service_placeholders` dict
+- Add `compose_extras: list[str] = Field(default_factory=list)` to `SandboxMetadata`
+- Add `compose_extras: list[str] = Field(default_factory=list)` to `CastNewPreset` (mirrors metadata for preset persistence)
+- Store paths **relative to project root** at `cast new` time — resolve to absolute at load time. This avoids stale paths when the project directory moves or another user clones with a different home path.
 
-**Modify: `foundry_sandbox/docker.py`** -- compose override management
-- Refactor temp file cleanup: replace individual temp file variables with a `_compose_overrides: list[str]` that collects all temp override paths. Clean up the entire list in the `finally` block. This prevents the pattern from growing a new variable per feature.
-- New `_prepare_user_services_override(compose_extras) -> tuple[str | None, list[str]]`:
-  - Same pattern as `_prepare_allowlist_override()` (temp compose file, returns path + updated extras)
-  - Generates compose override that:
-    - Passes real env vars to `unified-proxy` (just the env var name, compose inherits from host; if unset on host, proxy gets empty string and `_load_credentials()` skips it — this is the correct no-op behavior)
-    - Passes placeholder values to `dev` container (`ENV_VAR=${SANDBOX_OPENROUTER_API_KEY:-}`)
-    - Bind-mounts the user-services.yaml into proxy at `/etc/unified-proxy/user-services.yaml:ro`
-  - Returns `(None, compose_extras)` if no user-services.yaml found
+**Modify: `foundry_sandbox/commands/start.py`**
 
-**Modify: `foundry_sandbox/docker.py`** -- `compose_up()`
-- Chain `_prepare_user_services_override()` after `_prepare_allowlist_override()`
-- Both temp file paths go into `_compose_overrides` list for cleanup
+- Add `--compose-extra` Click option (`multiple=True`, type `click.Path(exists=True)`)
+- Load `compose_extras` from sandbox metadata
+- Merge CLI extras (appended after metadata extras) and pass to `compose_up()`
+- Also pass merged extras to the `compose_down()` call in the error-recovery path
 
-**Modify: `foundry_sandbox/api_keys.py`** -- `get_cli_status()`
-- After existing status lines, load user services and append status for each (configured/not configured)
-- Uses same `os.environ.get(svc.env_var)` check as placeholder generation for consistency
+**Modify: `foundry_sandbox/commands/stop.py`**
 
-### Phase 3: Proxy-side integration (credential injection + allowlist)
+- Load `compose_extras` from sandbox metadata
+- Pass to `compose_down()`
 
-All three proxy-side consumers import from the shared `unified-proxy/user_services.py` loader.
+### Phase 3: Documentation + templates
 
-**Modify: `unified-proxy/addons/credential_injector.py`** -- `CredentialInjector.__init__()`
-- New instance attribute `self.provider_map = dict(PROVIDER_MAP)` — shallow copy of the module-level map so user entries don't leak across instances (matters for tests)
-- All credential lookups in the class use `self.provider_map` instead of the module-level `PROVIDER_MAP`
-- New method `_load_user_services()`:
-  - Calls `load_proxy_user_services()` from shared loader
-  - For each service, checks if `svc.domain` already exists in `self.provider_map` — if so, logs warning and **skips** (built-in providers are not overridable)
-  - Otherwise, adds entry to `self.provider_map`: `{domain: {header, env_var, format}}`
-- Call `_load_user_services()` before `_load_credentials()` so existing credential loading picks up user entries automatically
+**New file: `docs/usage/sidecars.md`** -- sidecar guide covering:
 
-**Modify: `unified-proxy/generate_squid_config.py`**
-- New helper `_load_user_mitm_domains()`: calls `load_proxy_user_services()`, returns list of domains
-- In `generate_squid_config()`, extend `MITM_DOMAINS` with user domains **before** the dedup logic so existing wildcard deduplication handles them correctly
+- Network topology diagram (credential-isolation, proxy-egress, custom internal)
+- Pattern A walkthrough: internal-only sidecar (Redis example)
+- Pattern B walkthrough: sidecar with egress (Ollama example)
+- All three extension mechanisms (auto-discovery, env var, CLI flag)
+- Precedence and `-f` chain ordering
+- Troubleshooting (container not starting, network connectivity, healthchecks)
 
-**Modify: `unified-proxy/config.py`** -- `load_allowlist_config()`
-- After merging `PROXY_ALLOWLIST_EXTRA_PATH`, also load user services via shared loader
-- New helper `_synthesize_allowlist_from_user_services(services) -> AllowlistConfig | None`:
-  - Takes list of `ProxyUserService` (already loaded)
-  - For each service, creates:
-    - Domain entry for `svc.domain`
-    - HTTP endpoint: `host=svc.domain`, `methods=svc.methods`, `paths=svc.paths`
-  - Constructs the config via `AllowlistConfig._partial()` to bypass `__post_init__` validation (synthetic config won't have all required fields)
-  - Returns `None` if services list is empty (caller skips merge)
-- Merge into the config via existing `merge_allowlist_configs()`
+**New file: `config/docker-compose.redis.yml.example`** -- copy-paste template for internal-only pattern
 
-### Phase 4: Example file + docs
+**New file: `config/docker-compose.ollama.yml.example`** -- copy-paste template for egress pattern
 
-**New file: `config/user-services.yaml.example`** -- documented example with commented-out entries showing both `bearer` and `value` formats, custom headers, and methods/paths overrides
+**Modify: `docs/configuration.md`** -- add "Sidecar Containers" section with brief overview + link to `docs/usage/sidecars.md`
 
-**Modify: `docs/configuration.md`** -- add "User-Defined Services" section documenting:
-- Config file format and field descriptions
-- Search order for config file location
-- How to verify a service is working (CLI status + curl test)
-- Limitations (header injection only, no OAuth/body injection)
+**Modify: `docs/security/security-model.md`** -- add "Sidecar Containers" subsection under "Explicit Non-Goals and Accepted Risks"
 
-**Modify: `docs/security/security-model.md`** -- add note that user-services.yaml expands the allowlist and MITM scope, requires host-level trust
+This is a meaningful expansion of the security perimeter and deserves more than a one-liner. The subsection should cover:
+
+- **Host volume mounts**: Sidecar compose files can mount arbitrary host paths — the trust boundary is the compose file itself (same as `CLAUDE.md`, controlled by the repo owner)
+- **Proxy bypass**: Sidecars on `proxy-egress` reach the internet directly, not through mitmproxy — they are not subject to allowlist filtering or credential isolation
+- **Privilege escalation surface**: A compose file could specify `privileged: true`, host network mode, or other Docker capabilities. This is accepted risk — compose files are repo-owner-controlled, same trust level as Dockerfiles
+- **Network isolation**: Sidecars on custom internal networks (`internal: true`) cannot reach the internet. Sidecars must explicitly join `proxy-egress` for egress.
+- **Trust model summary**: Compose files in `config/` are trusted at the same level as the base `docker-compose.yml` — they are checked into the repo and reviewed via normal code review
+
+### Phase 4: Testing
+
+**New tests in `tests/unit/test_collect_compose_extras.py`**:
+
+- Auto-discovery finds `config/docker-compose.*.yml` files, sorted by name
+- Auto-discovery returns empty list when no matching files exist
+- Env var parsing: single path, multiple colon-separated paths, empty segments skipped
+- CLI extras appended after env var paths
+- Deduplication preserves earliest occurrence
+- Missing path raises `FileNotFoundError` with the offending path in the message
+- Integration: all three sources combine correctly
+
+**Extend existing tests**:
+
+- `test_compose_extras.py`: verify `_collect_compose_extras()` output integrates correctly with `get_compose_command()` ordering
+- Metadata round-trip: compose extras stored at `new` time, loaded at `start`/`stop` time
 
 ## Files Changed
 
 | File | Type | Summary |
 |------|------|---------|
-| `foundry_sandbox/user_services.py` | New | CLI-side config loader + validation (~120 lines) |
-| `unified-proxy/user_services.py` | New | Shared proxy-side YAML loader (~60 lines) |
-| `config/user-services.yaml.example` | New | Documented example config |
-| `foundry_sandbox/models.py` | Modify | Add `user_service_placeholders` dict to `CredentialPlaceholders` |
-| `foundry_sandbox/docker.py` | Modify | Refactor temp file cleanup to list-based pattern, add `_prepare_user_services_override()`, extend `setup_credential_placeholders()` and `compose_up()` |
-| `foundry_sandbox/api_keys.py` | Modify | Extend `get_cli_status()` for user services |
-| `unified-proxy/addons/credential_injector.py` | Modify | Copy `PROVIDER_MAP` to instance attr, add `_load_user_services()` with conflict detection |
-| `unified-proxy/generate_squid_config.py` | Modify | Load user service domains into MITM list via shared loader |
-| `unified-proxy/config.py` | Modify | Synthesize allowlist entries from user services via shared loader |
-| `docs/configuration.md` | Modify | Document user-services.yaml format and usage |
-| `docs/security/security-model.md` | Modify | Document allowlist expansion trust model |
+| `foundry_sandbox/docker.py` | Modify | Add `_collect_compose_extras()`, wire into `compose_up()` / `compose_down()` |
+| `foundry_sandbox/commands/new.py` | Modify | Add `--compose-extra` Click option, pass to `_new_setup()` |
+| `foundry_sandbox/commands/new_setup.py` | Modify | Accept `compose_extras` param, forward to `compose_up()` |
+| `foundry_sandbox/models.py` | Modify | Add `compose_extras` to `SandboxMetadata` and `CastNewPreset` |
+| `foundry_sandbox/commands/start.py` | Modify | Add `--compose-extra` flag, load from metadata, merge, pass to `compose_up()` and error-path `compose_down()` |
+| `foundry_sandbox/commands/stop.py` | Modify | Load compose extras from metadata, pass to `compose_down()` |
+| `docs/usage/sidecars.md` | New | Sidecar guide with network topology, patterns, examples |
+| `config/docker-compose.redis.yml.example` | New | Internal-only sidecar template |
+| `config/docker-compose.ollama.yml.example` | New | Sidecar-with-egress template |
+| `docs/configuration.md` | Modify | Add sidecar section with link |
+| `docs/security/security-model.md` | Modify | Add "Sidecar Containers" subsection under accepted risks |
+| `tests/unit/test_collect_compose_extras.py` | New | Unit tests for extras collection |
 
 ## Verification
 
-1. Create `config/user-services.yaml` with a test service (e.g., OpenRouter)
-2. Set `OPENROUTER_API_KEY=sk-or-test123` on host
-3. Run `cast new` -- verify "OpenRouter: configured" appears in status output
-4. Verify log output shows which user-services.yaml path was resolved
-5. Inspect proxy container env -- verify `OPENROUTER_API_KEY=sk-or-test123` is set
-6. Inspect sandbox container env -- verify `OPENROUTER_API_KEY=CRED_PROXY_<hex>` (placeholder)
-7. From sandbox, `curl -X POST https://openrouter.ai/api/v1/chat/completions -H "Content-Type: application/json" -d '{}'` -- verify proxy injects real key (check proxy logs for injection, expect 401 from OpenRouter since test key is invalid)
-8. Run `./scripts/ci-local.sh` -- verify existing tests pass
-9. Run unit tests for both `user_services.py` modules
+1. Drop `docker-compose.redis.yml` into `config/` — verify `cast new` picks it up (check compose command in debug logs)
+2. Run `cast new --compose-extra ./some-override.yml` — verify override is applied and path is stored in metadata
+3. Run `cast stop` then `cast start` — verify the sidecar comes back (metadata persistence)
+4. Set `FOUNDRY_COMPOSE_EXTRAS=/path/to/override.yml` — verify it's included
+5. Verify all three mechanisms stack correctly when used simultaneously
+6. Verify missing path produces clear error, not a compose failure
+7. Run `./scripts/ci-local.sh` — all existing and new tests pass

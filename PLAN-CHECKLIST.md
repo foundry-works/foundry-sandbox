@@ -1,58 +1,63 @@
 # Implementation Checklist
 
-## Phase 1: Config loader modules
-- [x] Verify `pyyaml` is in `pyproject.toml` dependencies; add if missing
-- [x] Create `foundry_sandbox/user_services.py` with `UserService` dataclass and `load_user_services()` loader
-- [x] Add `find_user_services_path()` helper for resolving config file location
-- [x] Search order: explicit path -> `FOUNDRY_USER_SERVICES_PATH` env -> `./config/user-services.yaml` (no `~/.config` fallback for MVP)
-- [x] Add validation (env_var format, domain non-empty, format is bearer/value, header non-empty, methods are valid HTTP methods, paths non-empty)
-- [x] Path glob syntax must reuse existing allowlist path matching from `unified-proxy/config.py`
-- [x] Default methods: `["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS", "HEAD"]`
-- [x] Log which config path was resolved (or that none was found)
-- [x] Create `unified-proxy/user_services.py` with shared `ProxyUserService` dataclass and `load_proxy_user_services()` loader
-- [x] Add cross-reference comments between `UserService` and `ProxyUserService` noting shared schema
-- [x] Handle missing/malformed YAML gracefully in proxy loader (return empty list, log warning)
+## Phase 1: Auto-discovery and env var loading
+- [ ] Add `_collect_compose_extras(cli_extras=None) -> list[str]` to `foundry_sandbox/docker.py`
+- [ ] Implement auto-discovery: glob `config/docker-compose.*.yml`, sorted by name
+- [ ] Implement `FOUNDRY_COMPOSE_EXTRAS` env var parsing (colon-separated, skip empty segments)
+- [ ] Append `cli_extras` after env var paths
+- [ ] Resolve all paths to absolute via `Path.resolve()` before validation and dedup
+- [ ] Validate all resolved paths exist and are regular files (`FileNotFoundError` with clear message showing original path)
+- [ ] Deduplicate on resolved absolute paths, preserving earliest occurrence
+- [ ] Log final extras list at DEBUG level
+- [ ] Wire `_collect_compose_extras()` into `compose_up()` — call before `get_compose_command()`, merge with existing temp overrides
+- [ ] Wire `_collect_compose_extras()` into `compose_down()` — pass sidecar extras so custom networks/volumes are cleaned up
 
-## Phase 2: CLI-side integration
-- [x] `foundry_sandbox/models.py`: Add `user_service_placeholders: dict[str, str]` to `CredentialPlaceholders`
-- [x] `foundry_sandbox/models.py`: Extend `to_env_dict()` to emit `SANDBOX_{env_var}` entries
-- [x] `foundry_sandbox/docker.py`: Extend `setup_credential_placeholders()` to generate placeholders for user services
-- [x] `foundry_sandbox/docker.py`: Refactor temp file cleanup from individual variables to `_compose_overrides` list pattern
-- [x] `foundry_sandbox/docker.py`: Add `_prepare_user_services_override()` (temp compose override, mounts config + threads env vars)
-- [x] `foundry_sandbox/docker.py`: Extend `compose_up()` to chain user services override + list-based cleanup
-- [x] `foundry_sandbox/api_keys.py`: Extend `get_cli_status()` to show user service status
+## Phase 2: CLI flag + metadata persistence
+- [ ] `foundry_sandbox/commands/new.py`: Add `--compose-extra` Click option (`multiple=True`, `click.Path(exists=True)`)
+- [ ] `foundry_sandbox/commands/new_setup.py`: Add `compose_extras` keyword parameter to `_new_setup()`
+- [ ] Pass CLI extras through to `compose_up()` via `compose_extras` parameter
+- [ ] `foundry_sandbox/models.py`: Add `compose_extras: list[str]` to `SandboxMetadata`
+- [ ] `foundry_sandbox/models.py`: Add `compose_extras: list[str]` to `CastNewPreset`
+- [ ] Store paths **relative to project root** in metadata (resolve to absolute at load time)
+- [ ] `foundry_sandbox/commands/start.py`: Add `--compose-extra` Click option (`multiple=True`, `click.Path(exists=True)`)
+- [ ] `foundry_sandbox/commands/start.py`: Load `compose_extras` from metadata, merge with CLI extras, pass to `compose_up()`
+- [ ] `foundry_sandbox/commands/start.py`: Pass merged extras to error-path `compose_down()` call
+- [ ] `foundry_sandbox/commands/stop.py`: Load `compose_extras` from metadata, pass to `compose_down()`
+- [ ] Verify metadata survives stop/start cycle
 
-## Phase 3: Proxy-side integration
-- [x] `unified-proxy/addons/credential_injector.py`: Add `self.provider_map = dict(PROVIDER_MAP)` instance copy in `__init__()` — do NOT mutate the module-level dict
-- [x] `unified-proxy/addons/credential_injector.py`: Update all credential lookups to use `self.provider_map` instead of module-level `PROVIDER_MAP`
-- [x] `unified-proxy/addons/credential_injector.py`: Add `_load_user_services()` using shared `load_proxy_user_services()`
-- [x] `unified-proxy/addons/credential_injector.py`: Add domain conflict detection — skip with warning if domain exists in built-in `PROVIDER_MAP`
-- [x] `unified-proxy/addons/credential_injector.py`: Call `_load_user_services()` before `_load_credentials()` in `__init__()`
-- [x] `unified-proxy/generate_squid_config.py`: Add `_load_user_mitm_domains()` using shared loader
-- [x] `unified-proxy/generate_squid_config.py`: Extend MITM list before dedup logic in `generate_squid_config()`
-- [x] `unified-proxy/config.py`: Add `_synthesize_allowlist_from_user_services()` helper (uses `AllowlistConfig._partial()`, returns `AllowlistConfig | None`)
-- [x] `unified-proxy/config.py`: Integrate into `load_allowlist_config()` after extra path merge, skip merge if None
+## Phase 3: Documentation + templates
+- [ ] Create `docs/usage/sidecars.md` with network topology, Pattern A (internal-only), Pattern B (with egress)
+- [ ] Document all three extension mechanisms (auto-discovery, env var, CLI flag) with precedence
+- [ ] Document auto-discovery "live-fire" behavior: matching files are included unconditionally, use `.yml.disabled` / `.yml.bak` to exclude
+- [ ] Add troubleshooting section (container not starting, network connectivity, healthchecks)
+- [ ] Create `config/docker-compose.redis.yml.example` (internal-only sidecar template)
+- [ ] Create `config/docker-compose.ollama.yml.example` (sidecar-with-egress template)
+- [ ] `docs/configuration.md`: Add "Sidecar Containers" section with brief overview + link to sidecars guide
+- [ ] `docs/security/security-model.md`: Add "Sidecar Containers" subsection under "Explicit Non-Goals and Accepted Risks" covering:
+  - [ ] Host volume mount trust boundary (compose files are repo-owner-controlled)
+  - [ ] Proxy bypass: `proxy-egress` sidecars reach internet directly, not through mitmproxy
+  - [ ] Privilege escalation surface: `privileged`, host network mode (accepted risk, same trust as Dockerfiles)
+  - [ ] Network isolation: custom internal networks cannot reach internet
+  - [ ] Trust model summary: compose files in `config/` = same trust level as base compose
 
-## Phase 4: Documentation
-- [x] Create `config/user-services.yaml.example` with documented examples (bearer, value, custom headers, methods/paths)
-- [x] `docs/configuration.md`: Add "User-Defined Services" section (format, search order, verification, limitations)
-- [x] `docs/security/security-model.md`: Add note on allowlist expansion trust model
-
-## Phase 5: Testing
-- [x] Unit tests for `foundry_sandbox/user_services.py`: valid config loads correctly
-- [x] Unit tests for `foundry_sandbox/user_services.py`: missing file returns empty list
-- [x] Unit tests for `foundry_sandbox/user_services.py`: malformed YAML (missing fields, bad env_var format, invalid method)
-- [x] Unit tests for `foundry_sandbox/user_services.py`: config path search order and logging
-- [x] Unit tests for `unified-proxy/user_services.py`: valid config, missing file, malformed YAML
-- [x] Unit tests for `foundry_sandbox/models.py`: `to_env_dict()` emits `SANDBOX_OPENROUTER_API_KEY` etc. from `user_service_placeholders`
-- [x] Unit tests for placeholder generation with user services (env var set vs not set)
-- [x] Unit tests for compose override generation (mounts config, passes env vars)
-- [x] Unit tests for proxy-side `self.provider_map` dynamic loading (instance copy, not module-level mutation)
-- [x] Unit tests for domain conflict detection (built-in domain skipped with warning)
-- [x] Unit tests for allowlist synthesis (domains + endpoints generated, uses `_partial()`, empty services returns None)
-- [x] Unit tests for MITM domain extension (user domains added before dedup)
-- [x] Run `./scripts/ci-local.sh` -- all existing tests pass
-- [ ] Manual integration test: create config, set env var, `cast new`, verify status output
-- [ ] Manual integration test: verify compose override mounts user-services.yaml into proxy
-- [ ] Manual integration test: verify proxy injects credential on matching request (check proxy logs)
-- [ ] Manual integration test: verify env var not set on host → no placeholder generated, proxy doesn't inject
+## Phase 4: Testing
+- [ ] Create `tests/unit/test_collect_compose_extras.py`
+- [ ] Test: auto-discovery finds `config/docker-compose.*.yml`, sorted by name
+- [ ] Test: auto-discovery returns empty list when no matching files
+- [ ] Test: env var single path
+- [ ] Test: env var multiple colon-separated paths
+- [ ] Test: env var with empty segments (leading/trailing/double colons)
+- [ ] Test: CLI extras appended after env var paths
+- [ ] Test: deduplication on resolved paths (relative and absolute pointing to same file)
+- [ ] Test: missing path raises `FileNotFoundError` with offending path in message
+- [ ] Test: all three sources combine correctly (auto-discovered + env var + CLI)
+- [ ] Test: relative paths in metadata resolved correctly at load time
+- [ ] Test: metadata round-trip — compose extras stored at new, loaded at start/stop
+- [ ] Test: `compose_down()` receives sidecar extras for network/volume cleanup
+- [ ] Verify `_collect_compose_extras()` output integrates with `get_compose_command()` ordering
+- [ ] Run `./scripts/ci-local.sh` — all existing and new tests pass
+- [ ] Manual test: drop Redis override into `config/`, `cast new`, verify sidecar starts
+- [ ] Manual test: `cast stop` + `cast start`, verify sidecar comes back via metadata
+- [ ] Manual test: `--compose-extra` flag on `cast new` with explicit path
+- [ ] Manual test: `--compose-extra` flag on `cast start` (merged with metadata extras)
+- [ ] Manual test: `FOUNDRY_COMPOSE_EXTRAS` env var
