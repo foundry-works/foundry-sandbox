@@ -22,6 +22,9 @@ __all__ = ["ProxyUserService", "load_proxy_user_services"]
 
 _ENV_VAR_RE = re.compile(r"^[A-Z_][A-Z0-9_]*$")
 
+# Domain must be a bare hostname (optionally with dots), no scheme/path/whitespace.
+_DOMAIN_RE = re.compile(r"^[a-zA-Z0-9]([a-zA-Z0-9\-]*[a-zA-Z0-9])?(\.[a-zA-Z0-9]([a-zA-Z0-9\-]*[a-zA-Z0-9])?)*$")
+
 _VALID_HTTP_METHODS = frozenset(
     {"GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS", "HEAD"}
 )
@@ -76,7 +79,10 @@ def load_proxy_user_services(
         logger.warning("user-services: expected dict in %s, got %s", resolved, type(data).__name__)
         return []
 
-    # TODO: validate version field for forward-compatibility
+    version = data.get("version")
+    if version is not None and str(version) != "1":
+        logger.warning("user-services: unknown version '%s' in %s, attempting to load anyway", version, resolved)
+
     services_data = data.get("services")
     if not isinstance(services_data, list):
         logger.warning("user-services: missing or invalid 'services' key in %s", resolved)
@@ -118,6 +124,12 @@ def _parse_entry(
 
     if not name or not domain or not header:
         logger.warning("user-services: %s has empty required field in %s", prefix, file_path)
+        return None
+    if not _DOMAIN_RE.match(domain):
+        logger.warning(
+            "user-services: %s invalid domain '%s' (must be bare hostname, no scheme/path/whitespace) in %s",
+            prefix, domain, file_path,
+        )
         return None
     if not _ENV_VAR_RE.match(env_var):
         logger.warning(

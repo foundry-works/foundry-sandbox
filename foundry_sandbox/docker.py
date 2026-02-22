@@ -594,6 +594,7 @@ def _prepare_allowlist_override(
     tmp_path = f.name
     f.write(override_content)
     f.close()
+    os.chmod(tmp_path, 0o600)
     compose_extras = list(compose_extras or []) + [tmp_path]
     return tmp_path, compose_extras
 
@@ -613,12 +614,12 @@ def _prepare_user_services_override(
 
     from foundry_sandbox.user_services import load_user_services, find_user_services_path
 
-    services = load_user_services()
-    if not services:
-        return None, compose_extras
-
     config_path = find_user_services_path()
     if config_path is None:
+        return None, compose_extras
+
+    services = load_user_services(path=config_path)
+    if not services:
         return None, compose_extras
 
     config_path = os.path.realpath(config_path)
@@ -655,6 +656,7 @@ def _prepare_user_services_override(
     tmp_path = f.name
     f.write(override_content)
     f.close()
+    os.chmod(tmp_path, 0o600)
     compose_extras = list(compose_extras or []) + [tmp_path]
     return tmp_path, compose_extras
 

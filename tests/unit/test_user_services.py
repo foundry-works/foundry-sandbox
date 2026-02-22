@@ -324,6 +324,51 @@ class TestLoadUserServicesValidation:
         with pytest.raises(UserServiceConfigError, match="domain.*cannot be empty"):
             load_user_services(path=path)
 
+    def test_domain_with_scheme_rejected(self, tmp_path):
+        """Raises when domain contains a scheme prefix."""
+        path = self._write_yaml(tmp_path, {
+            "version": "1",
+            "services": [{
+                "name": "Svc",
+                "env_var": "KEY",
+                "domain": "https://openrouter.ai",
+                "header": "H",
+                "format": "bearer",
+            }],
+        })
+        with pytest.raises(UserServiceConfigError, match="bare hostname"):
+            load_user_services(path=path)
+
+    def test_domain_with_path_rejected(self, tmp_path):
+        """Raises when domain contains a path component."""
+        path = self._write_yaml(tmp_path, {
+            "version": "1",
+            "services": [{
+                "name": "Svc",
+                "env_var": "KEY",
+                "domain": "openrouter.ai/api",
+                "header": "H",
+                "format": "bearer",
+            }],
+        })
+        with pytest.raises(UserServiceConfigError, match="bare hostname"):
+            load_user_services(path=path)
+
+    def test_domain_with_whitespace_rejected(self, tmp_path):
+        """Raises when domain contains whitespace."""
+        path = self._write_yaml(tmp_path, {
+            "version": "1",
+            "services": [{
+                "name": "Svc",
+                "env_var": "KEY",
+                "domain": "open router.ai",
+                "header": "H",
+                "format": "bearer",
+            }],
+        })
+        with pytest.raises(UserServiceConfigError, match="bare hostname"):
+            load_user_services(path=path)
+
     def test_empty_header(self, tmp_path):
         """Raises when header is empty."""
         path = self._write_yaml(tmp_path, {
@@ -527,6 +572,13 @@ class TestSchemaConsistency:
         import user_services as proxy_mod
 
         assert cli_re.pattern == proxy_mod._ENV_VAR_RE.pattern
+
+    def test_domain_regex_matches(self):
+        """_DOMAIN_RE pattern is identical in both modules."""
+        from foundry_sandbox.user_services import _DOMAIN_RE as cli_re
+        import user_services as proxy_mod
+
+        assert cli_re.pattern == proxy_mod._DOMAIN_RE.pattern
 
     def test_valid_http_methods_match(self):
         """_VALID_HTTP_METHODS is identical in both modules."""

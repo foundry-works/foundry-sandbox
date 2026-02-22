@@ -35,9 +35,14 @@ def stop(name: str) -> None:
 
     log_info(f"Stopping sandbox: {name}...")
 
-    # Load compose extras from metadata for proper teardown
-    metadata = load_sandbox_metadata(name) or {}
-    extras = resolve_metadata_compose_extras(metadata) or None
+    # Load compose extras from metadata for proper teardown.
+    # Best-effort: metadata issues must never prevent stopping containers.
+    try:
+        metadata = load_sandbox_metadata(name) or {}
+        extras = resolve_metadata_compose_extras(metadata) or None
+    except Exception as exc:
+        log_warn(f"Could not load compose extras from metadata: {exc}")
+        extras = None
 
     # Kill tmux session (best effort)
     try:

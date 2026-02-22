@@ -229,6 +229,34 @@ class TestProxyLoaderValidation:
         path.write_text(yaml.dump(content))
         return str(path)
 
+    def test_domain_with_scheme_skipped(self, tmp_path, caplog):
+        """Domain with scheme prefix is skipped."""
+        path = self._write_service(tmp_path, {
+            "name": "Svc",
+            "env_var": "KEY",
+            "domain": "https://openrouter.ai",
+            "header": "H",
+            "format": "bearer",
+        })
+        with caplog.at_level(logging.WARNING, logger="user_services"):
+            result = load_proxy_user_services(path=path)
+        assert result == []
+        assert any("invalid domain" in r.message for r in caplog.records)
+
+    def test_domain_with_path_skipped(self, tmp_path, caplog):
+        """Domain with path component is skipped."""
+        path = self._write_service(tmp_path, {
+            "name": "Svc",
+            "env_var": "KEY",
+            "domain": "openrouter.ai/api",
+            "header": "H",
+            "format": "bearer",
+        })
+        with caplog.at_level(logging.WARNING, logger="user_services"):
+            result = load_proxy_user_services(path=path)
+        assert result == []
+        assert any("invalid domain" in r.message for r in caplog.records)
+
     def test_invalid_env_var_skipped(self, tmp_path, caplog):
         """Invalid env_var format skips entry."""
         path = self._write_service(tmp_path, {

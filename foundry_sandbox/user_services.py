@@ -20,6 +20,9 @@ from foundry_sandbox.utils import log_debug, log_warn
 
 __all__ = ["UserService", "UserServiceConfigError", "find_user_services_path", "load_user_services"]
 
+# In-process cache keyed by resolved path.  No TTL or file-mtime
+# invalidation — suitable for short-lived CLI invocations only.
+# Use _clear_cache() in tests to reset between test cases.
 _cache: dict[str, list["UserService"]] = {}
 
 
@@ -29,6 +32,9 @@ def _clear_cache() -> None:
 
 
 _ENV_VAR_RE = re.compile(r"^[A-Z_][A-Z0-9_]*$")
+
+# Domain must be a bare hostname (optionally with dots), no scheme/path/whitespace.
+_DOMAIN_RE = re.compile(r"^[a-zA-Z0-9]([a-zA-Z0-9\-]*[a-zA-Z0-9])?(\.[a-zA-Z0-9]([a-zA-Z0-9\-]*[a-zA-Z0-9])?)*$")
 
 _VALID_HTTP_METHODS = frozenset(
     {"GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS", "HEAD"}
@@ -61,7 +67,7 @@ def find_user_services_path() -> str | None:
 
     Search order:
     1. FOUNDRY_USER_SERVICES_PATH environment variable
-    2. ./config/user-services.yaml (relative to cwd)
+    2. config/user-services.yaml (relative to project root)
 
     Returns:
         Resolved path string, or None if no file found.
@@ -110,6 +116,10 @@ def _validate_service(entry: dict[str, object], index: int) -> UserService:
         )
     if not domain:
         raise UserServiceConfigError(f"{prefix}: 'domain' cannot be empty")
+    if not _DOMAIN_RE.match(domain):
+        raise UserServiceConfigError(
+            f"{prefix}: 'domain' must be a bare hostname (no scheme, path, or whitespace), got '{domain}'"
+        )
     if not header:
         raise UserServiceConfigError(f"{prefix}: 'header' cannot be empty")
     if fmt not in ("bearer", "value"):
@@ -190,7 +200,10 @@ def load_user_services(path: str | None = None) -> list[UserService]:
             f"Expected YAML dict in {resolved}, got {type(data).__name__}"
         )
 
-    # TODO: validate version field for forward-compatibility
+    version = data.get("version")
+    if version is not None and str(version) != "1":
+        log_warn(f"user-services: unknown version '{version}' in {resolved}, attempting to load anyway")
+
     services_data = data.get("services")
     if services_data is None:
         raise UserServiceConfigError(f"Missing 'services' key in {resolved}")
