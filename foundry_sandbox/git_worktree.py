@@ -303,6 +303,15 @@ def create_worktree(
             # No from_branch — try to create worktree directly
             log_step(f"Creating worktree for branch: {branch}")
 
+            # Update the local branch ref to match the remote before
+            # creating the worktree.  Without this, refs/heads/<branch>
+            # stays at the commit from the original bare clone and the
+            # worktree checks out stale code.
+            try:
+                fetch_bare_branch(bare_p, branch)
+            except (RuntimeError, subprocess.CalledProcessError) as e:
+                log_info(f"Fetch failed (may already exist locally): {e}")
+
             if sparse_checkout and working_dir:
                 # Try creating worktree without checkout
                 result = subprocess.run(
