@@ -18,6 +18,8 @@ import yaml
 
 logger = logging.getLogger(__name__)
 
+__all__ = ["ProxyUserService", "load_proxy_user_services"]
+
 _ENV_VAR_RE = re.compile(r"^[A-Z_][A-Z0-9_]*$")
 
 _VALID_HTTP_METHODS = frozenset(
@@ -74,6 +76,7 @@ def load_proxy_user_services(
         logger.warning("user-services: expected dict in %s, got %s", resolved, type(data).__name__)
         return []
 
+    # TODO: validate version field for forward-compatibility
     services_data = data.get("services")
     if not isinstance(services_data, list):
         logger.warning("user-services: missing or invalid 'services' key in %s", resolved)

@@ -18,6 +18,16 @@ import yaml
 
 from foundry_sandbox.utils import log_debug, log_warn
 
+__all__ = ["UserService", "UserServiceConfigError", "find_user_services_path", "load_user_services"]
+
+_cache: dict[str, list["UserService"]] = {}
+
+
+def _clear_cache() -> None:
+    """Clear the load_user_services() result cache (for testing)."""
+    _cache.clear()
+
+
 _ENV_VAR_RE = re.compile(r"^[A-Z_][A-Z0-9_]*$")
 
 _VALID_HTTP_METHODS = frozenset(
@@ -163,6 +173,10 @@ def load_user_services(path: str | None = None) -> list[UserService]:
     if resolved is None:
         return []
 
+    cache_key = str(Path(resolved).resolve())
+    if cache_key in _cache:
+        return _cache[cache_key]
+
     try:
         with open(resolved) as f:
             data = yaml.safe_load(f)
@@ -176,6 +190,7 @@ def load_user_services(path: str | None = None) -> list[UserService]:
             f"Expected YAML dict in {resolved}, got {type(data).__name__}"
         )
 
+    # TODO: validate version field for forward-compatibility
     services_data = data.get("services")
     if services_data is None:
         raise UserServiceConfigError(f"Missing 'services' key in {resolved}")
@@ -189,4 +204,5 @@ def load_user_services(path: str | None = None) -> list[UserService]:
         services.append(_validate_service(entry, i))
 
     log_debug(f"user-services: loaded {len(services)} service(s) from {resolved}")
+    _cache[cache_key] = services
     return services

@@ -55,8 +55,8 @@ class TestAutoDiscovery:
 
         assert result == []
 
-    def test_ignores_example_and_disabled_extensions(self, tmp_path):
-        """Files with .example or .disabled extensions are not discovered."""
+    def test_glob_only_matches_yml_suffix(self, tmp_path):
+        """Files with non-.yml suffixes are excluded by the glob pattern."""
         config = tmp_path / "config"
         config.mkdir()
         (config / "docker-compose.redis.yml").write_text("services: {}")

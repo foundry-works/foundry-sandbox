@@ -513,5 +513,53 @@ class TestUserServiceDataclass:
         assert "EXTRA" not in svc2.methods
 
 
+# ---------------------------------------------------------------------------
+# Schema consistency between CLI-side and proxy-side loaders
+# ---------------------------------------------------------------------------
+
+
+class TestSchemaConsistency:
+    """Ensure foundry_sandbox.user_services and unified-proxy/user_services stay in sync."""
+
+    def test_env_var_regex_matches(self):
+        """_ENV_VAR_RE pattern is identical in both modules."""
+        from foundry_sandbox.user_services import _ENV_VAR_RE as cli_re
+        import user_services as proxy_mod
+
+        assert cli_re.pattern == proxy_mod._ENV_VAR_RE.pattern
+
+    def test_valid_http_methods_match(self):
+        """_VALID_HTTP_METHODS is identical in both modules."""
+        from foundry_sandbox.user_services import _VALID_HTTP_METHODS as cli_methods
+        import user_services as proxy_mod
+
+        assert cli_methods == proxy_mod._VALID_HTTP_METHODS
+
+    def test_default_methods_match(self):
+        """_DEFAULT_METHODS is identical in both modules."""
+        from foundry_sandbox.user_services import _DEFAULT_METHODS as cli_defaults
+        import user_services as proxy_mod
+
+        assert cli_defaults == proxy_mod._DEFAULT_METHODS
+
+    def test_default_paths_match(self):
+        """_DEFAULT_PATHS is identical in both modules."""
+        from foundry_sandbox.user_services import _DEFAULT_PATHS as cli_paths
+        import user_services as proxy_mod
+
+        assert cli_paths == proxy_mod._DEFAULT_PATHS
+
+    def test_dataclass_fields_match(self):
+        """UserService and ProxyUserService have the same field names."""
+        import dataclasses
+
+        from foundry_sandbox.user_services import UserService
+        import user_services as proxy_mod
+
+        cli_names = [f.name for f in dataclasses.fields(UserService)]
+        proxy_names = [f.name for f in dataclasses.fields(proxy_mod.ProxyUserService)]
+        assert cli_names == proxy_names
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])

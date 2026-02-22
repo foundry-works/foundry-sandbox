@@ -592,12 +592,9 @@ def _prepare_allowlist_override(
         delete=False,
     )
     tmp_path = f.name
-    os.chmod(tmp_path, 0o600)
     f.write(override_content)
     f.close()
-    if compose_extras is None:
-        compose_extras = []
-    compose_extras.append(tmp_path)
+    compose_extras = list(compose_extras or []) + [tmp_path]
     return tmp_path, compose_extras
 
 
@@ -656,12 +653,9 @@ def _prepare_user_services_override(
         delete=False,
     )
     tmp_path = f.name
-    os.chmod(tmp_path, 0o600)
     f.write(override_content)
     f.close()
-    if compose_extras is None:
-        compose_extras = []
-    compose_extras.append(tmp_path)
+    compose_extras = list(compose_extras or []) + [tmp_path]
     return tmp_path, compose_extras
 
 

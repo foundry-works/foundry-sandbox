@@ -60,7 +60,7 @@ Each sandbox is a git worktree — create one in seconds, destroy it with zero t
 curl -fsSL https://raw.githubusercontent.com/foundry-works/foundry-sandbox/main/install.sh | bash
 ```
 
-Clones to `~/.foundry-sandbox`, adds the `cast` command, enables tab completion, and builds the Docker image.
+Clones to `~/.foundry-sandbox`, adds the `cast` command, enables tab completion, and builds the Docker image. Also available on [PyPI](https://pypi.org/project/foundry-sandbox/) (`pipx install foundry-sandbox`). See [Getting Started](docs/getting-started.md) for manual install, uninstall, and prerequisites.
 
 **2. Set up credentials**
 
