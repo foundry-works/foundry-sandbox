@@ -253,15 +253,15 @@ def generate_sandbox_subnet(project_name: str) -> tuple[str, str]:
 # ============================================================================
 
 
-def _collect_compose_extras(cli_extras: list[str] | None = None) -> list[str]:
-    """Collect compose extras from auto-discovery, env var, and CLI flag.
+def _collect_compose_extras(extra_paths: list[str] | None = None) -> list[str]:
+    """Collect compose extras from auto-discovery, env var, and caller paths.
 
     Sources are collected in precedence order (later overrides earlier in
     docker-compose merge semantics):
 
     1. Auto-discovered: ``config/docker-compose.*.yml`` (sorted by name)
     2. ``FOUNDRY_COMPOSE_EXTRAS`` env var (colon-separated paths)
-    3. *cli_extras* parameter (from ``--compose-extra`` flag)
+    3. *extra_paths* parameter (additional paths from caller)
 
     All paths are resolved to absolute before validation and deduplication.
     Deduplication preserves the earliest occurrence when the same file is
@@ -272,7 +272,7 @@ def _collect_compose_extras(cli_extras: list[str] | None = None) -> list[str]:
     ``_prepare_*`` functions.
 
     Args:
-        cli_extras: Optional list of paths from the ``--compose-extra`` CLI flag.
+        extra_paths: Optional list of additional compose override file paths.
 
     Returns:
         Deduplicated list of validated absolute paths.
@@ -298,10 +298,10 @@ def _collect_compose_extras(cli_extras: list[str] | None = None) -> list[str]:
             if segment:
                 raw_paths.append((segment, "FOUNDRY_COMPOSE_EXTRAS"))
 
-    # 3. CLI extras (--compose-extra flag)
-    if cli_extras:
-        for cli_path in cli_extras:
-            raw_paths.append((cli_path, "--compose-extra"))
+    # 3. Caller-provided extra paths
+    if extra_paths:
+        for cli_path in extra_paths:
+            raw_paths.append((cli_path, "extra_paths"))
 
     # Resolve, validate, deduplicate
     seen: set[Path] = set()
@@ -320,6 +320,57 @@ def _collect_compose_extras(cli_extras: list[str] | None = None) -> list[str]:
     if result:
         log_debug(f"Compose extras collected: {result}")
 
+    return result
+
+
+def resolve_metadata_compose_extras(metadata: dict[str, object]) -> list[str]:
+    """Resolve compose extras from metadata (relative paths) to absolute paths.
+
+    Paths stored in metadata are relative to the project root.  This function
+    resolves them back to absolute paths, skipping any that no longer exist
+    (with a warning).
+
+    Args:
+        metadata: Sandbox metadata dictionary.
+
+    Returns:
+        List of absolute paths to existing compose extra files.
+    """
+    raw = metadata.get("compose_extras", [])
+    if not isinstance(raw, list):
+        return []
+    project_root = _script_dir()
+    result: list[str] = []
+    for rel_path in raw:
+        if not isinstance(rel_path, str) or not rel_path:
+            continue
+        resolved = (project_root / rel_path).resolve()
+        if resolved.is_file():
+            result.append(str(resolved))
+        else:
+            log_warn(f"Compose extra from metadata not found, skipping: {rel_path}")
+    return result
+
+
+def relativize_compose_extras(paths: list[str]) -> list[str]:
+    """Convert absolute compose extra paths to project-root-relative strings.
+
+    Falls back to the absolute path for any path that is outside the project
+    root.
+
+    Args:
+        paths: List of (possibly absolute) file paths.
+
+    Returns:
+        List of relative path strings (or absolute if outside project root).
+    """
+    project_root = _script_dir()
+    result: list[str] = []
+    for p in paths:
+        try:
+            result.append(str(Path(p).resolve().relative_to(project_root)))
+        except ValueError:
+            result.append(str(Path(p).resolve()))
     return result
 
 
@@ -686,9 +737,9 @@ def compose_up(
         isolate_credentials, repos_dir, sandbox_id, anthropic_base_url,
     )
 
-    # Collect sidecar extras (auto-discovery + env var + CLI flag).
+    # Collect sidecar extras (auto-discovery + env var + caller paths).
     # The _prepare_* functions below will append their temp overrides after.
-    compose_extras = _collect_compose_extras(cli_extras=compose_extras) or None
+    compose_extras = _collect_compose_extras(extra_paths=compose_extras) or None
 
     _compose_overrides: list[str] = []
     try:
@@ -779,8 +830,8 @@ def compose_down(
         env.setdefault("SANDBOX_SUBNET", "10.0.0.0/24")
         env.setdefault("SANDBOX_PROXY_IP", "10.0.0.2")
 
-    # Collect sidecar extras (auto-discovery + env var + CLI flag)
-    compose_extras = _collect_compose_extras(cli_extras=compose_extras) or None
+    # Collect sidecar extras (auto-discovery + env var + caller paths)
+    compose_extras = _collect_compose_extras(extra_paths=compose_extras) or None
 
     compose_cmd = get_compose_command(override_file, isolate_credentials, compose_extras)
     cmd = compose_cmd + ["-p", container, "down"]

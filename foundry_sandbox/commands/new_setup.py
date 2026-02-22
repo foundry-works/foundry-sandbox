@@ -198,13 +198,8 @@ def _new_setup(
         add_ssh_agent_to_override(str(override_file), "")
 
     # Write metadata — store compose extras as relative paths for portability
-    project_root = Path(__file__).resolve().parent.parent.parent
-    relative_extras: list[str] = []
-    for extra in (compose_extras or []):
-        try:
-            relative_extras.append(str(Path(extra).resolve().relative_to(project_root)))
-        except ValueError:
-            relative_extras.append(str(Path(extra).resolve()))
+    from foundry_sandbox.docker import relativize_compose_extras
+    relative_extras = relativize_compose_extras(compose_extras or [])
 
     write_sandbox_metadata(
         name=name,

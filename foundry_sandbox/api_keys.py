@@ -16,7 +16,7 @@ from pathlib import Path
 from typing import Any
 
 from foundry_sandbox.constants import TIMEOUT_LOCAL_CMD
-from foundry_sandbox.utils import log_step
+from foundry_sandbox.utils import log_debug, log_step
 
 
 # ============================================================================
@@ -255,8 +255,8 @@ def get_cli_status() -> list[str]:
             lines.append(
                 f"{svc.name}: {'configured' if configured else 'not configured'}"
             )
-    except Exception:
-        pass  # Don't break status display if user-services.yaml is malformed
+    except Exception as exc:
+        log_debug(f"Could not load user services for status display: {exc}")
 
     return lines
 

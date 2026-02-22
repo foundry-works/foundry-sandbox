@@ -34,6 +34,7 @@ import click
 from foundry_sandbox import api_keys
 from foundry_sandbox.docker import (
     apply_network_restrictions as _apply_network_restrictions_shared,
+    resolve_metadata_compose_extras,
     uses_credential_isolation as _uses_credential_isolation_shared,
 )
 from foundry_sandbox.paths import resolve_ssh_agent_sock
@@ -69,32 +70,6 @@ from foundry_sandbox.validate import validate_existing_sandbox_name
 def _string_value(value: object) -> str:
     """Convert metadata value to a safe string."""
     return "" if value is None else str(value)
-
-
-def _resolve_metadata_compose_extras(metadata: dict[str, object]) -> list[str]:
-    """Resolve compose extras from metadata (relative paths) to absolute paths.
-
-    Paths stored in metadata are relative to the project root. This function
-    resolves them back to absolute paths, skipping any that no longer exist
-    (with a warning).
-
-    Returns:
-        List of absolute paths to existing compose extra files.
-    """
-    raw = metadata.get("compose_extras", [])
-    if not isinstance(raw, list):
-        return []
-    project_root = Path(__file__).resolve().parent.parent.parent
-    result: list[str] = []
-    for rel_path in raw:
-        if not isinstance(rel_path, str) or not rel_path:
-            continue
-        resolved = (project_root / rel_path).resolve()
-        if resolved.is_file():
-            result.append(str(resolved))
-        else:
-            log_warn(f"Compose extra from metadata not found, skipping: {rel_path}")
-    return result
 
 
 def _export_feature_flags(
@@ -554,7 +529,7 @@ def start(ctx: click.Context, name: str, pre_foundry: bool | None, compose_extra
         repos_dir = str(get_repos_dir())
 
         # Merge compose extras: metadata (persisted) + CLI (per-invocation)
-        merged_extras = _resolve_metadata_compose_extras(metadata)
+        merged_extras = resolve_metadata_compose_extras(metadata)
         merged_extras.extend(str(Path(p).resolve()) for p in compose_extras)
 
         compose_up(

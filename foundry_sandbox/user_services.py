@@ -64,7 +64,7 @@ def find_user_services_path() -> str | None:
         log_warn(f"user-services: FOUNDRY_USER_SERVICES_PATH={env_path} does not exist")
         return None
 
-    default_path = os.path.join(os.getcwd(), "config", "user-services.yaml")
+    default_path = str(Path(__file__).resolve().parent.parent / "config" / "user-services.yaml")
     if Path(default_path).is_file():
         log_debug(f"user-services: resolved at {default_path}")
         return default_path

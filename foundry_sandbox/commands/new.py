@@ -724,16 +724,8 @@ def new(
 
         # Save state: last command, preset, last attach
         # Store compose extras as relative paths so metadata stays portable
-        from pathlib import Path as _Path
-        _project_root = _Path(__file__).resolve().parent.parent.parent
-        _relative_extras: list[str] = []
-        for _extra in compose_extras:
-            try:
-                _relative_extras.append(
-                    str(_Path(_extra).resolve().relative_to(_project_root))
-                )
-            except ValueError:
-                _relative_extras.append(str(_Path(_extra).resolve()))
+        from foundry_sandbox.docker import relativize_compose_extras
+        _relative_extras = relativize_compose_extras(list(compose_extras))
 
         _persist_sandbox_state(
             repo_url=repo_url,

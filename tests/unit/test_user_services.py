@@ -89,13 +89,21 @@ class TestFindUserServicesPath:
         assert find_user_services_path() is None
 
     def test_default_path_found(self, tmp_path, monkeypatch):
-        """./config/user-services.yaml is found when no env var set."""
+        """config/user-services.yaml relative to project root is found when no env var set."""
         monkeypatch.delenv("FOUNDRY_USER_SERVICES_PATH", raising=False)
-        monkeypatch.chdir(tmp_path)
-        config_dir = tmp_path / "config"
+        # Create config/user-services.yaml under a fake project root
+        project_root = tmp_path / "project"
+        project_root.mkdir()
+        config_dir = project_root / "config"
         config_dir.mkdir()
         cfg_file = config_dir / "user-services.yaml"
         cfg_file.write_text(yaml.dump({"version": "1", "services": []}))
+        # Simulate __file__ being at project_root/foundry_sandbox/user_services.py
+        fake_file = project_root / "foundry_sandbox" / "user_services.py"
+        fake_file.parent.mkdir(parents=True, exist_ok=True)
+        fake_file.touch()
+        import foundry_sandbox.user_services as _mod
+        monkeypatch.setattr(_mod, "__file__", str(fake_file))
         result = find_user_services_path()
         assert result is not None
         assert result.endswith("user-services.yaml")
@@ -103,7 +111,12 @@ class TestFindUserServicesPath:
     def test_no_file_returns_none(self, tmp_path, monkeypatch):
         """Returns None when no config file exists."""
         monkeypatch.delenv("FOUNDRY_USER_SERVICES_PATH", raising=False)
-        monkeypatch.chdir(tmp_path)
+        # Point __file__ to a temp dir with no config/
+        fake_file = tmp_path / "foundry_sandbox" / "user_services.py"
+        fake_file.parent.mkdir(parents=True, exist_ok=True)
+        fake_file.touch()
+        import foundry_sandbox.user_services as _mod
+        monkeypatch.setattr(_mod, "__file__", str(fake_file))
         assert find_user_services_path() is None
 
 

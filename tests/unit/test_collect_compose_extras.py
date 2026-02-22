@@ -142,23 +142,23 @@ class TestCliExtras:
         monkeypatch.setenv("FOUNDRY_COMPOSE_EXTRAS", str(env_file))
 
         with patch("foundry_sandbox.docker._script_dir", return_value=tmp_path):
-            result = _collect_compose_extras(cli_extras=[str(cli_file)])
+            result = _collect_compose_extras(extra_paths=[str(cli_file)])
 
         assert len(result) == 2
         assert result[0] == str(env_file.resolve())
         assert result[1] == str(cli_file.resolve())
 
     def test_cli_extras_none_is_safe(self, tmp_path):
-        """cli_extras=None is handled gracefully."""
+        """extra_paths=None is handled gracefully."""
         with patch("foundry_sandbox.docker._script_dir", return_value=tmp_path):
-            result = _collect_compose_extras(cli_extras=None)
+            result = _collect_compose_extras(extra_paths=None)
 
         assert result == []
 
     def test_cli_extras_empty_list_is_safe(self, tmp_path):
-        """cli_extras=[] is handled gracefully."""
+        """extra_paths=[] is handled gracefully."""
         with patch("foundry_sandbox.docker._script_dir", return_value=tmp_path):
-            result = _collect_compose_extras(cli_extras=[])
+            result = _collect_compose_extras(extra_paths=[])
 
         assert result == []
 
@@ -180,7 +180,7 @@ class TestDeduplication:
         monkeypatch.setenv("FOUNDRY_COMPOSE_EXTRAS", str(extra))
 
         with patch("foundry_sandbox.docker._script_dir", return_value=tmp_path):
-            result = _collect_compose_extras(cli_extras=[str(extra)])
+            result = _collect_compose_extras(extra_paths=[str(extra)])
 
         assert len(result) == 1
 
@@ -193,7 +193,7 @@ class TestDeduplication:
 
         # Same file via auto-discovery and CLI
         with patch("foundry_sandbox.docker._script_dir", return_value=tmp_path):
-            result = _collect_compose_extras(cli_extras=[str(shared)])
+            result = _collect_compose_extras(extra_paths=[str(shared)])
 
         assert len(result) == 1
         assert result[0] == str(shared.resolve())
@@ -211,7 +211,7 @@ class TestValidation:
         """Non-existent path raises FileNotFoundError with the offending path."""
         with patch("foundry_sandbox.docker._script_dir", return_value=tmp_path):
             with pytest.raises(FileNotFoundError, match="/nonexistent/extra.yml"):
-                _collect_compose_extras(cli_extras=["/nonexistent/extra.yml"])
+                _collect_compose_extras(extra_paths=["/nonexistent/extra.yml"])
 
     def test_directory_path_raises(self, tmp_path):
         """Path pointing to a directory raises FileNotFoundError."""
@@ -220,7 +220,7 @@ class TestValidation:
 
         with patch("foundry_sandbox.docker._script_dir", return_value=tmp_path):
             with pytest.raises(FileNotFoundError, match="some-dir"):
-                _collect_compose_extras(cli_extras=[str(d)])
+                _collect_compose_extras(extra_paths=[str(d)])
 
     def test_error_message_includes_source(self, tmp_path, monkeypatch):
         """Error message includes which source (env var, CLI, etc.) produced the bad path."""
@@ -231,10 +231,10 @@ class TestValidation:
                 _collect_compose_extras()
 
     def test_error_message_includes_source_cli(self, tmp_path):
-        """Error message includes --compose-extra source label."""
+        """Error message includes extra_paths source label."""
         with patch("foundry_sandbox.docker._script_dir", return_value=tmp_path):
-            with pytest.raises(FileNotFoundError, match="--compose-extra"):
-                _collect_compose_extras(cli_extras=["/nonexistent/cli.yml"])
+            with pytest.raises(FileNotFoundError, match="extra_paths"):
+                _collect_compose_extras(extra_paths=["/nonexistent/cli.yml"])
 
 
 # ---------------------------------------------------------------------------
@@ -263,7 +263,7 @@ class TestCombinedSources:
         cli_file.write_text("services: {}")
 
         with patch("foundry_sandbox.docker._script_dir", return_value=tmp_path):
-            result = _collect_compose_extras(cli_extras=[str(cli_file)])
+            result = _collect_compose_extras(extra_paths=[str(cli_file)])
 
         assert len(result) == 3
         assert "auto" in result[0]
