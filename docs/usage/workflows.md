@@ -234,33 +234,22 @@ opencode
 
 ### Setting API Keys
 
-On your host (before creating sandbox):
-
-```bash
-export ANTHROPIC_API_KEY="sk-ant-..."
-export OPENAI_API_KEY="sk-..."
-
-# For Gemini CLI, run: gemini auth
-
-# Now create sandbox
-cast new owner/repo feature
-```
-
-API keys are passed via environment variables. Set them in your shell profile or `.env` file:
+Set API keys on your host before creating a sandbox — they are passed into containers automatically:
 
 ```bash
 export CLAUDE_CODE_OAUTH_TOKEN="..."   # Get via: claude setup-token
-export TAVILY_API_KEY="..."
-# Note: Gemini uses OAuth via ~/.gemini/ (run `gemini auth` on host)
+export ANTHROPIC_API_KEY="sk-ant-..."
+export OPENAI_API_KEY="sk-..."
+# Gemini: run `gemini auth` | Codex: run `codex login`
 ```
 
-See `.env.example` for all supported keys.
+See [Commands: Environment Variables](commands.md#environment-variables) for the full reference.
 
 ---
 
 ## Quick Iterations Workflow
 
-When you need fast feedback loops with AI assistance.
+When you want to try multiple approaches quickly.
 
 ### Create, Work, Destroy Pattern
 

@@ -24,4 +24,4 @@ Security validation tests including red-team scenarios.
 - Test both positive (allowed) and negative (blocked) cases
 - Document threat model for each test
 - Tests should be safe to run (no actual exploitation)
-- Reference `docs/security/sandbox-threats.md` for threat model
+- Reference `docs/security/security-model.md` for threat model

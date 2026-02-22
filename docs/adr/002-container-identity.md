@@ -297,8 +297,8 @@ This explicit signal is more reliable than inferring from IP changes alone.
 
 ## References
 
-- [Security Architecture](../security/security-architecture.md) - Credential isolation and network controls
-- [Network Isolation](../security/network-isolation.md) - Docker network setup and firewall rules
+- [Security Model](../security/security-model.md) - Security pillars, credential isolation, and network controls
+- [Credential Isolation](../security/credential-isolation.md) - Network architecture and firewall rules
 - [Architecture](../architecture.md) - System overview and component interactions
 - `unified-proxy/addons/container_identity.py` — Identity addon implementation
 - `unified-proxy/registry.py` — SQLite-backed container registry

@@ -30,7 +30,7 @@ curl -fsSL https://raw.githubusercontent.com/foundry-works/foundry-sandbox/main/
 This installs to `~/.foundry-sandbox` and:
 - Adds the `cast` alias to your shell
 - Enables tab completion
-- Builds the Docker image (Ubuntu 24.04-based with Node.js, Go, Python, Claude Code, Gemini CLI, Codex CLI, OpenCode, and safety guardrails)
+- Builds the Docker image (Ubuntu 24.04 with Node.js, Go, Python, Claude Code, Gemini CLI, Codex CLI, OpenCode, credential isolation, and network controls)
 
 After installation, reload your shell:
 
@@ -156,23 +156,19 @@ Removes the container, worktree, and associated configs. You'll be prompted to c
 ## Environment Variables
 
 ```bash
-# GitHub - use gh CLI (recommended)
+# GitHub - use gh CLI (recommended) or export token directly
 gh auth login
-# Token is pulled from keychain automatically (GH_TOKEN -> GITHUB_TOKEN)
+export GITHUB_TOKEN="ghp_..."     # required for private repos / push
 
-# Or export token directly (required for private repos or write ops)
-export GITHUB_TOKEN="ghp_..."
+# Claude Code
+export CLAUDE_CODE_OAUTH_TOKEN="..."   # get via: claude setup-token
 
-# Claude Code - get token via: claude setup-token
-export CLAUDE_CODE_OAUTH_TOKEN="..."
-
-# For Gemini CLI, run: gemini auth
-# For Codex CLI, run: codex login
+# Gemini CLI: gemini auth    |  Codex CLI: codex login
 ```
 
-These are passed into containers automatically.
+Credentials are passed into containers automatically. Public repos work without a GitHub token but may be rate limited.
 
-Public repositories can be used without a GitHub token, but requests may be rate limited. Private repos and push operations require a token.
+See [Commands: Environment Variables](usage/commands.md#environment-variables) for the full reference.
 
 ### CI / Non-Interactive Mode
 
@@ -182,10 +178,10 @@ Set `SANDBOX_NONINTERACTIVE=1` to suppress all interactive prompts. When enabled
 SANDBOX_NONINTERACTIVE=1 cast destroy sandbox-name
 ```
 
-## Next Steps
+## See Also
 
-- [Architecture](architecture.md) - Understand how sandboxes work
-- [Security Overview](security/index.md) - Security architecture quick reference
-- [Sandbox Threats](security/sandbox-threats.md) - Learn about the safety guarantees
-- [Commands](usage/commands.md) - Full command reference
-- [Workflows](usage/workflows.md) - Common patterns and recipes
+- [Architecture](architecture.md) — Understand how sandboxes work
+- [Security Overview](security/index.md) — Security architecture quick reference
+- [Security Model](security/security-model.md) — Safety guarantees and threat model
+- [Commands](usage/commands.md) — Full command reference
+- [Workflows](usage/workflows.md) — Common patterns and recipes

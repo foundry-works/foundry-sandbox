@@ -10,7 +10,6 @@ This document explains the technical design of Foundry Sandbox: how components f
 - [Docker Container Design](#docker-container-design)
 - [State Management](#state-management)
 - [Entrypoint Flow](#entrypoint-flow)
-- [Code Organization](#code-organization)
 - [Component Interactions](#component-interactions)
 - [Unified Proxy Architecture](#unified-proxy-architecture)
 
@@ -28,7 +27,7 @@ This document explains the technical design of Foundry Sandbox: how components f
 │  │                                                      │   │
 │  │  ┌──────────────────────────────────────────────┐   │   │
 │  │  │         SECURITY CONTROLS                     │   │   │
-│  │  │   (see docs/security/security-architecture)   │   │   │
+│  │  │   (see docs/security/security-model)            │   │   │
 │  │  │                                               │   │   │
 │  │  │  • Read-only filesystem    (Docker)           │   │   │
 │  │  │  • Network isolation       (Docker/dns/ipt)   │   │   │
@@ -213,88 +212,7 @@ Execute passed command (default: /bin/bash)
 
 Worktrees reference the bare repo by absolute path. Since host and container have different paths, the **host script** (`foundry_sandbox/container_setup.py`) fixes these paths after copying the repos directory—not the container entrypoint.
 
-## Code Organization
-
-```
-foundry-sandbox/
-├── Dockerfile              # Container image definition
-├── docker-compose.yml      # Container runtime config
-├── entrypoint.sh           # Container startup script (user)
-├── entrypoint-root.sh      # Root wrapper (credential isolation)
-├── install.sh              # Installation script
-├── completion.bash         # Bash tab completion
-├── pyproject.toml          # Python package definition (entry point: cast)
-│
-├── foundry_sandbox/        # Python package (orchestration layer)
-│   ├── cli.py              # Click CLI group with alias resolution
-│   ├── _bridge.py          # JSON envelope dispatcher for shell→Python calls
-│   ├── legacy_bridge.py    # Compatibility adapter for _bridge_* commands
-│   ├── constants.py        # Configuration defaults (replaces lib/constants.sh)
-│   ├── config.py           # JSON config I/O utilities
-│   ├── models.py           # Pydantic data models
-│   ├── paths.py            # Path resolution (SandboxPaths)
-│   ├── utils.py            # Logging/formatting helpers
-│   ├── docker.py           # Docker/compose operations
-│   ├── git.py              # Git operations with retry
-│   ├── git_worktree.py     # Worktree management
-│   ├── state.py            # Metadata persistence (JSON, atomic writes)
-│   ├── network.py          # Docker network configuration
-│   ├── proxy.py            # Unified proxy registration
-│   ├── validate.py         # Input validation
-│   ├── credential_setup.py # Container credential provisioning
-│   ├── container_io.py     # Container I/O primitives
-│   ├── container_setup.py  # Container setup orchestration
-│   ├── tool_configs.py     # Tool configuration (Claude, Codex, etc.)
-│   ├── foundry_plugin.py   # Foundry MCP plugin setup
-│   ├── permissions.py      # Workspace permission rules
-│   └── commands/           # Click command implementations
-│       ├── new.py          # cast new
-│       ├── attach.py       # cast attach
-│       ├── list_cmd.py     # cast list
-│       ├── destroy.py      # cast destroy
-│       └── ...             # Other commands
-│
-├── unified-proxy/              # Credential isolation proxy
-│   ├── gateway_base.py         # Shared gateway factory (identity, forwarding, errors)
-│   ├── gateway_middleware.py   # Gateway middleware (identity, metrics, circuit breaker, rate limiter)
-│   ├── gateway.py              # Anthropic API gateway (:9848)
-│   ├── openai_gateway.py       # OpenAI API gateway (:9849)
-│   ├── github_gateway.py       # GitHub API gateway (:9850)
-│   ├── gemini_gateway.py       # Gemini API gateway (:9851)
-│   ├── chatgpt_gateway.py      # ChatGPT/Codex API gateway (:9852)
-│   ├── security_policies.py    # Shared GitHub security policies (gateway + policy engine)
-│   ├── generate_squid_config.py # Squid domain list generator from allowlist.yaml
-│   ├── squid.conf              # Squid forward proxy configuration
-│   ├── addons/                 # mitmproxy addons (MITM-required providers)
-│   │   ├── container_identity.py   # Container identification
-│   │   ├── credential_injector.py  # API credential injection (MITM path)
-│   │   ├── git_proxy.py            # Git protocol handling
-│   │   ├── rate_limiter.py         # Rate limiting
-│   │   ├── circuit_breaker.py      # Resilience
-│   │   ├── policy_engine.py        # Access policies
-│   │   ├── dns_filter.py           # DNS filtering
-│   │   └── metrics.py              # Observability
-│   ├── branch_isolation.py     # Cross-sandbox branch isolation validator
-│   ├── git_operations.py       # Sandboxed git command execution (deny-by-default allowlist)
-│   ├── git_policies.py         # Protected branch enforcement
-│   ├── git_api.py              # Git API TCP server (port 8083)
-│   ├── registry.py             # Container registry (SQLite)
-│   ├── internal_api.py         # Flask API for registration
-│   └── entrypoint.sh           # Proxy startup script
-│
-├── config/                         # Configuration files
-│   ├── allowlist.yaml              # Domain/endpoint allowlist
-│   └── push-file-restrictions.yaml # Push-time file restriction patterns
-│
-└── safety/                         # Security controls
-    ├── sudoers-allowlist           # Sudo command restrictions
-    ├── network-firewall.sh         # iptables rules
-    ├── network-mode                # Network mode switcher
-    ├── proxy-credential-helper     # Git credential helper (proxy)
-    ├── proxy-gitconfig             # Git URL rewriting (proxy)
-    ├── credential-redaction.sh     # Output masking (not security)
-    └── operator-approve            # TTY-based human approval
-```
+For the full directory tree with file-level descriptions, see [Code Organization](development/contributing.md#code-organization) in the contributing guide.
 
 ## Component Interactions
 
@@ -409,15 +327,7 @@ The unified-proxy handles credential isolation, API proxying, and security polic
 
 Sandboxes connect to API gateways via provider-specific `*_BASE_URL` environment variables. Gateways accept plaintext HTTP on the internal Docker network, validate container identity, inject real credentials, and forward to the upstream provider over HTTPS. Responses are streamed back chunk-by-chunk without buffering.
 
-Each gateway is a thin wrapper around `gateway_base.py`, which provides a factory function (`create_gateway_app()`) that builds a fully configured aiohttp application. The per-gateway module specifies the upstream URL, credential loading logic, route table, and optional request hook.
-
-**Middleware stack** (applied to all gateways, outermost first):
-1. `IdentityMiddleware` — Resolves container identity from source IP via the container registry
-2. `MetricsMiddleware` — Records request count and latency (Prometheus, optional)
-3. `CircuitBreakerMiddleware` — Fails fast when upstream is unhealthy (fail-closed: errors return JSON, not pass-through)
-4. `RateLimiterMiddleware` — Per-container, per-upstream token bucket
-
-The GitHub gateway additionally enforces security policies via `security_policies.py` (shared with the mitmproxy policy engine): path normalization, merge blocking, operation blocklist, and body inspection.
+Each gateway is a thin wrapper around `gateway_base.py`, which provides a factory function (`create_gateway_app()`) that builds a fully configured aiohttp application. The per-gateway module specifies the upstream URL, credential loading logic, route table, and optional request hook. All gateways share a middleware stack (identity validation, metrics, circuit breaker, rate limiter) defined in `gateway_middleware.py`. The GitHub gateway additionally enforces security policies — see [Security Model: Credential Isolation](security/security-model.md#credential-isolation) and [Git Safety](security/security-model.md#git-safety) for details.
 
 ### Squid Forward Proxy
 
@@ -430,18 +340,7 @@ Squid handles all non-gateway HTTPS traffic on port 8080. Domain lists are gener
 
 ### Mitmproxy (Conditional)
 
-mitmproxy runs on port 8081 when MITM-required provider credentials are configured or DNS filtering is enabled. It handles TLS interception for providers that lack `*_BASE_URL` env var support. When no MITM providers are configured, no CA certificate is generated.
-
-The mitmproxy addon chain processes requests in order:
-
-1. **container_identity** — Identifies container by source IP, attaches config to request
-2. **policy_engine** — Enforces access policies (evaluated before credentials are injected)
-3. **dns_filter** — Filters DNS queries against allowlist (conditional)
-4. **credential_injector** — Injects API credentials for MITM-required providers
-5. **git_proxy** — Validates git operations, enforces repo authorization and push policies
-6. **rate_limiter** — Per-container, per-upstream rate limiting
-7. **circuit_breaker** — Protects against upstream failures
-8. **metrics** — Records request/response metrics
+mitmproxy runs on port 8081 when MITM-required provider credentials are configured or DNS filtering is enabled. It handles TLS interception for providers that lack `*_BASE_URL` env var support. When no MITM providers are configured, no CA certificate is generated. The addon chain (shown in the diagram above) handles identity resolution, policy enforcement, credential injection, and observability — see [Security Model: Credential Isolation](security/security-model.md#credential-isolation) for policy details.
 
 ### Container Registration
 
@@ -498,9 +397,8 @@ In credential isolation mode, the `.git` directory is hidden from sandboxes (bin
 5. The git API authenticates requests, applies policy checks (force-push blocking, branch deletion blocking, repo authorization), validates branch isolation via `branch_isolation.py`, then executes the real git command against the bare repository
 6. `git_operations.py` uses `fcntl.flock` to serialize concurrent fetch operations per bare repo, preventing corruption from parallel fetches
 
-## Next Steps
+## See Also
 
-- [Security Overview](security/index.md) - Security architecture quick reference
-- [Sandbox Threats](security/sandbox-threats.md) - What we protect against
-- [Security Architecture](security/security-architecture.md) - Defense in depth details
-- [Commands](usage/commands.md) - Full command reference
+- [Security Overview](security/index.md) — Security architecture quick reference
+- [Security Model](security/security-model.md) — Threats, defenses, and hardening
+- [Commands](usage/commands.md) — Full command reference

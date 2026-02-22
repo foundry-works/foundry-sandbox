@@ -175,11 +175,9 @@ entrypoint-root.sh (as root)
 
 ## References
 
-- [Network Isolation Architecture](../security/network-isolation.md) - How DNS fits into broader network security
+- [Credential Isolation](../security/credential-isolation.md) - Network architecture and proxy session management
 - Domain Allowlist - `config/allowlist.yaml`
-- [Credential Isolation](../security/credential-isolation.md) - Proxy architecture and session management
-- [Sandbox Threats](../security/sandbox-threats.md) - Threat model and what we protect against
-- [Security Architecture](../security/security-architecture.md) - Defense in depth overview
+- [Security Model](../security/security-model.md) - Threat model and defense-in-depth overview
 
 ### Implementation Files
 

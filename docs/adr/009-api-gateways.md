@@ -204,5 +204,5 @@ The GitHub gateway enforces security policies via a request hook that runs after
 - `unified-proxy/generate_squid_config.py` — Squid domain list generator
 - `unified-proxy/squid.conf` — Squid configuration
 - [Operations: Gateway Rollback](../operations.md#gateway-rollback-procedures)
-- [Threat Model: Credential Theft](../security/sandbox-threats.md#3-credential-theft)
+- [Threat Model: Credential Theft](../security/security-model.md#credential-isolation)
 - ADR-003: Policy Engine (related access control context)

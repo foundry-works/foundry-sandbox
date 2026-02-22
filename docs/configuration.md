@@ -31,7 +31,7 @@ export TAVILY_API_KEY="..."
 export PERPLEXITY_API_KEY="..."
 ```
 
-See `.env.example` for all supported keys.
+See [Commands: Environment Variables](usage/commands.md#environment-variables) for the full reference, or `.env.example` for a quick template.
 
 ## Config Files
 
@@ -234,3 +234,9 @@ compose_up(
 Each file must exist and be a regular file; non-existent paths raise `FileNotFoundError`. Files are appended as `-f <path>` arguments to the docker compose command in list order, after the base compose file and credential isolation file.
 
 This is an internal API intended for programmatic integration. End users typically configure docker-compose overrides via the standard docker-compose.override.yml mechanism or via other sandboxing features.
+
+## See Also
+
+- [Commands](usage/commands.md) — Full CLI reference and environment variables
+- [Getting Started](getting-started.md) — Installation and first sandbox
+- [Security Model](security/security-model.md) — Push file restrictions and git safety

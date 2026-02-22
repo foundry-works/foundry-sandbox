@@ -1,15 +1,15 @@
 # Foundry Sandbox Documentation
 
-Foundry Sandbox provides ephemeral, isolated development environments for AI-assisted coding. Each sandbox runs in a Docker container with security guardrails that protect your host system, credentials, and git history from accidental damage and supply chain attacks, while still giving AI coding assistants (Claude Code, Gemini CLI, Codex CLI, OpenCode) the tools they need to be productive.
+Foundry Sandbox provides temporary, isolated development environments for AI-assisted coding. Each sandbox runs in a Docker container with security controls that protect your host system, credentials, and git history from accidental damage and supply chain attacks, while still giving AI coding assistants (Claude Code, Gemini CLI, Codex CLI, OpenCode) the tools they need to be productive.
 
 The key insight: AI assistants can hallucinate dangerous commands or act without full context, and malicious dependencies can steal credentials. Sandboxes let them work freely while limiting blast radius.
 
 ## Key Features
 
-- **Ephemeral workspaces** - Each sandbox gets a fresh git worktree; destroy it when done
+- **Temporary workspaces** - Each sandbox gets a fresh git worktree; destroy it when done
 - **Credential isolation** - API keys and tokens never enter the sandbox; injected by proxy at the network level
 - **Git shadow mode** - `.git` hidden from sandboxes; all git operations proxied through authenticated API with policy enforcement
-- **Security guardrails** - Defense in depth with multiple safety layers
+- **Layered security** - Network isolation, credential isolation, read-only filesystem, branch isolation
 - **Pre-installed AI tools** - Claude Code, Gemini CLI, Codex CLI, OpenCode ready to use
 - **Filesystem protection** - Read-only root filesystem; non-root user; writable areas are RAM-backed and reset on restart
 
@@ -43,10 +43,8 @@ claude
 | Document | Description |
 |----------|-------------|
 | [Security Overview](security/index.md) | Security architecture and quick reference |
-| [Sandbox Threats](security/sandbox-threats.md) | AI-as-threat-actor model |
-| [Credential Isolation](security/credential-isolation.md) | Credential isolation threat model |
-| [Security Architecture](security/security-architecture.md) | Security pillars and defense layers |
-| [Network Isolation](security/network-isolation.md) | Network architecture |
+| [Security Model](security/security-model.md) | Threats, defenses, and hardening — organized by pillar |
+| [Credential Isolation](security/credential-isolation.md) | Network architecture, trust boundaries, and threat model |
 
 ### Usage
 

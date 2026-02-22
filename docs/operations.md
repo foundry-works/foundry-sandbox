@@ -143,7 +143,7 @@ docker exec unified-proxy sqlite3 -header -csv /var/lib/unified-proxy/registry.d
 
 ## DNS Configuration
 
-DNS filtering is **enabled by default** for full defense-in-depth security. When enabled:
+DNS filtering is **enabled by default** for layered network security. When enabled:
 
 1. **NXDOMAIN for blocked domains** — Prevents DNS-level reconnaissance
 2. **DNS bypass protection** — Containers cannot query external DNS servers (iptables rules block port 53 to non-proxy destinations)
@@ -164,7 +164,7 @@ Output: `true` (DNS enabled) or empty/false (DNS disabled)
 |---------|-------------|-------------------------|
 | Domain allowlist filtering | DNS + Firewall | Firewall only |
 | NXDOMAIN for blocked domains | Yes | No (upstream DNS resolves) |
-| Defense in depth | Full | Reduced |
+| Filtering layers | Two (DNS + firewall) | One (firewall only) |
 | Latency overhead | +5-20ms | None |
 
 ### Activate DNS Fallback
@@ -211,7 +211,7 @@ docker compose -f docker-compose.credential-isolation.yml up -d unified-proxy
 docker logs unified-proxy 2>&1 | grep "DNS filtering enabled"
 ```
 
-**Security note:** Disabling DNS filtering reduces defense in depth. Use only when necessary for debugging.
+**Security note:** Disabling DNS filtering removes a security layer. Use only when necessary for debugging.
 
 ## Troubleshooting
 
@@ -288,22 +288,7 @@ If p95 > 100ms, consider DNS fallback mode.
 
 **Symptom:** `SSL certificate problem: unable to get local issuer certificate`
 
-**Check 1: Verify CA mounted in sandbox**
-```bash
-docker exec <sandbox-container> ls -la /certs/
-```
-
-**Check 2: Verify environment variables**
-```bash
-docker exec <sandbox-container> printenv | grep -E "(NODE_EXTRA|SSL_CERT|REQUESTS_CA)"
-```
-
-**Check 3: Verify system trust store**
-```bash
-docker exec <sandbox-container> ls /etc/ssl/certs/ | grep mitmproxy
-```
-
-**Resolution:** If CA not found, check `mitm-certs` volume mount.
+See [Certificates: Troubleshooting](certificates.md#troubleshooting) for diagnosis steps and common causes.
 
 ### Git Operations Failing
 

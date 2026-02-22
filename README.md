@@ -134,10 +134,8 @@ cast repeat                                                         # repeat las
 | [Configuration](docs/configuration.md) | API keys, plugins, and config files |
 | [Architecture](docs/architecture.md) | Technical design and diagrams |
 | [Security Overview](docs/security/index.md) | Security architecture quick reference |
-| [Sandbox Threats](docs/security/sandbox-threats.md) | AI-as-threat-actor model |
-| [Security Architecture](docs/security/security-architecture.md) | Security pillars and defense layers |
-| [Credential Isolation](docs/security/credential-isolation.md) | Credential isolation threat model |
-| [Network Isolation](docs/security/network-isolation.md) | Network architecture details |
+| [Security Model](docs/security/security-model.md) | Threats, defenses, and hardening — organized by pillar |
+| [Credential Isolation](docs/security/credential-isolation.md) | Network architecture and threat model |
 | [Operations](docs/operations.md) | Proxy operations runbook |
 | [Observability](docs/observability.md) | Metrics and debugging |
 | [Certificates](docs/certificates.md) | CA certificate management |

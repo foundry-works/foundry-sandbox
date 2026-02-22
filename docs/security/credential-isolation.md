@@ -1,6 +1,22 @@
-# Credential Isolation: Threat Model
+# Credential Isolation
 
-This document defines the security scope, trust boundaries, threats, and explicit design decisions for credential isolation.
+This document covers the credential isolation system: its **network architecture**, **trust boundaries**, **threats**, **defense layers**, and **explicit design decisions**.
+
+## Overview
+
+```
++------------------+     +------------------------------+     +------------------+
+|    Sandbox       |     |       Unified Proxy          |     |  External APIs   |
+|    (dev)         |     |                              |     |  (GitHub, Anthro- |
+|                  |---->|  API Gateways (9848-9852)    |---->|   pic, OpenAI,   |
+|  [placeholders]  |     |  Squid SNI filter (:8080)    |     |   Gemini, etc.)  |
+|                  |     |  mitmproxy (:8081, optional)  |     |                  |
+|                  |     |  DNS filter (:53)            |     |                  |
+|                  |     |  [ALL CREDS]                 |     |                  |
++------------------+     +------------------------------+     +------------------+
+```
+
+The credential isolation system prevents sandbox containers from directly accessing credentials (GitHub tokens, API keys) while still allowing them to perform authenticated operations through a controlled proxy.
 
 ## Scope
 
@@ -13,7 +29,7 @@ This threat model covers the **credential isolation system** - a proxy that:
 
 ### What This Document Does NOT Cover
 
-- General AI sandbox safety (see [sandbox-threats.md](sandbox-threats.md))
+- General AI sandbox safety (see [Security Model](security-model.md))
 - Host-level security (OS hardening, Docker daemon security)
 - Upstream service security (GitHub, Anthropic, OpenAI)
 
@@ -332,6 +348,151 @@ This section documents what IS implemented to address the primary threats.
 
 ---
 
+## Network Security Layers
+
+These layers work together to ensure no bypass path exists for credential exfiltration.
+
+### Layer 1: Internal Network (`internal: true`)
+
+The `credential-isolation` network is configured with `internal: true`, which means:
+- No default gateway to external networks
+- Containers cannot route traffic outside the Docker network
+- All external access must go through explicitly connected services
+
+```yaml
+networks:
+  credential-isolation:
+    driver: bridge
+    internal: true
+```
+
+### Layer 2: Proxy Routing
+
+Outbound traffic is routed through the unified proxy via three mechanisms:
+
+**API Gateways (plaintext HTTP, no MITM):**
+Major providers route through dedicated gateways on the internal Docker network. The sandbox connects via `*_BASE_URL` env vars. Gateways inject real credentials and forward to upstream over HTTPS.
+
+| Gateway | Port | Provider |
+|---------|------|----------|
+| Anthropic | 9848 | `ANTHROPIC_BASE_URL=http://unified-proxy:9848` |
+| OpenAI | 9849 | MITM path (Squid) — `OPENAI_BASE_URL` intentionally unset |
+| GitHub | 9850 | `GITHUB_API_URL=http://unified-proxy:9850` |
+| Gemini | 9851 | `GOOGLE_GEMINI_BASE_URL=http://unified-proxy:9851` |
+| ChatGPT/Codex | 9852 | `CHATGPT_BASE_URL=http://unified-proxy:9852` + TLS on :443 |
+
+**Squid Forward Proxy (SNI-based domain filtering):**
+All other HTTPS traffic routes through `HTTP_PROXY`/`HTTPS_PROXY` pointing to Squid on port 8080. Squid uses SNI splicing to tunnel allowed domains without TLS decryption. MITM-required domains are forwarded to mitmproxy via `cache_peer`. IP literals and unknown domains are denied.
+
+**Git API Server (shadow mode):**
+Git operations in credential isolation mode go through the git API server (port 8083), not the HTTPS proxy. HTTPS git push/fetch credentials are injected via `FOUNDRY_PROXY_GIT_TOKEN` in the proxy's subprocess environment.
+
+```yaml
+environment:
+  - HTTP_PROXY=http://unified-proxy:8080
+  - HTTPS_PROXY=http://unified-proxy:8080
+  - NO_PROXY=localhost,127.0.0.1,unified-proxy,chatgpt.com
+```
+
+### Layer 3: DNS Isolation
+
+DNS is routed through the unified proxy's DNS filter (enabled by default via `PROXY_ENABLE_DNS=true`). The sandbox's `resolv.conf` is configured by `entrypoint-root.sh` to point to unified-proxy, and iptables rules restrict DNS to unified-proxy only.
+
+### Layer 4: iptables Rules (Redundant Filtering)
+
+Additional iptables rules in `safety/network-firewall.sh`:
+
+**Container-level (OUTPUT chain):**
+- Allow traffic to unified-proxy
+- Allow DNS only to unified-proxy
+- Allow traffic to allowlisted domains (resolved at startup)
+- Wildcard mode: open ports 80/443 (security via DNS filtering)
+- Drop all other outbound traffic
+
+**Host-level (DOCKER-USER chain):**
+- Block direct external egress from sandbox subnet
+- Allow DNS only to unified-proxy
+- Processed before Docker's own rules
+
+### Layer 5: CAP_NET_RAW Dropped
+
+Both sandbox and unified-proxy containers drop `CAP_NET_RAW`:
+
+```yaml
+cap_drop:
+  - NET_RAW
+```
+
+This prevents IP spoofing, ARP poisoning, and raw packet sniffing on the Docker bridge network.
+
+---
+
+## Credential Exposure Matrix
+
+| Credential | Unified Proxy | Sandbox |
+|------------|---------------|---------|
+| GITHUB_TOKEN / GH_TOKEN | Yes | No (empty) |
+| ANTHROPIC_API_KEY | Yes | Placeholder |
+| OPENAI_API_KEY | Yes | Placeholder |
+| GOOGLE_API_KEY | Yes | Placeholder |
+| Other API Keys | Yes | Placeholder |
+| FOUNDRY_PROXY_GIT_TOKEN | Yes (subprocess env only) | No (never exposed) |
+
+The unified proxy holds all real credentials. Sandboxes never see real values.
+
+---
+
+## Proof of No Bypass Path
+
+### Direct External Access
+- **Blocked by:** `internal: true` network
+- **Backup:** DOCKER-USER chain drops external egress
+
+### Container-to-Container Snooping
+- **Blocked by:** Separate Docker networks per sandbox project
+- **Backup:** iptables OUTPUT rules, CAP_NET_RAW dropped
+
+### DNS Exfiltration
+- **Blocked by:** DNS routed to unified-proxy only
+- **Backup:** DOCKER-USER chain drops port 53 except to unified-proxy
+
+### Credential Theft from Proxy
+- **Blocked by:** Sandboxes only see placeholder values
+- **Backup:** Real credentials never enter sandbox environment
+
+### Direct GitHub/API Access
+- **Blocked by:** Proxy environment variables enforced
+- **Backup:** Network-level blocking of direct connections
+
+---
+
+## Service Dependencies
+
+```
+unified-proxy ───────> dev (sandbox)
+```
+
+The unified proxy must be healthy before the sandbox starts:
+
+```yaml
+depends_on:
+  unified-proxy:
+    condition: service_healthy
+```
+
+The healthcheck verifies the internal API is responsive via Unix socket:
+
+```yaml
+healthcheck:
+  test: ["CMD", "curl", "-sf", "--unix-socket", "/var/run/proxy/internal.sock", "http://localhost/internal/health"]
+  interval: 5s
+  timeout: 5s
+  retries: 5
+  start_period: 10s
+```
+
+---
+
 ## Attack Scenarios and Responses
 
 ### Scenario 1: Malicious npm Package in Sandbox (Supply Chain Attack)
@@ -378,20 +539,26 @@ This section documents what IS implemented to address the primary threats.
 
 ---
 
-## Security Testing Checklist
+## Verification and Testing
 
-### Network Isolation Verification
+### Network Isolation
 
 ```bash
-# From sandbox: verify cannot reach external directly
+# Check network config
+docker network inspect credential-isolation
+
+# From sandbox: verify direct external access blocked
 curl -v https://github.com 2>&1 | grep -E "(Connection refused|timed out)"
 
-# From sandbox: verify DNS only resolves via unified-proxy
-dig @8.8.8.8 github.com  # Should fail
+# From sandbox: verify proxy-routed access works
+git clone https://github.com/owner/repo.git  # Should work
+
+# From sandbox: verify DNS filtering
+dig @8.8.8.8 github.com  # Should fail (blocked by iptables)
 dig github.com  # Should work (uses unified-proxy DNS)
 ```
 
-### Credential Isolation Verification
+### Credential Isolation
 
 ```bash
 # From sandbox: verify real credentials not exposed
@@ -403,7 +570,7 @@ git clone https://github.com/allowed/repo.git  # Should work
 curl -H "Authorization: Bearer $ANTHROPIC_API_KEY" https://api.anthropic.com/v1/messages  # Should work via proxy
 ```
 
-### Container Registration Verification
+### Container Registration
 
 ```bash
 # From host: verify registration requires Unix socket
@@ -414,7 +581,7 @@ curl -H "Authorization: Bearer $ANTHROPIC_API_KEY" https://api.anthropic.com/v1/
 docker exec <proxy-container> curl -s --unix-socket /var/run/proxy/internal.sock http://localhost/internal/containers
 ```
 
-### CAP_NET_RAW Verification (Supply Chain Protection)
+### CAP_NET_RAW (Supply Chain Protection)
 
 ```bash
 # From sandbox: verify CAP_NET_RAW is dropped
@@ -453,11 +620,20 @@ ping -c 1 unified-proxy
 
 ---
 
-## Related Documentation
+## Configuration Files
 
-- [Network Isolation](network-isolation.md) - Detailed network architecture
-- [Security Architecture](security-architecture.md) - Security pillars and defense layers
-- [Sandbox Threats](sandbox-threats.md) - AI-as-threat-actor model for sandbox safety
+| File | Purpose |
+|------|---------|
+| `docker-compose.credential-isolation.yml` | Service definitions and network config |
+| `safety/network-firewall.sh` | iptables rules for defense-in-depth |
+| `config/allowlist.yaml` | Domain allowlist (single source of truth) |
+| `unified-proxy/` | Unified proxy for all egress traffic |
+
+## See Also
+
+- [Security Model](security-model.md) — Security pillars, threat model, and hardening details
+- [Security Overview](index.md) — Quick reference and architecture diagram
+- [ADR-009: API Gateways](../adr/009-api-gateways.md) — Gateway architecture decision
 
 ---
 
@@ -468,3 +644,4 @@ ping -c 1 unified-proxy
 | 2026-01-31 | 1.0 | Initial threat model for credential isolation gateway |
 | 2026-02-05 | 2.0 | Updated for unified-proxy consolidation: merged gateway + API proxy into single service, replaced session tokens with container registry (SQLite-backed), updated DNS filtering to use integrated mitmproxy DNS mode |
 | 2026-02-08 | 2.1 | Added v0.10-v0.11 features: branch isolation enforcement, protected branch policies, GitHub API endpoint filtering, FOUNDRY_PROXY_GIT_TOKEN injection |
+| 2026-02-22 | 2.2 | Merged network-isolation.md content: network topology, security layers, credential exposure matrix, bypass proof, service dependencies |

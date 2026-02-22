@@ -4,7 +4,7 @@ This document provides a high-level overview of Foundry Sandbox security archite
 
 ## Security Architecture
 
-Foundry Sandbox implements **defense in depth** with multiple security layers:
+Foundry Sandbox implements **layered security** with multiple independent controls:
 
 ```
 +-------------------+     +-------------------+
@@ -38,106 +38,25 @@ Foundry Sandbox implements **defense in depth** with multiple security layers:
 
 ## Reading Guide
 
-- **Quick orientation →** Continue reading this page for a summary of all security properties
-- **Threat model →** [Sandbox Threats](sandbox-threats.md) — what we defend against (AI-as-threat-actor)
-- **Defense implementation →** [Security Architecture](security-architecture.md) — how each control works, with bypass analysis
-- **Deep dives →** [Credential Isolation](credential-isolation.md) and [Network Isolation](network-isolation.md) — detailed threat models for specific subsystems
-- **Hardening →** [Hardening](hardening.md) — input validation, identity controls, network resilience
+- **Quick orientation** — Continue reading this page for a summary of security properties
+- **Security model** — [Security Model](security-model.md) — threats, defenses, and hardening organized by pillar
+- **Credential isolation** — [Credential Isolation](credential-isolation.md) — network architecture, trust boundaries, and threat model
 
 ## Key Security Properties
 
-### Credential Isolation
-
-Real credentials (GitHub tokens, API keys) **never enter sandbox containers**:
-
-- Sandboxes receive placeholder values (`CREDENTIAL_PROXY_PLACEHOLDER`)
-- Real credentials are held by the unified-proxy container
-- The proxy intercepts outbound requests and injects credentials
-- Container registration authenticates sandboxes to the proxy
-
-### Network Isolation
-
-Sandboxes have **restricted network access**:
-
-- Internal Docker network with no default gateway
-- DNS routed through unified-proxy's DNS filter (enabled by default)
-- iptables rules for defense-in-depth
-
-### Filesystem Protection
-
-Container filesystem is **read-only** by default:
-
-- System directories cannot be modified
-- Writable tmpfs mounts for `/tmp`, `/home`
-- Changes do not persist across container restarts
-
-### Branch Isolation
-
-Each sandbox is **restricted to its own git branch**:
-
-- Deny-by-default ref validation on all git commands (checkout, switch, fetch, pull, merge, rebase, cherry-pick)
-- Output filtering hides other sandboxes' branches from `git branch`, `for-each-ref`, `ls-remote`, `show-ref`, and `log --decorate`
-- SHA reachability enforcement validates SHAs are ancestors of allowed branches
-- Protected branch enforcement blocks pushes to main/master/release/production
-
-### Git Safety
-
-Remote git operations are **controlled by the unified proxy**:
-
-- Protected branches — blocks ALL direct pushes to main, master, release/*, and production (not just force pushes)
-- Force-push blocking — non-fast-forward pushes to protected branches are rejected
-- PR operation controls — PR create/comment/review blocked by default; enable with `--allow-pr`
-- GitHub API filtering — dangerous API operations (repo delete, secret access, branch protection changes) are blocked at the network layer
-
-### Operator Approval
-
-Sensitive operations require **human approval**:
-
-- Operator approval required for sensitive operations (TTY-based check)
-- Read-only filesystem prevents destructive filesystem commands
-- Unified proxy can block dangerous git operations like force push
+- **Credential isolation** — Real credentials never enter sandbox containers; the unified proxy injects them into outbound requests. See [Security Model: Credential Isolation](security-model.md#credential-isolation).
+- **Network isolation** — Internal Docker network, DNS filtering, iptables rules, and CAP_NET_RAW dropped. See [Security Model: Network Isolation](security-model.md#network-isolation).
+- **Read-only filesystem** — Container filesystem is read-only by default; writable tmpfs for `/tmp` and `/home`. See [Security Model: Read-only Filesystem](security-model.md#read-only-filesystem).
+- **Branch isolation** — Each sandbox is restricted to its own git branch via deny-by-default ref validation. See [Security Model: Branch Isolation](security-model.md#branch-isolation).
+- **Git safety** — Force-push blocking, protected branches, PR merge prevention, CI/CD file restrictions. See [Security Model: Git Safety](security-model.md#git-safety).
+- **Operator approval** — Sensitive operations require human TTY-based approval. See [Security Model: Operational Controls](security-model.md#operational-controls).
 
 ## Security Documentation
 
 | Document | Description |
 |----------|-------------|
-| [Credential Isolation](credential-isolation.md) | Trust boundaries, threats, and explicit non-requirements for credential isolation |
-| [Network Isolation](network-isolation.md) | Detailed network architecture and isolation proof |
-| [Security Architecture](security-architecture.md) | Security pillars and defense layers |
-| [Sandbox Threats](sandbox-threats.md) | AI-as-threat-actor model for sandbox safety |
-
-## Quick Reference
-
-### Security-Relevant Configuration
-
-| Setting | File | Purpose |
-|---------|------|---------|
-| Network mode | `--network=` flag | Controls network isolation level |
-| Repository allowlist | Container registration | Restricts accessible repositories |
-| Domain allowlist | `config/allowlist.yaml` | Controls allowed outbound domains |
-| Credential injection | `docker-compose.credential-isolation.yml` | Enables credential isolation mode |
-| `--allow-pr` flag | `cast new` option | Controls PR create/comment/review (default: blocked) |
-| Branch identity | Container registration metadata | Restricts git access to sandbox's own branch |
-
-### Network Modes
-
-| Mode | Description | Use Case |
-|------|-------------|----------|
-| `limited` | Allowlist only (default) | Normal development |
-| `host-only` | Local network only | Isolated development |
-| `none` | Loopback only | Maximum isolation |
-
-### Credential Exposure
-
-| Credential | Unified Proxy | Sandbox |
-|------------|---------------|---------|
-| GITHUB_TOKEN / GH_TOKEN | Yes | No (empty) |
-| ANTHROPIC_API_KEY | Yes | Placeholder |
-| OPENAI_API_KEY | Yes | Placeholder |
-| Other API Keys | Yes | Placeholder |
-| FOUNDRY_PROXY_GIT_TOKEN | Yes (subprocess env only) | No (never exposed) |
-
-The unified proxy holds all real credentials and injects them into outbound requests. Sandboxes never receive real tokens.
+| [Security Model](security-model.md) | Threats, defenses, hardening, and accepted risks — organized by security pillar |
+| [Credential Isolation](credential-isolation.md) | Network architecture, trust boundaries, credential exposure matrix, and attack scenarios |
 
 ## Reporting Security Issues
 
@@ -158,3 +77,9 @@ This security model assumes:
 4. **Network isolation works** - Docker networking and iptables are reliable
 
 If any of these assumptions are violated, the security properties may not hold.
+
+## See Also
+
+- [Security Model](security-model.md) — Detailed threats, defenses, and hardening
+- [Credential Isolation](credential-isolation.md) — Network architecture and trust boundaries
+- [Architecture](../architecture.md) — System components and proxy design

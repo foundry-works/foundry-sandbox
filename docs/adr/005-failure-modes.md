@@ -312,7 +312,7 @@ Store sessions in Redis/database external to the proxy.
 ## References
 
 - [docker-compose.credential-isolation.yml](/workspace/docker-compose.credential-isolation.yml) - Healthcheck configuration
-- [Security Architecture](/workspace/docs/security/security-architecture.md) - Security pillars overview
+- [Security Model](/workspace/docs/security/security-model.md) - Security pillars overview
 - [Credential Isolation](/workspace/docs/security/credential-isolation.md) - Credential isolation threat model
 - [entrypoint-root.sh](/workspace/entrypoint-root.sh) - DNS firewall and startup initialization
 - [entrypoint.sh](/workspace/entrypoint.sh) - Sandbox user-level startup

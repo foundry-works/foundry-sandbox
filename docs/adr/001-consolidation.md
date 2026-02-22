@@ -117,6 +117,6 @@ Implement a single **unified-proxy** service that handles all proxy responsibili
 - `unified-proxy/registry.py` — SQLite-backed container registry
 - `unified-proxy/addons/` — mitmproxy addon chain
 - `docker-compose.credential-isolation.yml` — Single-service composition
-- [Security Architecture](../security/security-architecture.md) — Security pillars overview
+- [Security Model](../security/security-model.md) — Security pillars overview
 - [Credential Isolation](../security/credential-isolation.md) — Credential isolation threat model
 - [Architecture](../architecture.md) — System architecture documentation
