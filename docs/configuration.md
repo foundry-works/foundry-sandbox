@@ -137,20 +137,7 @@ warned_patterns:
 warn_action: "log"          # "log" or "reject"
 ```
 
-### Pattern Semantics
-
-| Pattern form | Matching behavior | Example |
-|---|---|---|
-| Ends with `/` | Directory prefix match — blocks any file under that directory (`path.startswith(pattern)`) | `.github/workflows/` blocks `.github/workflows/ci.yml` |
-| Contains `*` or `?` | Glob match via `fnmatch` against both the basename and the full relative path | `requirements-*.txt` matches `requirements-dev.txt` at any depth |
-| Bare name (no `/`, no glob) | Basename match — blocks any file at any depth with that exact name | `Makefile` blocks `Makefile` and `subdir/Makefile` |
-
-### Blocked vs. Warned Patterns
-
-- **`blocked_patterns`** — Always reject the push. No override.
-- **`warned_patterns`** — Behavior depends on `warn_action`:
-  - `"log"` — Log a warning but allow the push (suitable for initial rollout or monitoring)
-  - `"reject"` — Block the push (same as blocked patterns)
+For pattern matching semantics (directory prefix, glob, basename) and the difference between blocked and warned patterns, see [Security Model: Git Safety](security/security-model.md#git-safety).
 
 ### Default Restrictions
 

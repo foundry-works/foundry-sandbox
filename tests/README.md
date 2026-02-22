@@ -298,5 +298,5 @@ test:
 ## See Also
 
 - [Architecture](../docs/architecture.md) - System components
-- [Security](../docs/security/index.md) - Security model
+- [Security Model](../docs/security/security-model.md) - Security model
 - [Operations](../docs/operations.md) - Operational procedures

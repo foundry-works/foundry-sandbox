@@ -2,9 +2,12 @@
 
 ## Status
 
-Accepted
+Completed
 
 Date: 2026-02-11
+
+File has been removed from the repository. All functions have been migrated to
+their Python equivalents in the `foundry_sandbox/` package.
 
 ## Context
 

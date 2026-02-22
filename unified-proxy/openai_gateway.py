@@ -10,18 +10,19 @@ Port allocation:
   :9849  OpenAI gateway   (this module)
   :9850  GitHub gateway    (github_gateway.py)
 
-Perplexity conflict:
-  Perplexity uses OPENAI_BASE_URL via the OpenAI SDK.  If both OpenAI and
-  Perplexity need proxying, they cannot share the same env var.  For now,
-  Perplexity continues to use the MITM path until its SDK adds a dedicated
-  env var.
+Routing:
+  OPENAI_BASE_URL=http://unified-proxy:9849 routes OpenAI SDK traffic
+  through this gateway for fast credential injection (no TLS interception).
 
-Sandbox configuration:
-  OPENAI_BASE_URL is intentionally left unset in sandboxes to avoid
-  conflicting with Codex subscription mode (which routes through
-  chatgpt.com → TLS interception on port 443). OpenAI API-key traffic
-  uses the MITM credential injection path instead of this gateway.
-  This gateway remains available but is not actively routed to.
+  Codex CLI uses a shell wrapper (~/.bashrc codex function) that unsets
+  OPENAI_BASE_URL so subscription mode still routes through chatgpt.com →
+  TLS interception on port 443.  Codex API-key mode falls back to the
+  MITM path (api.openai.com remains in MITM_DOMAINS).
+
+  Perplexity creates its OpenAI client with an explicit base_url, so the
+  OPENAI_BASE_URL env var does not affect it — traffic continues through
+  the MITM path.
+
   OPENAI_API_KEY=CREDENTIAL_PROXY_PLACEHOLDER
 """
 

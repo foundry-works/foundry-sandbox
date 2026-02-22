@@ -236,33 +236,7 @@ The following capabilities were evaluated and **explicitly excluded** from the i
 
 **Decision:** Sandbox containers have CAP_NET_RAW capability dropped via `cap_drop: NET_RAW`.
 
-**Threat Model Rationale:**
-
-1. **Supply Chain Attack Protection**: Malicious npm packages, Python libraries, or other dependencies may contain code that attempts to exploit network-level attacks. By dropping CAP_NET_RAW, we prevent:
-   - IP spoofing (crafting packets with forged source addresses)
-   - ARP poisoning (redirecting traffic via fake ARP replies)
-   - Raw packet sniffing on the Docker bridge network
-
-2. **Defense-in-Depth for Network Isolation**: CAP_NET_RAW is required to craft raw packets that could bypass network controls at Layer 2. Dropping this capability closes this gap.
-
-3. **Container Registration Protection**: Without CAP_NET_RAW, an attacker cannot:
-   - Spoof the source IP to bypass container IP binding
-   - Sniff unencrypted traffic on the bridge network
-   - Perform ARP spoofing to redirect proxy traffic
-
-4. **Minimal Operational Impact**: The only tools affected are:
-   - `ping` / `traceroute` (ICMP requires raw sockets)
-   - Low-level network debugging tools
-   These are rarely needed in AI coding sandboxes.
-
-**Attack Vectors Blocked:**
-
-| Attack | Mechanism | Protection |
-|--------|-----------|------------|
-| IP Spoofing | CAP_NET_RAW + raw packets | Blocked - cannot create raw sockets |
-| ARP Poisoning | Craft ARP replies | Blocked - cannot create raw sockets |
-| Packet Sniffing | Raw sockets on bridge | Blocked - cannot create raw sockets |
-| Registration Hijacking | Spoof container IP | Blocked - IP spoofing prevented |
+**Rationale:** Dropping CAP_NET_RAW prevents IP spoofing, ARP poisoning, and raw packet sniffing — attacks that could bypass network isolation and container registration IP binding. This protects against supply chain attacks (malicious packages attempting L2 network exploits) with minimal operational impact (only `ping`/`traceroute` are affected). See [Security Model: Network Isolation](security-model.md#network-isolation) for the full defense layer breakdown.
 
 ### Mutual TLS (mTLS) for Internal Traffic - NOT IMPLEMENTED
 
@@ -296,96 +270,29 @@ The following capabilities were evaluated and **explicitly excluded** from the i
 
 ## Defense Layers
 
-This section documents what IS implemented to address the primary threats.
+The credential isolation system relies on five defense layers:
 
-### Layer 1: Network Isolation
+1. **Network isolation** — Internal Docker network, CAP_NET_RAW dropped, DNS filtering, iptables rules
+2. **Container registration** — SQLite-backed registry with IP binding, explicit unregistration, Unix socket-only API
+3. **Credential proxying** — Placeholder values in sandbox, real credentials injected by proxy at request time
+4. **Request validation** — Domain allowlisting, git operation filtering, branch isolation, protected branches, rate limiting
+5. **Audit and monitoring** — Request logging, sensitive data filtering, container lifecycle logging
 
-| Control | Implementation | Threat Addressed |
-|---------|----------------|------------------|
-| Internal network | `internal: true` on Docker network | Direct external access |
-| CAP_NET_RAW dropped | `cap_drop: NET_RAW` on both sandbox and proxy | L2 attacks, IP spoofing, ARP poisoning |
-| DNS isolation | DNS routed through unified-proxy DNS filter (enabled by default) | DNS exfiltration |
-| iptables rules | `safety/network-firewall.sh` | Defense-in-depth for network controls |
-
-### Layer 2: Container Registration
-
-| Control | Implementation | Threat Addressed |
-|---------|----------------|------------------|
-| Container registry | SQLite-backed registry (`registry.py`) | Container identity management |
-| IP binding | Registrations bound to container IP | Registration reuse from other IPs |
-| Explicit unregistration | Registrations removed on sandbox destroy | Stale registration abuse |
-| Internal API | Unix socket only (`/var/run/proxy/internal.sock`) | Unauthorized registration |
-
-### Layer 3: Credential Proxying
-
-| Control | Implementation | Threat Addressed |
-|---------|----------------|------------------|
-| Git credential injection | Unified proxy injects GITHUB_TOKEN for git operations | Token exposure in sandbox |
-| API credential injection | Unified proxy injects API keys for HTTP/HTTPS requests | API key exposure in sandbox |
-| Placeholder values | Sandbox sees `CREDENTIAL_PROXY_PLACEHOLDER` | Environment variable scraping |
-| FOUNDRY_PROXY_GIT_TOKEN injection | Proxy injects token into subprocess env for push/fetch | Git credential exposure in sandbox |
-| Policy engine | Addon chain enforces per-request policy | Unauthorized API access |
-
-### Layer 4: Request Validation
-
-| Control | Implementation | Threat Addressed |
-|---------|----------------|------------------|
-| Domain allowlisting | DNS-level + policy engine domain restrictions | Data exfiltration |
-| Git operation filtering | `git_proxy.py` addon blocks dangerous operations | Force push, history rewriting |
-| Branch isolation | `branch_isolation.py` enforces per-sandbox branch access | Cross-sandbox branch access |
-| Protected branch enforcement | `git_policies.py` blocks pushes to main/master/release/production | Protected branch modification |
-| GitHub API endpoint filtering | `security_policies.py` blocks dangerous API operations | Repo deletion, secret access, unsafe PR operations |
-| Rate limiting | `rate_limiter.py` addon | Resource exhaustion |
-| Circuit breaker | `circuit_breaker.py` addon | Cascading failures |
-
-### Layer 5: Audit and Monitoring
-
-| Control | Implementation | Threat Addressed |
-|---------|----------------|------------------|
-| Request logging | All proxy requests logged via `metrics.py` addon | Incident investigation |
-| Sensitive data filtering | Tokens filtered from logs | Log-based credential exposure |
-| Container lifecycle logging | Registration create/destroy logged | Registration abuse detection |
+Each layer is described in detail in [Security Model](security-model.md) under the corresponding pillar.
 
 ---
 
 ## Network Security Layers
 
-These layers work together to ensure no bypass path exists for credential exfiltration.
+Network isolation is enforced through five layers: internal Docker networking, proxy routing, DNS isolation, iptables rules, and CAP_NET_RAW dropped. See [Security Model: Network Isolation](security-model.md#network-isolation) for the full breakdown.
 
-### Layer 1: Internal Network (`internal: true`)
-
-The `credential-isolation` network is configured with `internal: true`, which means:
-- No default gateway to external networks
-- Containers cannot route traffic outside the Docker network
-- All external access must go through explicitly connected services
-
-```yaml
-networks:
-  credential-isolation:
-    driver: bridge
-    internal: true
-```
-
-### Layer 2: Proxy Routing
+### Proxy Routing
 
 Outbound traffic is routed through the unified proxy via three mechanisms:
 
-**API Gateways (plaintext HTTP, no MITM):**
-Major providers route through dedicated gateways on the internal Docker network. The sandbox connects via `*_BASE_URL` env vars. Gateways inject real credentials and forward to upstream over HTTPS.
-
-| Gateway | Port | Provider |
-|---------|------|----------|
-| Anthropic | 9848 | `ANTHROPIC_BASE_URL=http://unified-proxy:9848` |
-| OpenAI | 9849 | MITM path (Squid) — `OPENAI_BASE_URL` intentionally unset |
-| GitHub | 9850 | `GITHUB_API_URL=http://unified-proxy:9850` |
-| Gemini | 9851 | `GOOGLE_GEMINI_BASE_URL=http://unified-proxy:9851` |
-| ChatGPT/Codex | 9852 | `CHATGPT_BASE_URL=http://unified-proxy:9852` + TLS on :443 |
-
-**Squid Forward Proxy (SNI-based domain filtering):**
-All other HTTPS traffic routes through `HTTP_PROXY`/`HTTPS_PROXY` pointing to Squid on port 8080. Squid uses SNI splicing to tunnel allowed domains without TLS decryption. MITM-required domains are forwarded to mitmproxy via `cache_peer`. IP literals and unknown domains are denied.
-
-**Git API Server (shadow mode):**
-Git operations in credential isolation mode go through the git API server (port 8083), not the HTTPS proxy. HTTPS git push/fetch credentials are injected via `FOUNDRY_PROXY_GIT_TOKEN` in the proxy's subprocess environment.
+- **API Gateways** — Major providers (Anthropic :9848, GitHub :9850, Gemini :9851, ChatGPT/Codex :9852) route through dedicated gateways that inject credentials and forward to upstream over HTTPS. See [Architecture: API Gateways](../architecture.md#api-gateways) for ports and details.
+- **Squid Forward Proxy** — All other HTTPS traffic routes through Squid on port 8080 (SNI-based domain filtering). MITM-required domains are forwarded to mitmproxy via `cache_peer`.
+- **Git API Server** — Git operations go through the git API server (port 8083) with HMAC authentication. HTTPS push/fetch credentials are injected via `FOUNDRY_PROXY_GIT_TOKEN`.
 
 ```yaml
 environment:
@@ -393,37 +300,6 @@ environment:
   - HTTPS_PROXY=http://unified-proxy:8080
   - NO_PROXY=localhost,127.0.0.1,unified-proxy,chatgpt.com
 ```
-
-### Layer 3: DNS Isolation
-
-DNS is routed through the unified proxy's DNS filter (enabled by default via `PROXY_ENABLE_DNS=true`). The sandbox's `resolv.conf` is configured by `entrypoint-root.sh` to point to unified-proxy, and iptables rules restrict DNS to unified-proxy only.
-
-### Layer 4: iptables Rules (Redundant Filtering)
-
-Additional iptables rules in `safety/network-firewall.sh`:
-
-**Container-level (OUTPUT chain):**
-- Allow traffic to unified-proxy
-- Allow DNS only to unified-proxy
-- Allow traffic to allowlisted domains (resolved at startup)
-- Wildcard mode: open ports 80/443 (security via DNS filtering)
-- Drop all other outbound traffic
-
-**Host-level (DOCKER-USER chain):**
-- Block direct external egress from sandbox subnet
-- Allow DNS only to unified-proxy
-- Processed before Docker's own rules
-
-### Layer 5: CAP_NET_RAW Dropped
-
-Both sandbox and unified-proxy containers drop `CAP_NET_RAW`:
-
-```yaml
-cap_drop:
-  - NET_RAW
-```
-
-This prevents IP spoofing, ARP poisoning, and raw packet sniffing on the Docker bridge network.
 
 ---
 
@@ -439,30 +315,6 @@ This prevents IP spoofing, ARP poisoning, and raw packet sniffing on the Docker 
 | FOUNDRY_PROXY_GIT_TOKEN | Yes (subprocess env only) | No (never exposed) |
 
 The unified proxy holds all real credentials. Sandboxes never see real values.
-
----
-
-## Proof of No Bypass Path
-
-### Direct External Access
-- **Blocked by:** `internal: true` network
-- **Backup:** DOCKER-USER chain drops external egress
-
-### Container-to-Container Snooping
-- **Blocked by:** Separate Docker networks per sandbox project
-- **Backup:** iptables OUTPUT rules, CAP_NET_RAW dropped
-
-### DNS Exfiltration
-- **Blocked by:** DNS routed to unified-proxy only
-- **Backup:** DOCKER-USER chain drops port 53 except to unified-proxy
-
-### Credential Theft from Proxy
-- **Blocked by:** Sandboxes only see placeholder values
-- **Backup:** Real credentials never enter sandbox environment
-
-### Direct GitHub/API Access
-- **Blocked by:** Proxy environment variables enforced
-- **Backup:** Network-level blocking of direct connections
 
 ---
 
@@ -495,47 +347,14 @@ healthcheck:
 
 ## Attack Scenarios and Responses
 
-### Scenario 1: Malicious npm Package in Sandbox (Supply Chain Attack)
+| Scenario | Attack | Outcome |
+|----------|--------|---------|
+| **Supply chain** (malicious npm package) | Package reads env vars, attempts direct HTTPS, DNS exfiltration, raw packet crafting | Gets placeholder values only; all exfiltration paths blocked by network isolation, DNS filter, and CAP_NET_RAW dropped |
+| **AI token probing** | AI-generated code searches filesystem and memory for tokens | Finds only placeholder values — real credentials never enter the sandbox |
+| **Lateral movement** | Compromised Sandbox A attempts to reach Sandbox B via direct connection, ARP/IP spoofing, or DNS rebinding | Blocked by separate isolated networks, CAP_NET_RAW dropped, and DNS filter |
+| **Registration theft** | Attacker obtains registration details, attempts reuse from different location | Rejected by IP binding; registrations removed on destroy; new registration requires orchestrator (Unix socket) |
 
-**Attack:** User installs npm package that attempts to read environment variables and exfiltrate credentials.
-
-**Response:**
-1. Package reads `ANTHROPIC_API_KEY` -> gets `CREDENTIAL_PROXY_PLACEHOLDER`
-2. Package attempts direct HTTPS to api.anthropic.com -> blocked by network isolation
-3. Package attempts DNS exfiltration -> blocked by DNS filter
-4. Package attempts raw packet crafting to bypass network controls -> blocked by CAP_NET_RAW dropped
-5. Attack fails, credentials remain secure
-
-### Scenario 2: AI-Generated Code Probes for Tokens
-
-**Attack:** AI generates code that searches filesystem and memory for tokens.
-
-**Response:**
-1. Filesystem search finds only placeholder environment variables
-2. No real credentials exist anywhere in the sandbox
-3. Exfiltration attempts get placeholder values, not real secrets
-4. Attack fails - credentials never entered the sandbox
-
-### Scenario 3: Compromised Container Attempts Lateral Movement
-
-**Attack:** Attacker gains shell in Sandbox A, attempts to attack Sandbox B.
-
-**Response:**
-1. Direct network connection to Sandbox B -> blocked by separate isolated networks per project
-2. ARP spoofing to intercept Sandbox B traffic -> blocked by CAP_NET_RAW dropped (cannot create raw sockets)
-3. IP spoofing to impersonate Sandbox B -> blocked by CAP_NET_RAW dropped
-4. DNS rebinding to redirect Sandbox B -> blocked by unified-proxy DNS filter
-5. Attack fails, Sandbox B remains isolated
-
-### Scenario 4: Container Registration Theft and Reuse
-
-**Attack:** Attacker obtains container registration details, attempts to use from different location.
-
-**Response:**
-1. Attacker uses registration from different IP -> rejected by IP binding
-2. Attacker waits for registration to expire -> registration removed on sandbox destroy
-3. Attacker attempts to create new registration -> requires orchestrator access (Unix socket only)
-4. Attack fails, IP binding prevents registration reuse
+See [Security Model](security-model.md) for the full defense layer breakdown behind each outcome.
 
 ---
 
@@ -632,7 +451,6 @@ ping -c 1 unified-proxy
 ## See Also
 
 - [Security Model](security-model.md) — Security pillars, threat model, and hardening details
-- [Security Overview](index.md) — Quick reference and architecture diagram
 - [ADR-009: API Gateways](../adr/009-api-gateways.md) — Gateway architecture decision
 
 ---
@@ -645,3 +463,4 @@ ping -c 1 unified-proxy
 | 2026-02-05 | 2.0 | Updated for unified-proxy consolidation: merged gateway + API proxy into single service, replaced session tokens with container registry (SQLite-backed), updated DNS filtering to use integrated mitmproxy DNS mode |
 | 2026-02-08 | 2.1 | Added v0.10-v0.11 features: branch isolation enforcement, protected branch policies, GitHub API endpoint filtering, FOUNDRY_PROXY_GIT_TOKEN injection |
 | 2026-02-22 | 2.2 | Merged network-isolation.md content: network topology, security layers, credential exposure matrix, bypass proof, service dependencies |
+| 2026-02-22 | 2.3 | Deduplicated defense layers, network security layers, attack scenarios, and CAP_NET_RAW section — replaced with cross-references to security-model.md |

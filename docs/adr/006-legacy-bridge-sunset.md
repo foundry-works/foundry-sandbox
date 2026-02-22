@@ -2,9 +2,13 @@
 
 ## Status
 
-Accepted
+Completed
 
 Date: 2025-02-10
+
+Removal completed. All bridge infrastructure (`_bridge.py`, `legacy_bridge.py`,
+per-module `bridge_main()` blocks) has been deleted. No shell scripts remain
+under `lib/`.
 
 ## Context
 

@@ -111,9 +111,9 @@ PROVIDER_MAP = {
     # which handles credential injection and HTTPS forwarding.
     # See unified-proxy/gateway.py.
 
-    # OpenAI: restored to MITM path. OPENAI_BASE_URL is intentionally unset
-    # in sandboxes to avoid conflicting with Codex subscription mode (which
-    # routes through chatgpt.com). API-key traffic uses the MITM path.
+    # OpenAI: MITM fallback for Codex CLI (wrapper unsets OPENAI_BASE_URL).
+    # Primary OpenAI SDK traffic routes through the gateway (:9849).
+    # This entry is retained so Codex API-key mode still works via MITM.
     "api.openai.com": {
         "header": "Authorization",
         "env_var": "OPENAI_API_KEY",

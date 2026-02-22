@@ -37,8 +37,8 @@ logger = get_logger(__name__)
 # addons/credential_injector.py.  If you add a new MITM provider there,
 # add its domain(s) here too so Squid routes them through mitmproxy.
 MITM_DOMAINS = [
-    # OpenAI: restored to MITM path (OPENAI_BASE_URL unset to avoid
-    # conflicting with Codex subscription mode)
+    # OpenAI: MITM fallback for Codex CLI (wrapper unsets OPENAI_BASE_URL).
+    # Primary SDK traffic routes through the gateway (:9849).
     "api.openai.com",
     # Gemini / Google AI
     # NOTE: generativelanguage.googleapis.com API-key traffic now routes

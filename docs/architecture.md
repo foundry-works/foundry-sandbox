@@ -399,6 +399,5 @@ In credential isolation mode, the `.git` directory is hidden from sandboxes (bin
 
 ## See Also
 
-- [Security Overview](security/index.md) — Security architecture quick reference
 - [Security Model](security/security-model.md) — Threats, defenses, and hardening
 - [Commands](usage/commands.md) — Full command reference

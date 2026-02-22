@@ -234,16 +234,7 @@ opencode
 
 ### Setting API Keys
 
-Set API keys on your host before creating a sandbox — they are passed into containers automatically:
-
-```bash
-export CLAUDE_CODE_OAUTH_TOKEN="..."   # Get via: claude setup-token
-export ANTHROPIC_API_KEY="sk-ant-..."
-export OPENAI_API_KEY="sk-..."
-# Gemini: run `gemini auth` | Codex: run `codex login`
-```
-
-See [Commands: Environment Variables](commands.md#environment-variables) for the full reference.
+Set API keys on your host before creating a sandbox — they are passed into containers automatically. See [Commands: Environment Variables](commands.md#environment-variables) for the full reference.
 
 ---
 

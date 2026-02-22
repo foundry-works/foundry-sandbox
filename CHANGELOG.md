@@ -452,7 +452,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Container escape attempts (mounts, sockets, cgroups)
   - Social engineering defense tests
 - Security documentation reorganization:
-  - `docs/security/index.md` - Security overview and quick reference
+  - `docs/security/security-model.md` - Security model (consolidated from former index.md)
   - `docs/security/credential-isolation.md` - Credential isolation threat model
   - `docs/security/sandbox-threats.md` - Sandbox threat model and attack taxonomy
   - `docs/security/security-architecture.md` - Defense-in-depth architecture

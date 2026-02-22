@@ -4,7 +4,7 @@ Mitmproxy CA certificate management for HTTPS interception in credential isolati
 
 ## How It Works
 
-When MITM-required provider credentials are configured (Gemini, Tavily, Semantic Scholar, Perplexity, Zhipu), the unified proxy generates a CA certificate and uses it to intercept HTTPS traffic for credential injection. Major providers (Anthropic, OpenAI, GitHub) route through plaintext HTTP gateways and do not require MITM or CA trust.
+When MITM-required provider credentials are configured (see [Architecture: Mitmproxy](architecture.md#mitmproxy-conditional) for the current list), the unified proxy generates a CA certificate and uses it to intercept HTTPS traffic for credential injection. Major providers (Anthropic, OpenAI, GitHub) route through plaintext HTTP gateways and do not require MITM or CA trust.
 
 ```
 unified-proxy                          sandbox container
@@ -82,5 +82,5 @@ curl -v https://api.github.com 2>&1 | head -20
 ## See Also
 
 - [Architecture](architecture.md) - Unified proxy architecture
-- [Security](security/index.md) - Security model
+- [Security Model](security/security-model.md) - Security model
 - [Operations](operations.md) - Certificate troubleshooting in operations context

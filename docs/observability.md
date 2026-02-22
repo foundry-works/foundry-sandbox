@@ -101,7 +101,7 @@ clear_context()
 
 ## Recommended Alerts
 
-> These alerts are relevant for team or multi-tenant deployments where Prometheus is configured. For single-user setups, the debugging workflows below are typically sufficient.
+> These alerts are relevant for team or multi-tenant deployments where Prometheus is configured. For single-user setups, the [troubleshooting procedures](operations.md#troubleshooting) are typically sufficient.
 
 | Alert | Expression | Severity | Trigger |
 |-------|-----------|----------|---------|
@@ -111,76 +111,7 @@ clear_context()
 | High latency | `p95 request duration > 5s` | Warning | Sustained for 5m |
 | Slow DNS | `p95 DNS duration > 100ms` | Warning | Sustained for 5m |
 
-## Debugging Workflows
-
-### Request Tracing
-
-1. **Find request ID** from client logs or error message
-2. **Search proxy logs** by request_id:
-   ```bash
-   docker logs unified-proxy 2>&1 | grep "req-abc123"
-   ```
-3. **Follow the flow** through addons:
-   - container_identity (identification)
-   - credential_injector (credential injection)
-   - rate_limiter (throttling decision)
-   - circuit_breaker (upstream health)
-
-### Circuit Breaker Investigation
-
-1. **Check circuit state**:
-   ```bash
-   curl -s http://unified-proxy:8080/internal/metrics | grep circuit_breaker
-   ```
-2. **Review failure logs**:
-   ```bash
-   docker logs unified-proxy 2>&1 | grep -i "circuit\|failure" | tail -50
-   ```
-3. **Check upstream health**:
-   ```bash
-   curl -v https://api.anthropic.com/health
-   ```
-
-### Rate Limit Investigation
-
-1. **Check remaining tokens**:
-   ```bash
-   curl -s http://unified-proxy:8080/internal/metrics | grep rate_limit
-   ```
-2. **Review rate limit logs**:
-   ```bash
-   docker logs unified-proxy 2>&1 | grep "rate limit" | tail -20
-   ```
-3. **Identify high-volume container**:
-   ```promql
-   topk(5, sum by (container_id) (rate(proxy_requests_total[5m])))
-   ```
-
-### DNS Resolution Issues
-
-1. **Check DNS metrics**:
-   ```bash
-   curl -s http://unified-proxy:8080/internal/metrics | grep dns
-   ```
-2. **Review blocked queries**:
-   ```bash
-   docker logs unified-proxy 2>&1 | grep "dns.*blocked\|NXDOMAIN"
-   ```
-3. **Verify allowlist** includes the domain
-
-### Container Identity Issues
-
-1. **Check registration**:
-   ```bash
-PROXY_CONTAINER="sandbox-<sandbox-name>-unified-proxy-1"
-docker exec "$PROXY_CONTAINER" curl -s --unix-socket /var/run/proxy/internal.sock \
-  http://localhost/internal/containers
-   ```
-2. **Review identity logs**:
-   ```bash
-   docker logs unified-proxy 2>&1 | grep "identity\|unknown.*ip"
-   ```
-3. **Verify container IP** matches registration
+For debugging procedures (request tracing, circuit breaker investigation, rate limiting, DNS resolution, container identity), see [Operations: Troubleshooting](operations.md#troubleshooting).
 
 ## Metrics Endpoint
 

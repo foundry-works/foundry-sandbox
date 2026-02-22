@@ -147,7 +147,7 @@ IP literals (dotted decimal, IPv6 brackets, octal, hex, integer) are blocked by 
 
 mitmproxy startup is gated behind `ENABLE_MITM_FALLBACK` and provider credential detection. When no MITM-required provider credentials are configured, mitmproxy runs only for DNS filtering (if enabled) and does not generate a CA certificate.
 
-MITM-required providers: Tavily, Semantic Scholar, Perplexity, Zhipu, and GitHub OAuth/git credential flows. Gemini traffic (both API-key and OAuth) routes through the gateway (:9851). ChatGPT/Codex subscription-mode traffic routes through the gateway via transparent TLS interception (:443) — `/etc/hosts` redirects `chatgpt.com` to the proxy IP and `NO_PROXY` bypasses Squid.
+MITM-required providers: Tavily, Semantic Scholar, Perplexity, Zhipu, and GitHub OAuth/git credential flows. OpenAI SDK traffic primarily routes through the gateway (:9849) via `OPENAI_BASE_URL`; the MITM entry for `api.openai.com` is retained as a fallback for Codex CLI (which uses a shell wrapper that unsets `OPENAI_BASE_URL`). Gemini traffic (both API-key and OAuth) routes through the gateway (:9851). ChatGPT/Codex subscription-mode traffic routes through the gateway via transparent TLS interception (:443) — `/etc/hosts` redirects `chatgpt.com` to the proxy IP and `NO_PROXY` bypasses Squid.
 
 ### GitHub gateway: security policy enforcement
 

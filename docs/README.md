@@ -42,8 +42,7 @@ claude
 
 | Document | Description |
 |----------|-------------|
-| [Security Overview](security/index.md) | Security architecture and quick reference |
-| [Security Model](security/security-model.md) | Threats, defenses, and hardening — organized by pillar |
+| [Security Model](security/security-model.md) | Threats, defenses, hardening, and security assumptions — organized by pillar |
 | [Credential Isolation](security/credential-isolation.md) | Network architecture, trust boundaries, and threat model |
 
 ### Usage

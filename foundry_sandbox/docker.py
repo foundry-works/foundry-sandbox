@@ -149,10 +149,10 @@ def setup_credential_placeholders() -> CredentialPlaceholders:
     # Tavily: Set flag if API key is available on host
     enable_tavily = "1" if os.environ.get("TAVILY_API_KEY") else "0"
 
-    # OpenAI: Never set OPENAI_BASE_URL. Codex subscription mode needs chatgpt.com
-    # routing (TLS interception on port 443), and OPENAI_BASE_URL overrides it.
-    # OpenAI API-key traffic uses the MITM path (like Perplexity).
-    openai_base_url = ""
+    # OpenAI: route SDK traffic through the gateway for fast credential injection.
+    # Codex CLI uses a shell wrapper that unsets OPENAI_BASE_URL so subscription
+    # mode still routes through chatgpt.com → TLS interception on port 443.
+    openai_base_url = "http://unified-proxy:9849"
 
     return CredentialPlaceholders(
         sandbox_anthropic_api_key=anthropic_key,

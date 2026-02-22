@@ -2,6 +2,38 @@
 
 This document defines the complete security model: **what threats exist**, **how each defense works**, and **hardening details** — organized by security pillar so each concept appears once.
 
+## Trust Boundary Architecture
+
+```
++-------------------+     +-------------------+
+|   AI Assistant    |     |    Orchestrator   |
+|   (untrusted)     |     |    (trusted)      |
++--------+----------+     +--------+----------+
+         |                         |
+         v                         v
++---------------------------+    +------------------------------+
+|    SANDBOX CONTAINER      |    |    UNIFIED PROXY CONTAINER   |
+|                           |    |    (separate container)      |
+|  +--------------------+   |    |                              |
+|  | Network Isolation  |   |    |  [ALL CREDENTIALS:          |
+|  +--------------------+   |    |   GITHUB_TOKEN, API_KEYS]   |
+|  +--------------------+   |    |                              |
+|  | .git hidden        |   |    |  • Credential injection     |
+|  +--------------------+   |    |  • Git API server (:8083)   |
+|  +--------------------+   |    |  • DNS filter (mitmproxy)   |
+|  | No real creds      |   |    |  • Policy engine            |
+|  +--------------------+   |    |                              |
+|                           |    +-------------+----------------+
+| credential-isolation net ◄├────┤             |
++---------------------------+    |             v
+                                 |    +-------------------+
+                                 |    |  External APIs    |
+                                 |    |  (GitHub, etc)    |
+                                 |    +-------------------+
+                                 |    proxy-egress network
+                                 +-----------------------------+
+```
+
 ## What We're Protecting
 
 ### Assets at Risk
@@ -312,6 +344,23 @@ Merge endpoints blocked: REST `PUT /repos/*/pulls/*/merge` and `*/auto-merge`, G
 
 Blocked patterns are defined in `config/push-file-restrictions.yaml` (e.g., `.github/workflows/`, `Makefile`). Warned patterns (e.g., `package.json`, `Dockerfile`) are logged or rejected depending on `warn_action` setting.
 
+**Pattern semantics:**
+
+| Pattern form | Matching behavior | Example |
+|---|---|---|
+| Ends with `/` | Directory prefix match — blocks any file under that directory (`path.startswith(pattern)`) | `.github/workflows/` blocks `.github/workflows/ci.yml` |
+| Contains `*` or `?` | Glob match via `fnmatch` against both the basename and the full relative path | `requirements-*.txt` matches `requirements-dev.txt` at any depth |
+| Bare name (no `/`, no glob) | Basename match — blocks any file at any depth with that exact name | `Makefile` blocks `Makefile` and `subdir/Makefile` |
+
+**Blocked vs. warned patterns:**
+
+- **`blocked_patterns`** — Always reject the push. No override.
+- **`warned_patterns`** — Behavior depends on `warn_action`:
+  - `"log"` — Log a warning but allow the push (suitable for initial rollout or monitoring)
+  - `"reject"` — Block the push (same as blocked patterns)
+
+See [Configuration: Push File Restrictions](../configuration.md#push-file-restrictions) for the YAML format, default patterns, and customization instructions.
+
 #### Git Shadow Mode
 
 In credential isolation mode, sandboxes cannot directly access the `.git` directory or run git commands against the local repository. Instead, all git operations are proxied through the unified-proxy's git API server.
@@ -417,7 +466,7 @@ The sandbox container is granted `CAP_NET_ADMIN` for iptables DNS firewall rules
 
 ### Mitmproxy CA Trust
 
-The sandbox trusts the unified-proxy's mitmproxy CA certificate for HTTPS interception of providers that lack `*_BASE_URL` env var support (Gemini, Tavily, Semantic Scholar, Perplexity, Zhipu). Major providers (Anthropic, OpenAI, GitHub) route through plaintext HTTP gateways and do not require MITM.
+The sandbox trusts the unified-proxy's mitmproxy CA certificate for HTTPS interception of providers that lack `*_BASE_URL` env var support (see [Architecture: Mitmproxy](../architecture.md#mitmproxy-conditional) for the current list). Major providers (Anthropic, OpenAI, GitHub) route through plaintext HTTP gateways and do not require MITM.
 
 **Mitigations:** CA private key never enters the sandbox, sandbox only receives the public CA certificate, network isolation ensures only the unified-proxy can use this CA, CA generation is gated behind `ENABLE_MITM_FALLBACK` and MITM provider credential detection.
 
@@ -453,6 +502,26 @@ Rate limiters, circuit breakers, and nonce replay stores reset on proxy restart.
 4. **Minimize friction** - Safe operations should "just work"
 5. **Recoverability** - Destroying and recreating sandboxes is cheap
 
+## Security Assumptions
+
+This security model assumes:
+
+1. **Docker is trusted** — Container escape vulnerabilities are out of scope
+2. **Orchestrator is trusted** — Container registration is a privileged operation
+3. **Host is secure** — Host-level security is a prerequisite
+4. **Network isolation works** — Docker networking and iptables are reliable
+
+If any of these assumptions are violated, the security properties may not hold.
+
+## Reporting Security Issues
+
+If you discover a security vulnerability:
+
+1. **Do not** open a public GitHub issue
+2. Email security concerns to the maintainers
+3. Include steps to reproduce and potential impact
+4. Allow time for a fix before public disclosure
+
 ---
 
 ## Summary Table
@@ -480,6 +549,5 @@ Security measures are covered by:
 ## See Also
 
 - [Credential Isolation](credential-isolation.md) — Full architecture, network topology, and threat model
-- [Security Overview](index.md) — Quick reference and architecture diagram
 - [Configuration: Push File Restrictions](../configuration.md#push-file-restrictions) — File restriction patterns
 - [ADR-009: API Gateways](../adr/009-api-gateways.md) — Gateway architecture decision

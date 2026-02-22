@@ -116,6 +116,15 @@ gh() {
 }
 GH_WRAPPER
 
+# Codex wrapper: unset OPENAI_BASE_URL so Codex subscription mode routes
+# through chatgpt.com → TLS interception on port 443 instead of the gateway.
+# Proxy vars are preserved for auth.openai.com OAuth refresh.
+cat >> ~/.bashrc << 'CODEX_WRAPPER'
+codex() {
+    OPENAI_BASE_URL= command codex "$@"
+}
+CODEX_WRAPPER
+
 # API keys are expected to be passed via environment variables (docker-compose)
 
 # CLI tools are pre-installed in the image

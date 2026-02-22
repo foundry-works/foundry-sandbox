@@ -13,6 +13,7 @@ This guide covers operational procedures for the unified proxy: restart procedur
 - [Emergency Procedures](#emergency-procedures)
 
 **Troubleshooting:**
+- [Request Tracing](#request-tracing)
 - [Proxy Won't Start](#proxy-wont-start)
 - [Containers Not Registered](#containers-not-registered)
 - [High Latency](#high-latency)
@@ -215,6 +216,21 @@ docker logs unified-proxy 2>&1 | grep "DNS filtering enabled"
 
 ## Troubleshooting
 
+### Request Tracing
+
+Use the `request_id` field in structured logs to trace a request end-to-end through the proxy.
+
+1. **Find request ID** from client logs or error message
+2. **Search proxy logs** by request_id:
+   ```bash
+   docker logs unified-proxy 2>&1 | grep "req-abc123"
+   ```
+3. **Follow the flow** through addons:
+   - container_identity (identification)
+   - credential_injector (credential injection)
+   - rate_limiter (throttling decision)
+   - circuit_breaker (upstream health)
+
 ### Proxy Won't Start
 
 **Symptom:** Container exits immediately or healthcheck fails
@@ -268,7 +284,10 @@ docker exec "$PROXY_CONTAINER" curl -X POST --unix-socket /var/run/proxy/interna
 curl -s http://unified-proxy:8080/internal/metrics | grep circuit_breaker
 ```
 
-If state = 2 (OPEN), upstream is failing. See [Circuit Breaker Investigation](observability.md#circuit-breaker-investigation).
+If state = 2 (OPEN), upstream is failing. Check upstream health directly:
+```bash
+curl -v https://api.anthropic.com/health
+```
 
 **Check 2: Rate limit exhaustion**
 ```bash

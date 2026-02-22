@@ -181,7 +181,6 @@ SANDBOX_NONINTERACTIVE=1 cast destroy sandbox-name
 ## See Also
 
 - [Architecture](architecture.md) — Understand how sandboxes work
-- [Security Overview](security/index.md) — Security architecture quick reference
 - [Security Model](security/security-model.md) — Safety guarantees and threat model
 - [Commands](usage/commands.md) — Full command reference
 - [Workflows](usage/workflows.md) — Common patterns and recipes

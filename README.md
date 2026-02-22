@@ -133,8 +133,7 @@ cast repeat                                                         # repeat las
 | [Workflows](docs/usage/workflows.md) | Common patterns and recipes |
 | [Configuration](docs/configuration.md) | API keys, plugins, and config files |
 | [Architecture](docs/architecture.md) | Technical design and diagrams |
-| [Security Overview](docs/security/index.md) | Security architecture quick reference |
-| [Security Model](docs/security/security-model.md) | Threats, defenses, and hardening — organized by pillar |
+| [Security Model](docs/security/security-model.md) | Threats, defenses, hardening, and security assumptions — organized by pillar |
 | [Credential Isolation](docs/security/credential-isolation.md) | Network architecture and threat model |
 | [Operations](docs/operations.md) | Proxy operations runbook |
 | [Observability](docs/observability.md) | Metrics and debugging |
