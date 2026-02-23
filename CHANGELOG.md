@@ -5,6 +5,11 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.20.11] - 2026-02-23
+
+### Fixed
+- **Circuit breaker self-generated 503s counted as upstream failures** — When the circuit breaker blocked a request with a 503 response, mitmproxy's `response()` hook still fired on the same flow, counting the self-generated 503 as another upstream failure; this kept the circuit open forever. Now marks blocked flows with `flow.metadata["circuit_breaker_blocked"]` so `response()` skips them.
+
 ## [0.20.10] - 2026-02-23
 
 ### Fixed

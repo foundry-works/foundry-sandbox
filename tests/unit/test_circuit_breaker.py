@@ -71,6 +71,7 @@ def mock_flow():
     flow.request.port = 443
     flow.response = None
     flow.error = None
+    flow.metadata = {}
     return flow
 
 
@@ -360,6 +361,7 @@ class TestPerUpstreamIsolation:
         flow1.request.port = 443
         flow1.response = None
         flow1.error = None
+        flow1.metadata = {}
 
         flow2 = MagicMock()
         flow2.request = MagicMock()
@@ -367,6 +369,7 @@ class TestPerUpstreamIsolation:
         flow2.request.port = 443
         flow2.response = None
         flow2.error = None
+        flow2.metadata = {}
 
         # Open circuit for service1
         for i in range(3):
@@ -397,6 +400,7 @@ class TestPerUpstreamIsolation:
         flow_http.request.port = 80
         flow_http.response = None
         flow_http.error = None
+        flow_http.metadata = {}
 
         flow_https = MagicMock()
         flow_https.request = MagicMock()
@@ -404,6 +408,7 @@ class TestPerUpstreamIsolation:
         flow_https.request.port = 443
         flow_https.response = None
         flow_https.error = None
+        flow_https.metadata = {}
 
         # Open circuit for HTTP
         for i in range(3):
@@ -440,6 +445,7 @@ class TestPerUpstreamIsolation:
             flow.request.pretty_host = host
             flow.request.port = port
             flow.response = None
+            flow.metadata = {}
             addon.request(flow)
             flow.response = MagicMock()
             flow.response.status_code = 200
@@ -598,6 +604,7 @@ class TestCompleteWorkflow:
         addon.request(mock_flow)
         assert mock_flow.response.status_code == 503
         mock_flow.response = None
+        mock_flow.metadata = {}  # Reset for next phase
 
         # Advance past recovery timeout
         time_control(1.1)
@@ -610,6 +617,7 @@ class TestCompleteWorkflow:
 
         # Send successful requests
         for i in range(2):
+            mock_flow.metadata = {}
             addon.request(mock_flow)
             mock_flow.response = MagicMock()
             mock_flow.response.status_code = 200
@@ -655,6 +663,107 @@ class TestCompleteWorkflow:
                 assert status.state == CircuitState.CLOSED
 
 
+class TestSelfGeneratedResponseNotCounted:
+    """Tests that the circuit breaker's own 503 responses don't count as upstream failures."""
+
+    def test_blocked_response_not_counted_as_failure(self, addon, mock_flow, time_control, monkeypatch):
+        """Test that circuit-breaker-generated 503s don't keep the circuit open forever.
+
+        Regression test: the response() hook must skip flows that the circuit
+        breaker itself blocked in request(), otherwise the self-generated 503
+        counts as another upstream failure and the circuit can never recover.
+        """
+        mock_response = MagicMock()
+        mock_response.status_code = 503
+        mock_response.content = b"Service Unavailable: Circuit breaker is open"
+
+        mock_http = MagicMock()
+        mock_http.Response.make.return_value = mock_response
+        monkeypatch.setattr(_cb_module, "http", mock_http)
+
+        # Open the circuit with real upstream failures
+        for i in range(3):
+            addon.request(mock_flow)
+            mock_flow.response = MagicMock()
+            mock_flow.response.status_code = 500
+            addon.response(mock_flow)
+            mock_flow.response = None
+
+        with addon._lock:
+            status = addon._circuits["example.com:443"]
+            assert status.state == CircuitState.OPEN
+
+        # Now simulate what mitmproxy does: request() sets flow.response,
+        # then response() is still called on the same flow.
+        mock_flow.response = None
+        mock_flow.metadata = {}
+        addon.request(mock_flow)
+        assert mock_flow.response is not None  # blocked with 503
+
+        # mitmproxy calls response() even on short-circuited flows
+        addon.response(mock_flow)
+
+        # The failure count should NOT have increased — the self-generated
+        # 503 must not be counted as an upstream failure.
+        with addon._lock:
+            status = addon._circuits["example.com:443"]
+            assert status.failure_count == 3, (
+                "Self-generated 503 was counted as upstream failure! "
+                f"failure_count={status.failure_count}, expected 3"
+            )
+
+    def test_circuit_recovers_after_blocked_requests(self, addon, mock_flow, time_control, monkeypatch):
+        """Test circuit can recover even after many blocked requests."""
+        mock_response = MagicMock()
+        mock_response.status_code = 503
+        mock_response.content = b"Service Unavailable: Circuit breaker is open"
+
+        mock_http = MagicMock()
+        mock_http.Response.make.return_value = mock_response
+        monkeypatch.setattr(_cb_module, "http", mock_http)
+
+        # Open the circuit
+        for i in range(3):
+            addon.request(mock_flow)
+            mock_flow.response = MagicMock()
+            mock_flow.response.status_code = 500
+            addon.response(mock_flow)
+            mock_flow.response = None
+
+        # Simulate many blocked requests (as mitmproxy would: request + response)
+        for i in range(20):
+            mock_flow.response = None
+            mock_flow.metadata = {}
+            addon.request(mock_flow)
+            addon.response(mock_flow)
+
+        # Advance past recovery timeout — circuit should still be recoverable
+        time_control(1.1)
+
+        mock_flow.response = None
+        mock_flow.metadata = {}
+        addon.request(mock_flow)
+
+        with addon._lock:
+            status = addon._circuits["example.com:443"]
+            assert status.state == CircuitState.HALF_OPEN, (
+                f"Circuit should be HALF_OPEN after recovery timeout, "
+                f"but is {status.state.value}"
+            )
+
+        # Successful probes should close it
+        for i in range(2):
+            mock_flow.response = MagicMock()
+            mock_flow.response.status_code = 200
+            mock_flow.metadata = {}
+            addon.response(mock_flow)
+            mock_flow.response = None
+
+        with addon._lock:
+            status = addon._circuits["example.com:443"]
+            assert status.state == CircuitState.CLOSED
+
+
 class TestEdgeCases:
     """Tests for edge cases and error conditions."""
 
@@ -684,6 +793,7 @@ class TestEdgeCases:
                 flow.request.port = 443
                 flow.response = None
                 flow.error = None
+                flow.metadata = {}
 
                 addon.request(flow)
                 mock_response = MagicMock()

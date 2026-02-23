@@ -436,6 +436,9 @@ class CircuitBreakerAddon:
                     b"Service Unavailable: Circuit breaker is open",
                     {"Content-Type": "text/plain"},
                 )
+                # Mark as self-generated so response() doesn't count it as
+                # an upstream failure (which would keep the circuit open forever)
+                flow.metadata["circuit_breaker_blocked"] = True
 
     def response(self, flow: http.HTTPFlow) -> None:
         """Process response to track success/failure.
@@ -443,8 +446,12 @@ class CircuitBreakerAddon:
         Args:
             flow: The mitmproxy HTTP flow.
         """
-        # Skip if we already created a response (circuit breaker block)
+        # Skip if no response (shouldn't happen) or if we generated the
+        # response ourselves — counting our own 503s as failures would
+        # keep the circuit open forever.
         if flow.response is None:
+            return
+        if flow.metadata.get("circuit_breaker_blocked"):
             return
 
         upstream = self._get_upstream_key(flow)
