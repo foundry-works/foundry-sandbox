@@ -322,9 +322,6 @@ def _new_setup(
         enable_ssh=runtime_enable_ssh == "1",
         working_dir=wd or "",
         isolate_credentials=isolate_credentials,
-        from_branch=from_branch or "",
-        branch=branch,
-        repo_url=repo_url,
     )
 
     # Copy files

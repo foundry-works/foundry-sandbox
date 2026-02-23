@@ -597,6 +597,18 @@ class TestFilterRefListingOutput:
         assert "main" in result
         assert "sandbox/other" not in result
 
+    def test_branch_show_current_returns_own_branch(self):
+        """git branch --show-current outputs bare branch name without indicator."""
+        output = f"{SANDBOX}\n"
+        result = filter_ref_listing_output(output, ["branch", "--show-current"], SANDBOX)
+        assert SANDBOX in result
+
+    def test_branch_show_current_hides_other_sandbox(self):
+        """--show-current for a disallowed branch returns empty."""
+        output = "sandbox/other\n"
+        result = filter_ref_listing_output(output, ["branch", "--show-current"], SANDBOX)
+        assert result == ""
+
     # --- Ref enumeration (for-each-ref) ---
 
     def test_for_each_ref_hides_other_keeps_tags(self):

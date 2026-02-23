@@ -80,8 +80,6 @@ class TestCopyConfigsCredentialIsolation:
 
         with patch.multiple(
             "foundry_sandbox.credential_setup",
-            _file_exists=lambda p: False,
-            _dir_exists=lambda p: False,
             _opencode_enabled=lambda: False,
         ), patch("pathlib.Path.home", return_value=Path("/fake/home")), \
              patch("pathlib.Path.exists", return_value=False):
@@ -113,8 +111,6 @@ class TestCopyConfigsCredentialIsolation:
 
         with patch.multiple(
             "foundry_sandbox.credential_setup",
-            _file_exists=lambda p: False,
-            _dir_exists=lambda p: False,
             _opencode_enabled=lambda: False,
         ), patch("pathlib.Path.home", return_value=Path("/fake/home")), \
              patch("pathlib.Path.exists", return_value=False):
@@ -146,8 +142,6 @@ class TestCopyConfigsCredentialIsolation:
 
         with patch.multiple(
             "foundry_sandbox.credential_setup",
-            _file_exists=lambda p: False,
-            _dir_exists=lambda p: False,
             _opencode_enabled=lambda: False,
         ), patch("pathlib.Path.home", return_value=Path("/fake/home")), \
              patch("pathlib.Path.exists", return_value=False):
@@ -195,8 +189,6 @@ class TestNoCredentialLeaks:
 
         with patch.multiple(
             "foundry_sandbox.credential_setup",
-            _file_exists=lambda p: False,
-            _dir_exists=lambda p: False,
             _opencode_enabled=lambda: False,
         ), patch("pathlib.Path.home", return_value=Path("/fake/home")), \
              patch("pathlib.Path.exists", return_value=False), \

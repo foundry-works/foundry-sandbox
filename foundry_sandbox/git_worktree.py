@@ -234,11 +234,16 @@ def create_worktree(
     if not wt_p.exists():
         # Create new worktree
         if from_branch:
-            # Fetch the base branch and update the local ref.
+            # Fetch the base branch and update the local ref so the
+            # worktree starts from the current remote state, not a stale
+            # bare-clone snapshot.
             try:
                 fetch_bare_branch(bare_p, from_branch)
             except (RuntimeError, subprocess.CalledProcessError) as e:
-                log_info(f"Fetch failed (may already exist locally): {e}")
+                log_warn(
+                    f"Failed to fetch '{from_branch}' from origin: {e}\n"
+                    "  The worktree will be based on the local (possibly stale) ref."
+                )
 
             # Verify from_branch ref exists before attempting worktree add
             ref_exists = subprocess.run(

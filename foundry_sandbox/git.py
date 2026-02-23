@@ -175,7 +175,7 @@ _VALID_BRANCH_RE = re.compile(
 )
 
 
-def fetch_bare_branch(bare_path: str | Path, branch: str) -> None:
+def fetch_bare_branch(bare_path: str | Path, branch: str) -> str:
     """Fetch a single branch into a bare repo, updating refs/heads/<branch>.
 
     ``git clone --bare`` omits the fetch refspec and ``git fetch`` refuses
@@ -190,6 +190,9 @@ def fetch_bare_branch(bare_path: str | Path, branch: str) -> None:
     Args:
         bare_path: Path to the bare repository.
         branch: Remote branch name to fetch and update.
+
+    Returns:
+        The commit SHA that refs/heads/<branch> was set to.
 
     Raises:
         ValueError: If *branch* contains invalid ref characters or path traversal.
@@ -219,6 +222,8 @@ def fetch_bare_branch(bare_path: str | Path, branch: str) -> None:
         check=True,
         timeout=TIMEOUT_GIT_QUERY,
     )
+
+    return sha
 
 
 def ensure_repo_checkout(

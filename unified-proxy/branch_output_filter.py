@@ -605,6 +605,14 @@ def filter_ref_listing_output(
 
     # Branch listing
     if subcommand == "branch":
+        # --show-current outputs just the bare branch name (no "* " prefix),
+        # which _filter_branch_output would drop as unrecognized.  Handle it
+        # directly: validate the single branch name and pass through or clear.
+        if "--show-current" in sub_args:
+            name = output.strip()
+            if name and _is_allowed_branch_name(name, sandbox_branch, base_branch):
+                return output
+            return ""
         return _filter_branch_output(output, sandbox_branch, base_branch)
 
     # Ref enumeration commands

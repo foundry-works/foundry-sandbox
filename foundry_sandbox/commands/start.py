@@ -343,9 +343,6 @@ def _finalize_container(
         pre_foundry_override: If not None, overrides the metadata value.
     """
     working_dir = _string_value(metadata.get("working_dir", ""))
-    repo_url = _string_value(metadata.get("repo_url", ""))
-    from_branch = _string_value(metadata.get("from_branch", ""))
-    sandbox_branch = _string_value(metadata.get("branch", ""))
 
     copy_configs_to_container(
         container_id,
@@ -353,9 +350,6 @@ def _finalize_container(
         enable_ssh=enable_ssh,
         working_dir=working_dir,
         isolate_credentials=bool(isolate_credentials),
-        from_branch=from_branch,
-        branch=sandbox_branch,
-        repo_url=repo_url,
     )
 
     sparse_checkout = _flag_enabled(metadata.get("sparse_checkout", False))

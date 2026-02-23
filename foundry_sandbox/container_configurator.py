@@ -113,9 +113,6 @@ class ContainerConfigurator:
         enable_ssh: bool = False,
         working_dir: str = "",
         isolate_credentials: bool = False,
-        from_branch: str = "",
-        branch: str = "",
-        repo_url: str = "",
     ) -> None:
         """Run full container configuration sequence.
 
@@ -127,9 +124,6 @@ class ContainerConfigurator:
             enable_ssh: If True, enable SSH agent forwarding
             working_dir: Working directory path in container
             isolate_credentials: If True, isolate credentials from host
-            from_branch: Source branch for Git operations
-            branch: Target branch for Git operations
-            repo_url: Repository URL for Git operations
         """
         self.credential_setup.copy_configs_to_container(
             container_id,
@@ -137,9 +131,6 @@ class ContainerConfigurator:
             enable_ssh=enable_ssh,
             working_dir=working_dir,
             isolate_credentials=isolate_credentials,
-            from_branch=from_branch,
-            branch=branch,
-            repo_url=repo_url,
         )
 
     def sync_credentials(self, container_id: str) -> None:

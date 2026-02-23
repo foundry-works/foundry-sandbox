@@ -1,7 +1,6 @@
 """Unit tests for foundry_sandbox.stub_manager.
 
-Tests workspace docs installation, branch context injection, repo URL
-cleaning, and marker idempotency checks.
+Tests workspace docs installation and marker idempotency checks.
 
 All subprocess and file I/O calls are mocked so tests run without Docker.
 """
@@ -13,7 +12,6 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from foundry_sandbox.stub_manager import (
-    inject_sandbox_branch_context,
     install_foundry_workspace_docs,
 )
 
@@ -131,116 +129,6 @@ class TestInstallFoundryWorkspaceDocs:
         install_foundry_workspace_docs("c1")
 
         assert mock_run.call_count == 6
-
-
-# ---------------------------------------------------------------------------
-# TestInjectSandboxBranchContext
-# ---------------------------------------------------------------------------
-
-
-class TestInjectSandboxBranchContext:
-    """inject_sandbox_branch_context appends branch info to CLAUDE.md."""
-
-    @patch("foundry_sandbox.stub_manager.subprocess.run")
-    def test_skips_when_no_branch(self, mock_run):
-        """Must skip if branch is empty."""
-        inject_sandbox_branch_context("c1", repo_url="org/repo", branch="", from_branch="main")
-        mock_run.assert_not_called()
-
-    @patch("foundry_sandbox.stub_manager.subprocess.run")
-    def test_skips_when_no_from_branch(self, mock_run):
-        """Must skip if from_branch is empty."""
-        inject_sandbox_branch_context("c1", repo_url="org/repo", branch="feat", from_branch="")
-        mock_run.assert_not_called()
-
-    @patch("foundry_sandbox.stub_manager.subprocess.run")
-    def test_skips_when_marker_present(self, mock_run):
-        """When sandbox-context marker exists, no append."""
-        mock_run.return_value = _completed(returncode=0)  # grep found marker
-
-        inject_sandbox_branch_context("c1", branch="feat", from_branch="main")
-
-        # Only grep should be called
-        assert mock_run.call_count == 1
-
-    @patch("foundry_sandbox.stub_manager.subprocess.run")
-    def test_appends_context_block(self, mock_run):
-        """When no marker, touch + append context block."""
-        mock_run.side_effect = [
-            _completed(returncode=1),  # grep - not found
-            _completed(returncode=0),  # touch
-            _completed(returncode=0),  # append
-        ]
-
-        inject_sandbox_branch_context(
-            "c1", repo_url="https://github.com/org/repo.git",
-            branch="feat/thing", from_branch="main",
-        )
-
-        assert mock_run.call_count == 3
-
-        # Check that the appended content contains branch info
-        append_call = mock_run.call_args_list[2]
-        input_text = append_call[1].get("input", "")
-        assert "feat/thing" in input_text
-        assert "main" in input_text
-        assert "<sandbox-context>" in input_text
-
-    @pytest.mark.parametrize("url,expected", [
-        ("https://github.com/org/repo.git", "org/repo"),
-        ("http://github.com/org/repo", "org/repo"),
-        ("git@github.com:org/repo.git", "org/repo"),
-        ("https://github.com/org/repo", "org/repo"),
-    ])
-    @patch("foundry_sandbox.stub_manager.subprocess.run")
-    def test_cleans_repo_url(self, mock_run, url, expected):
-        """Various repo URL formats are cleaned to owner/repo."""
-        mock_run.side_effect = [
-            _completed(returncode=1),  # grep
-            _completed(returncode=0),  # touch
-            _completed(returncode=0),  # append
-        ]
-
-        inject_sandbox_branch_context(
-            "c1", repo_url=url, branch="feat", from_branch="main",
-        )
-
-        append_call = mock_run.call_args_list[2]
-        input_text = append_call[1].get("input", "")
-        assert expected in input_text
-
-    @patch("foundry_sandbox.stub_manager.subprocess.run")
-    def test_no_repo_url_omits_repository_line(self, mock_run):
-        """When repo_url is empty, Repository line is omitted."""
-        mock_run.side_effect = [
-            _completed(returncode=1),
-            _completed(returncode=0),
-            _completed(returncode=0),
-        ]
-
-        inject_sandbox_branch_context("c1", branch="feat", from_branch="main")
-
-        append_call = mock_run.call_args_list[2]
-        input_text = append_call[1].get("input", "")
-        assert "Repository" not in input_text
-        assert "feat" in input_text
-
-    @patch("foundry_sandbox.stub_manager.subprocess.run")
-    def test_includes_base_branch_in_pr_guidance(self, mock_run):
-        """PR guidance references the from_branch."""
-        mock_run.side_effect = [
-            _completed(returncode=1),
-            _completed(returncode=0),
-            _completed(returncode=0),
-        ]
-
-        inject_sandbox_branch_context(
-            "c1", branch="feat", from_branch="develop",
-        )
-
-        append_call = mock_run.call_args_list[2]
-        input_text = append_call[1].get("input", "")
-        assert "target `develop` as the base branch" in input_text
 
 
 if __name__ == "__main__":

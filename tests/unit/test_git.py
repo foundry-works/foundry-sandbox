@@ -280,8 +280,9 @@ class TestFetchBareBranch:
             Mock(returncode=0, stdout="", stderr=""),  # update-ref
         ]
 
-        git.fetch_bare_branch("/bare/repo", "my-branch")
+        sha = git.fetch_bare_branch("/bare/repo", "my-branch")
 
+        assert sha == "abc123"
         mock_retry.assert_called_once_with(["-C", "/bare/repo", "fetch", "origin", "my-branch"])
         assert mock_run.call_count == 2
         # rev-parse FETCH_HEAD

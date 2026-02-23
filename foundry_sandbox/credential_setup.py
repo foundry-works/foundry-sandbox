@@ -75,15 +75,6 @@ def _merge_claude_settings_safe(container_id: str, host_settings: str) -> bool:
     return merge_claude_settings_safe(container_id, host_settings)
 
 
-def _file_exists(path: str) -> bool:
-    """Check if a host file exists."""
-    return os.path.isfile(Path(path).expanduser())
-
-
-def _dir_exists(path: str) -> bool:
-    """Check if a host directory exists."""
-    return os.path.isdir(Path(path).expanduser())
-
 
 def _opencode_enabled() -> bool:
     """Check if OpenCode is enabled."""
@@ -464,9 +455,6 @@ def _stage_setup_foundry(
     home: Path,
     *,
     working_dir: str,
-    from_branch: str,
-    branch: str,
-    repo_url: str,
 ) -> None:
     """Stage 7: foundry-mcp, research providers, workspace docs."""
     from foundry_sandbox.foundry_plugin import (
@@ -475,7 +463,6 @@ def _stage_setup_foundry(
         configure_foundry_research_providers,
     )
     from foundry_sandbox.stub_manager import (
-        inject_sandbox_branch_context,
         install_foundry_workspace_docs,
     )
 
@@ -500,14 +487,6 @@ def _stage_setup_foundry(
 
     log_step("Installing Foundry workspace docs")
     install_foundry_workspace_docs(container_id)
-
-    log_step("Injecting sandbox branch context")
-    inject_sandbox_branch_context(
-        container_id,
-        from_branch=from_branch,
-        branch=branch,
-        repo_url=repo_url,
-    )
 
 
 def _stage_fix_ownership(
@@ -549,9 +528,6 @@ def copy_configs_to_container(
     enable_ssh: bool = False,
     working_dir: str = "",
     isolate_credentials: bool = False,
-    from_branch: str = "",
-    branch: str = "",
-    repo_url: str = "",
 ) -> None:
     """Copy configs and credentials to container.
 
@@ -563,9 +539,6 @@ def copy_configs_to_container(
         enable_ssh: Enable SSH agent forwarding
         working_dir: Working directory for foundry workspace
         isolate_credentials: Use placeholder credentials instead of real ones
-        from_branch: Source branch for git context
-        branch: Current branch name
-        repo_url: Repository URL
     """
     host_user = getpass.getuser()
     home = Path.home()
@@ -587,9 +560,6 @@ def copy_configs_to_container(
     _stage_setup_foundry(
         container_id, home,
         working_dir=working_dir,
-        from_branch=from_branch,
-        branch=branch,
-        repo_url=repo_url,
     )
     _stage_fix_ownership(
         container_id, dirs,

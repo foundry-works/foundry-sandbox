@@ -5,6 +5,15 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.20.9] - 2026-02-23
+
+### Fixed
+- **`git branch --show-current` returns empty in sandbox** — The branch output filter regex required a leading `* ` or `  ` indicator, but `--show-current` outputs just the bare branch name; added early detection of `--show-current` in args to validate and pass through the branch name directly
+- **Worktree branch divergence warning suppressed** — When `fetch_bare_branch` failed during worktree creation, the error was logged at info level with a misleading "may already exist locally" message; upgraded to `log_warn` with clear messaging that the worktree may be based on stale data
+
+### Removed
+- **Sandbox-context CLAUDE.md injection** — Removed `inject_sandbox_branch_context()` which appended `<sandbox-context>` tags to `/workspace/CLAUDE.md` at runtime with branch and PR target info; Claude Code already discovers this natively via `gitStatus` in its system prompt, and the injection could contain stale or incorrect values (e.g. referencing a nonexistent `beta` branch)
+
 ## [0.20.8] - 2026-02-22
 
 ### Fixed
