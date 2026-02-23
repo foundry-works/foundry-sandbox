@@ -5,6 +5,11 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.20.13] - 2026-02-23
+
+### Fixed
+- **`gh pr create` fails inside sandboxes** — GitHub CLI injects `-c credential.helper=...` overrides into its internal git commands, which the proxy's `CONFIG_NEVER_ALLOW` blocklist rejected, causing all `gh` operations to fail with "failed to run git: exit status 1". The proxy now strips `credential.*` config overrides before validation since it manages credentials independently via its own credential-helper pipeline.
+
 ## [0.20.12] - 2026-02-23
 
 ### Fixed

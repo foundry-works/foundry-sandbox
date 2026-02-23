@@ -396,6 +396,60 @@ def _find_push_index(args: List[str]) -> Optional[int]:
     return None
 
 
+def _strip_credential_config_overrides(
+    args: List[str],
+) -> Tuple[List[str], bool]:
+    """Strip ``-c credential.*=...`` config overrides from git args.
+
+    GitHub CLI (``gh``) and other tools inject ``-c credential.helper=...``
+    overrides into their internal git commands.  The proxy's
+    ``CONFIG_NEVER_ALLOW`` blocklist rejects these, causing the entire
+    command to fail.
+
+    Since the proxy manages credentials independently (via
+    ``FOUNDRY_PROXY_GIT_TOKEN`` and the credential-helper script installed
+    in ``entrypoint.sh``), client-side credential overrides are redundant
+    and safe to remove.
+
+    Args:
+        args: Full git argument list (without the ``git`` binary itself).
+
+    Returns:
+        ``(args, True)`` if any overrides were stripped,
+        ``(args, False)`` otherwise.  The original list is never mutated.
+    """
+    stripped: List[str] = []
+    changed = False
+    idx = 0
+    while idx < len(args):
+        arg = args[idx]
+        # -c key=value (separate args)
+        if arg == "-c" and idx + 1 < len(args):
+            pair = args[idx + 1]
+            key = pair.split("=", 1)[0] if "=" in pair else pair
+            if key.startswith("credential.") or key == "credential":
+                idx += 2
+                changed = True
+                continue
+            stripped.extend([arg, pair])
+            idx += 2
+            continue
+        # -ckey=value (combined form)
+        if arg.startswith("-c") and len(arg) > 2:
+            pair = arg[2:]
+            key = pair.split("=", 1)[0] if "=" in pair else pair
+            if key.startswith("credential.") or key == "credential":
+                idx += 1
+                changed = True
+                continue
+            stripped.append(arg)
+            idx += 1
+            continue
+        stripped.append(arg)
+        idx += 1
+    return stripped, changed
+
+
 def _normalize_push_args(
     args: List[str], metadata: Optional[dict],
 ) -> Tuple[List[str], bool]:
@@ -921,6 +975,20 @@ def execute_git(
     req_id = str(uuid.uuid4())
 
     args = request.args
+
+    # Strip credential config overrides injected by tools like GitHub CLI.
+    # The proxy manages credentials independently, so these are redundant.
+    args, creds_stripped = _strip_credential_config_overrides(args)
+    if creds_stripped:
+        audit_log(
+            event="credential_config_stripped",
+            action=" ".join(args[:3]) if args else "unknown",
+            decision="allow",
+            command_args=args,
+            reason="Stripped -c credential.*=... overrides (proxy manages credentials)",
+            matched_rule="credential_config_strip",
+            request_id=req_id,
+        )
 
     # Clone-specific validation (repo allowlist + destination allowlist)
     clone_allowed_roots = None
