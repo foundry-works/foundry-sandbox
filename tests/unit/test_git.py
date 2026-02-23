@@ -273,25 +273,30 @@ class TestFetchBareBranch:
     @patch("foundry_sandbox.git.subprocess.run")
     @patch("foundry_sandbox.git.git_with_retry")
     def test_success_calls_fetch_revparse_updateref(self, mock_retry, mock_run):
-        """Happy path: fetch, rev-parse FETCH_HEAD, update-ref."""
+        """Happy path: fetch, rev-parse FETCH_HEAD, update-ref for local and remote."""
         mock_retry.return_value = Mock(returncode=0)
         mock_run.side_effect = [
             Mock(returncode=0, stdout="abc123\n", stderr=""),  # rev-parse
-            Mock(returncode=0, stdout="", stderr=""),  # update-ref
+            Mock(returncode=0, stdout="", stderr=""),  # update-ref (local)
+            Mock(returncode=0, stdout="", stderr=""),  # update-ref (remote tracking)
         ]
 
         sha = git.fetch_bare_branch("/bare/repo", "my-branch")
 
         assert sha == "abc123"
         mock_retry.assert_called_once_with(["-C", "/bare/repo", "fetch", "origin", "my-branch"])
-        assert mock_run.call_count == 2
+        assert mock_run.call_count == 3
         # rev-parse FETCH_HEAD
         assert mock_run.call_args_list[0][0][0] == [
             "git", "-C", "/bare/repo", "rev-parse", "FETCH_HEAD"
         ]
-        # update-ref with the SHA
+        # update-ref for local branch
         assert mock_run.call_args_list[1][0][0] == [
             "git", "-C", "/bare/repo", "update-ref", "refs/heads/my-branch", "abc123"
+        ]
+        # update-ref for remote tracking ref
+        assert mock_run.call_args_list[2][0][0] == [
+            "git", "-C", "/bare/repo", "update-ref", "refs/remotes/origin/my-branch", "abc123"
         ]
 
     @patch("foundry_sandbox.git.git_with_retry")
@@ -362,8 +367,9 @@ class TestFetchBareBranch:
         """Branch names like 'feature/foo' should be accepted."""
         mock_retry.return_value = Mock(returncode=0)
         mock_run.side_effect = [
-            Mock(returncode=0, stdout="abc123\n", stderr=""),
-            Mock(returncode=0, stdout="", stderr=""),
+            Mock(returncode=0, stdout="abc123\n", stderr=""),  # rev-parse
+            Mock(returncode=0, stdout="", stderr=""),  # update-ref (local)
+            Mock(returncode=0, stdout="", stderr=""),  # update-ref (remote tracking)
         ]
 
         git.fetch_bare_branch("/bare/repo", "feature/my-branch")
@@ -371,6 +377,10 @@ class TestFetchBareBranch:
         assert mock_run.call_args_list[1][0][0] == [
             "git", "-C", "/bare/repo", "update-ref",
             "refs/heads/feature/my-branch", "abc123"
+        ]
+        assert mock_run.call_args_list[2][0][0] == [
+            "git", "-C", "/bare/repo", "update-ref",
+            "refs/remotes/origin/feature/my-branch", "abc123"
         ]
 
 
@@ -524,12 +534,14 @@ class TestCreateWorktree:
         bare.mkdir()
         wt = tmp_path / "worktree"
 
-        # prune, rev-parse --verify (from_branch exists), show-ref (not found), worktree add
+        # prune, rev-parse --verify (from_branch exists), show-ref (not found),
+        # worktree add, push.autoSetupRemote config
         mock_run.side_effect = [
             Mock(returncode=0, stdout="", stderr=""),  # prune
             Mock(returncode=0, stdout="", stderr=""),  # rev-parse --verify (from_branch found)
             Mock(returncode=1, stdout="", stderr=""),  # show-ref (target branch not found)
             Mock(returncode=0, stdout="", stderr=""),  # worktree add --no-checkout
+            Mock(returncode=0, stdout="", stderr=""),  # git config push.autoSetupRemote
         ]
 
         git_worktree.create_worktree(

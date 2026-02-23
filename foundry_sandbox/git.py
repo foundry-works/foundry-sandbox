@@ -136,16 +136,47 @@ def remove_stale_git_locks(repo_path: str | Path) -> None:
                 pass
 
 
+def _ensure_fetch_refspec(bare_path: Path) -> None:
+    """Add a standard fetch refspec to a bare repo if missing.
+
+    ``git clone --bare`` does not configure ``remote.origin.fetch``, so
+    subsequent ``git fetch origin`` never updates ``refs/remotes/origin/*``.
+    This causes worktrees to see a stale ``origin/main`` tracking ref.
+
+    Silently returns if the path is not a valid git repository.
+    """
+    result = subprocess.run(
+        ["git", "-C", str(bare_path), "config", "--get", "remote.origin.fetch"],
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=TIMEOUT_GIT_QUERY,
+    )
+    if result.returncode not in (0, 1):
+        # returncode 1 = key not found (expected for bare clones);
+        # anything else means the repo is broken or not a git dir.
+        return
+
+    expected = "+refs/heads/*:refs/remotes/origin/*"
+    if expected not in (result.stdout or ""):
+        subprocess.run(
+            ["git", "-C", str(bare_path), "config", "remote.origin.fetch", expected],
+            capture_output=True,
+            check=False,
+            timeout=TIMEOUT_GIT_QUERY,
+        )
+
+
 def ensure_bare_repo(repo_url: str, bare_path: str | Path) -> None:
     """Clone or update a bare repository.
 
     If *bare_path* does not exist, clones *repo_url* as a bare repo.
-    Otherwise, fetches all remote objects so they are available locally.
+    After ensuring the fetch refspec is configured, fetches all remote
+    refs so ``refs/remotes/origin/*`` stays current for worktrees.
 
-    Note: ``git clone --bare`` does not configure a fetch refspec, so
-    ``git fetch --all`` alone will NOT update ``refs/heads/*``.  Branch
-    refs are updated individually by :func:`fetch_bare_branch` when the
-    worktree is created.
+    Individual branch refs (``refs/heads/*``) may still be updated by
+    :func:`fetch_bare_branch` when a worktree is created, since ``git
+    fetch`` refuses to update a ref that is checked out in a worktree.
 
     Args:
         repo_url: Remote repository URL.
@@ -153,14 +184,21 @@ def ensure_bare_repo(repo_url: str, bare_path: str | Path) -> None:
     """
     bp = Path(bare_path)
 
-    if not bp.is_dir():
+    fresh_clone = not bp.is_dir()
+    if fresh_clone:
         log_step("Cloning repository...")
         bp.parent.mkdir(parents=True, exist_ok=True)
         git_with_retry(["clone", "--bare", repo_url, str(bp)])
-    else:
+
+    # Ensure fetch refspec is configured.  ``git clone --bare`` omits it,
+    # so ``git fetch`` never updates ``refs/remotes/origin/*``.  Without
+    # this, worktrees see a stale ``origin/main`` and think they are ahead.
+    if bp.is_dir():
+        _ensure_fetch_refspec(bp)
+
+    if not fresh_clone:
         log_step("Fetching latest from origin...")
         remove_stale_git_locks(bp)
-        # Fetch objects; branch refs updated later by fetch_bare_branch.
         git_with_retry(["-C", str(bp), "fetch", "origin", "--prune"])
 
 
@@ -218,6 +256,15 @@ def fetch_bare_branch(bare_path: str | Path, branch: str) -> str:
     # Force-update the local branch ref (bypasses checked-out guard).
     subprocess.run(
         ["git", "-C", bp, "update-ref", f"refs/heads/{branch}", sha],
+        capture_output=True,
+        check=True,
+        timeout=TIMEOUT_GIT_QUERY,
+    )
+
+    # Also update the remote tracking ref so worktrees see an accurate
+    # ``origin/<branch>`` and don't report phantom ahead/behind counts.
+    subprocess.run(
+        ["git", "-C", bp, "update-ref", f"refs/remotes/origin/{branch}", sha],
         capture_output=True,
         check=True,
         timeout=TIMEOUT_GIT_QUERY,

@@ -5,6 +5,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.20.10] - 2026-02-23
+
+### Fixed
+- **Stale `origin/main` tracking ref in sandbox worktrees** — `git clone --bare` omits the fetch refspec, so `git fetch` never updated `refs/remotes/origin/*`; added `_ensure_fetch_refspec()` to configure it, and `fetch_bare_branch()` now also updates the remote tracking ref alongside the local branch ref, preventing phantom ahead/behind counts
+- **`git push` fails on first push in sandbox** — New sandbox branches had no upstream tracking configured, requiring `--set-upstream` on first push; worktree creation now sets `push.autoSetupRemote = true` so `git push` works immediately
+
 ## [0.20.9] - 2026-02-23
 
 ### Fixed

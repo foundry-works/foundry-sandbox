@@ -369,6 +369,14 @@ def create_worktree(
                         check=True,
                         timeout=TIMEOUT_GIT_TRANSFER,
                     )
+        # Enable auto-setup of upstream tracking so ``git push`` works
+        # without ``--set-upstream`` on the first push of a new branch.
+        subprocess.run(
+            ["git", "-C", str(wt_p), "config", "push.autoSetupRemote", "true"],
+            capture_output=True,
+            check=False,
+            timeout=TIMEOUT_GIT_QUERY,
+        )
     else:
         # Worktree exists — pull latest changes
         log_info(f"Worktree already exists at {wt_p}")
