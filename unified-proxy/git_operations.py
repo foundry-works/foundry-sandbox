@@ -687,9 +687,20 @@ def check_push_file_restrictions(
         resolved_cwd, env, remote_ref,
     )
 
+    if changed_files is None and metadata:
+        # Remote branch may not exist (first push). Prefer from_branch
+        # (the branch the sandbox was created from) over the repo default
+        # branch. Diffing against from_branch only captures the agent's
+        # own changes, whereas diffing against 'main' would include all
+        # pre-existing branch history and flag files the agent never touched.
+        from_branch = metadata.get("from_branch")
+        if from_branch:
+            changed_files = _enumerate_push_changed_files(
+                resolved_cwd, env, from_branch,
+            )
+
     if changed_files is None:
-        # Remote branch may not exist (first push). Fall back to diffing
-        # against the default branch.
+        # Last resort: diff against the repo default branch.
         bare_repo_path = resolve_bare_repo_path(repo_root)
         default_branch = None
         if bare_repo_path:
@@ -697,13 +708,6 @@ def check_push_file_restrictions(
         if default_branch:
             changed_files = _enumerate_push_changed_files(
                 resolved_cwd, env, default_branch,
-            )
-
-    if changed_files is None and metadata:
-        from_branch = metadata.get("from_branch")
-        if from_branch:
-            changed_files = _enumerate_push_changed_files(
-                resolved_cwd, env, from_branch,
             )
 
     if changed_files is None:

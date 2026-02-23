@@ -611,8 +611,8 @@ class TestCheckPushFileRestrictions:
             assert err is not None
             assert "Path traversal" in err.reason
 
-    def test_from_branch_fallback_when_bare_repo_unavailable(self, config_file):
-        """When bare repo is unavailable, from_branch metadata is used."""
+    def test_from_branch_fallback_when_remote_branch_unavailable(self, config_file):
+        """When remote branch fails, from_branch metadata is tried next."""
         fail_result = self._make_diff_result("", returncode=128)
         ok_result = self._make_diff_result("src/main.py\n")
 
@@ -625,7 +625,7 @@ class TestCheckPushFileRestrictions:
                 return fail_result  # Remote branch diff fails
             return ok_result  # from_branch diff succeeds
 
-        meta = {**META, "from_branch": "main"}
+        meta = {**META, "from_branch": "feature/base"}
 
         with patch(
             "git_operations.get_file_restrictions_config",
@@ -634,8 +634,6 @@ class TestCheckPushFileRestrictions:
             "git_operations.subprocess.run", side_effect=run_side_effect
         ), patch(
             "git_operations.build_clean_env", return_value={}
-        ), patch(
-            "git_operations.resolve_bare_repo_path", return_value=None
         ):
             err = check_push_file_restrictions(
                 ["origin", BRANCH], "/repo", meta
@@ -643,10 +641,10 @@ class TestCheckPushFileRestrictions:
             assert err is None
             assert call_count == 2
 
-    def test_from_branch_fallback_after_default_branch_fallback_fails(
+    def test_default_branch_fallback_after_from_branch_fails(
         self, config_file
     ):
-        """All three fallbacks tried: remote, default branch, from_branch."""
+        """All three fallbacks tried: remote, from_branch, default branch."""
         fail_result = self._make_diff_result("", returncode=128)
         ok_result = self._make_diff_result("src/main.py\n")
 
@@ -656,10 +654,10 @@ class TestCheckPushFileRestrictions:
             nonlocal call_count
             call_count += 1
             if call_count <= 2:
-                return fail_result  # Remote + default branch fail
-            return ok_result  # from_branch succeeds
+                return fail_result  # Remote + from_branch fail
+            return ok_result  # default branch succeeds
 
-        meta = {**META, "from_branch": "main"}
+        meta = {**META, "from_branch": "feature/base"}
 
         with patch(
             "git_operations.get_file_restrictions_config",
