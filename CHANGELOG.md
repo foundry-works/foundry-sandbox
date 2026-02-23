@@ -5,6 +5,11 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.20.12] - 2026-02-23
+
+### Fixed
+- **Push file restrictions tried default branch before `from_branch`** — The fallback chain for enumerating changed files on push diffed against the repo default branch before trying `from_branch` metadata; this included all pre-existing branch history and flagged files the agent never touched. Reordered to try `from_branch` first so diffs only capture the agent's own changes.
+
 ## [0.20.11] - 2026-02-23
 
 ### Fixed
