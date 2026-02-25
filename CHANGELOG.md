@@ -5,6 +5,11 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.20.14] - 2026-02-25
+
+### Fixed
+- **`git rm` blocked by proxy allowlist** — `git rm` was not included in the deny-by-default command allowlist, so sandboxed agents couldn't stage file deletions. Added `rm` to the working-tree command set.
+
 ## [0.20.13] - 2026-02-23
 
 ### Fixed

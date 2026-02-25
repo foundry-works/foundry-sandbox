@@ -31,7 +31,7 @@ SUBPROCESS_TIMEOUT = 120               # 2 minutes
 
 # Working tree commands
 _WORKING_TREE_CMDS = frozenset({
-    "status", "add", "restore", "stash", "clean",
+    "status", "add", "rm", "restore", "stash", "clean",
 })
 
 # Committing commands
