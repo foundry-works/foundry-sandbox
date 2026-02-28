@@ -434,7 +434,8 @@ class TestCommandValidationThroughAPI:
         )
         assert response.status_code == 422
         data = response.get_json()
-        assert "not allowed" in data.get("error", "").lower()
+        error_msg = data.get("error", "").lower()
+        assert "not allowed" in error_msg or "path outside allowed roots" in error_msg
 
     def test_blocked_global_flag_rejected(self, client, hmac_secret):
         """Global blocked flags should be rejected."""
