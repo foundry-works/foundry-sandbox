@@ -48,11 +48,11 @@ foundry-spec → foundry-implement → [CODE] → foundry-review → foundry-tes
 
 **MCP-First**: All skills use Foundry MCP tools exclusively. No CLI fallbacks.
 
-**Human-in-Loop**: Skills prompt for key decisions. Don't assume - ask.
+**Unattended Posture**: This sandbox runs with `autonomy_posture.profile = "unattended"`. User prompts are skipped — auto-select recommended tasks, auto-approve plans, auto-continue between tasks. Safety limits (context >= 85%, error thresholds, task limits) are still enforced.
 
 **Task States**: `pending` → `in_progress` → `completed` | `blocked`
-- **Sequential mode** (interactive, autonomous): Only one task `in_progress` at a time
-- **Parallel mode** (`--parallel`): Multiple tasks `in_progress` during batch execution
+- **Sequential**: Only one task `in_progress` at a time (default)
+- **Batch execution**: Multiple tasks `in_progress` when the agent decides parallelism is appropriate (independent tasks, no file conflicts)
 - Mark tasks complete immediately after finishing
 
 **Safety**: Use dry-run previews before spec modifications. Backups created automatically.

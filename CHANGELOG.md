@@ -5,6 +5,15 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.20.15] - 2026-02-28
+
+### Changed
+- **Unattended autonomy posture in sandbox CLAUDE.md** — Sandbox stub now declares `autonomy_posture.profile = "unattended"` so agents auto-select tasks, auto-approve plans, and auto-continue between tasks without user prompts.
+- **README tagline update** — Added "batteries-included" to the project description.
+
+### Fixed
+- **Path validation error not accepted in disallowed command test** — Test assertion updated to accept the proxy's path-validation error response for disallowed git commands.
+
 ## [0.20.14] - 2026-02-25
 
 ### Fixed

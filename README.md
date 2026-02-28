@@ -5,7 +5,7 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Built for Claude Code](https://img.shields.io/badge/Built_for-Claude_Code-cc785c)](https://docs.anthropic.com/en/docs/claude-code)
 
-Ephemeral Docker workspaces that isolate AI coding agents from your credentials and host system.
+Ephemeral, batteries-included Docker workspaces that isolate AI coding agents from your credentials and host system.
 
 ## What It Does
 
