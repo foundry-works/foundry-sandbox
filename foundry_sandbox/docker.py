@@ -146,9 +146,6 @@ def setup_credential_placeholders() -> CredentialPlaceholders:
     else:
         zhipu_key = ""
 
-    # Tavily: Set flag if API key is available on host
-    enable_tavily = "1" if os.environ.get("TAVILY_API_KEY") else "0"
-
     # OpenAI: route SDK traffic through the gateway for fast credential injection.
     # Codex CLI uses a shell wrapper that unsets OPENAI_BASE_URL so subscription
     # mode still routes through chatgpt.com → TLS interception on port 443.
@@ -168,7 +165,6 @@ def setup_credential_placeholders() -> CredentialPlaceholders:
         sandbox_claude_oauth=claude_oauth,
         sandbox_gemini_api_key=gemini_key,
         sandbox_zhipu_api_key=zhipu_key,
-        sandbox_enable_tavily=enable_tavily,
         sandbox_openai_base_url=openai_base_url,
         user_service_placeholders=user_placeholders,
     )

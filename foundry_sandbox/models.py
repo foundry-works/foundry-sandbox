@@ -40,11 +40,8 @@ class SandboxMetadata(BaseModel):
     allow_pr: bool = False
     """Whether to allow PR creation."""
 
-    pre_foundry: bool = False
-    """Whether to upgrade foundry-mcp to pre-release."""
-
-    pre_foundry_version: str = ""
-    """Pinned foundry-mcp pre-release version (e.g. '1.2.0a3')."""
+    skills: list[str] = Field(default_factory=list)
+    """List of skill names to install in this sandbox."""
 
     enable_opencode: bool = False
     """Whether to enable OpenCode."""
@@ -89,8 +86,8 @@ class CastNewPreset(BaseModel):
     allow_pr: bool = False
     """Whether to allow PR creation."""
 
-    pre_foundry: bool = False
-    """Whether to upgrade foundry-mcp to pre-release."""
+    skills: list[str] = Field(default_factory=list)
+    """List of skill names to install in this sandbox."""
 
     network_mode: str = "limited"
     """Network mode: limited, host-only, or none."""
@@ -151,9 +148,6 @@ class CredentialPlaceholders(BaseModel):
     sandbox_zhipu_api_key: str = ""
     """Placeholder or empty for Zhipu API key."""
 
-    sandbox_enable_tavily: str = "0"
-    """Whether Tavily is enabled ('0' or '1')."""
-
     sandbox_openai_base_url: str = ""
     """OpenAI base URL (conditional: only set when host has OPENAI_API_KEY)."""
 
@@ -167,7 +161,6 @@ class CredentialPlaceholders(BaseModel):
             "SANDBOX_CLAUDE_OAUTH": self.sandbox_claude_oauth,
             "SANDBOX_GEMINI_API_KEY": self.sandbox_gemini_api_key,
             "SANDBOX_ZHIPU_API_KEY": self.sandbox_zhipu_api_key,
-            "SANDBOX_ENABLE_TAVILY": self.sandbox_enable_tavily,
             "SANDBOX_OPENAI_BASE_URL": self.sandbox_openai_base_url,
         }
         for env_var, placeholder in self.user_service_placeholders.items():

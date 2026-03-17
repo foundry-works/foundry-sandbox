@@ -95,8 +95,7 @@ def write_sandbox_metadata(
     sparse_checkout: bool = False,
     pip_requirements: str = "",
     allow_pr: bool = False,
-    pre_foundry: bool = False,
-    pre_foundry_version: str = "",
+    skills: list[str] | None = None,
     enable_opencode: bool = False,
     enable_zai: bool = False,
     mounts: list[str] | None = None,
@@ -117,8 +116,7 @@ def write_sandbox_metadata(
         sparse_checkout: Whether to use sparse checkout.
         pip_requirements: Path to requirements file.
         allow_pr: Whether to allow PR creation.
-        pre_foundry: Whether to upgrade foundry-mcp to pre-release.
-        pre_foundry_version: Pinned foundry-mcp pre-release version.
+        skills: List of skill names.
         enable_opencode: Whether to enable OpenCode.
         enable_zai: Whether to enable ZAI.
         mounts: List of Docker mount specs.
@@ -137,8 +135,7 @@ def write_sandbox_metadata(
         sparse_checkout=sparse_checkout,
         pip_requirements=pip_requirements,
         allow_pr=allow_pr,
-        pre_foundry=pre_foundry,
-        pre_foundry_version=pre_foundry_version,
+        skills=skills or [],
         enable_opencode=enable_opencode,
         enable_zai=enable_zai,
         mounts=mounts or [],
@@ -423,13 +420,13 @@ def _build_command_line(
     sparse: bool = False,
     pip_requirements: str = "",
     allow_pr: bool = False,
-    pre_foundry: bool = False,
     network_mode: str = "limited",
     sync_ssh: bool = False,
     enable_opencode: bool = False,
     enable_zai: bool = False,
     mounts: list[str] | None = None,
     copies: list[str] | None = None,
+    skills: list[str] | None = None,
 ) -> str:
     """Build a display-friendly command line string from cast-new arguments."""
     parts = ["cast new", repo]
@@ -445,8 +442,6 @@ def _build_command_line(
         parts.extend(["--pip-requirements", pip_requirements])
     if _flag_enabled(allow_pr):
         parts.append("--allow-pr")
-    if _flag_enabled(pre_foundry):
-        parts.append("--pre-foundry")
     if network_mode and network_mode != "limited":
         parts.extend(["--network", network_mode])
     if _flag_enabled(sync_ssh):
@@ -459,6 +454,8 @@ def _build_command_line(
         parts.extend(["--mount", mount])
     for copy in (copies or []):
         parts.extend(["--copy", copy])
+    for skill in (skills or []):
+        parts.extend(["--skill", skill])
     return " ".join(parts)
 
 
@@ -472,7 +469,6 @@ def _write_cast_new_json(
     sparse: bool = False,
     pip_requirements: str = "",
     allow_pr: bool = False,
-    pre_foundry: bool = False,
     network_mode: str = "limited",
     sync_ssh: bool = False,
     enable_opencode: bool = False,
@@ -480,6 +476,7 @@ def _write_cast_new_json(
     mounts: list[str] | None = None,
     copies: list[str] | None = None,
     compose_extras: list[str] | None = None,
+    skills: list[str] | None = None,
 ) -> str:
     """Write cast-new JSON to a file.
 
@@ -495,7 +492,7 @@ def _write_cast_new_json(
         sparse=sparse,
         pip_requirements=pip_requirements,
         allow_pr=allow_pr,
-        pre_foundry=pre_foundry,
+        skills=skills or [],
         network_mode=network_mode,
         sync_ssh=sync_ssh,
         enable_opencode=enable_opencode,
@@ -508,8 +505,8 @@ def _write_cast_new_json(
     timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
     command_line = _build_command_line(
         repo, branch, from_branch, working_dir, sparse,
-        pip_requirements, allow_pr, pre_foundry, network_mode, sync_ssh,
-        enable_opencode, enable_zai, mounts, copies,
+        pip_requirements, allow_pr, network_mode, sync_ssh,
+        enable_opencode, enable_zai, mounts, copies, skills,
     )
 
     data = {
@@ -532,7 +529,6 @@ def save_last_cast_new(
     sparse: bool = False,
     pip_requirements: str = "",
     allow_pr: bool = False,
-    pre_foundry: bool = False,
     network_mode: str = "limited",
     sync_ssh: bool = False,
     enable_opencode: bool = False,
@@ -540,6 +536,7 @@ def save_last_cast_new(
     mounts: list[str] | None = None,
     copies: list[str] | None = None,
     compose_extras: list[str] | None = None,
+    skills: list[str] | None = None,
 ) -> str:
     """Save the most recent cast-new command.
 
@@ -551,11 +548,11 @@ def save_last_cast_new(
         path, repo=repo, branch=branch, from_branch=from_branch,
         working_dir=working_dir, sparse=sparse,
         pip_requirements=pip_requirements, allow_pr=allow_pr,
-        pre_foundry=pre_foundry,
         network_mode=network_mode, sync_ssh=sync_ssh,
         enable_opencode=enable_opencode, enable_zai=enable_zai,
         mounts=mounts, copies=copies,
         compose_extras=compose_extras,
+        skills=skills,
     )
 
 
@@ -569,7 +566,6 @@ def save_cast_preset(
     sparse: bool = False,
     pip_requirements: str = "",
     allow_pr: bool = False,
-    pre_foundry: bool = False,
     network_mode: str = "limited",
     sync_ssh: bool = False,
     enable_opencode: bool = False,
@@ -577,6 +573,7 @@ def save_cast_preset(
     mounts: list[str] | None = None,
     copies: list[str] | None = None,
     compose_extras: list[str] | None = None,
+    skills: list[str] | None = None,
 ) -> None:
     """Save a named cast-new preset.
 
@@ -589,11 +586,11 @@ def save_cast_preset(
         path, repo=repo, branch=branch, from_branch=from_branch,
         working_dir=working_dir, sparse=sparse,
         pip_requirements=pip_requirements, allow_pr=allow_pr,
-        pre_foundry=pre_foundry,
         network_mode=network_mode, sync_ssh=sync_ssh,
         enable_opencode=enable_opencode, enable_zai=enable_zai,
         mounts=mounts, copies=copies,
         compose_extras=compose_extras,
+        skills=skills,
     )
 
 
@@ -621,7 +618,7 @@ def _load_cast_new_json(path: str | Path) -> dict[str, Any] | None:
             "sparse": _flag_enabled(args.get("sparse", False)),
             "pip_requirements": args.get("pip_requirements", ""),
             "allow_pr": _flag_enabled(args.get("allow_pr", False)),
-            "pre_foundry": _flag_enabled(args.get("pre_foundry", False)),
+            "skills": args.get("skills", []),
             "mounts": args.get("mounts", []),
             "copies": args.get("copies", []),
             "network_mode": args.get("network_mode", "limited"),

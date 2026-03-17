@@ -1,14 +1,70 @@
 # Configuration
 
-This guide covers configuration options for Foundry Sandbox, including AI tool plugins, API keys, and config file mappings.
+This guide covers configuration options for Foundry Sandbox, including skills, API keys, and config file mappings.
 
-## Claude Plugin
+## Skills
 
-The [claude-foundry](https://github.com/foundry-works/claude-foundry) plugin is installed automatically when you create a new sandbox. This provides:
-- **foundry-mcp** MCP server with spec-driven development tools
-- Skills: `/foundry-spec`, `/foundry-implement`, `/foundry-review`, `/foundry-test`, etc.
+Sandboxes are empty by default — no MCP servers or tools are pre-installed. You configure what to mount into sandboxes using **skills**, defined in `~/.sandboxes/skills.toml`.
 
-No host installation required. The plugin is fetched from GitHub and configured during sandbox creation.
+Each skill can provide:
+- A **host directory** to mount into the container (read-only)
+- An **MCP server** registration
+- **Permission** allow/deny rules
+- **Stub files** to append to `/workspace/` (e.g. a CLAUDE.md guide)
+- **Environment variables** (with `$VAR` resolution from the host)
+
+### Quick Start
+
+```bash
+# Create an example skills.toml
+cast skills init
+
+# Edit it to define your skills
+$EDITOR ~/.sandboxes/skills.toml
+
+# List configured skills
+cast skills list
+
+# Show details for a specific skill
+cast skills show my-tool
+
+# Create a sandbox with skills
+cast new owner/repo feature --skill my-tool --skill another-tool
+```
+
+Skills can also be selected interactively in the `cast new` wizard.
+
+### Configuration Format
+
+```toml
+[skills.my-research-tool]
+# Host directory to mount into the container (read-only)
+path = "~/GitHub/my-research-tool"
+
+# Where to mount inside the container (optional, defaults to /skills/<name>)
+mount_target = "/skills/my-research-tool"
+
+# MCP server to register (optional)
+mcp_server = { command = "python", args = ["/skills/my-research-tool/server.py"] }
+
+# Extra permissions for this skill (optional)
+permissions_allow = ["Bash(my-tool:*)"]
+permissions_deny = []
+
+# Stub files from the skill directory to append to /workspace/ (optional)
+stubs = ["SKILL_GUIDE.md"]
+
+# Environment variables (optional, $VAR resolves from host env)
+env = { MY_API_KEY = "$MY_API_KEY" }
+```
+
+### How Skills Are Installed
+
+1. **At creation time** (`cast new`): skill mounts and env vars are added to the container's docker-compose config
+2. **At setup time**: MCP servers are registered in the container's `~/.claude.json`, stubs are appended to `/workspace/`, and permissions are merged into `~/.claude/settings.json`
+3. **On reattach** (`cast start`): skills are re-installed to ensure MCP servers and stubs are present after container restart
+
+Stubs use HTML comment markers for idempotency — repeated installs won't duplicate content.
 
 ### Statusline
 
@@ -25,10 +81,6 @@ API keys are passed to containers via environment variables. Set them in your sh
 ```bash
 # AI Provider Keys (at least one required)
 export CLAUDE_CODE_OAUTH_TOKEN="..."   # Get via: claude setup-token
-
-# Search Provider Keys (optional - for deep research features)
-export TAVILY_API_KEY="..."
-export PERPLEXITY_API_KEY="..."
 ```
 
 See [Commands: Environment Variables](usage/commands.md#environment-variables) for the full reference, or `.env.example` for a quick template.
@@ -90,16 +142,6 @@ cast new owner/repo feature --with-zai
 ```
 
 Requires `ZHIPU_API_KEY` set in your environment.
-
-### Search Providers
-
-The `foundry-mcp` research tools support multiple search providers. Set these optional API keys for enhanced research capabilities:
-
-| Variable | Provider | Purpose |
-|----------|----------|---------|
-| `TAVILY_API_KEY` | Tavily | Web search for deep research |
-| `PERPLEXITY_API_KEY` | Perplexity | AI-powered search |
-| `SEMANTIC_SCHOLAR_API_KEY` | Semantic Scholar | Academic paper search |
 
 ### Tmux
 

@@ -1,6 +1,6 @@
 """Unit tests for foundry_sandbox.stub_manager.
 
-Tests workspace docs installation and marker idempotency checks.
+Tests workspace stub installation.
 
 All subprocess and file I/O calls are mocked so tests run without Docker.
 """
@@ -11,9 +11,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from foundry_sandbox.stub_manager import (
-    install_foundry_workspace_docs,
-)
+from foundry_sandbox.stub_manager import install_workspace_stubs
 
 
 # ---------------------------------------------------------------------------
@@ -30,105 +28,82 @@ def _completed(stdout="", stderr="", returncode=0):
 
 
 # ---------------------------------------------------------------------------
-# TestInstallFoundryWorkspaceDocs
+# TestInstallWorkspaceStubs
 # ---------------------------------------------------------------------------
 
 
-class TestInstallFoundryWorkspaceDocs:
-    """install_foundry_workspace_docs appends stubs to container workspace."""
+class TestInstallWorkspaceStubs:
+    """install_workspace_stubs appends stubs to container workspace."""
 
-    @patch("foundry_sandbox.stub_manager.subprocess.run")
-    @patch("foundry_sandbox.stub_manager.os.path.isfile")
+    @patch("foundry_sandbox.stub_manager.subprocess.run", return_value=_completed())
     @patch("foundry_sandbox.stub_manager.get_sandbox_home")
-    def test_skips_when_marker_already_present(self, mock_home, mock_isfile, mock_run, tmp_path):
-        """When foundry-instructions marker exists, no append happens."""
+    def test_skips_when_no_stub_files(self, mock_home, mock_run, tmp_path):
+        """When no stub files are specified, nothing happens."""
         mock_home.return_value = tmp_path
-        stubs_dir = tmp_path / "stubs"
-        stubs_dir.mkdir()
-        (stubs_dir / "CLAUDE.md").write_text("# Stub content")
-        (stubs_dir / "AGENTS.md").write_text("# Agents content")
 
-        mock_isfile.return_value = True
-        # grep returns 0 = marker found for both files
-        mock_run.return_value = _completed(returncode=0)
+        install_workspace_stubs("c1")
 
-        install_foundry_workspace_docs("c1")
-
-        # Only the grep checks should run (one per stub file), no touch/append
-        assert mock_run.call_count == 2
-        for c in mock_run.call_args_list:
-            cmd = c[0][0]
-            assert "grep" in cmd
-
-    @patch("foundry_sandbox.stub_manager.subprocess.run")
-    @patch("foundry_sandbox.stub_manager.os.path.isfile")
-    @patch("foundry_sandbox.stub_manager.get_sandbox_home")
-    def test_appends_when_marker_not_present(self, mock_home, mock_isfile, mock_run, tmp_path):
-        """When no marker, touch + append should happen for each stub file."""
-        mock_home.return_value = tmp_path
-        stubs_dir = tmp_path / "stubs"
-        stubs_dir.mkdir()
-        (stubs_dir / "CLAUDE.md").write_text("# Stub content\n<foundry-instructions>")
-        (stubs_dir / "AGENTS.md").write_text("# Agents content\n<foundry-instructions>")
-
-        mock_isfile.return_value = True
-        # Both files: grep not found, touch, append
-        mock_run.side_effect = [
-            _completed(returncode=1),  # grep CLAUDE.md - not found
-            _completed(returncode=0),  # touch CLAUDE.md
-            _completed(returncode=0),  # cat >> CLAUDE.md (append)
-            _completed(returncode=1),  # grep AGENTS.md - not found
-            _completed(returncode=0),  # touch AGENTS.md
-            _completed(returncode=0),  # cat >> AGENTS.md (append)
-        ]
-
-        install_foundry_workspace_docs("c1")
-
-        # Should have: (grep, touch, append) x 2
-        assert mock_run.call_count == 6
-
-    @patch("foundry_sandbox.stub_manager.subprocess.run")
-    @patch("foundry_sandbox.stub_manager.os.path.isfile")
-    @patch("foundry_sandbox.stub_manager.get_sandbox_home")
-    def test_skips_missing_stub_files(self, mock_home, mock_isfile, mock_run, tmp_path):
-        """When stub file doesn't exist on host, skip it."""
-        mock_home.return_value = tmp_path
-        stubs_dir = tmp_path / "stubs"
-        stubs_dir.mkdir()
-        # Don't create CLAUDE.md or AGENTS.md
-
-        mock_isfile.return_value = False
-
-        install_foundry_workspace_docs("c1")
-
-        # No subprocess calls should happen
         mock_run.assert_not_called()
 
     @patch("foundry_sandbox.stub_manager.subprocess.run")
-    @patch("foundry_sandbox.stub_manager.os.path.isfile")
     @patch("foundry_sandbox.stub_manager.get_sandbox_home")
-    def test_processes_both_stub_files(self, mock_home, mock_isfile, mock_run, tmp_path):
-        """Both CLAUDE.md and AGENTS.md are processed."""
+    def test_installs_existing_stub_files(self, mock_home, mock_run, tmp_path):
+        """Existing stub files are grep-checked, touched, and appended."""
         mock_home.return_value = tmp_path
         stubs_dir = tmp_path / "stubs"
         stubs_dir.mkdir()
-        (stubs_dir / "CLAUDE.md").write_text("# Claude")
-        (stubs_dir / "AGENTS.md").write_text("# Agents")
+        (stubs_dir / "CLAUDE.md").write_text("# Test stub")
 
-        mock_isfile.return_value = True
-        # Both greps say marker not found
-        mock_run.side_effect = [
-            _completed(returncode=1),  # grep CLAUDE.md
-            _completed(returncode=0),  # touch CLAUDE.md
-            _completed(returncode=0),  # append CLAUDE.md
-            _completed(returncode=1),  # grep AGENTS.md
-            _completed(returncode=0),  # touch AGENTS.md
-            _completed(returncode=0),  # append AGENTS.md
-        ]
+        # grep returns 1 (marker not found) so installation proceeds
+        mock_run.return_value = _completed(returncode=1)
 
-        install_foundry_workspace_docs("c1")
+        install_workspace_stubs("c1", ["CLAUDE.md"])
 
-        assert mock_run.call_count == 6
+        # grep (idempotency check) + touch + cat >> = 3 calls
+        assert mock_run.call_count == 3
+
+    @patch("foundry_sandbox.stub_manager.subprocess.run")
+    @patch("foundry_sandbox.stub_manager.get_sandbox_home")
+    def test_skips_already_installed_stub(self, mock_home, mock_run, tmp_path):
+        """Stubs with existing markers are skipped (idempotency)."""
+        mock_home.return_value = tmp_path
+        stubs_dir = tmp_path / "stubs"
+        stubs_dir.mkdir()
+        (stubs_dir / "CLAUDE.md").write_text("# Test stub")
+
+        # grep returns 0 (marker found) so installation is skipped
+        mock_run.return_value = _completed(returncode=0)
+
+        install_workspace_stubs("c1", ["CLAUDE.md"])
+
+        # Only the grep check, no touch or append
+        assert mock_run.call_count == 1
+
+    @patch("foundry_sandbox.stub_manager.subprocess.run", return_value=_completed())
+    @patch("foundry_sandbox.stub_manager.get_sandbox_home")
+    def test_skips_empty_stub_files(self, mock_home, mock_run, tmp_path):
+        """Empty stub files are skipped."""
+        mock_home.return_value = tmp_path
+        stubs_dir = tmp_path / "stubs"
+        stubs_dir.mkdir()
+        (stubs_dir / "EMPTY.md").write_text("   \n  ")
+
+        install_workspace_stubs("c1", ["EMPTY.md"])
+
+        mock_run.assert_not_called()
+
+    @patch("foundry_sandbox.stub_manager.subprocess.run", return_value=_completed())
+    @patch("foundry_sandbox.stub_manager.get_sandbox_home")
+    def test_skips_missing_stub_files(self, mock_home, mock_run, tmp_path):
+        """Missing stub files are silently skipped."""
+        mock_home.return_value = tmp_path
+        stubs_dir = tmp_path / "stubs"
+        stubs_dir.mkdir()
+        # Don't create the stub file
+
+        install_workspace_stubs("c1", ["MISSING.md"])
+
+        mock_run.assert_not_called()
 
 
 if __name__ == "__main__":

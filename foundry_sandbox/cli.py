@@ -48,6 +48,7 @@ _LAZY_COMMANDS: dict[str, tuple[str, str]] = {
     "prune": ("foundry_sandbox.commands.prune", "prune"),
     "refresh-credentials": ("foundry_sandbox.commands.refresh_creds", "refresh_creds"),
     "git-mode": ("foundry_sandbox.commands.git_mode", "git_mode"),
+    "skills": ("foundry_sandbox.commands.skills_cmd", "skills"),
     "start": ("foundry_sandbox.commands.start", "start"),
     "status": ("foundry_sandbox.commands.status", "status"),
     "stop": ("foundry_sandbox.commands.stop", "stop"),

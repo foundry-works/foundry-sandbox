@@ -122,26 +122,6 @@ class TestSetupCredentialPlaceholders:
 
         assert env["SANDBOX_ZHIPU_API_KEY"] == ""
 
-    def test_tavily_api_key_sets_enable_flag(self, monkeypatch):
-        monkeypatch.delenv("CLAUDE_CODE_OAUTH_TOKEN", raising=False)
-        monkeypatch.delenv("SANDBOX_ENABLE_OPENCODE", raising=False)
-        monkeypatch.setenv("TAVILY_API_KEY", "tvly-xxx")
-
-        with patch("pathlib.Path.is_file", return_value=False):
-            env = setup_credential_placeholders().to_env_dict()
-
-        assert env["SANDBOX_ENABLE_TAVILY"] == "1"
-
-    def test_no_tavily_clears_enable_flag(self, monkeypatch):
-        monkeypatch.delenv("CLAUDE_CODE_OAUTH_TOKEN", raising=False)
-        monkeypatch.delenv("SANDBOX_ENABLE_OPENCODE", raising=False)
-        monkeypatch.delenv("TAVILY_API_KEY", raising=False)
-
-        with patch("pathlib.Path.is_file", return_value=False):
-            env = setup_credential_placeholders().to_env_dict()
-
-        assert env["SANDBOX_ENABLE_TAVILY"] == "0"
-
     def test_placeholders_are_unique_per_call(self, monkeypatch):
         """Each call generates unique random nonces."""
         monkeypatch.delenv("CLAUDE_CODE_OAUTH_TOKEN", raising=False)

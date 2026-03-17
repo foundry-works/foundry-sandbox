@@ -21,9 +21,7 @@ from foundry_sandbox.constants import get_repos_dir
 from foundry_sandbox.container_io import copy_dir_to_container, copy_file_to_container
 from foundry_sandbox.container_setup import install_pip_requirements
 from foundry_sandbox.credential_setup import copy_configs_to_container
-from foundry_sandbox.foundry_upgrade import upgrade_foundry_mcp_prerelease
 from foundry_sandbox.docker import compose_up
-from foundry_sandbox.foundry_plugin import prepopulate_foundry_global
 from foundry_sandbox.git import ensure_bare_repo
 from foundry_sandbox.git_path_fixer import fix_proxy_worktree_paths
 from foundry_sandbox.git_worktree import create_worktree
@@ -36,7 +34,7 @@ from foundry_sandbox.network import (
 from foundry_sandbox.paths import ensure_dir, path_claude_home
 from foundry_sandbox.permissions import install_workspace_permissions
 from foundry_sandbox.proxy import setup_proxy_registration
-from foundry_sandbox.state import patch_sandbox_metadata, write_sandbox_metadata
+from foundry_sandbox.state import write_sandbox_metadata
 from foundry_sandbox.validate import validate_git_remotes
 from foundry_sandbox.errors import SetupError
 from foundry_sandbox.utils import log_section, log_step, log_warn
@@ -125,7 +123,7 @@ def _new_setup(
     isolate_credentials: bool,
     allow_pr: bool,
     pip_requirements: str,
-    pre_foundry: bool = False,
+    skills: list[str] | None = None,
     enable_opencode_flag: str,
     enable_zai_flag: str,
     anthropic_base_url: str,
@@ -144,13 +142,6 @@ def _new_setup(
         sparse,
         wd or None,
     )
-
-    # Add specs/.backups to gitignore
-    gitignore_file = worktree_path / ".gitignore"
-    gitignore_content = gitignore_file.read_text() if gitignore_file.exists() else ""
-    if "specs/.backups" not in gitignore_content:
-        with gitignore_file.open("a") as f:
-            f.write("specs/.backups\n")
 
     # Setup override file
     ensure_dir(claude_config_path)
@@ -182,9 +173,6 @@ def _new_setup(
     add_claude_home_to_override(str(override_file), str(claude_home_path))
     add_timezone_to_override(str(override_file))
 
-    # Pre-populate foundry global
-    prepopulate_foundry_global(str(claude_home_path))
-
     # Show CLI status
     show_cli_status()
 
@@ -210,7 +198,7 @@ def _new_setup(
         sparse_checkout=bool(sparse),
         pip_requirements=pip_requirements or "",
         allow_pr=bool(allow_pr),
-        pre_foundry=bool(pre_foundry),
+        skills=skills or [],
         network_mode=network_mode or "",
         sync_ssh=1 if sync_ssh_enabled else 0,
         ssh_mode=ssh_mode,
@@ -322,6 +310,7 @@ def _new_setup(
         enable_ssh=runtime_enable_ssh == "1",
         working_dir=wd or "",
         isolate_credentials=isolate_credentials,
+        skills=skills,
     )
 
     # Copy files
@@ -342,23 +331,14 @@ def _new_setup(
             else:
                 copy_file_to_container(container_id, src, dst)
 
-    # Install workspace permissions
-    install_workspace_permissions(container_id)
-
-    # Upgrade foundry-mcp to pre-release if requested (must run before pip
-    # requirements because install_pip_requirements blocks PyPI afterward)
-    installed_foundry_version = ""
-    if pre_foundry:
-        installed_foundry_version = upgrade_foundry_mcp_prerelease(
-            container_id, required=True,
-        )
-        # Pin the installed version in sandbox metadata for deterministic restarts
-        if installed_foundry_version:
-            patch_sandbox_metadata(
-                name,
-                pre_foundry=True,
-                pre_foundry_version=installed_foundry_version,
-            )
+    # Install workspace permissions (with skill permissions merged in)
+    from foundry_sandbox.skills import get_skill_permissions, load_skills_config
+    extra_allow: list[str] = []
+    extra_deny: list[str] = []
+    if skills:
+        skills_config = load_skills_config()
+        extra_allow, extra_deny = get_skill_permissions(skills, skills_config)
+    install_workspace_permissions(container_id, extra_allow=extra_allow, extra_deny=extra_deny)
 
     # Install pip requirements (blocks PyPI access after install)
     if pip_requirements:

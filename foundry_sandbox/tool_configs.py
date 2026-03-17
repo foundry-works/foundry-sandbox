@@ -3,7 +3,7 @@
 Migrated from lib/container_config.sh: ensure_claude_onboarding, ensure_claude_statusline,
 ensure_github_https_git, configure_gh_credential_helper, ensure_codex_config,
 ensure_gemini_settings, ensure_opencode_settings, ensure_opencode_default_model,
-ensure_opencode_tavily_mcp, sync_opencode_foundry, prefetch_opencode_npm_plugins,
+sync_opencode_foundry, prefetch_opencode_npm_plugins,
 sync_opencode_local_plugins_on_first_attach.
 """
 from __future__ import annotations
@@ -358,23 +358,6 @@ def ensure_opencode_default_model(container_id: str, *, quiet: bool = False) -> 
     )
 
 
-def ensure_opencode_tavily_mcp(container_id: str, *, quiet: bool = False) -> None:
-    """Add tavily-mcp to OpenCode's MCP configuration.
-
-    Migrated from lib/container_config.sh:ensure_opencode_tavily_mcp (L551-599).
-    Only configures if SANDBOX_ENABLE_TAVILY=1.
-
-    Args:
-        container_id: Container ID
-        quiet: If True, suppress output
-    """
-    # Skip if Tavily is not enabled
-    if os.environ.get("SANDBOX_ENABLE_TAVILY", "0") != "1":
-        return
-
-    _docker_exec_python(container_id, _read_script("ensure_opencode_tavily.py"), quiet=quiet)
-
-
 def sync_opencode_foundry(container_id: str, *, quiet: bool = False) -> None:
     """Sync opencode-foundry config from vendor repo.
 
@@ -525,7 +508,6 @@ def sync_opencode_local_plugins_on_first_attach(
         pass
 
     sync_opencode_foundry(container_id, quiet=quiet)
-    ensure_opencode_tavily_mcp(container_id, quiet=quiet)
 
 
 # ============================================================================
@@ -597,4 +579,3 @@ def configure_opencode(container_id: str, *, quiet: bool = False) -> None:
     """
     ensure_opencode_settings(container_id, quiet=quiet)
     ensure_opencode_default_model(container_id, quiet=quiet)
-    ensure_opencode_tavily_mcp(container_id, quiet=quiet)

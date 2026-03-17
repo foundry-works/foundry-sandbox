@@ -873,13 +873,12 @@ class TestPatchSandboxMetadata:
             allow_pr=False,
         )
 
-        patch_sandbox_metadata("patch-test", allow_pr=True, pre_foundry=True, pre_foundry_version="1.2.0a3")
+        patch_sandbox_metadata("patch-test", allow_pr=True, enable_opencode=True)
 
         metadata = load_sandbox_metadata("patch-test")
         assert metadata is not None
         assert metadata["allow_pr"] is True
-        assert metadata["pre_foundry"] is True
-        assert metadata["pre_foundry_version"] == "1.2.0a3"
+        assert metadata["enable_opencode"] is True
         # Original fields preserved
         assert metadata["repo_url"] == "https://github.com/test/repo.git"
         assert metadata["branch"] == "main"
