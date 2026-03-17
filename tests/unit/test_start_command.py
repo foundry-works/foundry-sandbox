@@ -48,7 +48,6 @@ def test_export_feature_flags_normalizes_env_values(monkeypatch) -> None:
 @patch("foundry_sandbox.commands.start.compose_up")
 @patch("foundry_sandbox.commands.start.add_timezone_to_override")
 @patch("foundry_sandbox.commands.start.add_claude_home_to_override")
-@patch("foundry_sandbox.commands.start.prepopulate_foundry_global")
 @patch("foundry_sandbox.commands.start.ensure_override_from_metadata")
 @patch("foundry_sandbox.commands.start._setup_ssh_forwarding", return_value=False)
 @patch("foundry_sandbox.commands.start.api_keys")
@@ -66,7 +65,6 @@ def test_start_refreshes_bare_repo(
     mock_api_keys,
     _mock_ssh,
     _mock_override,
-    _mock_foundry,
     _mock_claude_home,
     _mock_tz,
     _mock_compose,
@@ -102,7 +100,6 @@ def test_start_refreshes_bare_repo(
 @patch("foundry_sandbox.commands.start.compose_up")
 @patch("foundry_sandbox.commands.start.add_timezone_to_override")
 @patch("foundry_sandbox.commands.start.add_claude_home_to_override")
-@patch("foundry_sandbox.commands.start.prepopulate_foundry_global")
 @patch("foundry_sandbox.commands.start.ensure_override_from_metadata")
 @patch("foundry_sandbox.commands.start._setup_ssh_forwarding", return_value=False)
 @patch("foundry_sandbox.commands.start.api_keys")
@@ -120,7 +117,6 @@ def test_start_skips_bare_repo_refresh_when_no_repo_url(
     mock_api_keys,
     _mock_ssh,
     _mock_override,
-    _mock_foundry,
     _mock_claude_home,
     _mock_tz,
     _mock_compose,

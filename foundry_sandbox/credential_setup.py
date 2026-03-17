@@ -143,7 +143,7 @@ def _stage_setup_claude_config(
 ) -> None:
     """Stage 3: Claude config, settings merge, statusline, plugins."""
     from foundry_sandbox.foundry_plugin import (
-        ensure_foundry_mcp_config,
+        ensure_marketplace_config,
         sync_marketplace_manifests,
     )
     from foundry_sandbox.tool_configs import (
@@ -182,8 +182,8 @@ def _stage_setup_claude_config(
     log_step("Ensuring Claude onboarding")
     ensure_claude_onboarding(container_id)
 
-    log_step("Ensuring Foundry MCP config")
-    ensure_foundry_mcp_config(container_id)
+    log_step("Ensuring marketplace config")
+    ensure_marketplace_config(container_id)
 
     # Merge host settings — strip secrets when credential isolation is active
     log_step("Merging Claude settings")
@@ -450,43 +450,31 @@ def _stage_setup_git_config(container_id: str, home: Path, host_user: str) -> No
     ensure_github_https_git(container_id)
 
 
-def _stage_setup_foundry(
+def _stage_setup_skills(
     container_id: str,
-    home: Path,
     *,
-    working_dir: str,
+    skills: list[str] | None = None,
 ) -> None:
-    """Stage 7: foundry-mcp, research providers, workspace docs."""
+    """Stage 7: Install skills (MCP servers, stubs) and set settings defaults."""
     from foundry_sandbox.foundry_plugin import (
-        ensure_claude_foundry_mcp,
-        ensure_foundry_mcp_workspace_dirs,
-        configure_foundry_research_providers,
+        ensure_claude_settings_defaults,
+        ensure_pyright_lsp,
     )
-    from foundry_sandbox.stub_manager import (
-        install_foundry_workspace_docs,
+    from foundry_sandbox.skills import (
+        install_skills_to_container,
+        load_skills_config,
     )
 
-    log_step("Copying foundry-mcp config")
-    foundry_mcp_config = home / ".config" / "foundry-mcp"
-    if foundry_mcp_config.exists():
-        copy_dir_to_container(
-            container_id, str(foundry_mcp_config),
-            f"{CONTAINER_HOME}/.config/foundry-mcp",
-        )
-    else:
-        log_debug("~/.config/foundry-mcp not found, skipping")
+    log_step("Setting Claude defaults")
+    ensure_claude_settings_defaults(container_id)
 
-    log_step("Configuring Foundry research providers")
-    configure_foundry_research_providers(container_id)
+    log_step("Setting up Pyright LSP")
+    ensure_pyright_lsp(container_id)
 
-    log_step("Ensuring Claude Foundry MCP")
-    ensure_claude_foundry_mcp(container_id)
-
-    log_step("Ensuring Foundry MCP workspace dirs")
-    ensure_foundry_mcp_workspace_dirs(container_id, working_dir)
-
-    log_step("Installing Foundry workspace docs")
-    install_foundry_workspace_docs(container_id)
+    if skills:
+        log_step("Installing skills")
+        skills_config = load_skills_config()
+        install_skills_to_container(container_id, skills, skills_config)
 
 
 def _stage_fix_ownership(
@@ -528,6 +516,7 @@ def copy_configs_to_container(
     enable_ssh: bool = False,
     working_dir: str = "",
     isolate_credentials: bool = False,
+    skills: list[str] | None = None,
 ) -> None:
     """Copy configs and credentials to container.
 
@@ -537,8 +526,9 @@ def copy_configs_to_container(
         container_id: Container ID
         skip_plugins: Skip marketplace plugins sync
         enable_ssh: Enable SSH agent forwarding
-        working_dir: Working directory for foundry workspace
+        working_dir: Working directory (kept for signature compat)
         isolate_credentials: Use placeholder credentials instead of real ones
+        skills: List of skill names to install
     """
     host_user = getpass.getuser()
     home = Path.home()
@@ -557,9 +547,9 @@ def copy_configs_to_container(
         enable_ssh=enable_ssh,
     )
     _stage_setup_git_config(container_id, home, host_user)
-    _stage_setup_foundry(
-        container_id, home,
-        working_dir=working_dir,
+    _stage_setup_skills(
+        container_id,
+        skills=skills,
     )
     _stage_fix_ownership(
         container_id, dirs,
@@ -582,6 +572,8 @@ def copy_configs_to_container(
 def sync_runtime_credentials(
     container_id: str,
     isolate_credentials: bool = False,
+    *,
+    skills: list[str] | None = None,
 ) -> None:
     """Sync credentials when attaching to running container.
 
@@ -592,15 +584,16 @@ def sync_runtime_credentials(
     Args:
         container_id: Container ID
         isolate_credentials: If True, skip real credential copies
+        skills: List of skill names to re-install
     """
     # Lazy imports
     from foundry_sandbox.foundry_plugin import (
-        ensure_claude_foundry_mcp,
-        ensure_foundry_mcp_config,
+        ensure_claude_settings_defaults,
+        ensure_marketplace_config,
         sync_marketplace_manifests,
-        configure_foundry_research_providers,
     )
     from foundry_sandbox.git_path_fixer import detect_nested_git_repos
+    from foundry_sandbox.skills import install_skills_to_container, load_skills_config
     from foundry_sandbox.tool_configs import (
         ensure_claude_onboarding,
         ensure_claude_statusline,
@@ -636,8 +629,8 @@ def sync_runtime_credentials(
     # Ensure Claude onboarding (quiet)
     ensure_claude_onboarding(container_id, quiet=True)
 
-    # Ensure foundry MCP config (quiet)
-    ensure_foundry_mcp_config(container_id, quiet=True)
+    # Ensure marketplace config (quiet)
+    ensure_marketplace_config(container_id, quiet=True)
 
     # Merge host settings.json into container settings (quiet)
     settings_json = home / ".claude" / "settings.json"
@@ -658,8 +651,8 @@ def sync_runtime_credentials(
             f"{CONTAINER_HOME}/.claude/statusline.conf",
         )
 
-    # Ensure Claude Foundry MCP (quiet)
-    ensure_claude_foundry_mcp(container_id, quiet=True)
+    # Ensure Claude settings defaults (quiet)
+    ensure_claude_settings_defaults(container_id, quiet=True)
 
     # Ensure Claude statusline (quiet)
     ensure_claude_statusline(container_id, quiet=True)
@@ -708,17 +701,10 @@ def sync_runtime_credentials(
     # Ensure Codex config (quiet)
     ensure_codex_config(container_id, quiet=True)
 
-    # Copy foundry-mcp config (quiet)
-    foundry_mcp_config = home / ".config" / "foundry-mcp"
-    if foundry_mcp_config.exists():
-        copy_dir_to_container_quiet(
-            container_id,
-            str(foundry_mcp_config),
-            f"{CONTAINER_HOME}/.config/foundry-mcp",
-        )
-
-    # Configure research providers
-    configure_foundry_research_providers(container_id, quiet=True)
+    # Re-install skills
+    if skills:
+        skills_config = load_skills_config()
+        install_skills_to_container(container_id, skills, skills_config)
 
     # Detect nested git repos
     detect_nested_git_repos(container_id)

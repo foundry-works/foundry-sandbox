@@ -135,7 +135,6 @@ class TestCredentialPlaceholders:
         creds = CredentialPlaceholders()
         assert creds.sandbox_anthropic_api_key == ""
         assert creds.sandbox_claude_oauth == ""
-        assert creds.sandbox_enable_tavily == "0"
 
     def test_to_env_dict(self):
         creds = CredentialPlaceholders(
@@ -143,14 +142,12 @@ class TestCredentialPlaceholders:
             sandbox_claude_oauth="",
             sandbox_gemini_api_key="CRED_PROXY_def",
             sandbox_zhipu_api_key="",
-            sandbox_enable_tavily="1",
         )
         env = creds.to_env_dict()
         assert env["SANDBOX_ANTHROPIC_API_KEY"] == "CRED_PROXY_abc"
         assert env["SANDBOX_CLAUDE_OAUTH"] == ""
         assert env["SANDBOX_GEMINI_API_KEY"] == "CRED_PROXY_def"
         assert env["SANDBOX_ZHIPU_API_KEY"] == ""
-        assert env["SANDBOX_ENABLE_TAVILY"] == "1"
 
     def test_to_env_dict_keys(self):
         creds = CredentialPlaceholders()
@@ -160,7 +157,6 @@ class TestCredentialPlaceholders:
             "SANDBOX_CLAUDE_OAUTH",
             "SANDBOX_GEMINI_API_KEY",
             "SANDBOX_ZHIPU_API_KEY",
-            "SANDBOX_ENABLE_TAVILY",
             "SANDBOX_OPENAI_BASE_URL",
         }
         assert set(env.keys()) == expected_keys
@@ -168,7 +164,6 @@ class TestCredentialPlaceholders:
     def test_model_dump_roundtrip(self):
         creds = CredentialPlaceholders(
             sandbox_anthropic_api_key="key1",
-            sandbox_enable_tavily="1",
         )
         data = creds.model_dump()
         restored = CredentialPlaceholders(**data)

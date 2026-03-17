@@ -108,27 +108,13 @@ RUN if [ "$INCLUDE_OPENCODE" = "1" ]; then \
     fi
 
 # Install Python packages globally (to /usr/local/lib/python3)
-RUN pip3 install foundry-mcp pypdf pytest-asyncio hypothesis cc-context-stats pyright
-
-# Install tavily-mcp globally (npm package for web search MCP server)
-# Pre-installed to avoid runtime installation delay
-RUN npm install -g tavily-mcp
-
-# Fix ESM module resolution for OpenCode SDK wrapper (only if INCLUDE_OPENCODE=1)
-# ESM imports don't respect NODE_PATH, so we create a symlink from foundry-mcp's
-# providers directory to the globally installed SDK
-RUN if [ "$INCLUDE_OPENCODE" = "1" ]; then \
-        PROVIDERS_DIR=$(python3 -c "import foundry_mcp.core.providers as p; print(p.__path__[0])") && \
-        mkdir -p "$PROVIDERS_DIR/node_modules" && \
-        ln -sf /usr/local/lib/node_modules/@opencode-ai "$PROVIDERS_DIR/node_modules/@opencode-ai"; \
-    fi
+RUN pip3 install pypdf pytest-asyncio hypothesis pyright
 
 # Add useful aliases to system bashrc (before switching to non-root user)
 # Home directory is tmpfs at runtime, so user .bashrc won't persist
 # API keys are passed via environment variables (docker-compose), not sourced from files
 RUN echo "alias claudedsp='claude --dangerously-skip-permissions'" >> /etc/bash.bashrc && \
-    echo "alias codexdsp='codex --dangerously-bypass-approvals-and-sandbox'" >> /etc/bash.bashrc && \
-    echo "alias reinstall-foundry='claude plugin marketplace add foundry-works/claude-foundry && claude plugin install foundry@claude-foundry && claude plugin enable foundry@claude-foundry'" >> /etc/bash.bashrc
+    echo "alias codexdsp='codex --dangerously-bypass-approvals-and-sandbox'" >> /etc/bash.bashrc
 
 # Install bash completions for sandbox aliases
 COPY safety/sandbox-completions.bash /etc/bash_completion.d/sandbox-completions

@@ -66,15 +66,15 @@ class TestCommandAllowlist:
 
     def test_allowed_commands_pass_through(self):
         """Test that all allowlisted commands pass validation."""
-        allowed_cmds = ["status", "add", "commit", "push", "pull", "fetch", "diff", "log", "clone"]
+        allowed_cmds = ["status", "add", "commit", "push", "pull", "fetch", "diff", "log", "clone", "rm"]
 
         for cmd in allowed_cmds:
             result = validate_command([cmd])
             assert result is None, f"Command {cmd} should be allowed but got: {result}"
 
     def test_non_allowlisted_commands_rejected(self):
-        """Test that non-allowlisted commands are rejected (e.g., reset, rm)."""
-        blocked_cmds = ["reset", "rm", "gc", "fsck", "filter-branch", "reflog"]
+        """Test that non-allowlisted commands are rejected (e.g., reset, gc)."""
+        blocked_cmds = ["reset", "gc", "fsck", "filter-branch", "reflog"]
 
         for cmd in blocked_cmds:
             result = validate_command([cmd])

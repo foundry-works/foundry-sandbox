@@ -1,6 +1,7 @@
 """Workspace documentation stub management.
 
-Migrated from lib/container_config.sh: install_foundry_workspace_docs.
+Installs stub files (CLAUDE.md, AGENTS.md, etc.) into container workspace.
+Skill-specific stubs are handled by the skills system (skills.py).
 """
 from __future__ import annotations
 
@@ -11,22 +12,25 @@ from foundry_sandbox.constants import CONTAINER_USER, TIMEOUT_DOCKER_EXEC, get_s
 from foundry_sandbox.utils import log_debug, log_info
 
 
-def install_foundry_workspace_docs(container_id: str) -> None:
-    """Install CLAUDE.md and AGENTS.md stubs into container workspace.
+def install_workspace_stubs(container_id: str, stub_files: list[str] | None = None) -> None:
+    """Install stub files into container workspace.
 
-    Reads stubs from host stubs directory and appends to /workspace files
-    if foundry-instructions marker not already present.
+    Reads stubs from host stubs directory and appends to /workspace files.
 
     Args:
         container_id: Container ID or name
+        stub_files: List of stub file names to install. Defaults to empty (no stubs).
     """
+    if not stub_files:
+        return
+
     verbose = get_sandbox_verbose()
     stubs_dir = get_sandbox_home() / "stubs"
 
     if verbose:
-        log_debug(f"Installing workspace docs from {stubs_dir}")
+        log_debug(f"Installing workspace stubs from {stubs_dir}")
 
-    for stub_file in ["CLAUDE.md", "AGENTS.md"]:
+    for stub_file in stub_files:
         stub_path = stubs_dir / stub_file
 
         if not os.path.isfile(stub_path):
@@ -34,48 +38,42 @@ def install_foundry_workspace_docs(container_id: str) -> None:
                 log_debug(f"Stub file not found: {stub_path}")
             continue
 
-        # Check if marker already exists in container file
-        target_path = f"/workspace/{stub_file}"
-        check_cmd = [
-            "docker", "exec",
-            "-u", CONTAINER_USER,
-            container_id,
-            "grep", "-q", "<foundry-instructions>", target_path
-        ]
-
-        result = subprocess.run(check_cmd, capture_output=True, text=True, check=False, timeout=TIMEOUT_DOCKER_EXEC)
-
-        if result.returncode == 0:
-            # Marker found, skip
-            if verbose:
-                log_debug(f"Foundry instructions already present in {target_path}")
-            continue
-
-        # Ensure target file exists
-        touch_cmd = [
-            "docker", "exec",
-            "-u", CONTAINER_USER,
-            container_id,
-            "touch", target_path
-        ]
-        subprocess.run(touch_cmd, check=False, timeout=TIMEOUT_DOCKER_EXEC)
-
         # Read stub content
         with open(stub_path, 'r') as f:
             stub_content = f.read()
 
-        # Append stub content to container file
-        append_cmd = [
-            "docker", "exec",
-            "-i",
-            "-u", CONTAINER_USER,
-            container_id,
-            "sh", "-c", f"cat >> {target_path}"
-        ]
+        if not stub_content.strip():
+            if verbose:
+                log_debug(f"Stub file is empty, skipping: {stub_path}")
+            continue
 
+        target_path = f"/workspace/{stub_file}"
+
+        # Check if stub was already appended (idempotency via marker)
+        marker = f"<!-- cast-stub:{stub_file} -->"
+        check_result = subprocess.run(
+            ["docker", "exec", "-u", CONTAINER_USER, container_id,
+             "grep", "-qF", marker, target_path],
+            capture_output=True, check=False, timeout=TIMEOUT_DOCKER_EXEC,
+        )
+        if check_result.returncode == 0:
+            if verbose:
+                log_debug(f"Stub {stub_file} already installed, skipping")
+            continue
+
+        # Ensure target file exists
+        subprocess.run(
+            ["docker", "exec", "-u", CONTAINER_USER, container_id,
+             "touch", target_path],
+            check=False, timeout=TIMEOUT_DOCKER_EXEC,
+        )
+
+        # Prepend marker and append to container file
+        content_with_marker = f"{marker}\n{stub_content}"
         result = subprocess.run(
-            append_cmd,
-            input=stub_content,
+            ["docker", "exec", "-i", "-u", CONTAINER_USER, container_id,
+             "sh", "-c", f"cat >> {target_path}"],
+            input=content_with_marker,
             text=True,
             capture_output=True,
             check=False,

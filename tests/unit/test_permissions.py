@@ -26,14 +26,11 @@ class TestPermissionLists:
     def test_deny_list_non_empty(self) -> None:
         assert len(FOUNDRY_DENY) > 0
 
-    def test_allow_contains_foundry_skill(self) -> None:
-        assert "Skill(foundry:*)" in FOUNDRY_ALLOW
+    def test_allow_contains_git_commands(self) -> None:
+        assert "Bash(git add:*)" in FOUNDRY_ALLOW
 
-    def test_allow_contains_mcp_tools(self) -> None:
-        assert any(e.startswith("mcp__plugin_foundry") for e in FOUNDRY_ALLOW)
-
-    def test_deny_contains_spec_read_block(self) -> None:
-        assert "Read(/workspace/**/specs/**/*.json)" in FOUNDRY_DENY
+    def test_allow_contains_workspace_read(self) -> None:
+        assert "Read(/workspace/**)" in FOUNDRY_ALLOW
 
     def test_deny_contains_gh_api_block(self) -> None:
         assert "Bash(gh api:*)" in FOUNDRY_DENY
@@ -55,7 +52,7 @@ class TestInstallScriptRendering:
         )
         assert "FOUNDRY_ALLOW" in script
         assert "FOUNDRY_DENY" in script
-        assert "Skill(foundry:*)" in script
+        assert "Bash(git add:*)" in script
 
     def test_rendered_script_is_valid_python(self) -> None:
         script = _INSTALL_SCRIPT.format(

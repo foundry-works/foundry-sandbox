@@ -15,7 +15,7 @@ from typing import NamedTuple
 import click
 
 from foundry_sandbox.constants import TIMEOUT_GIT_QUERY
-from foundry_sandbox.tui import tui_choose, tui_confirm, tui_header, tui_input, tui_step, tui_summary
+from foundry_sandbox.tui import tui_choose, tui_confirm, tui_header, tui_input, tui_multi_choose, tui_step, tui_summary
 
 _WIZARD_STEPS = 8
 """Total number of wizard steps (update when adding/removing steps)."""
@@ -31,7 +31,7 @@ class WizardResult(NamedTuple):
     sparse: bool
     pip_requirements: str
     allow_pr: bool
-    pre_foundry: bool
+    skills: tuple[str, ...]
 
 
 def _wizard_repo() -> tuple[str, str, str, str]:
@@ -271,40 +271,25 @@ def _wizard_pr() -> bool:
     )
 
 
-def _wizard_foundry_version() -> bool:
-    """Wizard step 7: Foundry MCP version selection.
-
-    Always displays the step header for consistent numbering.  When no
-    pre-release is available (or the check fails), informs the user and
-    returns False.
+def _wizard_skills() -> tuple[str, ...]:
+    """Wizard step 7: Skills selection.
 
     Returns:
-        True to upgrade to pre-release, False for stable.
+        Tuple of selected skill names.
     """
-    tui_step(7, _WIZARD_STEPS, "Foundry MCP version")
+    from foundry_sandbox.skills import load_skills_config
 
-    click.echo("  Checking for foundry-mcp updates...", nl=False)
-    try:
-        from foundry_sandbox.pypi_version import has_newer_prerelease
+    tui_step(7, _WIZARD_STEPS, "Skills")
 
-        info = has_newer_prerelease()
-    except Exception:
-        click.echo("\r\033[K", nl=False)  # clear the "Checking..." line
-        click.echo("  Could not check PyPI — using stable.")
-        return False
+    skills_config = load_skills_config()
+    if not skills_config:
+        click.echo("  No skills configured. Define skills in ~/.sandboxes/skills.toml")
+        click.echo("  Run 'cast skills init' to create an example config.")
+        return ()
 
-    click.echo("\r\033[K", nl=False)  # clear the "Checking..." line
-
-    if not info.has_newer:
-        click.echo("  No pre-release available — using stable.")
-        return False
-
-    choice = tui_choose(
-        f"Foundry MCP version (stable: {info.stable}, pre-release: {info.pre})",
-        [f"Stable ({info.stable})", f"Pre-release ({info.pre})"],
-        default=f"Stable ({info.stable})",
-    )
-    return choice.startswith("Pre-release")
+    available = list(skills_config.keys())
+    selected = tui_multi_choose("Select skills to install (space/enter to toggle)", available)
+    return tuple(selected)
 
 
 def _wizard_summary(
@@ -316,7 +301,7 @@ def _wizard_summary(
     sparse: bool,
     pip_req: str,
     allow_pr: bool,
-    pre_foundry: bool = False,
+    skills: tuple[str, ...] = (),
 ) -> None:
     """Wizard summary step: Summary display.
 
@@ -329,7 +314,7 @@ def _wizard_summary(
         sparse: True if sparse checkout.
         pip_req: Pip requirements path.
         allow_pr: True if allowing PR operations.
-        pre_foundry: True if upgrading to pre-release foundry-mcp.
+        skills: Selected skill names.
     """
     tui_step(_WIZARD_STEPS, _WIZARD_STEPS, "Review")
 
@@ -339,7 +324,7 @@ def _wizard_summary(
     sparse_display = "yes" if sparse else "no"
     pip_display = pip_req if pip_req else "no"
     pr_display = "yes" if allow_pr else "no"
-    foundry_display = "pre-release" if pre_foundry else "stable"
+    skills_display = ", ".join(skills) if skills else "none"
 
     lines = [
         f"Repository:   {repo_display}",
@@ -353,7 +338,7 @@ def _wizard_summary(
         f"Sparse clone: {sparse_display}",
         f"Python deps:  {pip_display}",
         f"PR access:    {pr_display}",
-        f"Foundry MCP:  {foundry_display}",
+        f"Skills:       {skills_display}",
     ])
 
     tui_summary("Here's what we'll create:", "\n".join(lines))
@@ -373,10 +358,10 @@ def _guided_new() -> WizardResult:
     sparse = _wizard_sparse(working_dir)
     pip_req = _wizard_deps()
     allow_pr = _wizard_pr()
-    pre_foundry = _wizard_foundry_version()
+    skills = _wizard_skills()
 
     while True:
-        _wizard_summary(repo_display, branch, from_branch, create_branch, working_dir, sparse, pip_req, allow_pr, pre_foundry)
+        _wizard_summary(repo_display, branch, from_branch, create_branch, working_dir, sparse, pip_req, allow_pr, skills)
         next_choice = tui_choose("Next step", ["Create sandbox", "Edit answers", "Cancel"])
 
         if next_choice == "Create sandbox":
@@ -388,7 +373,7 @@ def _guided_new() -> WizardResult:
         else:
             edit = tui_choose("What do you want to edit?", [
                 "Repository", "Branch", "Working directory", "Dependencies",
-                "PR access", "Foundry version",
+                "PR access", "Skills",
             ])
             if edit == "Repository":
                 repo_url, repo_root, repo_display, current_branch = _wizard_repo()
@@ -404,8 +389,8 @@ def _guided_new() -> WizardResult:
                 pip_req = _wizard_deps()
             elif edit == "PR access":
                 allow_pr = _wizard_pr()
-            elif edit == "Foundry version":
-                pre_foundry = _wizard_foundry_version()
+            elif edit == "Skills":
+                skills = _wizard_skills()
 
     # Return the resolved repo input (not URL) for proper handling
     repo_input = repo_root if repo_root else repo_url
@@ -417,5 +402,5 @@ def _guided_new() -> WizardResult:
         sparse=sparse,
         pip_requirements=pip_req,
         allow_pr=allow_pr,
-        pre_foundry=pre_foundry,
+        skills=skills,
     )

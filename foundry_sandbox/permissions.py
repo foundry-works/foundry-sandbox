@@ -1,8 +1,8 @@
 """Workspace permission management for sandbox containers.
 
-Migrated from lib/permissions.sh. Installs foundry permissions (allow/deny
-rules) into the container's ~/.claude/settings.json, merging additively
-with any existing permissions.
+Installs base permissions (allow/deny rules) into the container's
+~/.claude/settings.json, merging additively with any existing permissions.
+Skill-specific permissions are merged in when skills are configured.
 """
 
 from __future__ import annotations
@@ -13,11 +13,8 @@ import subprocess
 from foundry_sandbox.constants import CONTAINER_USER, TIMEOUT_DOCKER_EXEC
 from foundry_sandbox.utils import log_debug
 
-# Foundry permissions based on claude-foundry v2.1.0
-FOUNDRY_ALLOW = [
-    "Skill(foundry:*)",
-    "mcp__plugin_foundry_foundry-mcp__*",
-    "mcp__tavily-mcp__*",
+# Base permissions for sandbox containers
+BASE_ALLOW = [
     "Bash(git add:*)",
     "Bash(git branch:*)",
     "Bash(git checkout:*)",
@@ -64,14 +61,17 @@ FOUNDRY_ALLOW = [
     "Edit(/workspace/**)",
 ]
 
-FOUNDRY_DENY = [
-    "Read(/workspace/**/specs/**/*.json)",
+BASE_DENY = [
     "Bash(gh api:*)",
     "Bash(gh repo delete:*)",
     "Bash(gh release delete:*)",
     "Bash(gh secret:*)",
     "Bash(gh variable:*)",
 ]
+
+# Backward compatibility aliases
+FOUNDRY_ALLOW = BASE_ALLOW
+FOUNDRY_DENY = BASE_DENY
 
 
 # Python script to execute inside the container for permission installation.
@@ -120,21 +120,35 @@ if __name__ == "__main__":
 '''
 
 
-def install_workspace_permissions(container_id: str) -> None:
-    """Install foundry permissions into container's Claude settings.
+def install_workspace_permissions(
+    container_id: str,
+    *,
+    extra_allow: list[str] | None = None,
+    extra_deny: list[str] | None = None,
+) -> None:
+    """Install base permissions into container's Claude settings.
 
-    Executes a Python script inside the container that merges foundry
-    allow/deny permissions with any existing permissions in
-    ~/.claude/settings.json.
+    Executes a Python script inside the container that merges base
+    allow/deny permissions (plus any skill-provided extras) with any
+    existing permissions in ~/.claude/settings.json.
 
     Args:
         container_id: Docker container ID or name.
+        extra_allow: Additional allow rules (e.g. from skills).
+        extra_deny: Additional deny rules (e.g. from skills).
     """
-    log_debug("Installing foundry permissions into workspace...")
+    log_debug("Installing workspace permissions...")
+
+    allow = list(BASE_ALLOW)
+    deny = list(BASE_DENY)
+    if extra_allow:
+        allow.extend(extra_allow)
+    if extra_deny:
+        deny.extend(extra_deny)
 
     script = _INSTALL_SCRIPT.format(
-        allow_json=json.dumps(FOUNDRY_ALLOW),
-        deny_json=json.dumps(FOUNDRY_DENY),
+        allow_json=json.dumps(allow),
+        deny_json=json.dumps(deny),
     )
 
     result = subprocess.run(

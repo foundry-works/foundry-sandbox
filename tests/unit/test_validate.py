@@ -465,7 +465,6 @@ class TestCredentialPlaceholders:
             assert env["SANDBOX_ANTHROPIC_API_KEY"] == ""
             assert env["SANDBOX_CLAUDE_OAUTH"].startswith("CRED_PROXY_")
             assert env["SANDBOX_GEMINI_API_KEY"].startswith("CRED_PROXY_")
-            assert env["SANDBOX_ENABLE_TAVILY"] == "0"
             # Each placeholder should be unique
             assert env["SANDBOX_CLAUDE_OAUTH"] != env["SANDBOX_GEMINI_API_KEY"]
 
@@ -502,17 +501,6 @@ class TestCredentialPlaceholders:
             env = docker.setup_credential_placeholders().to_env_dict()
 
             assert env["SANDBOX_ZHIPU_API_KEY"] == ""
-
-    def test_tavily_available(self, monkeypatch):
-        """Tavily API key should enable Tavily flag."""
-        monkeypatch.delenv("CLAUDE_CODE_OAUTH_TOKEN", raising=False)
-        monkeypatch.setenv("TAVILY_API_KEY", "test-key")
-        monkeypatch.setenv("SANDBOX_ENABLE_OPENCODE", "0")
-
-        with patch.object(Path, "is_file", return_value=False):
-            env = docker.setup_credential_placeholders().to_env_dict()
-
-            assert env["SANDBOX_ENABLE_TAVILY"] == "1"
 
     def test_gemini_oauth_mode(self, monkeypatch):
         """Gemini OAuth should not set API key placeholder."""

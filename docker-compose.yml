@@ -59,10 +59,6 @@ services:
       - CLAUDE_CODE_OAUTH_TOKEN
       - ANTHROPIC_BASE_URL=${ANTHROPIC_BASE_URL:-}
       - ANTHROPIC_CUSTOM_HEADERS
-      # Deep research providers (foundry-mcp)
-      - TAVILY_API_KEY
-      - PERPLEXITY_API_KEY
-      - SEMANTIC_SCHOLAR_API_KEY
       # Gemini API key (alternative to OAuth in ~/.gemini/)
       - GEMINI_API_KEY
       # ZAI (Zhipu) API key (for optional claude-zai alias)

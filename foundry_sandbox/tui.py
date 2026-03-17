@@ -187,6 +187,64 @@ def tui_choose(prompt: str, options: list[str], default: Optional[str] = None) -
     return options[int(choice) - 1]
 
 
+def tui_multi_choose(prompt: str, options: list[str]) -> list[str]:
+    """Display options and let the user select zero or more.
+
+    Args:
+        prompt: The prompt message to display.
+        options: List of options to choose from.
+
+    Returns:
+        List of selected option strings (may be empty).
+    """
+    if not options:
+        return []
+
+    if _is_noninteractive():
+        return []
+
+    if _has_gum():
+        click.echo()
+        gum_args = ["choose", "--no-limit", "--header", prompt]
+        gum_args.extend(options)
+        ok, value = _run_gum(*gum_args)
+        if ok:
+            selected = [line for line in value.splitlines() if line in options]
+            if selected:
+                click.echo(f"  > {', '.join(selected)}")
+            else:
+                click.echo("  > (none)")
+            return selected
+        return []
+
+    # Click fallback: numbered options with space-separated input
+    click.echo()
+    click.echo(prompt)
+    for i, option in enumerate(options, start=1):
+        click.echo(f"  {i}. {option}")
+    click.echo()
+
+    raw = click.prompt(
+        "Enter numbers (space-separated, or blank for none)",
+        default="",
+        show_default=False,
+    )
+
+    if not raw.strip():
+        return []
+
+    chosen: list[str] = []
+    for token in raw.split():
+        try:
+            idx = int(token)
+            if 1 <= idx <= len(options) and options[idx - 1] not in chosen:
+                chosen.append(options[idx - 1])
+        except ValueError:
+            pass
+
+    return chosen
+
+
 def tui_header(title: str) -> None:
     """Display a styled header.
 

@@ -41,7 +41,6 @@ from foundry_sandbox.paths import resolve_ssh_agent_sock
 from foundry_sandbox.utils import flag_enabled as _flag_enabled, generate_sandbox_id
 from foundry_sandbox.constants import get_repos_dir, TIMEOUT_DOCKER_QUERY
 from foundry_sandbox.container_setup import install_pip_requirements
-from foundry_sandbox.foundry_upgrade import upgrade_foundry_mcp_prerelease
 from foundry_sandbox.credential_setup import copy_configs_to_container
 from foundry_sandbox.docker import (
     compose_down,
@@ -50,7 +49,6 @@ from foundry_sandbox.docker import (
     populate_stubs_volume,
     repair_hmac_secret_permissions,
 )
-from foundry_sandbox.foundry_plugin import prepopulate_foundry_global
 from foundry_sandbox.git import ensure_bare_repo
 from foundry_sandbox.git_path_fixer import fix_proxy_worktree_paths
 from foundry_sandbox.image import check_image_freshness
@@ -62,7 +60,7 @@ from foundry_sandbox.network import (
 )
 from foundry_sandbox.paths import derive_sandbox_paths, ensure_dir, path_claude_home, repo_url_to_bare_path
 from foundry_sandbox.proxy import setup_proxy_registration
-from foundry_sandbox.state import load_sandbox_metadata, patch_sandbox_metadata
+from foundry_sandbox.state import load_sandbox_metadata
 from foundry_sandbox.utils import environment_scope, log_error, log_info, log_step, log_warn
 from foundry_sandbox.validate import validate_existing_sandbox_name
 
@@ -330,7 +328,6 @@ def _finalize_container(
     isolate_credentials: str,
     *,
     sandbox_name: str,
-    pre_foundry_override: bool | None = None,
 ) -> None:
     """Copy configs, install pip requirements, and apply network restrictions.
 
@@ -340,9 +337,12 @@ def _finalize_container(
         enable_ssh: Whether SSH forwarding is enabled.
         isolate_credentials: "true" if credential isolation is active, else "".
         sandbox_name: Sandbox name (for metadata patching).
-        pre_foundry_override: If not None, overrides the metadata value.
     """
     working_dir = _string_value(metadata.get("working_dir", ""))
+
+    # Load skills from metadata
+    raw_skills = metadata.get("skills", [])
+    skills_list: list[str] = list(raw_skills) if isinstance(raw_skills, list) else []
 
     copy_configs_to_container(
         container_id,
@@ -350,42 +350,12 @@ def _finalize_container(
         enable_ssh=enable_ssh,
         working_dir=working_dir,
         isolate_credentials=bool(isolate_credentials),
+        skills=skills_list or None,
     )
 
     sparse_checkout = _flag_enabled(metadata.get("sparse_checkout", False))
     if sparse_checkout and working_dir:
         log_info(f"Sparse checkout active for: {working_dir}")
-
-    # Re-apply foundry-mcp pre-release upgrade on restart (must run before pip
-    # requirements because install_pip_requirements blocks PyPI afterward)
-    pre_foundry = (
-        pre_foundry_override
-        if pre_foundry_override is not None
-        else _flag_enabled(metadata.get("pre_foundry", False))
-    )
-    if pre_foundry:
-        explicit = pre_foundry_override is not None
-        # Explicit --pre-foundry: latest pre-release, fail hard
-        # Metadata-driven: pin to previously installed version, soft failure
-        pin_version = (
-            None if explicit
-            else _string_value(metadata.get("pre_foundry_version", "")) or None
-        )
-        version = upgrade_foundry_mcp_prerelease(
-            container_id,
-            pin_version=pin_version,
-            required=explicit,
-        )
-        # Update pinned version in metadata when a new version was installed
-        if version:
-            try:
-                patch_sandbox_metadata(
-                    sandbox_name,
-                    pre_foundry=True,
-                    pre_foundry_version=version,
-                )
-            except FileNotFoundError:
-                pass  # metadata may not exist for very old sandboxes
 
     pip_requirements = _string_value(metadata.get("pip_requirements", ""))
     if pip_requirements:
@@ -403,11 +373,9 @@ def _finalize_container(
 
 @click.command()
 @click.argument("name")
-# Tri-state: None = use persisted metadata, True/False = explicit override
-@click.option("--pre-foundry/--no-pre-foundry", default=None, help="Upgrade foundry-mcp to pre-release on start")
 @click.option("--compose-extra", "compose_extras", multiple=True, type=click.Path(exists=True), help="Additional docker-compose override file")
 @click.pass_context
-def start(ctx: click.Context, name: str, pre_foundry: bool | None, compose_extras: tuple[str, ...]) -> None:
+def start(ctx: click.Context, name: str, compose_extras: tuple[str, ...]) -> None:
     """Start a stopped sandbox container."""
     valid_name, name_error = validate_existing_sandbox_name(name)
     if not valid_name:
@@ -484,7 +452,6 @@ def start(ctx: click.Context, name: str, pre_foundry: bool | None, compose_extra
         ensure_dir(claude_home_path)
         add_claude_home_to_override(str(override_file), str(claude_home_path))
         add_timezone_to_override(str(override_file))
-        prepopulate_foundry_global(str(claude_home_path), skip_if_populated=True)
 
         # --------------------------------------------------------------
         # 7. Handle SSH agent forwarding
@@ -563,5 +530,4 @@ def start(ctx: click.Context, name: str, pre_foundry: bool | None, compose_extra
         _finalize_container(
             container_id, metadata, enable_ssh, isolate_credentials,
             sandbox_name=name,
-            pre_foundry_override=pre_foundry,
         )

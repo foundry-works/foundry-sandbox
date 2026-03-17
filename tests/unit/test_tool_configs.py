@@ -74,7 +74,6 @@ class TestExtractedScriptValidity:
         "ensure_gemini_settings.py",
         "ensure_opencode_settings.py",
         "ensure_opencode_default_model.py",
-        "ensure_opencode_tavily.py",
         "prefetch_opencode_plugins.py",
     ])
     def test_script_compiles(self, script_name):
@@ -457,19 +456,16 @@ class TestOpenCodeLocalPluginSync:
             return responses.pop(0)
 
         sync_foundry = MagicMock()
-        ensure_tavily = MagicMock()
 
         monkeypatch.setattr(tool_configs_module, "get_sandbox_opencode_plugin_dir", lambda: str(host_plugins))
         monkeypatch.setattr(tool_configs_module, "path_opencode_plugins_marker", lambda _name: marker)
         monkeypatch.setattr(tool_configs_module.subprocess, "run", _fake_run)
         monkeypatch.setattr(tool_configs_module, "sync_opencode_foundry", sync_foundry)
-        monkeypatch.setattr(tool_configs_module, "ensure_opencode_tavily_mcp", ensure_tavily)
 
         sync_opencode_local_plugins_on_first_attach("demo", "sandbox-demo-dev-1")
 
         assert not marker.exists()
         sync_foundry.assert_not_called()
-        ensure_tavily.assert_not_called()
         assert responses == []
 
     def test_sync_writes_marker_and_runs_followups_on_success(self, tmp_path, monkeypatch):
@@ -489,19 +485,16 @@ class TestOpenCodeLocalPluginSync:
             return responses.pop(0)
 
         sync_foundry = MagicMock()
-        ensure_tavily = MagicMock()
 
         monkeypatch.setattr(tool_configs_module, "get_sandbox_opencode_plugin_dir", lambda: str(host_plugins))
         monkeypatch.setattr(tool_configs_module, "path_opencode_plugins_marker", lambda _name: marker)
         monkeypatch.setattr(tool_configs_module.subprocess, "run", _fake_run)
         monkeypatch.setattr(tool_configs_module, "sync_opencode_foundry", sync_foundry)
-        monkeypatch.setattr(tool_configs_module, "ensure_opencode_tavily_mcp", ensure_tavily)
 
         sync_opencode_local_plugins_on_first_attach("demo", "sandbox-demo-dev-1")
 
         assert marker.exists()
         sync_foundry.assert_called_once()
-        ensure_tavily.assert_called_once()
         assert responses == []
 
 
