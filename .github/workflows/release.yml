@@ -1,0 +1,69 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Validate version tag
+        run: |
+          TAG="${{ github.ref_name }}"
+          if ! echo "$TAG" | grep -qE '^v[0-9]+\.[0-9]+\.[0-9]+(\.?(a|b|rc|dev)[0-9]+)?$'; then
+            echo "::error::Tag '$TAG' does not match vX.Y.Z[.preN] format"
+            exit 1
+          fi
+          TOML_VERSION=$(python3 -c "
+          import re
+          with open('pyproject.toml') as f:
+              m = re.search(r'version\s*=\s*\"([^\"]+)\"', f.read())
+              print(m.group(1) if m else '')
+          ")
+          TAG_VERSION="${TAG#v}"
+          if [ "$TAG_VERSION" != "$TOML_VERSION" ]; then
+            echo "::error::Tag version ($TAG_VERSION) does not match pyproject.toml ($TOML_VERSION)"
+            exit 1
+          fi
+      - name: Create GitHub Release
+        run: |
+          TAG="${{ github.ref_name }}"
+          PRERELEASE_FLAG=""
+          if echo "$TAG" | grep -qE '(a|b|rc|dev)[0-9]+$'; then
+            PRERELEASE_FLAG="--prerelease"
+          fi
+          gh release create "$TAG" --generate-notes $PRERELEASE_FLAG
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  publish:
+    needs: [release]
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+    environment: pypi
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install build tools
+        run: pip install build
+      - name: Build package
+        run: python -m build
+      - name: Publish to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1

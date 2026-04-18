@@ -1,0 +1,53 @@
+#!/bin/bash
+# Root entrypoint wrapper for credential isolation
+# Sets up DNS firewall rules before dropping privileges to the sandbox user.
+#
+# DNS configuration (resolv.conf, /etc/hosts) is handled at compose level
+# via dns: and extra_hosts: directives, because Docker 29+ makes these
+# files read-only when read_only:true is set.
+#
+# This script adds iptables rules for defense-in-depth (block DNS bypass),
+# then exec's to the regular entrypoint as the sandbox user.
+
+set -e
+
+# Get the target user (default: ubuntu)
+TARGET_USER="${SANDBOX_USER:-ubuntu}"
+
+# Set up DNS firewall when in credential isolation mode
+if [ "$SANDBOX_GATEWAY_ENABLED" = "true" ]; then
+    # Resolve the proxy IP (DNS is pre-configured via compose dns:/extra_hosts:)
+    PROXY_IP=$(getent hosts unified-proxy | awk '{print $1}' | head -1)
+
+    # Validate IPv4 format before inserting into iptables rules
+    if ! [[ "$PROXY_IP" =~ ^[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}$ ]]; then
+        echo "FATAL: Cannot resolve unified-proxy to valid IPv4 address (got: '${PROXY_IP:-<empty>}')" >&2
+        echo "       DNS firewall rules cannot be applied. Aborting." >&2
+        exit 1
+    fi
+
+    echo "Unified proxy IP: $PROXY_IP"
+
+    # Block DNS bypass - only allow DNS to unified-proxy
+    # This prevents dig @8.8.8.8 and similar direct DNS queries to external resolvers
+    echo "Setting up DNS firewall rules..."
+    iptables -A OUTPUT -p udp --dport 53 -d "$PROXY_IP" -j ACCEPT || { echo "FATAL: iptables rule failed (udp accept)" >&2; exit 1; }
+    iptables -A OUTPUT -p tcp --dport 53 -d "$PROXY_IP" -j ACCEPT || { echo "FATAL: iptables rule failed (tcp accept)" >&2; exit 1; }
+    # Block DNS to all other destinations (including Docker's 127.0.0.11)
+    iptables -A OUTPUT -p udp --dport 53 -j DROP || { echo "FATAL: iptables rule failed (udp drop)" >&2; exit 1; }
+    iptables -A OUTPUT -p tcp --dport 53 -j DROP || { echo "FATAL: iptables rule failed (tcp drop)" >&2; exit 1; }
+    echo "DNS firewall rules applied"
+
+    # Overlay /workspace/.git with tmpfs so it appears as an empty directory.
+    # The compose file bind-mounts /dev/null over the gitdir pointer file,
+    # which hides the content but exposes /dev/null metadata via stat(2).
+    # This tmpfs overlay converts it to a normal empty directory.
+    if mount -t tmpfs -o size=1k,mode=755 tmpfs /workspace/.git 2>/dev/null; then
+        echo ".git tmpfs overlay applied (empty directory)"
+    else
+        echo "Warning: .git tmpfs overlay failed; falling back to /dev/null bind mount" >&2
+    fi
+fi
+
+# Drop privileges and run the regular entrypoint
+exec gosu "$TARGET_USER" /usr/local/bin/entrypoint.sh "$@"

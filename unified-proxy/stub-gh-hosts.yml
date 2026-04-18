@@ -1,0 +1,5 @@
+# Stub GitHub CLI credentials - real token injected by proxy
+github.com:
+    oauth_token: gho_CREDENTIAL_PROXY_PLACEHOLDER
+    git_protocol: https
+    user: sandbox-user

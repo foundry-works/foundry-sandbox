@@ -1,0 +1,9 @@
+# Git configuration for credential isolation gateway
+# Applied conditionally when SANDBOX_GATEWAY_ENABLED=true
+
+[url "http://gateway:8080/git/"]
+    insteadOf = https://github.com/
+    insteadOf = git@github.com:
+
+[credential "http://gateway:8080"]
+    helper = /usr/local/bin/gateway-credential-helper

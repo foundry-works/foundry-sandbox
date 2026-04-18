@@ -1,0 +1,38 @@
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Allow test fixtures and placeholder values"
+
+paths = [
+    '''safety/credential-redaction\.sh''',
+]
+
+regexTarget = "match"
+regexes = [
+    # Test dummy tokens used in unit/integration tests
+    '''ghp_test_token''',
+    '''ghp_testtoken''',
+    '''ghp_FAKE\d+''',
+    '''ghp_first''',
+    '''ghp_second''',
+    '''ghp_fallback''',
+    '''ghp_from_cli''',
+    '''ghp_xxxx+''',
+    '''gho_fallback_token''',
+    '''gho_CREDENTIAL_PROXY_PLACEHOLDER''',
+    '''test-anthropic-key''',
+    '''test-openai-key''',
+    '''test-google-key''',
+    '''test-tavily-key''',
+    '''test-github-token''',
+    '''test-scholar-key''',
+    '''test-perplexity-key''',
+    '''test-zhipu-key''',
+    # Placeholder markers
+    '''CREDENTIAL_PROXY_PLACEHOLDER''',
+    # Regex patterns in redteam test assertions (not real keys)
+    '''sk-ant-\[a-zA-Z''',
+    '''ghp_\[a-zA-Z''',
+    '''ghs_\[a-zA-Z''',
+]

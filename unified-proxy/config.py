@@ -1,0 +1,1067 @@
+"""Configuration loader for unified proxy.
+
+Loads and validates policy.yaml and allowlist.yaml configuration files
+with support for environment variable overrides.
+"""
+
+import fnmatch
+import logging
+import os
+import posixpath
+import re
+from dataclasses import dataclass, field
+from functools import lru_cache
+from pathlib import Path
+from typing import List, Optional, Dict, Any, Tuple
+
+import yaml
+
+from user_services import ProxyUserService, load_proxy_user_services
+
+
+class ConfigError(Exception):
+    """Exception raised for configuration errors."""
+
+    pass
+
+
+@dataclass
+class RateLimitConfig:
+    """Rate limit configuration."""
+
+    capacity: int
+    refill_rate: float
+
+    def __post_init__(self):
+        """Validate rate limit configuration."""
+        if self.capacity <= 0:
+            raise ConfigError(f"Rate limit capacity must be positive, got {self.capacity}")
+        if self.refill_rate <= 0:
+            raise ConfigError(
+                f"Rate limit refill_rate must be positive, got {self.refill_rate}"
+            )
+
+
+@dataclass
+class CircuitBreakerConfig:
+    """Circuit breaker configuration."""
+
+    failure_threshold: int
+    recovery_timeout: int
+    success_threshold: int
+
+    def __post_init__(self):
+        """Validate circuit breaker configuration."""
+        if self.failure_threshold <= 0:
+            raise ConfigError(
+                f"Circuit breaker failure_threshold must be positive, got {self.failure_threshold}"
+            )
+        if self.recovery_timeout <= 0:
+            raise ConfigError(
+                f"Circuit breaker recovery_timeout must be positive, got {self.recovery_timeout}"
+            )
+        if self.success_threshold <= 0:
+            raise ConfigError(
+                f"Circuit breaker success_threshold must be positive, got {self.success_threshold}"
+            )
+
+
+
+# Maximum allowed length for user-provided regex patterns to mitigate ReDoS.
+MAX_REGEX_PATTERN_LENGTH = 1024
+
+# Regex detecting nested quantifiers that can cause catastrophic backtracking.
+# Matches patterns like (a+)+, (a*)+, (a+)*, (a{2,})+ etc.
+_REDOS_NESTED_QUANTIFIER = re.compile(
+    r"[+*]\)?[+*]"
+    r"|[+*]\)?\{[0-9,]+\}"
+    r"|\{[0-9,]+\}\)?[+*]"
+    r"|\{[0-9,]+\}\)?\{[0-9,]+\}"
+)
+
+
+@dataclass
+class BlockedPatternConfig:
+    """Configuration for a blocked request pattern."""
+
+    method: str
+    path_pattern: str
+    _compiled_pattern: Optional[re.Pattern] = field(default=None, init=False, repr=False)
+
+    def __post_init__(self):
+        """Validate and compile pattern."""
+        if not self.method:
+            raise ConfigError("Blocked pattern method cannot be empty")
+        if not self.path_pattern:
+            raise ConfigError("Blocked pattern path_pattern cannot be empty")
+
+        # Validate method is a valid HTTP method
+        valid_methods = {"GET", "POST", "PUT", "DELETE", "PATCH", "HEAD", "OPTIONS"}
+        if self.method.upper() not in valid_methods:
+            raise ConfigError(
+                f"Invalid HTTP method '{self.method}'. "
+                f"Valid methods: {', '.join(sorted(valid_methods))}"
+            )
+
+        # Validate regex complexity to prevent ReDoS
+        if len(self.path_pattern) > MAX_REGEX_PATTERN_LENGTH:
+            raise ConfigError(
+                f"Regex pattern too long ({len(self.path_pattern)} chars, "
+                f"max {MAX_REGEX_PATTERN_LENGTH}): '{self.path_pattern[:50]}...'"
+            )
+
+        if _REDOS_NESTED_QUANTIFIER.search(self.path_pattern):
+            raise ConfigError(
+                f"Regex pattern contains nested quantifiers (potential ReDoS): "
+                f"'{self.path_pattern}'"
+            )
+
+        # Compile regex pattern
+        try:
+            self._compiled_pattern = re.compile(self.path_pattern)
+        except re.error as e:
+            raise ConfigError(f"Invalid regex pattern '{self.path_pattern}': {e}")
+
+    def matches(self, method: str, path: str) -> bool:
+        """Check if the given method and path match this pattern.
+
+        Args:
+            method: HTTP method to check.
+            path: URL path to check.
+
+        Returns:
+            True if the pattern matches, False otherwise.
+        """
+        if self.method.upper() != method.upper():
+            return False
+        if self._compiled_pattern is None:
+            return False
+        return self._compiled_pattern.match(path) is not None
+
+
+@lru_cache(maxsize=256)
+def _compile_segment_pattern(pattern: str) -> re.Pattern:
+    """Compile a segment-aware glob pattern into a regex.
+
+    Supported wildcards:
+    - *  matches exactly one path segment (does not span /)
+    - ** matches one or more characters and may span /
+
+    The compiled pattern is anchored to match the full path.
+
+    Args:
+        pattern: Glob pattern (e.g., '/repos/*/hooks', '/repos/*/keys/*').
+
+    Returns:
+        Compiled regex pattern.
+    """
+    regex_parts: List[str] = []
+    i = 0
+    while i < len(pattern):
+        if pattern[i : i + 2] == "**":
+            regex_parts.append(r".+?")
+            i += 2
+            continue
+        if pattern[i] == "*":
+            regex_parts.append(r"[^/]+")
+            i += 1
+            continue
+        regex_parts.append(re.escape(pattern[i]))
+        i += 1
+
+    regex = "".join(regex_parts)
+    return re.compile(r"\A" + regex + r"\Z")
+
+
+def segment_match(pattern: str, path: str) -> bool:
+    """Match a path against a segment-aware glob pattern.
+
+    Wildcards:
+    - *  matches exactly one path segment (any characters except /)
+    - ** matches one or more characters and may span /
+
+    Args:
+        pattern: Glob pattern (e.g., '/repos/*/hooks').
+        path: URL path to test (e.g., '/repos/my-repo/hooks').
+
+    Returns:
+        True if path matches the pattern.
+    """
+    compiled = _compile_segment_pattern(pattern)
+    return compiled.fullmatch(path) is not None
+
+
+@dataclass
+class BlockedPathConfig:
+    """Configuration for blocked API paths per host."""
+
+    host: str
+    patterns: List[str]
+    _compiled_matchers: Tuple[re.Pattern, ...] = field(
+        default=(), init=False, repr=False
+    )
+
+    def __post_init__(self):
+        """Validate and compile patterns at load time."""
+        if not self.host:
+            raise ConfigError("Blocked path host cannot be empty")
+        if not self.patterns:
+            raise ConfigError(f"Blocked path config for {self.host} must have at least one pattern")
+        self._compiled_matchers = tuple(
+            _compile_segment_pattern(p) for p in self.patterns
+        )
+
+    def matches(self, path: str) -> bool:
+        """Check if a path matches any blocked pattern for this host.
+
+        Args:
+            path: URL path to check.
+
+        Returns:
+            True if the path matches any blocked pattern.
+        """
+        return any(m.fullmatch(path) is not None for m in self._compiled_matchers)
+
+
+@dataclass
+class PolicyConfig:
+    """Policy configuration loaded from policy.yaml."""
+
+    version: str
+    default_action: str
+    rate_limits: Dict[str, RateLimitConfig]
+    circuit_breaker: CircuitBreakerConfig
+    blocked_patterns: List[BlockedPatternConfig]
+
+    def __post_init__(self):
+        """Validate policy configuration."""
+        # Validate version format
+        if not self.version:
+            raise ConfigError("Policy version cannot be empty")
+
+        # Validate default action
+        if self.default_action not in ("allow", "deny"):
+            raise ConfigError(
+                f"Policy default_action must be 'allow' or 'deny', got '{self.default_action}'"
+            )
+
+        # Validate rate limits exist
+        if not self.rate_limits:
+            raise ConfigError("Policy must have at least one rate limit configuration")
+
+        # Validate default rate limit exists
+        if "default" not in self.rate_limits:
+            raise ConfigError("Policy rate_limits must include a 'default' configuration")
+
+
+@dataclass
+class HttpEndpointConfig:
+    """HTTP endpoint allowlist configuration."""
+
+    host: str
+    methods: List[str]
+    paths: List[str]
+
+    def __post_init__(self):
+        """Validate HTTP endpoint configuration."""
+        if not self.host:
+            raise ConfigError("HTTP endpoint host cannot be empty")
+
+        if not self.methods:
+            raise ConfigError(f"HTTP endpoint {self.host} must have at least one method")
+
+        # Validate HTTP methods
+        valid_methods = {"GET", "POST", "PUT", "DELETE", "PATCH", "HEAD", "OPTIONS"}
+        for method in self.methods:
+            if method.upper() not in valid_methods:
+                raise ConfigError(
+                    f"Invalid HTTP method '{method}' for endpoint {self.host}. "
+                    f"Valid methods: {', '.join(sorted(valid_methods))}"
+                )
+
+        if not self.paths:
+            raise ConfigError(f"HTTP endpoint {self.host} must have at least one path")
+
+
+@dataclass
+class AllowlistConfig:
+    """Allowlist configuration loaded from allowlist.yaml."""
+
+    version: str
+    domains: List[str]
+    http_endpoints: List[HttpEndpointConfig]
+    blocked_paths: List[BlockedPathConfig] = field(default_factory=list)
+
+    def __post_init__(self):
+        """Validate allowlist configuration."""
+        # Validate version format
+        if not self.version:
+            raise ConfigError("Allowlist version cannot be empty")
+
+        # Validate domains exist
+        if not self.domains:
+            raise ConfigError("Allowlist must have at least one domain")
+
+        # Validate domain formats
+        for domain in self.domains:
+            if not domain:
+                raise ConfigError("Allowlist domain cannot be empty")
+            # Basic validation - must not contain protocol or path
+            if "://" in domain:
+                raise ConfigError(
+                    f"Invalid domain '{domain}': must not include protocol (http://)"
+                )
+            if "/" in domain.rstrip("/"):
+                raise ConfigError(
+                    f"Invalid domain '{domain}': must not include path components"
+                )
+            # Validate wildcard format: only single-level prefix wildcards allowed
+            if domain.startswith("*."):
+                rest = domain[2:]
+                if "*" in rest:
+                    raise ConfigError(
+                        f"Invalid domain '{domain}': multi-level wildcards not supported"
+                    )
+            elif "*" in domain:
+                raise ConfigError(
+                    f"Invalid domain '{domain}': wildcard must be prefix (*.example.com)"
+                )
+
+        # Validate http_endpoints
+        if not self.http_endpoints:
+            raise ConfigError("Allowlist must have at least one HTTP endpoint")
+
+    @classmethod
+    def _partial(cls, *, version, domains=None, http_endpoints=None, blocked_paths=None):
+        """Construct a partial AllowlistConfig without validation.
+
+        For use in merge workflows where the final merged result is validated.
+        """
+        cfg = object.__new__(cls)
+        cfg.version = version
+        cfg.domains = domains or []
+        cfg.http_endpoints = http_endpoints or []
+        cfg.blocked_paths = blocked_paths or []
+        return cfg
+
+
+def merge_allowlist_configs(
+    base: AllowlistConfig, extra: AllowlistConfig
+) -> AllowlistConfig:
+    """Merge two allowlist configs additively, returning a new AllowlistConfig.
+
+    Pure function with no side effects. Merge semantics:
+    - Domains: ordered dedup (base entries first, extra appended, exact string match)
+    - Same-host HTTP endpoints: methods uppercased + deduped, paths exact deduped
+    - New-host HTTP endpoints: appended preserving extra ordering
+    - Blocked paths: extra appended after base (no per-host dedup)
+    - Result uses base config version
+
+    Args:
+        base: The base allowlist configuration.
+        extra: The extra allowlist configuration to merge on top.
+
+    Returns:
+        A new AllowlistConfig containing the merged result.
+    """
+    # Merge domains: ordered dedup, base first
+    seen_domains: set = set(base.domains)
+    merged_domains = list(base.domains)
+    for domain in extra.domains:
+        if domain not in seen_domains:
+            seen_domains.add(domain)
+            merged_domains.append(domain)
+
+    # Merge HTTP endpoints: same-host union methods/paths, new-host append
+    base_endpoints_by_host: Dict[str, HttpEndpointConfig] = {
+        ep.host: ep for ep in base.http_endpoints
+    }
+    merged_endpoints: List[HttpEndpointConfig] = []
+
+    # Start with base endpoints (preserving order), merging any same-host extras
+    extra_by_host: Dict[str, HttpEndpointConfig] = {
+        ep.host: ep for ep in extra.http_endpoints
+    }
+    for base_ep in base.http_endpoints:
+        if base_ep.host in extra_by_host:
+            extra_ep = extra_by_host[base_ep.host]
+            # Methods: uppercase and dedup, base order first
+            seen_methods: set = set(m.upper() for m in base_ep.methods)
+            merged_methods = [m.upper() for m in base_ep.methods]
+            for m in extra_ep.methods:
+                upper_m = m.upper()
+                if upper_m not in seen_methods:
+                    seen_methods.add(upper_m)
+                    merged_methods.append(upper_m)
+            # Paths: exact dedup, base order first
+            seen_paths: set = set(base_ep.paths)
+            merged_paths = list(base_ep.paths)
+            for p in extra_ep.paths:
+                if p not in seen_paths:
+                    seen_paths.add(p)
+                    merged_paths.append(p)
+            merged_endpoints.append(
+                HttpEndpointConfig(
+                    host=base_ep.host,
+                    methods=merged_methods,
+                    paths=merged_paths,
+                )
+            )
+        else:
+            merged_endpoints.append(
+                HttpEndpointConfig(
+                    host=base_ep.host,
+                    methods=[m.upper() for m in base_ep.methods],
+                    paths=list(base_ep.paths),
+                )
+            )
+
+    # Append new-host endpoints from extra (preserving extra ordering)
+    for extra_ep in extra.http_endpoints:
+        if extra_ep.host not in base_endpoints_by_host:
+            merged_endpoints.append(
+                HttpEndpointConfig(
+                    host=extra_ep.host,
+                    methods=[m.upper() for m in extra_ep.methods],
+                    paths=list(extra_ep.paths),
+                )
+            )
+
+    # Merge blocked paths: append extra after base (no per-host dedup)
+    merged_blocked_paths: List[BlockedPathConfig] = [
+        BlockedPathConfig(host=bp.host, patterns=list(bp.patterns))
+        for bp in base.blocked_paths
+    ] + [
+        BlockedPathConfig(host=bp.host, patterns=list(bp.patterns))
+        for bp in extra.blocked_paths
+    ]
+
+    return AllowlistConfig(
+        version=base.version,
+        domains=merged_domains,
+        http_endpoints=merged_endpoints,
+        blocked_paths=merged_blocked_paths,
+    )
+
+
+@dataclass
+class ValidationResult:
+    """Result of file restriction validation."""
+
+    blocked: bool
+    reason: str = ""
+    warned_files: List[str] = field(default_factory=list)
+
+
+@dataclass
+class FileRestrictionsConfig:
+    """Configuration for push/commit file restrictions."""
+
+    blocked_patterns: List[str]
+    warned_patterns: List[str]
+    warn_action: str  # "log" or "reject"
+
+    def __post_init__(self):
+        """Validate file restrictions configuration."""
+        if not isinstance(self.blocked_patterns, list):
+            raise ConfigError("blocked_patterns must be a list")
+        if not isinstance(self.warned_patterns, list):
+            raise ConfigError("warned_patterns must be a list")
+        if self.warn_action not in ("log", "reject"):
+            raise ConfigError(
+                f"warn_action must be 'log' or 'reject', got '{self.warn_action}'"
+            )
+
+
+def _matches_pattern(path: str, pattern: str) -> bool:
+    """Check if a file path matches a single restriction pattern.
+
+    Pattern semantics:
+    - Patterns ending in '/' match any file under that directory
+      (path.startswith(pattern)).
+    - Patterns with glob characters (*, ?) use fnmatch against both
+      the basename and the full relative path.
+    - Bare patterns (no '/', no glob) match any file at any depth
+      with that exact name (basename match).
+
+    Args:
+        path: Normalized relative file path.
+        pattern: Restriction pattern to match against.
+
+    Returns:
+        True if the path matches the pattern.
+    """
+    if pattern.endswith("/"):
+        return path.startswith(pattern)
+
+    has_glob = "*" in pattern or "?" in pattern
+    if has_glob:
+        basename = os.path.basename(path)
+        # Note: fnmatch is case-sensitive on Linux (sandbox runtime). macOS tests may differ.
+        return fnmatch.fnmatch(basename, pattern) or fnmatch.fnmatch(path, pattern)
+
+    # Bare pattern: exact basename match at any depth
+    return os.path.basename(path) == pattern
+
+
+def matches_any(path: str, patterns: List[str]) -> bool:
+    """Check if a file path matches any pattern in a list.
+
+    Args:
+        path: Normalized relative file path.
+        patterns: List of restriction patterns.
+
+    Returns:
+        True if the path matches any pattern.
+    """
+    return any(_matches_pattern(path, p) for p in patterns)
+
+
+def check_file_restrictions(
+    changed_files: List[str],
+    config: FileRestrictionsConfig,
+) -> ValidationResult:
+    """Check a list of changed file paths against blocked/warned patterns.
+
+    This is the shared core used by both push-time and commit-time
+    validation. Callers are responsible for obtaining the file list
+    (git diff --name-only for push, git diff --cached --name-only for commit).
+
+    Args:
+        changed_files: List of relative file paths that were changed.
+        config: File restrictions configuration.
+
+    Returns:
+        ValidationResult indicating whether the operation should be blocked.
+    """
+    # 1. Normalize paths (collapse //, strip ./, reject ..)
+    normalized = []
+    for f in changed_files:
+        f = posixpath.normpath(f)
+        if ".." in f.split("/"):
+            return ValidationResult(
+                blocked=True, reason=f"Path traversal detected: {f}"
+            )
+        # Strip leading ./ that normpath may leave
+        if f.startswith("./"):
+            f = f[2:]
+        normalized.append(f)
+
+    # 2. Check against blocked patterns
+    blocked = [f for f in normalized if matches_any(f, config.blocked_patterns)]
+    if blocked:
+        return ValidationResult(
+            blocked=True,
+            reason=f"Push modifies blocked files: {', '.join(blocked)}",
+        )
+
+    # 3. Check against warned patterns
+    warned = [f for f in normalized if matches_any(f, config.warned_patterns)]
+    if warned and config.warn_action == "reject":
+        return ValidationResult(
+            blocked=True,
+            reason=f"Push modifies restricted files: {', '.join(warned)}",
+        )
+    if warned:
+        return ValidationResult(
+            blocked=False, warned_files=warned,
+        )
+
+    return ValidationResult(blocked=False)
+
+
+_file_restrictions_logger = logging.getLogger(__name__)
+
+# Module-level cache for file restrictions config (loaded once at first use).
+_file_restrictions_config: Optional[FileRestrictionsConfig] = None
+
+
+def load_file_restrictions_config(
+    path: Optional[str] = None,
+) -> FileRestrictionsConfig:
+    """Load and validate file restrictions configuration.
+
+    Fails closed: if the config file is missing or malformed, raises
+    ConfigError (callers should block the operation).
+
+    Args:
+        path: Optional path to push-file-restrictions.yaml. If not provided,
+              uses PROXY_FILE_RESTRICTIONS_PATH env var or default location.
+
+    Returns:
+        Validated FileRestrictionsConfig instance.
+
+    Raises:
+        ConfigError: If configuration is invalid or missing required fields.
+    """
+    if path is None:
+        path = get_config_path("push-file-restrictions.yaml")
+
+    data = _load_yaml_file(path)
+
+    required_fields = ["blocked_patterns", "warned_patterns", "warn_action"]
+    missing = [f for f in required_fields if f not in data]
+    if missing:
+        raise ConfigError(
+            f"Missing required fields in {path}: {', '.join(missing)}"
+        )
+
+    blocked = data["blocked_patterns"]
+    if not isinstance(blocked, list):
+        raise ConfigError(f"blocked_patterns must be a list in {path}")
+
+    warned = data["warned_patterns"]
+    if not isinstance(warned, list):
+        raise ConfigError(f"warned_patterns must be a list in {path}")
+
+    return FileRestrictionsConfig(
+        blocked_patterns=[str(p) for p in blocked],
+        warned_patterns=[str(p) for p in warned],
+        warn_action=str(data["warn_action"]),
+    )
+
+
+def get_file_restrictions_config(
+    path: Optional[str] = None,
+) -> FileRestrictionsConfig:
+    """Get the file restrictions config, loading and caching on first call.
+
+    Args:
+        path: Optional override path (bypasses cache when provided).
+
+    Returns:
+        FileRestrictionsConfig instance.
+
+    Raises:
+        ConfigError: If config is missing or invalid.
+    """
+    global _file_restrictions_config
+    if path is not None:
+        return load_file_restrictions_config(path)
+    if _file_restrictions_config is None:
+        _file_restrictions_config = load_file_restrictions_config()
+    return _file_restrictions_config
+
+
+def get_config_path(filename: str) -> str:
+    """Get configuration file path from environment or use default.
+
+    Args:
+        filename: Name of the config file (e.g., 'policy.yaml', 'allowlist.yaml').
+
+    Returns:
+        Absolute path to the configuration file.
+
+    Environment Variables:
+        PROXY_POLICY_PATH: Override path for policy.yaml
+        PROXY_ALLOWLIST_PATH: Override path for allowlist.yaml
+    """
+    # Map filenames to environment variables
+    env_vars = {
+        "policy.yaml": "PROXY_POLICY_PATH",
+        "allowlist.yaml": "PROXY_ALLOWLIST_PATH",
+        "allowlist_extra.yaml": "PROXY_ALLOWLIST_EXTRA_PATH",
+        "push-file-restrictions.yaml": "PROXY_FILE_RESTRICTIONS_PATH",
+    }
+
+    env_var = env_vars.get(filename)
+    if env_var and os.environ.get(env_var):
+        return os.environ[env_var]
+
+    # Default location
+    return f"/etc/unified-proxy/{filename}"
+
+
+def _load_yaml_file(file_path: str) -> Dict[str, Any]:
+    """Load and parse a YAML file.
+
+    Args:
+        file_path: Path to the YAML file.
+
+    Returns:
+        Parsed YAML content as a dictionary.
+
+    Raises:
+        ConfigError: If file not found or YAML parsing fails.
+    """
+    path = Path(file_path)
+
+    if not path.exists():
+        raise ConfigError(
+            f"Configuration file not found: {file_path}\n"
+            f"Expected location: {file_path}\n"
+            f"Hint: You can override the location with environment variables:\n"
+            f"  - PROXY_POLICY_PATH for policy.yaml\n"
+            f"  - PROXY_ALLOWLIST_PATH for allowlist.yaml"
+        )
+
+    try:
+        with open(path, "r") as f:
+            data = yaml.safe_load(f)
+    except yaml.YAMLError as e:
+        raise ConfigError(f"Failed to parse YAML file {file_path}: {e}")
+    except Exception as e:
+        raise ConfigError(f"Failed to read configuration file {file_path}: {e}")
+
+    if not isinstance(data, dict):
+        raise ConfigError(
+            f"Invalid configuration file {file_path}: expected YAML dictionary, got {type(data).__name__}"
+        )
+
+    return data
+
+
+def load_policy_config(path: Optional[str] = None) -> PolicyConfig:
+    """Load and validate policy configuration.
+
+    Args:
+        path: Optional path to policy.yaml. If not provided, uses
+              environment variable PROXY_POLICY_PATH or default location.
+
+    Returns:
+        Validated PolicyConfig instance.
+
+    Raises:
+        ConfigError: If configuration is invalid or missing required fields.
+    """
+    if path is None:
+        path = get_config_path("policy.yaml")
+
+    data = _load_yaml_file(path)
+
+    # Validate required top-level fields
+    required_fields = ["version", "default_action", "rate_limits", "circuit_breaker"]
+    missing_fields = [f for f in required_fields if f not in data]
+    if missing_fields:
+        raise ConfigError(
+            f"Missing required fields in {path}: {', '.join(missing_fields)}"
+        )
+
+    # Parse rate limits
+    try:
+        rate_limits_data = data["rate_limits"]
+        if not isinstance(rate_limits_data, dict):
+            raise ConfigError("rate_limits must be a dictionary")
+
+        rate_limits = {}
+        for key, value in rate_limits_data.items():
+            if not isinstance(value, dict):
+                raise ConfigError(f"rate_limits.{key} must be a dictionary")
+            if "capacity" not in value:
+                raise ConfigError(f"rate_limits.{key} missing required field 'capacity'")
+            if "refill_rate" not in value:
+                raise ConfigError(
+                    f"rate_limits.{key} missing required field 'refill_rate'"
+                )
+            rate_limits[key] = RateLimitConfig(
+                capacity=int(value["capacity"]),
+                refill_rate=float(value["refill_rate"]),
+            )
+    except (KeyError, ValueError, TypeError) as e:
+        raise ConfigError(f"Invalid rate_limits configuration: {e}")
+
+    # Parse circuit breaker
+    try:
+        cb_data = data["circuit_breaker"]
+        if not isinstance(cb_data, dict):
+            raise ConfigError("circuit_breaker must be a dictionary")
+
+        required_cb_fields = ["failure_threshold", "recovery_timeout", "success_threshold"]
+        missing_cb_fields = [f for f in required_cb_fields if f not in cb_data]
+        if missing_cb_fields:
+            raise ConfigError(
+                f"circuit_breaker missing required fields: {', '.join(missing_cb_fields)}"
+            )
+
+        circuit_breaker = CircuitBreakerConfig(
+            failure_threshold=int(cb_data["failure_threshold"]),
+            recovery_timeout=int(cb_data["recovery_timeout"]),
+            success_threshold=int(cb_data["success_threshold"]),
+        )
+    except (ValueError, TypeError) as e:
+        raise ConfigError(f"Invalid circuit_breaker configuration: {e}")
+
+    # Parse blocked patterns (optional field)
+    blocked_patterns = []
+    if "blocked_patterns" in data:
+        patterns_data = data["blocked_patterns"]
+        if not isinstance(patterns_data, list):
+            raise ConfigError("blocked_patterns must be a list")
+
+        for i, pattern in enumerate(patterns_data):
+            if not isinstance(pattern, dict):
+                raise ConfigError(f"blocked_patterns[{i}] must be a dictionary")
+            if "method" not in pattern:
+                raise ConfigError(f"blocked_patterns[{i}] missing required field 'method'")
+            if "path_pattern" not in pattern:
+                raise ConfigError(
+                    f"blocked_patterns[{i}] missing required field 'path_pattern'"
+                )
+
+            blocked_patterns.append(
+                BlockedPatternConfig(
+                    method=pattern["method"],
+                    path_pattern=pattern["path_pattern"],
+                )
+            )
+
+    return PolicyConfig(
+        version=str(data["version"]),
+        default_action=str(data["default_action"]),
+        rate_limits=rate_limits,
+        circuit_breaker=circuit_breaker,
+        blocked_patterns=blocked_patterns,
+    )
+
+
+def _parse_extra_allowlist(file_path: str) -> AllowlistConfig:
+    """Parse an extra allowlist file with relaxed schema.
+
+    Extra files may omit domains, http_endpoints, and blocked_paths (each
+    defaults to an empty list).  The version field is still required but its
+    value is ignored during merge.  The returned AllowlistConfig bypasses
+    __post_init__ validation so that partial configs can be merged before
+    the final result is validated.
+
+    Args:
+        file_path: Path to the extra allowlist YAML file.
+
+    Returns:
+        AllowlistConfig with relaxed fields (may have empty lists).
+
+    Raises:
+        ConfigError: If version is missing or YAML is invalid.
+    """
+    data = _load_yaml_file(file_path)
+
+    if "version" not in data:
+        raise ConfigError(f"Missing required field 'version' in extra allowlist {file_path}")
+    version = str(data["version"])
+    if not version:
+        raise ConfigError(f"Extra allowlist version cannot be empty in {file_path}")
+
+    # Domains: default to empty list
+    domains: List[str] = []
+    if "domains" in data:
+        domains_data = data["domains"]
+        if not isinstance(domains_data, list):
+            raise ConfigError(f"domains must be a list in {file_path}")
+        domains = [str(d) for d in domains_data]
+
+    # HTTP endpoints: default to empty list
+    http_endpoints: List[HttpEndpointConfig] = []
+    if "http_endpoints" in data:
+        endpoints_data = data["http_endpoints"]
+        if not isinstance(endpoints_data, list):
+            raise ConfigError(f"http_endpoints must be a list in {file_path}")
+        for i, endpoint in enumerate(endpoints_data):
+            if not isinstance(endpoint, dict):
+                raise ConfigError(f"http_endpoints[{i}] must be a dictionary in {file_path}")
+            if "host" not in endpoint:
+                raise ConfigError(f"http_endpoints[{i}] missing 'host' in {file_path}")
+            if "methods" not in endpoint:
+                raise ConfigError(f"http_endpoints[{i}] missing 'methods' in {file_path}")
+            if "paths" not in endpoint:
+                raise ConfigError(f"http_endpoints[{i}] missing 'paths' in {file_path}")
+            if not isinstance(endpoint["methods"], list):
+                raise ConfigError(f"http_endpoints[{i}].methods must be a list in {file_path}")
+            if not isinstance(endpoint["paths"], list):
+                raise ConfigError(f"http_endpoints[{i}].paths must be a list in {file_path}")
+            http_endpoints.append(
+                HttpEndpointConfig(
+                    host=str(endpoint["host"]),
+                    methods=[str(m) for m in endpoint["methods"]],
+                    paths=[str(p) for p in endpoint["paths"]],
+                )
+            )
+
+    # Blocked paths: default to empty list
+    blocked_paths: List[BlockedPathConfig] = []
+    if "blocked_paths" in data:
+        bp_data = data["blocked_paths"]
+        if not isinstance(bp_data, list):
+            raise ConfigError(f"blocked_paths must be a list in {file_path}")
+        for i, bp in enumerate(bp_data):
+            if not isinstance(bp, dict):
+                raise ConfigError(f"blocked_paths[{i}] must be a dictionary in {file_path}")
+            if "host" not in bp:
+                raise ConfigError(f"blocked_paths[{i}] missing 'host' in {file_path}")
+            if "patterns" not in bp:
+                raise ConfigError(f"blocked_paths[{i}] missing 'patterns' in {file_path}")
+            if not isinstance(bp["patterns"], list):
+                raise ConfigError(f"blocked_paths[{i}].patterns must be a list in {file_path}")
+            if len(bp["patterns"]) == 0:
+                raise ConfigError(f"blocked_paths[{i}].patterns must not be empty in {file_path}")
+            blocked_paths.append(
+                BlockedPathConfig(
+                    host=str(bp["host"]),
+                    patterns=[str(p) for p in bp["patterns"]],
+                )
+            )
+
+    return AllowlistConfig._partial(
+        version=version, domains=domains,
+        http_endpoints=http_endpoints, blocked_paths=blocked_paths,
+    )
+
+
+def _synthesize_allowlist_from_user_services(
+    services: List[ProxyUserService],
+) -> Optional[AllowlistConfig]:
+    """Build a partial AllowlistConfig from user-defined services.
+
+    For each service, creates a domain entry and an HTTP endpoint with the
+    service's configured methods and paths.
+
+    Args:
+        services: List of user-defined services (from shared loader).
+
+    Returns:
+        A partial AllowlistConfig suitable for merging, or None if
+        the services list is empty.
+    """
+    if not services:
+        return None
+
+    domains: List[str] = []
+    endpoints: List[HttpEndpointConfig] = []
+
+    for svc in services:
+        domains.append(svc.domain)
+        endpoints.append(
+            HttpEndpointConfig(
+                host=svc.domain,
+                methods=list(svc.methods),
+                paths=list(svc.paths),
+            )
+        )
+
+    return AllowlistConfig._partial(
+        version="1",
+        domains=domains,
+        http_endpoints=endpoints,
+    )
+
+
+def load_allowlist_config(
+    path: Optional[str] = None, extra_path: Optional[str] = None
+) -> AllowlistConfig:
+    """Load and validate allowlist configuration, optionally merging an extra file.
+
+    Args:
+        path: Optional path to allowlist.yaml. If not provided, uses
+              environment variable PROXY_ALLOWLIST_PATH or default location.
+        extra_path: Optional path to an extra allowlist file. When None, falls
+              back to the PROXY_ALLOWLIST_EXTRA_PATH environment variable.
+              When explicitly passed (even empty string), env var is not consulted.
+              When the resolved path is unset or empty, extra loading is skipped.
+              When set but file is missing, raises ConfigError (fail-closed).
+
+    Returns:
+        Validated AllowlistConfig instance (merged if extra file provided).
+
+    Raises:
+        ConfigError: If configuration is invalid or missing required fields.
+    """
+    if path is None:
+        path = get_config_path("allowlist.yaml")
+
+    data = _load_yaml_file(path)
+
+    # Validate required top-level fields
+    required_fields = ["version", "domains", "http_endpoints"]
+    missing_fields = [f for f in required_fields if f not in data]
+    if missing_fields:
+        raise ConfigError(
+            f"Missing required fields in {path}: {', '.join(missing_fields)}"
+        )
+
+    # Parse domains
+    domains_data = data["domains"]
+    if not isinstance(domains_data, list):
+        raise ConfigError("domains must be a list")
+
+    domains = [str(d) for d in domains_data]
+
+    # Parse HTTP endpoints
+    endpoints_data = data["http_endpoints"]
+    if not isinstance(endpoints_data, list):
+        raise ConfigError("http_endpoints must be a list")
+
+    http_endpoints = []
+    for i, endpoint in enumerate(endpoints_data):
+        if not isinstance(endpoint, dict):
+            raise ConfigError(f"http_endpoints[{i}] must be a dictionary")
+        if "host" not in endpoint:
+            raise ConfigError(f"http_endpoints[{i}] missing required field 'host'")
+        if "methods" not in endpoint:
+            raise ConfigError(f"http_endpoints[{i}] missing required field 'methods'")
+        if "paths" not in endpoint:
+            raise ConfigError(f"http_endpoints[{i}] missing required field 'paths'")
+
+        if not isinstance(endpoint["methods"], list):
+            raise ConfigError(f"http_endpoints[{i}].methods must be a list")
+        if not isinstance(endpoint["paths"], list):
+            raise ConfigError(f"http_endpoints[{i}].paths must be a list")
+
+        http_endpoints.append(
+            HttpEndpointConfig(
+                host=str(endpoint["host"]),
+                methods=[str(m) for m in endpoint["methods"]],
+                paths=[str(p) for p in endpoint["paths"]],
+            )
+        )
+
+    # Parse blocked paths (optional field)
+    blocked_paths: List[BlockedPathConfig] = []
+    if "blocked_paths" in data:
+        bp_data = data["blocked_paths"]
+        if not isinstance(bp_data, list):
+            raise ConfigError("blocked_paths must be a list")
+
+        for i, bp in enumerate(bp_data):
+            if not isinstance(bp, dict):
+                raise ConfigError(f"blocked_paths[{i}] must be a dictionary")
+            if "host" not in bp:
+                raise ConfigError(f"blocked_paths[{i}] missing required field 'host'")
+            if "patterns" not in bp:
+                raise ConfigError(f"blocked_paths[{i}] missing required field 'patterns'")
+            if not isinstance(bp["patterns"], list):
+                raise ConfigError(f"blocked_paths[{i}].patterns must be a list")
+
+            blocked_paths.append(
+                BlockedPathConfig(
+                    host=str(bp["host"]),
+                    patterns=[str(p) for p in bp["patterns"]],
+                )
+            )
+
+    base_config = AllowlistConfig(
+        version=str(data["version"]),
+        domains=domains,
+        http_endpoints=http_endpoints,
+        blocked_paths=blocked_paths,
+    )
+
+    # Resolve extra path: explicit arg > env var
+    resolved_extra: Optional[str] = extra_path
+    if extra_path is None:
+        env_extra = get_config_path("allowlist_extra.yaml")
+        # get_config_path returns the default path when env var is unset;
+        # only use it if the env var was actually set
+        if os.environ.get("PROXY_ALLOWLIST_EXTRA_PATH"):
+            resolved_extra = env_extra
+
+    merged = base_config
+    if resolved_extra:
+        extra_config = _parse_extra_allowlist(resolved_extra)
+        merged = merge_allowlist_configs(merged, extra_config)
+
+    # Merge user-defined services into the allowlist
+    user_services_config = _synthesize_allowlist_from_user_services(
+        load_proxy_user_services()
+    )
+    if user_services_config is not None:
+        merged = merge_allowlist_configs(merged, user_services_config)
+
+    return merged

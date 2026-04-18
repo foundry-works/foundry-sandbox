@@ -1,0 +1,267 @@
+# Domain allowlist for unified proxy
+# Supports exact matches and wildcard patterns (*.domain.com)
+
+version: "1.0"
+
+domains:
+  # GitHub
+  # NOTE: api.github.com is on the MITM path because gh CLI does not
+  # support GITHUB_API_URL. Credential injection and policy enforcement
+  # happen via mitmproxy (credential_injector + policy_engine).
+  - github.com
+  - "*.github.com"
+  - api.github.com
+  - raw.githubusercontent.com
+  - objects.githubusercontent.com
+  - codeload.github.com
+  - github-releases.githubusercontent.com
+  - gist.github.com
+  - gist.githubusercontent.com
+  - release-assets.githubusercontent.com
+  - codeload.githubusercontent.com
+  - uploads.github.com
+
+  # AI Providers
+  # NOTE: api.anthropic.com removed — Anthropic traffic routes through the
+  # gateway (http://unified-proxy:9848) which handles credential injection
+  # and forwards to the upstream over HTTPS.
+  # NOTE: api.openai.com and *.api.openai.com removed — OpenAI traffic
+  # routes through the gateway (http://unified-proxy:9849).
+  # NOTE: generativelanguage.googleapis.com API-key traffic now routes
+  # through the Gemini gateway (http://unified-proxy:9851). Domain kept
+  # here for defense-in-depth (OAuth-mode traffic still uses MITM).
+  - chatgpt.com
+  - "*.chatgpt.com"
+  - generativelanguage.googleapis.com
+  - accounts.google.com
+  - oauth2.googleapis.com
+  - "*.googleapis.com"
+  - auth.openai.com
+  - api.tavily.com
+  - api.perplexity.ai
+  - api.z.ai
+  - open.bigmodel.cn
+  - api.semanticscholar.org
+
+  # Python Package Repository
+  - pypi.org
+  - "*.pypi.org"
+  - files.pythonhosted.org
+
+  # Node.js Package Repository
+  - npmjs.org
+  - registry.npmjs.org
+
+  # Ruby Package Repository
+  - rubygems.org
+  - "*.rubygems.org"
+
+  # Rust Package Repository
+  - crates.io
+  - "*.crates.io"
+
+  # Go Package Repository
+  - pkg.go.dev
+  - proxy.golang.org
+  - sum.golang.org
+
+  # Java Package Repository
+  - maven.apache.org
+  - repo1.maven.org
+
+  # PHP Package Repository
+  - packagist.org
+  - repo.packagist.org
+
+# HTTP endpoint allowlist for fine-grained API access control
+# Each endpoint specifies host, allowed methods, and allowed paths
+http_endpoints:
+  # GitHub API — gh CLI traffic flows through the MITM path
+  # (Squid → mitmproxy credential injector → api.github.com).
+  # The gateway (:9850) handles git operations only.
+  # *  matches exactly one path segment (does not span /)
+  # ** matches one or more characters and may span /
+  - host: api.github.com
+    methods: [GET, POST, PUT, PATCH, DELETE]
+    paths:
+      # Repository root (owner/repo metadata)
+      - "/repos/*/*"
+      # Pull requests
+      - "/repos/*/*/pulls"
+      - "/repos/*/*/pulls/*"
+      # Issues
+      - "/repos/*/*/issues"
+      - "/repos/*/*/issues/*"
+      # Issue comments
+      - "/repos/*/*/issues/*/comments"
+      - "/repos/*/*/issues/*/comments/*"
+      - "/repos/*/*/issues/comments"
+      - "/repos/*/*/issues/comments/*"
+      # Git data (refs, trees, blobs, commits)
+      - "/repos/*/*/git/**"
+      # Branches
+      - "/repos/*/*/branches"
+      - "/repos/*/*/branches/**"
+      # Commits
+      - "/repos/*/*/commits"
+      - "/repos/*/*/commits/*"
+      # File contents
+      - "/repos/*/*/contents"
+      - "/repos/*/*/contents/**"
+      # Compare
+      - "/repos/*/*/compare/**"
+      # Releases
+      - "/repos/*/*/releases"
+      - "/repos/*/*/releases/*"
+      # Tags
+      - "/repos/*/*/tags"
+      # Collaborators
+      - "/repos/*/*/collaborators"
+      - "/repos/*/*/collaborators/*"
+      # Comments (PR/issue comments)
+      - "/repos/*/*/comments"
+      - "/repos/*/*/comments/*"
+      # Pull request review comments
+      - "/repos/*/*/pulls/*/comments"
+      - "/repos/*/*/pulls/*/comments/*"
+      - "/repos/*/*/pulls/comments"
+      - "/repos/*/*/pulls/comments/*"
+      # Pull request reviews
+      - "/repos/*/*/pulls/*/reviews"
+      - "/repos/*/*/pulls/*/reviews/*"
+      - "/repos/*/*/pulls/*/reviews/**"
+      # Commit statuses
+      - "/repos/*/*/statuses/*"
+      # Actions (read-only: runs, workflows, jobs, artifacts)
+      - "/repos/*/*/actions/runs"
+      - "/repos/*/*/actions/runs/**"
+      - "/repos/*/*/actions/workflows"
+      - "/repos/*/*/actions/workflows/**"
+      - "/repos/*/*/actions/jobs"
+      - "/repos/*/*/actions/jobs/**"
+      - "/repos/*/*/actions/artifacts"
+      - "/repos/*/*/actions/artifacts/**"
+      # Check runs / check suites
+      - "/repos/*/*/check-runs"
+      - "/repos/*/*/check-runs/*"
+      # Labels
+      - "/repos/*/*/labels"
+      - "/repos/*/*/labels/**"
+      # Milestones
+      - "/repos/*/*/milestones"
+      - "/repos/*/*/milestones/*"
+      # Non-repo endpoints
+      - "/user/*"
+      - "/users/*"
+      - "/orgs/*"
+      - "/gists/*"
+      - "/search/*"
+      - "/rate_limit"
+      # GraphQL API (mutation filtering handled by github-api-filter.py)
+      - "/graphql"
+
+  # Anthropic API — removed from allowlist. Traffic routes through the
+  # gateway (http://unified-proxy:9848) and no longer flows through mitmproxy.
+
+  # OpenAI API — removed from allowlist. Traffic routes through the
+  # gateway (http://unified-proxy:9849) and no longer flows through mitmproxy.
+
+  # ChatGPT / Codex
+  - host: chatgpt.com
+    methods: [POST, GET]
+    paths:
+      - "/backend-api/codex/**"
+      - "/backend-api/**"
+
+  # Google AI API
+  - host: generativelanguage.googleapis.com
+    methods: [POST, GET]
+    paths:
+      - "/v1beta/models/*"
+      - "/v1/models/*"
+
+  # Google Auth (for Gemini login)
+  - host: accounts.google.com
+    methods: [GET, POST]
+    paths:
+      - "/o/oauth2/*"
+      - "/token"
+  - host: oauth2.googleapis.com
+    methods: [POST, GET]
+    paths:
+      - "/token"
+      - "/tokeninfo"
+      - "/v1/*"
+
+  # Tavily API
+  - host: api.tavily.com
+    methods: [POST, GET]
+    paths:
+      - "/search"
+      - "/extract"
+      - "/*"
+
+  # Perplexity API
+  - host: api.perplexity.ai
+    methods: [POST, GET]
+    paths:
+      - "/chat/completions"
+      - "/*"
+
+  # Codex OAuth
+  - host: auth.openai.com
+    methods: [POST]
+    paths:
+      - "/oauth/token"
+
+  # GitHub uploads (release assets)
+  - host: uploads.github.com
+    methods: [POST, PUT, PATCH]
+    paths:
+      - "/repos/*/*/releases/*/assets"
+
+  # Zhipu AI (OpenCode + claude-zai)
+  # Uses multi-segment paths: /api/paas/v4/... and /api/anthropic/v1/...
+  - host: open.bigmodel.cn
+    methods: [POST, GET]
+    paths:
+      - "/**"
+  - host: api.z.ai
+    methods: [POST, GET]
+    paths:
+      - "/**"
+
+  # Semantic Scholar
+  - host: api.semanticscholar.org
+    methods: [GET]
+    paths:
+      - "/*"
+
+# Blocked API paths - dangerous endpoints that must never be accessed
+# Uses segment-aware matching:
+# - *  matches exactly one path segment (not spanning /)
+# - ** matches one or more characters and may span /
+blocked_paths:
+  - host: api.github.com
+    patterns:
+      # Webhooks - could exfiltrate data to attacker-controlled servers
+      - "/repos/*/*/hooks"
+      - "/repos/*/*/hooks/*"
+      # SSH deploy keys - could grant persistent repo access
+      - "/repos/*/*/keys"
+      - "/repos/*/*/keys/*"
+      # Deploy keys (alternate endpoint)
+      - "/repos/*/*/deploy_keys"
+      - "/repos/*/*/deploy_keys/*"
+      # Environment deployment branch policy - could weaken protections
+      - "/repos/*/*/environments/*/deployment-branch-policy"
+      # Actions secrets - could expose or modify CI/CD secrets
+      - "/repos/*/*/actions/secrets"
+      - "/repos/*/*/actions/secrets/*"
+      # Actions variables - could modify CI/CD configuration
+      - "/repos/*/*/actions/variables"
+      - "/repos/*/*/actions/variables/*"
+      # Branch admin operations - could weaken branch protections
+      - "/repos/*/*/branches/**/protection"
+      - "/repos/*/*/branches/**/protection/**"
+      - "/repos/*/*/branches/**/rename"

@@ -1,0 +1,82 @@
+# Foundry Sandbox Documentation
+
+Foundry Sandbox provides temporary, isolated development environments for AI-assisted coding. Each sandbox runs in a Docker container with security controls that protect your host system, credentials, and git history from accidental damage and supply chain attacks, while still giving AI coding assistants (Claude Code, Gemini CLI, Codex CLI, OpenCode) the tools they need to be productive.
+
+The key insight: AI assistants can hallucinate dangerous commands or act without full context, and malicious dependencies can steal credentials. Sandboxes let them work freely while limiting blast radius.
+
+## Key Features
+
+- **Temporary workspaces** - Each sandbox gets a fresh git worktree; destroy it when done
+- **Credential isolation** - API keys and tokens never enter the sandbox; injected by proxy at the network level
+- **Git shadow mode** - `.git` hidden from sandboxes; all git operations proxied through authenticated API with policy enforcement
+- **Layered security** - Network isolation, credential isolation, read-only filesystem, branch isolation
+- **Pre-installed AI tools** - Claude Code, Gemini CLI, Codex CLI, OpenCode ready to use
+- **Filesystem protection** - Read-only root filesystem; non-root user; writable areas are RAM-backed and reset on restart
+
+## Quick Start
+
+```bash
+# Build the sandbox image
+cast build
+
+# Create a sandbox from a GitHub repo
+cast new owner/repo
+
+# You're now in a tmux session inside the container
+# Run your AI assistant:
+claude
+```
+
+## Documentation
+
+| Document | Description |
+|----------|-------------|
+| [Getting Started](getting-started.md) | Installation, setup, and first sandbox |
+| [Configuration](configuration.md) | API keys, plugins, and config files |
+| [Architecture](architecture.md) | Technical design and diagrams |
+| [Operations](operations.md) | Operational procedures and runbook |
+| [Observability](observability.md) | Metrics, logging, and alerting |
+
+### Security
+
+| Document | Description |
+|----------|-------------|
+| [Security Model](security/security-model.md) | Threats, defenses, hardening, and security assumptions — organized by pillar |
+
+### Usage
+
+| Document | Description |
+|----------|-------------|
+| [Commands](usage/commands.md) | Complete CLI reference |
+| [Workflows](usage/workflows.md) | Common patterns |
+
+### Architecture Decision Records
+
+| Document | Description | Status |
+|----------|-------------|--------|
+| [ADR-001: Unified Proxy Architecture](adr/001-consolidation.md) | Single-service proxy for credential isolation and request interception | Accepted |
+| [ADR-002: Container Identity](adr/002-container-identity.md) | Container identity design for proxy authentication | Accepted |
+| [ADR-003: Policy Engine](adr/003-policy-engine.md) | Policy engine design for access control | Accepted |
+| [ADR-004: DNS Integration](adr/004-dns-integration.md) | DNS filtering integration with unified proxy | Accepted |
+| [ADR-005: Failure Modes](adr/005-failure-modes.md) | Failure modes and readiness design | Accepted |
+| [ADR-006: Allowlist Layering](adr/006-allowlist-layering.md) | Layered allowlist architecture for network access | Accepted |
+| [ADR-007: API Gateways](adr/007-api-gateways.md) | API gateway routing and credential injection | Accepted |
+
+### Development
+
+| Document | Description |
+|----------|-------------|
+| [Contributing](development/contributing.md) | How to contribute |
+
+## Quick Reference
+
+```bash
+cast new owner/repo              # Create sandbox from main
+cast new owner/repo branch       # Create from existing branch
+cast new owner/repo new main     # Create new branch from main
+cast list                        # List all sandboxes
+cast attach name                 # Attach to running sandbox
+cast stop name                   # Stop sandbox (preserves worktree)
+cast destroy name                # Remove sandbox completely
+cast help                        # Show all commands
+```

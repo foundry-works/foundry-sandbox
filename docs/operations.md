@@ -1,0 +1,715 @@
+# Operations Runbook
+
+This guide covers operational procedures for the unified proxy: restart procedures, recovery from failures, DNS configuration, and troubleshooting common issues.
+
+## Contents
+
+**Runbooks:**
+- [Proxy Restart Procedure](#proxy-restart-procedure)
+- [SQLite Recovery](#sqlite-recovery-procedure)
+- [DNS Configuration](#dns-configuration)
+- [HMAC Secret Rotation](#hmac-secret-rotation)
+- [Gateway Rollback](#gateway-rollback-procedures)
+- [Certificate Management](#certificate-management)
+- [Emergency Procedures](#emergency-procedures)
+
+**Troubleshooting:**
+- [Request Tracing](#request-tracing)
+- [Proxy Won't Start](#proxy-wont-start)
+- [Containers Not Registered](#containers-not-registered)
+- [High Latency](#high-latency)
+- [Certificate Errors](#certificate-errors)
+- [Git Operations Failing](#git-operations-failing)
+- [Branch Isolation Errors](#branch-isolation-errors)
+- [Git Fetch Hangs](#git-fetch-hangs)
+- [Request Blocked Unexpectedly](#request-blocked-unexpectedly)
+
+## Proxy Restart Procedure
+
+The unified proxy supports graceful shutdown and restart without data loss.
+
+### Graceful Restart (Recommended)
+
+```bash
+# From the host machine
+docker compose -f docker-compose.credential-isolation.yml restart unified-proxy
+```
+
+**What happens:**
+1. Docker sends SIGTERM to mitmproxy process
+2. Proxy stops accepting new connections
+3. In-flight requests complete (up to 10s grace period)
+4. Readiness marker (`/var/run/proxy/ready`) is removed
+5. Container restarts with fresh state
+
+### Full Stop and Start
+
+```bash
+# Stop the proxy (and dependent containers)
+docker compose -f docker-compose.credential-isolation.yml stop unified-proxy
+
+# Start the proxy
+docker compose -f docker-compose.credential-isolation.yml start unified-proxy
+```
+
+### Force Restart (Emergency)
+
+Use only when graceful restart fails:
+
+```bash
+# Force kill and restart
+docker compose -f docker-compose.credential-isolation.yml kill unified-proxy
+docker compose -f docker-compose.credential-isolation.yml up -d unified-proxy
+```
+
+**Caution:** Force kill terminates in-flight requests immediately.
+
+### Restart Verification
+
+After restart, verify the proxy is healthy:
+
+```bash
+# Check container status
+docker compose -f docker-compose.credential-isolation.yml ps unified-proxy
+
+# Check readiness marker (inside proxy container)
+docker exec unified-proxy test -f /var/run/proxy/ready && echo "Ready" || echo "Not ready"
+
+# Check mitmproxy is listening
+docker exec unified-proxy ss -tlnp | grep 8080
+
+# Test credential injection (from sandbox)
+curl -v https://api.anthropic.com/v1/messages 2>&1 | head -20
+```
+
+## SQLite Recovery Procedure
+
+The container registry uses SQLite with WAL mode. Recovery is rarely needed but documented here.
+
+### Database Location
+
+```
+/var/lib/unified-proxy/registry.db      # Main database
+/var/lib/unified-proxy/registry.db-wal  # Write-ahead log
+/var/lib/unified-proxy/registry.db-shm  # Shared memory file
+```
+
+### Check Database Integrity
+
+```bash
+docker exec unified-proxy sqlite3 /var/lib/unified-proxy/registry.db "PRAGMA integrity_check;"
+```
+
+Expected output: `ok`
+
+### Recovery from Corruption
+
+**Symptom:** Container registration fails with "database disk image is malformed"
+
+**Step 1: Stop the proxy**
+```bash
+docker compose -f docker-compose.credential-isolation.yml stop unified-proxy
+```
+
+**Step 2: Backup corrupted database (optional)**
+```bash
+docker cp unified-proxy:/var/lib/unified-proxy/registry.db ./registry.db.corrupt
+```
+
+**Step 3: Remove database files**
+```bash
+docker exec unified-proxy rm -f /var/lib/unified-proxy/registry.db*
+```
+
+**Step 4: Restart proxy**
+```bash
+docker compose -f docker-compose.credential-isolation.yml start unified-proxy
+```
+
+The proxy will create a fresh database on startup. Containers will re-register automatically on their next request.
+
+### WAL Checkpoint (Performance)
+
+If the WAL file grows large, force a checkpoint:
+
+```bash
+docker exec unified-proxy sqlite3 /var/lib/unified-proxy/registry.db "PRAGMA wal_checkpoint(TRUNCATE);"
+```
+
+### Export Container Registrations
+
+```bash
+docker exec unified-proxy sqlite3 -header -csv /var/lib/unified-proxy/registry.db \
+  "SELECT container_id, ip_address, datetime(registered_at, 'unixepoch') as registered, ttl_seconds FROM containers;"
+```
+
+## DNS Configuration
+
+DNS filtering is **enabled by default** for layered network security. When enabled:
+
+1. **NXDOMAIN for blocked domains** — Prevents DNS-level reconnaissance
+2. **DNS bypass protection** — Containers cannot query external DNS servers (iptables rules block port 53 to non-proxy destinations)
+3. **Complete domain isolation** — Domain names cannot leak to external resolvers
+
+### Check Current DNS Mode
+
+```bash
+# Check if DNS is enabled
+docker exec unified-proxy printenv PROXY_ENABLE_DNS
+```
+
+Output: `true` (DNS enabled) or empty/false (DNS disabled)
+
+### DNS Mode Comparison
+
+| Feature | DNS Enabled | DNS Disabled (Fallback) |
+|---------|-------------|-------------------------|
+| Domain allowlist filtering | DNS + Firewall | Firewall only |
+| NXDOMAIN for blocked domains | Yes | No (upstream DNS resolves) |
+| Filtering layers | Two (DNS + firewall) | One (firewall only) |
+| Latency overhead | +5-20ms | None |
+
+### Activate DNS Fallback
+
+Use DNS fallback when:
+- mitmproxy DNS mode fails go/no-go criteria (latency > 50ms p99)
+- DNS filtering causes legitimate requests to fail
+- Emergency bypass for debugging
+
+Create or edit `docker-compose.override.yml`:
+
+```yaml
+services:
+  unified-proxy:
+    environment:
+      - PROXY_ENABLE_DNS=false
+```
+
+Or set the environment variable when starting the sandbox:
+
+```bash
+PROXY_ENABLE_DNS=false cast new myproject
+```
+
+Then restart the proxy:
+
+```bash
+docker compose -f docker-compose.credential-isolation.yml up -d unified-proxy
+
+# Verify DNS mode disabled
+docker logs unified-proxy 2>&1 | grep -i "dns"
+# Should show: "DNS filtering enabled" is absent
+```
+
+### Re-enable DNS Filtering
+
+Remove the `PROXY_ENABLE_DNS=false` override and restart:
+
+```bash
+# Remove override or set to true
+docker compose -f docker-compose.credential-isolation.yml up -d unified-proxy
+
+# Verify DNS mode enabled
+docker logs unified-proxy 2>&1 | grep "DNS filtering enabled"
+```
+
+**Security note:** Disabling DNS filtering removes a security layer. Use only when necessary for debugging.
+
+## Troubleshooting
+
+### Request Tracing
+
+Use the `request_id` field in structured logs to trace a request end-to-end through the proxy.
+
+1. **Find request ID** from client logs or error message
+2. **Search proxy logs** by request_id:
+   ```bash
+   docker logs unified-proxy 2>&1 | grep "req-abc123"
+   ```
+3. **Follow the flow** through addons:
+   - container_identity (identification)
+   - credential_injector (credential injection)
+   - rate_limiter (throttling decision)
+   - circuit_breaker (upstream health)
+
+### Proxy Won't Start
+
+**Symptom:** Container exits immediately or healthcheck fails
+
+**Check 1: View startup logs**
+```bash
+docker logs unified-proxy 2>&1 | head -50
+```
+
+**Check 2: Validate required files**
+```bash
+docker exec unified-proxy ls -la /opt/proxy/addons/
+docker exec unified-proxy ls -la /etc/proxy/certs/
+```
+
+**Check 3: Verify CA certificate**
+```bash
+docker exec unified-proxy cat /etc/proxy/certs/mitmproxy-ca.pem | head -3
+```
+
+Expected: `-----BEGIN CERTIFICATE-----`
+
+**Resolution:** If addons or certificates missing, check volume mounts in docker-compose.
+
+### Containers Not Registered
+
+**Symptom:** Requests fail with "unknown container" errors
+
+**Check registrations:**
+```bash
+PROXY_CONTAINER="sandbox-<sandbox-name>-unified-proxy-1"
+docker exec "$PROXY_CONTAINER" curl -s --unix-socket /var/run/proxy/internal.sock \
+  http://localhost/internal/containers | jq .
+```
+
+**Manual registration (emergency):**
+```bash
+PROXY_CONTAINER="sandbox-<sandbox-name>-unified-proxy-1"
+docker exec "$PROXY_CONTAINER" curl -X POST --unix-socket /var/run/proxy/internal.sock \
+  -H "Content-Type: application/json" \
+  -d '{"container_id":"sandbox-123","ip_address":"172.17.0.2"}' \
+  http://localhost/internal/containers
+```
+
+### High Latency
+
+**Symptom:** Requests take > 5 seconds
+
+**Check 1: Circuit breaker state**
+```bash
+curl -s http://unified-proxy:8080/internal/metrics | grep circuit_breaker
+```
+
+If state = 2 (OPEN), upstream is failing. Check upstream health directly:
+```bash
+curl -v https://api.anthropic.com/health
+```
+
+**Check 2: Rate limit exhaustion**
+```bash
+curl -s http://unified-proxy:8080/internal/metrics | grep rate_limit_remaining
+```
+
+If remaining < 5, container is rate limited. Wait for refill.
+
+**Check 3: DNS resolution time**
+```bash
+curl -s http://unified-proxy:8080/internal/metrics | grep dns_duration
+```
+
+If p95 > 100ms, consider DNS fallback mode.
+
+### Certificate Errors
+
+**Symptom:** `SSL certificate problem: unable to get local issuer certificate`
+
+See [Certificate Troubleshooting](#certificate-troubleshooting) for diagnosis steps and common causes.
+
+### Git Operations Failing
+
+**Symptom:** `git clone` or `git push` fails
+
+**Check 1: Verify proxy reachability**
+```bash
+curl -v http://unified-proxy:8080/
+```
+
+**Check 2: Check credential injection logs**
+```bash
+docker logs unified-proxy 2>&1 | grep -i "credential\|inject" | tail -20
+```
+
+**Check 3: Verify GitHub token**
+```bash
+docker exec unified-proxy printenv GITHUB_TOKEN | head -c 10
+# Should show first 10 chars of token (ghp_... or gho_...)
+```
+
+### Branch Isolation Errors
+
+**Symptom:** Git commands fail with "branch isolation: access denied" or "missing branch identity"
+
+**Check 1: Verify sandbox has branch identity**
+```bash
+PROXY_CONTAINER="sandbox-<sandbox-name>-unified-proxy-1"
+docker exec "$PROXY_CONTAINER" curl -s --unix-socket /var/run/proxy/internal.sock \
+  http://localhost/internal/containers | jq '.[].metadata'
+```
+
+Look for `sandbox_branch` and `from_branch` fields in the metadata. If missing, the sandbox was created before branch isolation support (v0.10).
+
+**Check 2: Review audit logs for denied operations**
+```bash
+docker logs unified-proxy 2>&1 | grep -E "git_audit.*denied" | tail -20
+```
+
+**Resolution:**
+- **Legacy sandbox (no branch identity):** Recreate the sandbox with `cast destroy && cast new` to get branch isolation metadata
+- **Branch not in allowed set:** The sandbox can only access its own branch, well-known branches (main, master, develop, production, release/*, hotfix/*), and tags
+- **SHA not reachable:** SHA arguments must be ancestors of allowed branches
+
+### Git Fetch Hangs
+
+**Symptom:** `git fetch` or `git pull` appears to hang indefinitely
+
+`git_operations.py` uses `fcntl.flock` to serialize concurrent fetch operations per bare repo, preventing corruption from parallel fetches. A hang may indicate a stale lock.
+
+**Check 1: Identify the lock file**
+```bash
+docker exec unified-proxy ls -la /home/ubuntu/.sandboxes/repos/github.com/owner/repo.git/.fetch-lock
+```
+
+**Check 2: Check for stale processes**
+```bash
+docker exec unified-proxy ps aux | grep git
+```
+
+**Resolution:**
+- If no git process is holding the lock, remove the stale lock file:
+  ```bash
+  docker exec unified-proxy rm -f /home/ubuntu/.sandboxes/repos/github.com/owner/repo.git/.fetch-lock
+  ```
+- If a git process is hung, kill it and retry:
+  ```bash
+  docker exec unified-proxy kill <pid>
+  ```
+
+### Request Blocked Unexpectedly
+
+**Symptom:** Request returns 403 or connection refused
+
+**Check 1: Policy engine logs**
+```bash
+docker logs unified-proxy 2>&1 | grep -i "policy\|blocked\|denied" | tail -20
+```
+
+**Check 2: DNS filter logs (if DNS enabled)**
+```bash
+docker logs unified-proxy 2>&1 | grep -i "dns.*blocked\|NXDOMAIN" | tail -20
+```
+
+**Check 3: Verify domain in allowlist**
+```bash
+docker exec unified-proxy cat /etc/unified-proxy/allowlist.yaml | grep <domain>
+```
+
+## Emergency Procedures
+
+### Complete Proxy Reset
+
+Use when proxy is in unrecoverable state:
+
+```bash
+# 1. Stop all credential isolation services
+docker compose -f docker-compose.credential-isolation.yml down
+
+# 2. Remove volumes (CAUTION: loses certificates)
+docker volume rm $(docker volume ls -q | grep -E "mitm-certs|proxy-")
+
+# 3. Recreate everything
+docker compose -f docker-compose.credential-isolation.yml up -d
+```
+
+### Bypass Proxy (Emergency Only)
+
+**CAUTION:** This bypasses credential isolation. Use only for debugging.
+
+```bash
+# Inside sandbox container, temporarily unset proxy
+unset HTTP_PROXY HTTPS_PROXY
+curl https://api.github.com  # Direct connection (no credential injection)
+```
+
+## HMAC Secret Rotation
+
+Each sandbox has a per-sandbox HMAC secret used to authenticate git operations between the git wrapper (inside the sandbox) and the git API (in the proxy). Secrets are stored as files under `/run/secrets/sandbox-hmac/{sandbox_id}`.
+
+### When to Rotate
+
+- Suspected secret compromise
+- Routine security hygiene (recommended: on sandbox recreation)
+- After a security incident involving the proxy or sandbox containers
+
+### Pre-Rotation Checklist
+
+1. **Identify the sandbox** whose secret needs rotation:
+   ```bash
+   SANDBOX_ID="<your-sandbox-name>"
+   ```
+
+2. **Verify current secret exists**:
+   ```bash
+   docker exec unified-proxy ls -la /run/secrets/sandbox-hmac/${SANDBOX_ID}
+   ```
+
+3. **Ensure no git operations are in flight** from the target sandbox:
+   ```bash
+   docker logs unified-proxy 2>&1 | grep "${SANDBOX_ID}" | tail -5
+   ```
+
+### Rotation Procedure
+
+**Step 1: Generate a new secret**
+
+```bash
+NEW_SECRET=$(openssl rand -hex 32)
+```
+
+**Step 2: Write the new secret to the proxy's secrets mount**
+
+```bash
+# Write to the secrets volume (proxy side)
+echo -n "${NEW_SECRET}" | docker exec -i unified-proxy \
+  tee /run/secrets/sandbox-hmac/${SANDBOX_ID} > /dev/null
+```
+
+**Step 3: Write the new secret to the sandbox's secrets mount**
+
+```bash
+# Write to the secrets volume (sandbox side)
+echo -n "${NEW_SECRET}" | docker exec -i sandbox-${SANDBOX_ID} \
+  tee /run/secrets/sandbox-hmac/${SANDBOX_ID} > /dev/null
+```
+
+**Step 4: Flush the proxy's secret cache**
+
+The git API caches secrets in memory. Force a re-read by restarting the git API process, or call the rotation admin function:
+
+```bash
+# Option A: Restart the git API (brief interruption to git operations)
+docker exec unified-proxy kill -HUP $(docker exec unified-proxy cat /var/run/proxy/mitmproxy.pid)
+
+# Option B: Full proxy restart (if Option A is insufficient)
+docker compose -f docker-compose.credential-isolation.yml restart unified-proxy
+```
+
+### Post-Rotation Verification
+
+1. **Verify the sandbox can still perform git operations**:
+   ```bash
+   docker exec sandbox-${SANDBOX_ID} git -C /workspace status
+   ```
+
+2. **Check for authentication errors in proxy logs**:
+   ```bash
+   docker logs unified-proxy 2>&1 | grep -i "invalid.*signature\|auth.*fail" | tail -10
+   ```
+
+3. **Verify the nonce cache was cleared** (prevents stale nonce collisions):
+   ```bash
+   docker logs unified-proxy 2>&1 | grep -i "rotate\|revoke" | tail -5
+   ```
+
+### Bulk Rotation (All Sandboxes)
+
+For rotating all sandbox secrets at once (e.g., after a security incident):
+
+```bash
+# List all active sandboxes
+for secret_file in /run/secrets/sandbox-hmac/*; do
+  SANDBOX_ID=$(basename "$secret_file")
+  NEW_SECRET=$(openssl rand -hex 32)
+
+  # Update proxy side
+  echo -n "${NEW_SECRET}" | docker exec -i unified-proxy \
+    tee /run/secrets/sandbox-hmac/${SANDBOX_ID} > /dev/null
+
+  # Update sandbox side
+  echo -n "${NEW_SECRET}" | docker exec -i sandbox-${SANDBOX_ID} \
+    tee /run/secrets/sandbox-hmac/${SANDBOX_ID} > /dev/null 2>&1 || \
+    echo "Warning: Could not update sandbox ${SANDBOX_ID} (may be stopped)"
+done
+
+# Restart proxy to flush all cached secrets
+docker compose -f docker-compose.credential-isolation.yml restart unified-proxy
+```
+
+### Troubleshooting Rotation Issues
+
+| Symptom | Cause | Resolution |
+|---------|-------|------------|
+| `git proxy authentication failed` after rotation | Secret mismatch between proxy and sandbox | Verify both sides have identical secret content |
+| `Unknown sandbox or missing secret` | Secret file not written to proxy | Check `/run/secrets/sandbox-hmac/` contains the file |
+| Rotation works but reverts on restart | Secrets volume not persisted | Ensure secrets are on a Docker volume, not tmpfs |
+
+## Gateway Rollback Procedures
+
+The API gateways (Anthropic, OpenAI, GitHub) route provider traffic through plaintext HTTP endpoints on the internal Docker network, injecting credentials at the gateway rather than via MITM interception. If a gateway has issues, traffic can be reverted to the MITM path.
+
+### Anthropic Gateway Rollback
+
+If the Anthropic gateway (port 9848) is failing or misbehaving:
+
+**Step 1: Re-add `api.anthropic.com` to the domain allowlist**
+
+```yaml
+# config/allowlist.yaml — add back under domains:
+- api.anthropic.com
+```
+
+**Step 2: Unset the gateway URL in the sandbox environment**
+
+Create or edit `docker-compose.override.yml`:
+
+```yaml
+services:
+  sandbox:
+    environment:
+      - ANTHROPIC_BASE_URL=  # Empty to clear — SDK uses default api.anthropic.com
+```
+
+**Step 3: Restart**
+
+```bash
+docker compose -f docker-compose.credential-isolation.yml up -d
+```
+
+**Step 4: Verify MITM path is working**
+
+```bash
+# From inside the sandbox
+curl -s https://api.anthropic.com/v1/messages \
+  -H "content-type: application/json" \
+  -H "x-api-key: $ANTHROPIC_API_KEY" \
+  -d '{"model":"claude-sonnet-4-20250514","max_tokens":1,"messages":[{"role":"user","content":"hi"}]}' \
+  | head -c 200
+```
+
+The credential injector (on the MITM mitmproxy instance) will inject the real API key. The same procedure applies to OpenAI (port 9849, `OPENAI_BASE_URL`, `api.openai.com`) and GitHub (port 9850, `GITHUB_API_URL`, `api.github.com`).
+
+### Squid Migration Rollback
+
+The Squid SNI filter replaced mitmproxy as the primary forward proxy. MITM is gated behind `ENABLE_MITM_FALLBACK`. If the Squid-based architecture has issues:
+
+**Step 1: Re-enable full MITM mode**
+
+```yaml
+# docker-compose.override.yml
+services:
+  unified-proxy:
+    environment:
+      - ENABLE_MITM_FALLBACK=true
+```
+
+When `ENABLE_MITM_FALLBACK=true` and provider credentials are present, `entrypoint.sh` detects MITM is needed (`detect_mitm_needed()`), generates the CA certificate, starts mitmproxy on port 8081, and routes MITM-required provider traffic through it.
+
+**Step 2: Restore gateway URLs to MITM path (if needed)**
+
+To fully revert to pre-gateway MITM for a specific provider, follow the per-gateway rollback above (re-add domain to allowlist, unset `*_BASE_URL`).
+
+**Step 3: Restart the proxy**
+
+```bash
+docker compose -f docker-compose.credential-isolation.yml restart unified-proxy
+```
+
+**Step 4: Verify**
+
+```bash
+# Check mitmproxy is running on MITM port
+docker exec unified-proxy ss -tlnp | grep 8081
+
+# Check CA certificate was generated
+docker exec unified-proxy ls -la /etc/proxy/certs/mitmproxy-ca.pem
+
+# Check Squid is still running (handles non-MITM traffic)
+docker exec unified-proxy ss -tlnp | grep 8080
+
+# Test a request from inside the sandbox
+docker exec <sandbox-container> curl -s https://api.anthropic.com/v1/messages -I
+```
+
+**MITM-required providers:** Gemini (`GOOGLE_API_KEY`, `GEMINI_API_KEY`), Tavily (`TAVILY_API_KEY`), Semantic Scholar (`SEMANTIC_SCHOLAR_API_KEY`), Perplexity (`PERPLEXITY_API_KEY`), Zhipu (`ZHIPU_API_KEY`). These providers lack `*_BASE_URL` env var support and always require MITM when their credentials are set.
+
+## Certificate Management
+
+Mitmproxy CA certificate management for HTTPS interception in credential isolation mode.
+
+### How It Works
+
+When MITM-required provider credentials are configured (see [Architecture: Mitmproxy](architecture.md#mitmproxy-conditional) for the current list), the unified proxy generates a CA certificate and uses it to intercept HTTPS traffic for credential injection. Major providers (Anthropic, OpenAI, GitHub) route through plaintext HTTP gateways and do not require MITM or CA trust.
+
+```
+unified-proxy                          sandbox container
+┌──────────────┐                      ┌────────────────────────┐
+│ Generate CA  │                      │ Trust combined bundle  │
+│ Build combined│──── mitm-certs ────│ /certs/ca-certificates │
+│ CA bundle    │     volume (ro)     │ .crt (system CAs +     │
+│              │                      │ mitmproxy CA)          │
+└──────────────┘                      └────────────────────────┘
+```
+
+#### Generation
+
+The proxy's `entrypoint.sh` generates the CA on first startup via `mitmdump`, then builds a combined bundle (system CAs + mitmproxy CA) at `/etc/proxy/certs/ca-certificates.crt`. This avoids running `update-ca-certificates` inside the sandbox (which requires a writable root filesystem).
+
+#### Distribution
+
+The combined bundle is shared via a Docker volume (`mitm-certs`), mounted read-only in the sandbox at `/certs/`.
+
+#### Trust Configuration
+
+Environment variables are set in `docker-compose.credential-isolation.yml`:
+
+| Variable | Value | Consumers |
+|----------|-------|-----------|
+| `NODE_EXTRA_CA_CERTS` | `/certs/ca-certificates.crt` | Node.js |
+| `REQUESTS_CA_BUNDLE` | `/certs/ca-certificates.crt` | Python requests |
+| `SSL_CERT_FILE` | `/certs/ca-certificates.crt` | OpenSSL |
+| `CURL_CA_BUNDLE` | `/certs/ca-certificates.crt` | curl |
+| `GIT_SSL_CAINFO` | `/certs/ca-certificates.crt` | git |
+
+### Certificate Rotation
+
+Certificates rotate automatically when the sandbox is destroyed and recreated (`cast destroy && cast new`). Manual rotation:
+
+```bash
+# Stop sandbox and proxy
+docker compose -f docker-compose.credential-isolation.yml down
+
+# Remove the certificate volume
+docker volume rm <project>_mitm-certs
+
+# Restart - proxy generates new certificate
+docker compose -f docker-compose.credential-isolation.yml up -d
+```
+
+### Certificate Troubleshooting
+
+**Symptom:** `SSL certificate problem: unable to get local issuer certificate`
+
+```bash
+# Inside sandbox: verify combined bundle exists
+ls -la /certs/ca-certificates.crt
+
+# Verify env vars are set
+echo $NODE_EXTRA_CA_CERTS
+
+# Test HTTPS through proxy
+curl -v https://api.github.com 2>&1 | head -20
+```
+
+**Common causes:**
+1. Combined bundle not generated — proxy may have failed to start mitmproxy
+2. Volume not mounted — check `mitm-certs` volume in `docker compose ps`
+3. Proxy not ready — sandbox started before proxy healthcheck passed
+
+### Security Properties
+
+- **Isolation**: Each sandbox project has its own CA
+- **Read-only mount**: Sandboxes cannot modify the CA certificate
+- **No persistence**: CA is regenerated on sandbox recreation
+- **Scope limited**: CA only trusted within the sandbox container
+- **Reduced surface**: Major providers use gateways (no MITM), limiting CA trust to MITM-required providers only
+
+## See Also
+
+- [Architecture](architecture.md) — System components
+- [Observability](observability.md) — Metrics and debugging
+- [ADR-005](adr/005-failure-modes.md) — Failure modes and recovery design
+- [ADR-004](adr/004-dns-integration.md) — DNS integration decision
