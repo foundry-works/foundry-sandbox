@@ -49,7 +49,7 @@ class TestProtectedBranchesConfig:
 class TestFileRestrictionsConfig:
     def test_defaults(self):
         cfg = FileRestrictionsConfig()
-        assert cfg.warn_action == "log"
+        assert cfg.warn_action == "reject"
         assert len(cfg.blocked_patterns) > 0
 
     def test_warn_action_validation_rejects_invalid(self):

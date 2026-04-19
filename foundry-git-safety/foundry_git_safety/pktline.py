@@ -206,6 +206,7 @@ def iter_prefixed_stream(
     prefix: bytes,
     stream: BinaryIO,
     chunk_size: int = DEFAULT_PKTLINE_CHUNK_SIZE,
+    max_bytes: int = 10 * 1024 * 1024,
 ) -> Iterator[bytes]:
     """
     Yield a previously-read prefix, then stream the remainder.
@@ -218,14 +219,19 @@ def iter_prefixed_stream(
         prefix: Bytes already read from the stream
         stream: Binary stream to continue reading from
         chunk_size: Size of chunks to read
+        max_bytes: Maximum total bytes to yield (default 10MB)
 
     Yields:
         Bytes chunks - first the prefix, then chunks from the stream
     """
+    total = 0
     if prefix:
         yield prefix
-    while True:
-        chunk = stream.read(chunk_size)
+        total += len(prefix)
+    while total < max_bytes:
+        to_read = min(chunk_size, max_bytes - total)
+        chunk = stream.read(to_read)
         if not chunk:
             break
         yield chunk
+        total += len(chunk)

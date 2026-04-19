@@ -461,7 +461,7 @@ def execute_git(
                 request_id=req_id,
             )
             return None, ValidationError(
-                "Cannot resolve bare repo for fetch locking; "
+                "Cannot resolve repository for fetch locking; "
                 "contact admin or set FOUNDRY_ALLOW_UNLOCKED_FETCH=1"
             )
         if bare_repo is not None:
@@ -621,8 +621,6 @@ def execute_git(
         decision="allow",
         command_args=args,
         exit_code=exit_code,
-        stdout=stdout_str or "",
-        stderr=stderr_str,
         request_id=req_id,
     )
 
@@ -642,15 +640,18 @@ async def execute_git_async(
     """
     semaphore = _semaphore_pool.get(sandbox_id)
 
-    # Single-threaded event loop: no await between check and acquire,
-    # so no other coroutine can interleave.
-    if semaphore.locked():
+    # Atomic non-blocking acquire: avoids race between check and acquire.
+    try:
+        await asyncio.wait_for(semaphore.acquire(), timeout=0)
+    except asyncio.TimeoutError:
         return None, ValidationError(
             f"Too many concurrent operations for sandbox {sandbox_id}"
         )
 
-    async with semaphore:
+    try:
         loop = asyncio.get_event_loop()
         return await loop.run_in_executor(
             None, execute_git, request, repo_root, metadata
         )
+    finally:
+        semaphore.release()

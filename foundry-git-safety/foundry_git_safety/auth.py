@@ -102,14 +102,12 @@ class NonceStore:
 
             store = self._stores[sandbox_id]
 
-            expired_keys = [
-                k for k, ts in store.items() if now - ts > self._ttl
-            ]
-            for k in expired_keys:
-                del store[k]
-
             if nonce in store:
-                return False
+                # Check if the stored nonce has expired
+                if now - store[nonce] <= self._ttl:
+                    return False
+                # Expired — remove it and fall through to re-store
+                del store[nonce]
 
             while len(store) >= self._max:
                 store.popitem(last=False)
@@ -271,5 +269,10 @@ def verify_signature(
     secret: bytes,
 ) -> bool:
     """Verify HMAC-SHA256 signature using constant-time comparison."""
+    # Reject malformed signatures before comparison
+    if len(provided_sig) != 64 or not all(
+        c in "0123456789abcdef" for c in provided_sig
+    ):
+        return False
     expected = compute_signature(method, path, body, timestamp, nonce, secret)
     return hmac.compare_digest(expected, provided_sig)

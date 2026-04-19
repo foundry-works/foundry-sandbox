@@ -152,12 +152,12 @@ timestamp = sys.argv[3]
 nonce = sys.argv[4]
 secret_file = sys.argv[5]
 
-body = sys.stdin.buffer.read().decode("utf-8")
+body = sys.stdin.buffer.read()
 
 with open(secret_file, "rb") as f:
     secret = f.read().rstrip(b"\n")
 
-body_hash = hashlib.sha256(body.encode("utf-8")).hexdigest()
+body_hash = hashlib.sha256(body).hexdigest()
 canonical = f"{method}\n{path}\n{body_hash}\n{timestamp}\n{nonce}"
 sig = hmac.new(secret, canonical.encode("utf-8"), hashlib.sha256).hexdigest()
 print(sig)

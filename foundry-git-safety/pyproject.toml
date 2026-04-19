@@ -82,4 +82,7 @@ line-length = 100
 
 [tool.hatch.build.targets.wheel]
 packages = ["foundry_git_safety"]
-artifacts = ["foundry_git_safety/default_config/*.yaml"]
+artifacts = [
+    "foundry_git_safety/default_config/*.yaml",
+    "foundry_git_safety/default_config/*.yaml.example",
+]

@@ -22,10 +22,26 @@ git_safety:
     blocked_patterns:
       - ".github/workflows/"
       - ".github/actions/"
+      - "Makefile"
+      - "Justfile"
+      - "Taskfile.yml"
+      - ".pre-commit-config.yaml"
+      - "CODEOWNERS"
+      - ".github/FUNDING.yml"
+      - ".env*"
     warned_patterns:
       - "package.json"
       - "pyproject.toml"
-    warn_action: "log"  # "log" (default) or "reject"
+      - "requirements.txt"
+      - "requirements-*.txt"
+      - "Gemfile"
+      - "go.mod"
+      - "go.sum"
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - "docker-compose*.yml"
+      - "Dockerfile"
+    warn_action: "reject"  # "reject" (default, blocks push) or "log" (warn only)
 
   branch_isolation:
     enabled: true

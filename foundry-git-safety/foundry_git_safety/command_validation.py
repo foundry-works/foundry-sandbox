@@ -820,8 +820,8 @@ def validate_path(
     if cwd is None or cwd in ("", ".", "/"):
         return real_root, None
 
-    # Block path traversal
-    if ".." in cwd.split(os.sep):
+    # Block path traversal (exact component match, not substring)
+    if any(part == ".." for part in cwd.split(os.sep)):
         return "", ValidationError("Path traversal (..) not allowed")
 
     # Resolve relative to repo root
@@ -878,8 +878,8 @@ def validate_path_args(
         # Skip flags
         if arg.startswith("-"):
             continue
-        # Check for path traversal
-        if ".." in arg.split(os.sep):
+        # Check for path traversal (exact component match, not substring)
+        if any(part == ".." for part in arg.split(os.sep)):
             return ValidationError(f"Path traversal (..) not allowed in arg: {arg}")
         # If it looks like a path (contains / or \), validate it
         if os.sep in arg or "/" in arg:

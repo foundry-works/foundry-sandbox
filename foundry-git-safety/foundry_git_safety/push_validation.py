@@ -7,6 +7,7 @@ validation that runs before subprocess execution.
 import logging
 import os
 import subprocess
+import time
 
 from .branch_isolation import resolve_bare_repo_path
 from .branch_types import (
@@ -23,6 +24,10 @@ from .policies import check_protected_branches
 from .subprocess_env import build_clean_env
 
 logger = logging.getLogger(__name__)
+
+# TTL cache for default branch detection to avoid subprocess on every push
+_DEFAULT_BRANCH_CACHE: dict[str, tuple[str | None, float]] = {}
+_DEFAULT_BRANCH_CACHE_TTL = 300.0  # 5 minutes
 
 # SHA used by git_policies to detect creation/deletion operations.
 _ZERO_SHA = "0" * 40
@@ -313,22 +318,31 @@ def normalize_push_args(
 def _detect_default_branch(bare_repo_path: str) -> str | None:
     """Detect the default branch name from a bare repo's HEAD symref.
 
-    Runs ``git symbolic-ref HEAD`` against the bare repo and extracts
-    the branch name from the ``refs/heads/`` prefix.
+    Results are cached for 5 minutes to avoid spawning a subprocess
+    on every push request.
     """
+    now = time.monotonic()
+    cached = _DEFAULT_BRANCH_CACHE.get(bare_repo_path)
+    if cached is not None:
+        branch, ts = cached
+        if now - ts < _DEFAULT_BRANCH_CACHE_TTL:
+            return branch
+
     try:
         result = subprocess.run(
             [GIT_BINARY, "--git-dir", bare_repo_path,
              "symbolic-ref", "HEAD"],
             capture_output=True, timeout=SHA_CHECK_TIMEOUT,
         )
+        branch = None
         if result.returncode == 0:
             head_ref = result.stdout.decode("utf-8", errors="replace").strip()
             if head_ref.startswith("refs/heads/"):
-                return head_ref[len("refs/heads/"):]
+                branch = head_ref[len("refs/heads/"):]
+        _DEFAULT_BRANCH_CACHE[bare_repo_path] = (branch, now)
+        return branch
     except (subprocess.TimeoutExpired, OSError):
-        pass
-    return None
+        return None
 
 
 def _inject_default_branch_protection(

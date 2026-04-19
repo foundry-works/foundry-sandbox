@@ -231,11 +231,21 @@ class GitHubAPIChecker:
         try:
             data = json.loads(body)
             state = str(data.get("state", "")).lower()
-            # Block any PATCH that sets state=open.  This catches both explicit
-            # reopens and ambiguous cases where GitHub may not include
-            # state_reason.  Legitimate title/body updates on open PRs don't
-            # include a state field.
-            return state == "open"
+            state_reason = str(data.get("state_reason", "")).lower()
+            # Only block explicit reopen attempts — when state is set to "open"
+            # AND a state_reason indicates a reopen action.  Legitimate metadata
+            # updates (title, body, labels) that happen to include state="open"
+            # are allowed through.
+            if state != "open":
+                return False
+            if state_reason == "reopened":
+                return True
+            # Also block bare state="open" with no other mutable fields —
+            # this is the minimal reopen payload.
+            mutable_fields = {"title", "body", "labels", "assignees",
+                              "milestone", "draft", "base"}
+            has_other_fields = any(k in data for k in mutable_fields)
+            return not has_other_fields
         except (json.JSONDecodeError, UnicodeDecodeError):
             return False
 
@@ -277,15 +287,19 @@ def run_github_proxy(
 
     class GitHubAPIProxyHandler(BaseHTTPRequestHandler):
         def do_CONNECT(self) -> None:
-            """Handle HTTPS CONNECT requests."""
-            # For HTTPS, we can't inspect the content without MITM.
-            # Instead, we tunnel the connection and let the client's
-            # HTTP requests flow through do_GET/do_POST after CONNECT
-            # is established (via HTTP over the CONNECT tunnel).
-            # Since most GitHub API calls use HTTPS, the actual filtering
-            # happens at the application level (git wrapper + security_policies).
-            self.send_response(200, "Connection Established")
+            """Reject HTTPS CONNECT — this proxy only filters plain HTTP."""
+            # Content inside CONNECT tunnels is encrypted end-to-end,
+            # so filtering is impossible without MITM.  The actual GitHub
+            # API filtering happens at the application layer via the git
+            # wrapper and security_policies module.
+            self.send_response(405, "Method Not Allowed")
+            self.send_header("Content-Type", "application/json")
             self.end_headers()
+            self.wfile.write(json.dumps({
+                "error": "CONNECT not supported",
+                "message": "This proxy filters plain HTTP only. "
+                           "HTTPS filtering is enforced at the application layer.",
+            }).encode())
 
         def _handle_request(self) -> None:
             """Handle a proxied HTTP request."""

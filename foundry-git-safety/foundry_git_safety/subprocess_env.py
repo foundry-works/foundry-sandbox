@@ -73,6 +73,12 @@ def build_clean_env() -> dict[str, str]:
     if "PATH" not in clean:
         clean["PATH"] = "/usr/local/bin:/usr/bin:/bin"
 
+    # Prevent git from reading ~/.gitconfig by pointing HOME to an isolated
+    # directory.  The proxy injects all needed config via -c flags.
+    clean["HOME"] = os.environ.get("FOUNDRY_GIT_HOME", "/dev/null")
+    clean["GIT_CONFIG_GLOBAL"] = "/dev/null"
+    clean["GIT_CONFIG_SYSTEM"] = "/dev/null"
+
     # Pass through our internal credential token for the git credential helper.
     # This is NOT a git-recognized variable — it's only read by our own
     # /var/run/proxy/git-credential-helper.sh script set up in entrypoint.sh.
@@ -289,7 +295,9 @@ def remove_stale_config_locks(repo_root: str) -> None:
     now = time.time()
     dirs_to_check = [bare_repo]
 
-    # Also check the worktree's gitdir (where config.worktree lives)
+    # Also check the worktree's gitdir (where config.worktree lives).
+    # Use resolve_bare_repo_path for boundary validation to prevent
+    # symlink traversal from a malicious .git file.
     dot_git = os.path.join(os.path.realpath(repo_root), ".git")
     if os.path.isfile(dot_git):
         try:
@@ -300,7 +308,12 @@ def remove_stale_config_locks(repo_root: str) -> None:
                 if not os.path.isabs(gitdir):
                     gitdir = os.path.join(os.path.realpath(repo_root), gitdir)
                 gitdir = os.path.realpath(gitdir)
-                if os.path.isdir(gitdir) and gitdir != bare_repo:
+                # Validate the resolved gitdir is within the bare repo tree
+                if (
+                    os.path.isdir(gitdir)
+                    and gitdir != bare_repo
+                    and (gitdir == bare_repo or gitdir.startswith(bare_repo + os.sep))
+                ):
                     dirs_to_check.append(gitdir)
         except OSError:
             pass
@@ -309,12 +322,16 @@ def remove_stale_config_locks(repo_root: str) -> None:
         for name in _GIT_LOCK_NAMES:
             lock_path = os.path.join(directory, name)
             try:
-                age = now - os.stat(lock_path).st_mtime
+                st = os.stat(lock_path)
             except FileNotFoundError:
                 continue
             except OSError:
                 continue
+            age = now - st.st_mtime
             if age >= _STALE_LOCK_AGE:
+                # Verify it's still a regular file (no TOCTOU symlink swap)
+                if not os.path.isfile(lock_path):
+                    continue
                 try:
                     os.unlink(lock_path)
                     logger.warning(

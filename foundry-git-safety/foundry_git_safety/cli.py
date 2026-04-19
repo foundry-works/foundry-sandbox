@@ -109,10 +109,13 @@ def stop(pid_file: str) -> None:
 
 @main.command()
 @click.option("--pid-file", default=_DEFAULT_PID_FILE, help="PID file path")
-def status(pid_file: str) -> None:
+@click.option("--config", "config_path", default=None, help="Path to foundry.yaml")
+def status(pid_file: str, config_path: str | None) -> None:
     """Check server status."""
     import json
     import urllib.request
+
+    from .config import load_foundry_config
 
     pid = _read_pid(pid_file)
     if pid is None:
@@ -123,9 +126,15 @@ def status(pid_file: str) -> None:
         click.echo(f"Server not running (PID {pid} is stale)")
         sys.exit(1)
 
+    # Read port from config
+    cfg = load_foundry_config(config_path)
+    port = cfg.git_safety.server.port
+
     # Health check
     try:
-        resp = urllib.request.urlopen("http://127.0.0.1:8083/health", timeout=2)
+        resp = urllib.request.urlopen(
+            f"http://127.0.0.1:{port}/health", timeout=2
+        )
         data = json.loads(resp.read())
         click.echo(f"Server running (PID {pid}, status: {data.get('status', 'unknown')})")
     except Exception as exc:

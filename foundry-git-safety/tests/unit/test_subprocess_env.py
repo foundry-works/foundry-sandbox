@@ -84,11 +84,13 @@ class TestBuildCleanEnv:
             env = build_clean_env()
             assert env.get("PATH") == "/usr/bin:/bin"
 
-    def test_keeps_home(self):
-        """HOME is preserved from the real environment."""
+    def test_home_isolated(self):
+        """HOME is set to an isolated value to prevent ~/.gitconfig reads."""
         with patch.dict(os.environ, {"HOME": "/home/testuser"}, clear=False):
             env = build_clean_env()
-            assert env.get("HOME") == "/home/testuser"
+            assert env.get("HOME") != "/home/testuser"
+            assert "GIT_CONFIG_GLOBAL" in env
+            assert env["GIT_CONFIG_GLOBAL"] == "/dev/null"
 
     def test_keeps_user(self):
         """USER is preserved from the real environment."""
@@ -121,7 +123,8 @@ class TestBuildCleanEnv:
         assert "FOUNDRY_PROXY_GIT_TOKEN" not in env
 
     def test_only_contains_allowed_keys_plus_token(self):
-        """The clean env contains only keys from ENV_ALLOWED (if present) and the proxy token."""
+        """The clean env contains only keys from ENV_ALLOWED, git config overrides, and the proxy token."""
+        _ALLOWED_EXTRA = {"FOUNDRY_PROXY_GIT_TOKEN", "GIT_CONFIG_GLOBAL", "GIT_CONFIG_SYSTEM"}
         with patch.dict(
             os.environ,
             {"PATH": "/bin", "HOME": "/home/test", "GIT_FOO": "bad", "SSH_BAR": "bad"},
@@ -129,7 +132,7 @@ class TestBuildCleanEnv:
         ):
             env = build_clean_env()
             for key in env:
-                if key == "FOUNDRY_PROXY_GIT_TOKEN":
+                if key in _ALLOWED_EXTRA:
                     continue
                 assert key in ENV_ALLOWED, f"Unexpected key {key} in clean env"
 

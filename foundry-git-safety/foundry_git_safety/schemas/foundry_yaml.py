@@ -39,12 +39,28 @@ class FileRestrictionsConfig(BaseModel):
     blocked_patterns: List[str] = Field(default_factory=lambda: [
         ".github/workflows/",
         ".github/actions/",
+        "Makefile",
+        "Justfile",
+        "Taskfile.yml",
+        ".pre-commit-config.yaml",
+        "CODEOWNERS",
+        ".github/FUNDING.yml",
+        ".env*",
     ])
     warned_patterns: List[str] = Field(default_factory=lambda: [
         "package.json",
         "pyproject.toml",
+        "requirements.txt",
+        "requirements-*.txt",
+        "Gemfile",
+        "go.mod",
+        "go.sum",
+        "Cargo.toml",
+        "Cargo.lock",
+        "docker-compose*.yml",
+        "Dockerfile",
     ])
-    warn_action: str = "log"
+    warn_action: str = "reject"
 
     @field_validator("warn_action")
     @classmethod
@@ -91,6 +107,13 @@ class RateLimitsConfig(BaseModel):
     burst: int = 300
     sustained: int = 120
     global_ceiling: int = 1000
+
+    @field_validator("burst", "sustained", "global_ceiling")
+    @classmethod
+    def validate_positive(cls, v: int) -> int:
+        if v < 1:
+            raise ValueError(f"Rate limit must be positive, got {v}")
+        return v
 
 
 class GitSafetyConfig(BaseModel):

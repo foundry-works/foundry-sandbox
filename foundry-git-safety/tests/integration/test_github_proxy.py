@@ -172,14 +172,34 @@ class TestProxyForwarding:
         assert reason is not None
 
     def test_patch_pr_reopen_blocked(self):
-        """PATCH that sets state=open on a PR is blocked."""
+        """PATCH that sets state=open without other mutable fields is blocked."""
         checker = GitHubAPIChecker(allow_pr_operations=True)
-        body = json.dumps({"state": "open", "title": "Reopen"}).encode("utf-8")
+        # Bare reopen payload — only state, no other mutable fields
+        body = json.dumps({"state": "open"}).encode("utf-8")
         allowed, reason = checker.check_request(
             "PATCH", "/repos/owner/repo/pulls/42", body=body
         )
         assert allowed is False
         assert "reopen" in reason.lower()
+
+    def test_patch_pr_reopen_with_state_reason_blocked(self):
+        """PATCH with explicit state_reason=reopened is blocked."""
+        checker = GitHubAPIChecker(allow_pr_operations=True)
+        body = json.dumps({"state": "open", "state_reason": "reopened"}).encode("utf-8")
+        allowed, reason = checker.check_request(
+            "PATCH", "/repos/owner/repo/pulls/42", body=body
+        )
+        assert allowed is False
+        assert "reopen" in reason.lower()
+
+    def test_patch_pr_metadata_with_state_allowed(self):
+        """PATCH with state=open AND other mutable fields is allowed."""
+        checker = GitHubAPIChecker(allow_pr_operations=True)
+        body = json.dumps({"state": "open", "title": "Update title"}).encode("utf-8")
+        allowed, reason = checker.check_request(
+            "PATCH", "/repos/owner/repo/pulls/42", body=body
+        )
+        assert allowed is True
 
     def test_branch_protection_put_blocked(self):
         """PUT to branch protection is always blocked."""
