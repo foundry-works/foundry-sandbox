@@ -9,6 +9,9 @@ Extracted from branch_isolation.py to reduce module size.
 import logging
 import re
 
+# Pre-compiled patterns for hot-path output filtering
+_REMOTE_REF_RE = re.compile(r"refs/remotes/[^/]+/([^\s]+)")
+
 from .branch_types import (
     REF_ENUM_CMDS,
     _BRANCH_LINE_RE,
@@ -209,7 +212,7 @@ def _filter_ref_enum_output(
             continue
 
         # Check for remote refs
-        remote_match = re.search(r"refs/remotes/[^/]+/([^\s]+)", stripped)
+        remote_match = _REMOTE_REF_RE.search(stripped)
         if remote_match:
             branch_name = remote_match.group(1)
             if _is_allowed_branch_name(branch_name, sandbox_branch, base_branch):
@@ -434,7 +437,7 @@ def _filter_custom_format_decorations(
             non_empty = [t for t in tokens if t]
             ref_like_count = sum(
                 1 for t in non_empty
-                if len(t) <= 256 and (
+                if len(t) <= 256 and len(t) >= 2 and (
                     t.startswith("HEAD") or t.startswith("tag: ")
                     or "/" in t or _is_allowed_branch_name(
                         t, sandbox_branch, base_branch

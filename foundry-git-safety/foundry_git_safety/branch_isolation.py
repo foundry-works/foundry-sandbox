@@ -104,7 +104,14 @@ def resolve_bare_repo_path(repo_root: str) -> str | None:
                     return None
                 return resolved
             # No commondir — .git itself is the git dir
-            return os.path.realpath(dot_git)
+            resolved_git = os.path.realpath(dot_git)
+            if not _is_within_boundary(resolved_git, boundary):
+                logger.warning(
+                    ".git dir escapes repo boundary: %s (boundary: %s)",
+                    resolved_git, boundary,
+                )
+                return None
+            return resolved_git
 
         # .git is a file — read gitdir pointer
         if not os.path.isfile(dot_git):

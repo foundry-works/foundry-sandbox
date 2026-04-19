@@ -644,6 +644,15 @@ async def execute_git_async(
     try:
         await asyncio.wait_for(semaphore.acquire(), timeout=0)
     except asyncio.TimeoutError:
+        audit_log(
+            event="concurrency_limit",
+            action=" ".join(request.args[:3]) if request.args else "unknown",
+            decision="deny",
+            command_args=request.args,
+            reason=f"Too many concurrent operations for sandbox {sandbox_id}",
+            matched_rule="semaphore",
+            sandbox_id=sandbox_id,
+        )
         return None, ValidationError(
             f"Too many concurrent operations for sandbox {sandbox_id}"
         )

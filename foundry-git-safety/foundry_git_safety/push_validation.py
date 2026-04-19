@@ -7,6 +7,7 @@ validation that runs before subprocess execution.
 import logging
 import os
 import subprocess
+import threading
 import time
 
 from .branch_isolation import resolve_bare_repo_path
@@ -29,6 +30,7 @@ logger = logging.getLogger(__name__)
 _DEFAULT_BRANCH_CACHE: dict[str, tuple[str | None, float]] = {}
 _DEFAULT_BRANCH_CACHE_TTL = 300.0  # 5 minutes
 _DEFAULT_BRANCH_CACHE_MAX = 256
+_DEFAULT_BRANCH_CACHE_LOCK = threading.Lock()
 
 # SHA used by git_policies to detect creation/deletion operations.
 _ZERO_SHA = "0" * 40
@@ -323,17 +325,23 @@ def _detect_default_branch(bare_repo_path: str) -> str | None:
     on every push request.
     """
     now = time.monotonic()
-    # Prune expired entries to bound cache growth
-    if len(_DEFAULT_BRANCH_CACHE) > _DEFAULT_BRANCH_CACHE_MAX:
+    with _DEFAULT_BRANCH_CACHE_LOCK:
+        # Prune expired entries to bound cache growth
         expired = [k for k, (_, ts) in _DEFAULT_BRANCH_CACHE.items()
                    if now - ts >= _DEFAULT_BRANCH_CACHE_TTL]
         for k in expired:
             del _DEFAULT_BRANCH_CACHE[k]
-    cached = _DEFAULT_BRANCH_CACHE.get(bare_repo_path)
-    if cached is not None:
-        branch, ts = cached
-        if now - ts < _DEFAULT_BRANCH_CACHE_TTL:
-            return branch
+        # Hard cap: evict oldest entries if still over limit
+        if len(_DEFAULT_BRANCH_CACHE) > _DEFAULT_BRANCH_CACHE_MAX:
+            sorted_entries = sorted(_DEFAULT_BRANCH_CACHE.items(), key=lambda x: x[1][1])
+            to_remove = len(_DEFAULT_BRANCH_CACHE) - _DEFAULT_BRANCH_CACHE_MAX
+            for k, _ in sorted_entries[:to_remove]:
+                del _DEFAULT_BRANCH_CACHE[k]
+        cached = _DEFAULT_BRANCH_CACHE.get(bare_repo_path)
+        if cached is not None:
+            branch, ts = cached
+            if now - ts < _DEFAULT_BRANCH_CACHE_TTL:
+                return branch
 
     try:
         result = subprocess.run(
@@ -346,7 +354,8 @@ def _detect_default_branch(bare_repo_path: str) -> str | None:
             head_ref = result.stdout.decode("utf-8", errors="replace").strip()
             if head_ref.startswith("refs/heads/"):
                 branch = head_ref[len("refs/heads/"):]
-        _DEFAULT_BRANCH_CACHE[bare_repo_path] = (branch, now)
+        with _DEFAULT_BRANCH_CACHE_LOCK:
+            _DEFAULT_BRANCH_CACHE[bare_repo_path] = (branch, now)
         return branch
     except (subprocess.TimeoutExpired, OSError):
         return None

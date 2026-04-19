@@ -71,7 +71,9 @@ def _daemonize(host: str, port: int, data_dir: str, cfg, pid_file: str) -> None:
 
     pid = os.fork()
     if pid > 0:
-        # Parent writes PID and exits
+        # Parent writes PID and exits.
+        # Note: if the child fails immediately, the PID file will contain a
+        # dead PID. The status/stop commands detect this via /proc/{pid} check.
         with open(pid_file, "w") as f:
             f.write(str(pid))
         click.echo(f"Started git safety server (PID {pid})")

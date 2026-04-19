@@ -40,10 +40,18 @@ WORKSPACE_DIR="${WORKSPACE_DIR:-}"
 
 # Auto-discover config from .foundry/config if available
 if [[ -z "${GIT_API_HOST:-}" && -n "$WORKSPACE_DIR" && -f "${WORKSPACE_DIR}/.foundry/config" ]]; then
-    GIT_API_HOST=$(grep -E '^GIT_API_HOST=' "${WORKSPACE_DIR}/.foundry/config" 2>/dev/null | head -1 | cut -d= -f2- || true)
+    _raw_host=$(grep -E '^GIT_API_HOST=' "${WORKSPACE_DIR}/.foundry/config" 2>/dev/null | head -1 | cut -d= -f2- || true)
+    # Sanitize: only allow hostname chars (alphanumeric, dots, hyphens)
+    if [[ "$_raw_host" =~ ^[a-zA-Z0-9._-]+$ ]]; then
+        GIT_API_HOST="$_raw_host"
+    fi
 fi
 if [[ -z "${GIT_API_PORT:-}" && -n "$WORKSPACE_DIR" && -f "${WORKSPACE_DIR}/.foundry/config" ]]; then
-    GIT_API_PORT=$(grep -E '^GIT_API_PORT=' "${WORKSPACE_DIR}/.foundry/config" 2>/dev/null | head -1 | cut -d= -f2- || true)
+    _raw_port=$(grep -E '^GIT_API_PORT=' "${WORKSPACE_DIR}/.foundry/config" 2>/dev/null | head -1 | cut -d= -f2- || true)
+    # Sanitize: only allow numeric port
+    if [[ "$_raw_port" =~ ^[0-9]+$ ]] && (( _raw_port >= 1 && _raw_port <= 65535 )); then
+        GIT_API_PORT="$_raw_port"
+    fi
 fi
 
 GIT_API_HOST="${GIT_API_HOST:-host.docker.internal}"
@@ -70,8 +78,15 @@ fi
 # Signal handling
 # ---------------------------------------------------------------------------
 
+# Track temp files for signal-safe cleanup
+_TEMP_FILES=()
+
 cleanup() {
     local sig="$1"
+    # Clean up temp files first (safe even if empty or already deleted)
+    for f in "${_TEMP_FILES[@]:-}"; do
+        rm -f "$f" 2>/dev/null || true
+    done
     if [[ -n "${CURL_PID:-}" ]]; then
         kill "$CURL_PID" 2>/dev/null || true
     fi
@@ -164,7 +179,7 @@ secret_file = sys.argv[5]
 body = sys.stdin.buffer.read()
 
 with open(secret_file, "rb") as f:
-    secret = f.read().rstrip(b"\n")
+    secret = f.read(4096).rstrip(b"\n")
 
 body_hash = hashlib.sha256(body).hexdigest()
 canonical = f"{method}\n{path}\n{body_hash}\n{timestamp}\n{nonce}"
@@ -241,8 +256,7 @@ HTTP_CODE_FILE=$(mktemp)
 PARSED_EXIT=$(mktemp)
 PARSED_STDOUT=$(mktemp)
 PARSED_STDERR=$(mktemp)
-trap 'rm -f "$RESPONSE_FILE" "$HTTP_CODE_FILE" "$PARSED_EXIT" "$PARSED_STDOUT" "$PARSED_STDERR"; cleanup 2' INT
-trap 'rm -f "$RESPONSE_FILE" "$HTTP_CODE_FILE" "$PARSED_EXIT" "$PARSED_STDOUT" "$PARSED_STDERR"; cleanup 15' TERM
+_TEMP_FILES+=("$RESPONSE_FILE" "$HTTP_CODE_FILE" "$PARSED_EXIT" "$PARSED_STDOUT" "$PARSED_STDERR")
 
 # Use proxy if SBX_PROXY is set, otherwise direct
 CURL_PROXY_ARGS=()
@@ -250,7 +264,7 @@ if [[ -n "$SBX_PROXY" ]]; then
     CURL_PROXY_ARGS=(--proxy "$SBX_PROXY")
 fi
 
-curl -s --max-time "$PROXY_TIMEOUT" --connect-timeout 5 \
+printf '%s' "$BODY" | curl -s --max-time "$PROXY_TIMEOUT" --connect-timeout 5 \
     "${CURL_PROXY_ARGS[@]}" \
     -X POST \
     -H "Content-Type: application/json" \
@@ -258,7 +272,7 @@ curl -s --max-time "$PROXY_TIMEOUT" --connect-timeout 5 \
     -H "X-Request-Timestamp: $TIMESTAMP" \
     -H "X-Request-Nonce: $NONCE" \
     -H "X-Request-Signature: $SIGNATURE" \
-    -d "$BODY" \
+    --data-binary @- \
     -o "$RESPONSE_FILE" \
     -w "%{http_code}" \
     "$GIT_API_URL" > "$HTTP_CODE_FILE" 2>/dev/null &

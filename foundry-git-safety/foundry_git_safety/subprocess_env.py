@@ -23,26 +23,9 @@ logger = logging.getLogger(__name__)
 # Environment Sanitization
 # ---------------------------------------------------------------------------
 
-# Vars to explicitly clear (set to empty string in subprocess env)
-ENV_VARS_TO_CLEAR: tuple = (
-    "GIT_CONFIG_PARAMETERS",
-    "GIT_DIR",
-    "GIT_WORK_TREE",
-    "GIT_SSH",
-    "GIT_SSH_COMMAND",
-    "GIT_ASKPASS",
-    "SSH_ASKPASS",
-    "GIT_EDITOR",
-    "GIT_PAGER",
-)
-
-# Prefixes to strip from environment
-ENV_PREFIX_STRIP: tuple = (
-    "GIT_",
-    "SSH_",
-)
-
-# Minimal allowed env vars for git execution
+# Minimal allowed env vars for git execution.
+# This is an allowlist — only these vars are copied into the subprocess env.
+# All GIT_* and SSH_* vars are excluded by omission.
 ENV_ALLOWED: frozenset = frozenset({
     "PATH",
     "HOME",
@@ -336,11 +319,15 @@ def remove_stale_config_locks(repo_root: str) -> None:
             age = now - st.st_mtime
             if age >= _STALE_LOCK_AGE:
                 try:
-                    os.unlink(lock_path)
-                    logger.warning(
-                        "Removed stale git lockfile: %s (age %.0fs)",
-                        lock_path, age,
-                    )
+                    # Verify the file we opened is still the same one at
+                    # lock_path (defends against TOCTOU swap to a symlink).
+                    current_st = os.stat(lock_path)
+                    if current_st.st_ino == st.st_ino and current_st.st_dev == st.st_dev:
+                        os.unlink(lock_path)
+                        logger.warning(
+                            "Removed stale git lockfile: %s (age %.0fs)",
+                            lock_path, age,
+                        )
                 except OSError:
                     pass
             os.close(fd)

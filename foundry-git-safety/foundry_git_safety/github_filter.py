@@ -20,6 +20,8 @@ from .github_config import GITHUB_API_HOSTS
 
 logger = logging.getLogger(__name__)
 
+_MAX_BODY_SIZE = 4 * 1024 * 1024  # 4 MiB
+
 ALLOW_PR_OPERATIONS = os.environ.get("ALLOW_PR_OPERATIONS", "").lower() in (
     "true", "1", "yes",
 )
@@ -350,7 +352,20 @@ def run_github_proxy(
 
             # Read body up-front for all requests (not just GitHub API) so that
             # the connection isn't left hanging with unread data.
-            content_length = int(self.headers.get("Content-Length", 0))
+            try:
+                content_length = int(self.headers.get("Content-Length", 0))
+            except (ValueError, TypeError):
+                self.send_response(400)
+                self.send_header("Content-Type", "application/json")
+                self.end_headers()
+                self.wfile.write(json.dumps({"error": "Invalid Content-Length"}).encode())
+                return
+            if content_length < 0 or content_length > _MAX_BODY_SIZE:
+                self.send_response(413)
+                self.send_header("Content-Type", "application/json")
+                self.end_headers()
+                self.wfile.write(json.dumps({"error": "Content-Length out of range"}).encode())
+                return
             body = self.rfile.read(content_length) if content_length > 0 else None
 
             # Only filter GitHub API hosts
@@ -403,7 +418,13 @@ def run_github_proxy(
                         self.send_header(key, value)
                 self.end_headers()
 
-                response_body = response.read()
+                # Stream response in chunks to bound memory usage
+                _PROXY_CHUNK_SIZE = 64 * 1024  # 64 KiB
+                while True:
+                    chunk = response.read(_PROXY_CHUNK_SIZE)
+                    if not chunk:
+                        break
+                    self.wfile.write(chunk)
                 self.wfile.write(response_body)
                 conn.close()
 

@@ -131,19 +131,27 @@ class TestSetGetClearContext:
 
 class TestSetupLogging:
     def test_configures_root_logger_level(self):
-        setup_logging(level="DEBUG", format_type="json")
         root = logging.getLogger()
-        assert root.level == logging.DEBUG
-        # Cleanup
-        logging.getLogger().setLevel(logging.WARNING)
+        original_level = root.level
+        original_handlers = list(root.handlers)
+        try:
+            setup_logging(level="DEBUG", format_type="json")
+            assert root.level == logging.DEBUG
+        finally:
+            root.setLevel(original_level)
+            root.handlers = original_handlers
 
     def test_clears_existing_handlers(self):
         root = logging.getLogger()
-        root.addHandler(logging.StreamHandler())
-        setup_logging(level="INFO", format_type="text")
-        assert len(root.handlers) == 1
-        # Cleanup
-        root.handlers.clear()
+        original_level = root.level
+        original_handlers = list(root.handlers)
+        try:
+            root.addHandler(logging.StreamHandler())
+            setup_logging(level="INFO", format_type="text")
+            assert len(root.handlers) == 1
+        finally:
+            root.setLevel(original_level)
+            root.handlers = original_handlers
 
 
 class TestGenerateRequestId:

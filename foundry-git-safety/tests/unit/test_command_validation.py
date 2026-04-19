@@ -152,11 +152,21 @@ class TestValidateRequest:
 class TestValidateCommand:
     """Tests for validate_command(args, extra_allowed=None)."""
 
-    # -- Allowed commands pass --
+    # -- Allowed commands pass with minimal safe args --
+
+    # Commands that need specific sub-args to pass validation
+    _CMD_SPECIAL_ARGS = {
+        "config": ["--list"],
+        "remote": ["-v"],
+        "notes": ["list"],
+        "sparse-checkout": ["list"],
+        "clean": ["-n"],
+    }
 
     @pytest.mark.parametrize("cmd", sorted(ALLOWED_COMMANDS))
     def test_allowed_command_passes(self, cmd):
-        err = validate_command([cmd])
+        args = self._CMD_SPECIAL_ARGS.get(cmd, ["--help"])
+        err = validate_command([cmd] + args)
         assert err is None, f"Allowed command {cmd!r} should pass"
 
     def test_extra_allowed_command_passes(self):

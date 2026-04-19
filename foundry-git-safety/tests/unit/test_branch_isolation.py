@@ -29,7 +29,13 @@ class TestDenyByDefault:
     """Fail-closed when metadata is missing or incomplete."""
 
     def test_none_metadata_allows(self):
-        """None metadata returns None (no validation applied)."""
+        """None metadata returns None (no validation applied).
+
+        This is intentional fail-open: when no flow metadata is available
+        (e.g., local-only operation without proxy), branch isolation is
+        not enforced. The proxy layer always provides metadata, so this
+        path is only reachable outside the proxy context.
+        """
         result = validate_branch_isolation(["checkout", "main"], None)
         assert result is None
 

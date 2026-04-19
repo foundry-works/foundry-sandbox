@@ -166,6 +166,9 @@ class JSONFormatter(logging.Formatter):
         }
         for key, value in record.__dict__.items():
             if key not in standard_attrs and not key.startswith("_"):
+                # Truncate potentially sensitive command_args
+                if key == "command_args" and isinstance(value, list):
+                    value = [str(v)[:200] for v in value]
                 log_dict[key] = value
 
         return json.dumps(log_dict, default=str)

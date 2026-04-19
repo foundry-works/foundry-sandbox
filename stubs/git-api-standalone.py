@@ -170,9 +170,15 @@ def execute_git(args: list, cwd: str, repo_root: str, stdin_data: bytes | None =
     }
 
     subcmd = cmd
-    if cmd == "config" and len(args) > 1 and args[1].startswith("-"):
-        # Allow git config --get etc (read-only)
-        pass
+    if cmd == "config":
+        # Only allow read-only config subcommands (--get, --get-all, --list, etc.)
+        config_readonly_flags = {"--get", "--get-all", "--list", "-l", "--get-regexp", "--get-color", "--get-colorbool"}
+        if not any(arg in config_readonly_flags for arg in args):
+            return {
+                "exit_code": 1,
+                "stdout": "",
+                "stderr": "error: git config write operations are not allowed",
+            }
     elif cmd not in allowed_commands:
         return {
             "exit_code": 1,
@@ -265,7 +271,14 @@ class GitAPIHandler(BaseHTTPRequestHandler):
             return
 
         # Read body
-        content_length = int(self.headers.get("Content-Length", 0))
+        try:
+            content_length = int(self.headers.get("Content-Length", 0))
+        except (ValueError, TypeError):
+            self._send_json(400, {"error": "Invalid Content-Length"})
+            return
+        if content_length < 0 or content_length > 4 * 1024 * 1024:
+            self._send_json(413, {"error": "Content-Length out of range"})
+            return
         if content_length > MAX_BODY_SIZE:
             self._send_json(413, {"error": "Request too large"})
             return

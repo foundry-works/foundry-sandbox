@@ -191,7 +191,8 @@ class TestFailClosed:
         body = b"this is not json {{"
         allowed, reason = checker.check_request("POST", "/graphql", body)
         assert not allowed
-        assert "unparseable" in (reason or "").lower() or reason is not None
+        assert reason is not None
+        assert "unparseable" in reason.lower()
 
     def test_empty_graphql_body_not_crash(self) -> None:
         """Empty body on /graphql should not crash — must return a valid bool."""

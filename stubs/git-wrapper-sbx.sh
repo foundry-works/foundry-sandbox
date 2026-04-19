@@ -61,8 +61,14 @@ fi
 # Signal handling
 # ---------------------------------------------------------------------------
 
+# Track temp files for signal-safe cleanup
+_TEMP_FILES=()
+
 cleanup() {
     local sig="$1"
+    for f in "${_TEMP_FILES[@]:-}"; do
+        rm -f "$f" 2>/dev/null || true
+    done
     if [[ -n "${CURL_PID:-}" ]]; then
         kill "$CURL_PID" 2>/dev/null || true
     fi
@@ -232,10 +238,9 @@ HTTP_CODE_FILE=$(mktemp)
 PARSED_EXIT=$(mktemp)
 PARSED_STDOUT=$(mktemp)
 PARSED_STDERR=$(mktemp)
-trap 'rm -f "$RESPONSE_FILE" "$HTTP_CODE_FILE" "$PARSED_EXIT" "$PARSED_STDOUT" "$PARSED_STDERR"; cleanup 2' INT
-trap 'rm -f "$RESPONSE_FILE" "$HTTP_CODE_FILE" "$PARSED_EXIT" "$PARSED_STDOUT" "$PARSED_STDERR"; cleanup 15' TERM
+_TEMP_FILES+=("$RESPONSE_FILE" "$HTTP_CODE_FILE" "$PARSED_EXIT" "$PARSED_STDOUT" "$PARSED_STDERR")
 
-curl -s --max-time "$PROXY_TIMEOUT" --connect-timeout 5 \
+printf '%s' "$BODY" | curl -s --max-time "$PROXY_TIMEOUT" --connect-timeout 5 \
     --proxy "$SBX_PROXY" \
     -X POST \
     -H "Content-Type: application/json" \
@@ -243,7 +248,7 @@ curl -s --max-time "$PROXY_TIMEOUT" --connect-timeout 5 \
     -H "X-Request-Timestamp: $TIMESTAMP" \
     -H "X-Request-Nonce: $NONCE" \
     -H "X-Request-Signature: $SIGNATURE" \
-    -d "$BODY" \
+    --data-binary @- \
     -o "$RESPONSE_FILE" \
     -w "%{http_code}" \
     "$GIT_API_URL" > "$HTTP_CODE_FILE" 2>/dev/null &
