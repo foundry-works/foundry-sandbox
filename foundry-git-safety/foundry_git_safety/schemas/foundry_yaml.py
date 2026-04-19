@@ -1,6 +1,6 @@
 """Pydantic models for foundry.yaml configuration schema."""
 
-from typing import List, Optional
+from typing import List
 
 from pydantic import BaseModel, Field, field_validator
 

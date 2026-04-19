@@ -12,7 +12,7 @@ Complete reference for all `cast` commands.
 
 **Status & Info:** [list](#cast-list) | [status](#cast-status) | [info](#cast-info) | [config](#cast-config)
 
-**Maintenance:** [build](#cast-build) | [prune](#cast-prune) | [refresh-credentials](#cast-refresh-credentials) | [upgrade](#cast-upgrade) | [help](#cast-help)
+**Maintenance:** [refresh-credentials](#cast-refresh-credentials) | [help](#cast-help) | [git-mode](#cast-git-mode)
 
 **Reference:** [Environment Variables](#environment-variables)
 
@@ -47,18 +47,15 @@ cast new --preset <name>
 | `--last` | Repeat the previous `cast new` command |
 | `--preset <name>` | Use a saved preset configuration |
 | `--save-as <name>` | Save this configuration as a named preset |
-| `--mount`, `-v` | Mount host path: `host:container[:ro]` |
-| `--copy`, `-c` | Copy host path once: `host:container` |
-| `--network`, `-n` | Network isolation mode: `limited` (default), `host-only`, `none` |
-| `--with-ssh` | Enable SSH agent forwarding (opt-in, agent-only) |
-| `--with-opencode` | Enable OpenCode setup (requires host auth file) |
-| `--with-zai` | Enable ZAI Claude alias (requires `ZHIPU_API_KEY`) |
-| `--no-isolate-credentials`, `--no-isolate` | Disable credential isolation (pass API keys directly) |
-| `--skip-key-check` | Skip API key validation |
-| `--wd <path>` | Working directory within repo (relative path) |
-| `--sparse` | Enable sparse checkout (requires `--wd`) |
+| `--agent <type>` | Agent type: claude, codex, copilot, gemini, kiro, opencode, shell (default: claude) |
+| `--copy`, `-c` | Copy host path once: `host:container` (multiple allowed) |
+| `--name <name>` | Override auto-generated sandbox name |
 | `--pip-requirements`, `-r` | Install Python packages from requirements.txt (`auto` to detect) |
 | `--allow-pr`, `--with-pr` | Allow PR operations (create/comment/review); blocked by default |
+| `--with-opencode` | Enable OpenCode setup (requires host auth file) |
+| `--with-zai` | Enable ZAI Claude alias (requires `ZHIPU_API_KEY`) |
+| `--skip-key-check` | Skip API key validation |
+| `--wd <path>` | Working directory within repo (relative path) |
 | `--with-ide[=name]` | Launch IDE (cursor, zed, code) then terminal |
 | `--ide-only[=name]` | Launch IDE only, skip terminal |
 | `--no-ide` | Skip IDE selection prompt |
@@ -78,30 +75,21 @@ cast new owner/repo feature-branch
 # Create new branch from main
 cast new owner/repo my-feature main
 
-# With volume mounts
-cast new owner/repo feature --mount /data:/data
-cast new owner/repo feature -v /models:/models:ro
+# With a specific agent
+cast new owner/repo feature --agent codex
+cast new owner/repo feature --agent gemini
+cast new owner/repo feature --agent shell
 
 # With file copies (copied once at creation)
 cast new owner/repo feature --copy ~/configs:/configs
 cast new owner/repo feature -c /path/to/data:/data
 
-# With network restrictions
-cast new owner/repo feature --network=limited    # whitelist only
-cast new owner/repo feature --network=host-only  # local network only
-cast new owner/repo feature --network=none       # no network
-
-# With SSH agent forwarding
-cast new owner/repo feature --with-ssh
-
-# Disable credential isolation (pass API keys directly)
-cast new owner/repo feature --no-isolate-credentials
+# With Python dependencies
+cast new owner/repo feature -r requirements.txt
+cast new owner/repo feature -r auto
 
 # Work in a subdirectory of a monorepo
 cast new owner/monorepo feature --wd packages/backend
-
-# Sparse checkout (only checkout the working directory + root configs)
-cast new owner/monorepo feature --wd packages/backend --sparse
 
 # Save configuration as a preset for reuse
 cast new owner/repo feature --wd packages/app --save-as myproject
@@ -116,20 +104,26 @@ cast repeat  # shorthand alias
 # Enable optional tools
 cast new owner/repo feature --with-opencode  # requires ~/.local/share/opencode/auth.json
 cast new owner/repo feature --with-zai       # requires ZHIPU_API_KEY
+
+# Override auto-generated name
+cast new owner/repo feature --name my-sandbox
 ```
 
-Note: SSH forwarding is disabled by default and agent-only (no key copy); use `--with-ssh` or set `SANDBOX_SYNC_SSH=1` to enable. API keys are passed via environment variables (see `.env.example`).
+API keys are stored on the host via `sbx secret set -g` and injected at the network level (see `.env.example`).
 
-> **Monorepo support:** Use `--wd` to set the initial working directory inside the container. Combine with `--sparse` for large monorepos to checkout only the specified directory plus essential root files (`*.json`, `*.yaml`, `*.toml`, `*.md`, `*.lock`, `.github/`). Run `git sparse-checkout add <path>` inside the container to include additional paths.
+> **Monorepo support:** Use `--wd` to set the initial working directory inside the sandbox.
 
 ### Behavior
 
-1. Clones repository as bare repo (if not already cloned)
-2. Creates git worktree with specified branch
-3. Sets up Claude Code configuration
-4. Starts Docker container
-5. Registers container with unified proxy (including branch identity for isolation)
-6. Attaches to tmux session inside container
+1. Validates sbx CLI is available
+2. Clones repository as bare repo (if not already cloned)
+3. Creates git worktree with specified branch
+4. Creates sbx microVM sandbox (via `sbx create`)
+5. Starts git safety server (if not already running)
+6. Generates HMAC secret and registers sandbox with git safety
+7. Injects git wrapper into sandbox
+8. Copies files and installs pip requirements (if specified)
+9. Writes sandbox metadata
 
 If `repo` is `.` and no branch is provided, the sandbox branch is created from your current branch.
 
@@ -181,12 +175,15 @@ cast attach --last
 | Option | Description |
 |--------|-------------|
 | `--last` | Reattach to the last attached sandbox |
+| `--with-ide[=name]` | Launch IDE then terminal |
+| `--ide-only[=name]` | Launch IDE only, skip terminal |
+| `--no-ide` | Skip IDE prompt |
 
 ### Behavior
 
-- If sandbox is stopped, starts it first
-- Syncs credentials from host to container when `SANDBOX_SYNC_ON_ATTACH=1` (default: `0`)
-- Attaches to tmux session
+- If sandbox is stopped, starts it first (via `sbx run`)
+- Verifies git safety server is running and re-injects wrapper if missing
+- Attaches via `sbx exec` with streaming I/O
 - Auto-detects sandbox from current working directory if inside a worktree
 
 ### Examples
@@ -245,10 +242,11 @@ cast start <name>
 
 ### Behavior
 
-1. Checks Docker image freshness
-2. Sets up Claude config if missing
-3. Copies credentials from host
-4. Starts container with docker-compose
+1. Verifies sbx sandbox exists
+2. Starts sandbox via `sbx run`
+3. Verifies git safety server is running
+4. Re-injects git wrapper if missing
+5. Installs pip requirements (if configured in metadata)
 
 ### Examples
 
@@ -276,9 +274,8 @@ cast stop <name>
 
 ### Behavior
 
-- Kills tmux session
-- Stops container (preserves worktree)
-- Home directory contents are lost (tmpfs), except `~/.claude` which is persisted per sandbox
+- Stops sandbox via `sbx stop`
+- Worktree and host-side state are preserved
 
 ### Examples
 
@@ -310,13 +307,13 @@ cast destroy <name> [options]
 |--------|-------------|
 | `-f`, `--force` | Skip confirmation prompt |
 | `-y`, `--yes` | Assume yes to confirmation |
-| `--keep-worktree` | Remove container but keep worktree |
+| `--keep-worktree` | Remove sandbox but keep worktree |
 
 ### Behavior
 
 1. Prompts for confirmation (unless `-f` or `-y`)
-2. Kills tmux session
-3. Removes Docker container and volumes
+2. Removes sandbox via `sbx rm` (best-effort)
+3. Unregisters sandbox from git safety server
 4. Removes Claude config directory
 5. Removes git worktree
 6. Cleans up sandbox branch from bare repo (if not used by other worktrees)
@@ -331,7 +328,7 @@ cast destroy repo-feature-branch
 cast destroy repo-feature-branch --yes
 cast destroy repo-feature-branch -f
 
-# Keep the worktree (just remove container)
+# Keep the worktree (just remove sandbox)
 cast destroy repo-feature-branch --keep-worktree
 ```
 
@@ -351,13 +348,13 @@ cast destroy-all [options]
 
 | Option | Description |
 |--------|-------------|
-| `--keep-worktree` | Remove containers but keep worktrees |
+| `--keep-worktree` | Remove sandboxes but keep worktrees |
 
 ### Behavior
 
 1. Lists all sandboxes that will be destroyed
 2. Requires double confirmation (type "yes" twice)
-3. Destroys each sandbox sequentially
+3. Destroys each sandbox sequentially using `destroy_impl()`
 
 ### Examples
 
@@ -365,7 +362,7 @@ cast destroy-all [options]
 # Destroy everything
 cast destroy-all
 
-# Remove containers only, keep worktrees
+# Remove sandboxes only, keep worktrees
 cast destroy-all --keep-worktree
 ```
 
@@ -456,13 +453,7 @@ Sandboxes:
   repo-sandbox-20240115   stopped
 ```
 
-JSON:
-```json
-[
-  {"name": "repo-feature-branch", "status": "running", ...},
-  {"name": "repo-sandbox-20240115", "status": "stopped", ...}
-]
-```
+JSON output includes foundry-specific metadata (repo, branch, git safety status).
 
 ---
 
@@ -499,20 +490,6 @@ cast status repo-feature-branch
 
 # JSON output
 cast status --json
-cast status repo-feature-branch --json
-```
-
-### Output
-
-```
-Sandbox: repo-feature-branch
-  Worktree      /home/user/.sandboxes/worktrees/repo-feature-branch
-  Claude config /home/user/.sandboxes/claude-config/repo-feature-branch
-  Container     sb-repo-feature-branch-dev-1 (running)
-  Tmux          attached
-  Repo          https://github.com/owner/repo
-  Branch        feature-branch
-  From branch   main
 ```
 
 ---
@@ -576,86 +553,27 @@ Sandbox config
   WORKTREES_DIR      /home/user/.sandboxes/worktrees
   CLAUDE_CONFIGS_DIR /home/user/.sandboxes/claude-config
   SCRIPT_DIR         /path/to/foundry-sandbox
-  DOCKER_IMAGE       foundry-sandbox:latest
   ...
 
 Checks
   git           ok
-  docker        ok
-  docker daemon ok
+  sbx           ok
 ```
 
 ---
 
 ## Maintenance
 
-## cast build
-
-Build or rebuild the Docker image.
-
-### Synopsis
-
-```
-cast build
-```
-
-### Behavior
-
-- Runs `docker compose build` with current user's UID/GID
-- Image is tagged as `foundry-sandbox:latest`
-
-### Examples
-
-```bash
-cast build
-```
-
----
-
-## cast prune
-
-Remove orphaned configuration directories.
-
-### Synopsis
-
-```
-cast prune [-f] [--json]
-```
-
-### Options
-
-| Option | Description |
-|--------|-------------|
-| `-f`, `--force` | Remove without prompting |
-| `--json` | Output in JSON format |
-
-### Behavior
-
-Finds Claude config directories that don't have a corresponding worktree (orphaned after manual cleanup) and removes them.
-
-### Examples
-
-```bash
-# Interactive
-cast prune
-
-# Force remove all orphans
-cast prune -f
-
-# JSON output
-cast prune --json
-```
-
----
-
 ## cast refresh-credentials
 
-Refresh credentials in a running sandbox.
+Push API keys from host environment to sbx-managed secrets.
 
 ### Synopsis
 
 ```
 cast refresh-credentials [name]
+cast refresh-credentials --last
+cast refresh-credentials --all
 ```
 
 ### Arguments
@@ -664,11 +582,18 @@ cast refresh-credentials [name]
 |----------|-------------|
 | `name` | Sandbox name (optional, auto-detects from current directory) |
 
+### Options
+
+| Option | Description |
+|--------|-------------|
+| `--last`, `-l` | Target the last attached sandbox |
+| `--all` | Refresh all running sandboxes |
+
 ### Behavior
 
-- In **direct mode** (no credential isolation): syncs credentials from host to container
-- In **credential isolation mode**: restarts the unified proxy to pick up new credentials
-- Supports `--last` flag to target the last attached sandbox
+- Reads API keys from host environment (ANTHROPIC_API_KEY, GITHUB_TOKEN, OPENAI_API_KEY)
+- Pushes to sbx via `sbx secret set -g`
+- No separate direct/isolation mode distinction
 
 ### Examples
 
@@ -676,41 +601,52 @@ cast refresh-credentials [name]
 # Refresh credentials for a specific sandbox
 cast refresh-credentials repo-feature-branch
 
+# Refresh last attached sandbox
+cast refresh-credentials --last
+
+# Refresh all running sandboxes
+cast refresh-credentials --all
+
 # Auto-detect from current directory
 cast refresh-credentials
 ```
 
 ---
 
-## cast upgrade
+## cast git-mode
 
-Upgrade Foundry Sandbox to the latest version.
+Toggle a sandbox's git config between host and sandbox path modes.
 
 ### Synopsis
 
 ```
-cast upgrade [--local]
+cast git-mode [name] --mode <host|sandbox>
 ```
+
+### Arguments
+
+| Argument | Description |
+|----------|-------------|
+| `name` | Sandbox name (optional, auto-detects from worktree) |
 
 ### Options
 
 | Option | Description |
 |--------|-------------|
-| `--local` | Upgrade from local repo (for development) |
-
-### Behavior
-
-- Pulls the latest version from the remote repository
-- Rebuilds if necessary
+| `--mode host` | Set `core.worktree` to real host path (for IDE tools) |
+| `--mode sandbox` | Set `core.worktree` to `/git-workspace` (for proxy-routed git) |
 
 ### Examples
 
 ```bash
-# Upgrade to latest
-cast upgrade
+# Switch to host mode for IDE work
+cast git-mode repo-feature-branch --mode host
 
-# Upgrade from local changes (development)
-cast upgrade --local
+# Switch back to sandbox mode
+cast git-mode repo-feature-branch --mode sandbox
+
+# Auto-detect sandbox from current directory
+cast git-mode --mode host
 ```
 
 ---
@@ -743,43 +679,21 @@ These environment variables affect `cast` behavior:
 |----------|-------------|---------|
 | `SANDBOX_HOME` | Base directory for sandbox data | `~/.sandboxes` |
 | `SANDBOX_DEBUG` | Enable debug output | `0` |
-| `SANDBOX_VERBOSE` | Enable verbose output | `0` |
+| `SANDBOX_VERBOSE` | Enable verbose output (shows sbx commands) | `0` |
 | `SANDBOX_ASSUME_YES` | Skip confirmations | `0` |
 | `SANDBOX_NONINTERACTIVE` | Suppress all interactive prompts (for CI); implies `SANDBOX_ASSUME_YES` behavior | `0` |
-| `SANDBOX_NETWORK_MODE` | Default network mode | `limited` |
-| `SANDBOX_ALLOWED_DOMAINS` | Extra domains for limited mode (comma-separated) | - |
-| `SANDBOX_SYNC_ON_ATTACH` | Sync runtime credentials on `cast attach` | `0` |
-| `SANDBOX_SYNC_SSH` | Enable SSH agent forwarding (opt-in) | `0` |
-| `SANDBOX_SSH_MODE` | Deprecated; use `always` when `SANDBOX_SYNC_SSH=1` | `always` |
-| `SANDBOX_SSH_AUTH_SOCK` | Override host SSH agent socket path | - |
-| `SANDBOX_OPENCODE_DISABLE_NPM_PLUGINS` | Drop non-local OpenCode npm plugins from config | `1` |
-| `SANDBOX_OPENCODE_PLUGIN_DIR` | Host directory of OpenCode plugins to sync on first attach | - |
-| `SANDBOX_OPENCODE_PREFETCH_NPM_PLUGINS` | Prefetch OpenCode npm plugins during sandbox init | `1` |
-| `SANDBOX_HOME_TMPFS_SIZE` | Size of `/home/ubuntu` tmpfs (configs, caches) | `2g` |
-| `CLAUDE_CODE_TMPDIR` | Claude Code temp directory inside the container | `/workspace/.claude-tmp` |
-| `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC` | Disable Claude Code auto-updates, telemetry, bug reports | `1` |
-| `DISABLE_AUTOUPDATER` | Disable Claude Code auto-updates | `1` |
-| `DISABLE_BUG_COMMAND` | Disable Claude Code bug reporting | `1` |
-| `DISABLE_ERROR_REPORTING` | Disable Claude Code error reporting | `1` |
-| `DISABLE_TELEMETRY` | Disable Claude Code telemetry | `1` |
-| `OPENCODE_DISABLE_AUTOUPDATE` | Disable OpenCode auto-updates | `1` |
-| `OPENCODE_DISABLE_MODELS_FETCH` | Disable OpenCode model fetching | `1` |
-| `OPENCODE_DISABLE_LSP_DOWNLOAD` | Disable OpenCode LSP downloads | `1` |
-| `OPENCODE_DISABLE_SHARE` | Disable OpenCode sharing | `1` |
-| `ANTHROPIC_API_KEY` | Passed to containers | - |
-| `GITHUB_TOKEN` | Optional; GitHub API + private repo access | - |
-| `GH_TOKEN` | Optional; fallback to `GITHUB_TOKEN` (gh keychain) | - |
-| `CLAUDE_CODE_OAUTH_TOKEN` | Passed to containers | - |
-| `OPENAI_API_KEY` | Passed to containers | - |
-| `TAVILY_API_KEY` | Passed to containers | - |
-| `PERPLEXITY_API_KEY` | Passed to containers | - |
-| `GOOGLE_API_KEY` | Passed to containers | - |
-| `GOOGLE_CSE_ID` | Passed to containers | - |
-| `ZHIPU_API_KEY` | Required for `--with-zai` (ZAI Claude alias) | - |
+| `ANTHROPIC_API_KEY` | Anthropic API key (pushed to sbx) | - |
+| `GITHUB_TOKEN` | GitHub token (pushed to sbx) | - |
+| `GH_TOKEN` | Fallback to `GITHUB_TOKEN` (gh keychain) | - |
+| `CLAUDE_CODE_OAUTH_TOKEN` | Claude Code OAuth token | - |
+| `OPENAI_API_KEY` | OpenAI API key (pushed to sbx) | - |
+| `TAVILY_API_KEY` | Tavily API key (search) | - |
+| `PERPLEXITY_API_KEY` | Perplexity API key (search) | - |
+| `ZHIPU_API_KEY` | Required for `--with-zai` | - |
+| `GIT_API_SECRETS_PATH` | HMAC secrets directory | `/run/secrets/sandbox-hmac` |
+| `FOUNDRY_DATA_DIR` | Git safety data directory | `/var/lib/foundry-git-safety` |
 
-Gemini CLI uses OAuth credentials stored under `~/.gemini/` (from `gemini auth`). Large Gemini CLI artifacts (e.g. `~/.gemini/antigravity`) are skipped to keep sandboxes lightweight. Sandboxes default to disabling Gemini auto-updates, update nags, telemetry, and usage stats via `~/.gemini/settings.json`, and Codex update checks/analytics via `~/.codex/config.toml`. If your host Codex config does not set them, sandboxes also default to `approval_policy = "on-failure"` and `sandbox_mode = "danger-full-access"` inside the container.
-
-OpenCode plugin notes: set `SANDBOX_OPENCODE_PLUGIN_DIR` to a host directory containing plugin subfolders (use package names; scoped packages are nested like `@scope/name`). On first attach, the folder is synced into the container and plugin entries are rewritten to local paths. OpenCode npm plugins are prefetched by default during sandbox init; set `SANDBOX_OPENCODE_PREFETCH_NPM_PLUGINS=0` to disable.
+Gemini CLI uses OAuth credentials stored under `~/.gemini/` (from `gemini auth`). Codex update checks and analytics are disabled by default via `~/.codex/config.toml`.
 
 ### Debugging
 
@@ -787,6 +701,6 @@ OpenCode plugin notes: set `SANDBOX_OPENCODE_PLUGIN_DIR` to a host directory con
 # Enable debug output
 SANDBOX_DEBUG=1 cast list
 
-# Enable verbose output
+# Enable verbose output (shows sbx subprocess commands)
 SANDBOX_VERBOSE=1 cast start mybox
 ```

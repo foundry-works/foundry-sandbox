@@ -1,10 +1,10 @@
-"""Unit tests for Phase 1 foundation modules.
+"""Unit tests for foundation modules.
 
 Covers:
-  - foundry_sandbox.paths: path derivation and filesystem helpers
   - foundry_sandbox.constants: directory getters and runtime flag defaults
   - foundry_sandbox.models: Pydantic model construction and serialization round-trips
   - foundry_sandbox.config: JSON load/write/merge operations
+  - foundry_sandbox.paths: path derivation and filesystem helpers
 """
 
 import json
@@ -13,11 +13,6 @@ import os
 import pytest
 
 from foundry_sandbox.constants import (
-    CONTAINER_HOME,
-    CONTAINER_USER,
-    DOCKER_IMAGE,
-    SSH_AGENT_CONTAINER_SOCK,
-    CONTAINER_OPENCODE_PLUGIN_DIR,
     get_sandbox_home,
     get_repos_dir,
     get_worktrees_dir,
@@ -25,16 +20,6 @@ from foundry_sandbox.constants import (
     get_sandbox_debug,
     get_sandbox_verbose,
     get_sandbox_assume_yes,
-    get_sandbox_network_mode,
-    get_sandbox_sync_on_attach,
-    get_sandbox_sync_ssh,
-    get_sandbox_ssh_mode,
-    get_sandbox_opencode_disable_npm_plugins,
-    get_sandbox_opencode_plugin_dir,
-    get_sandbox_opencode_prefetch_npm_plugins,
-    get_sandbox_opencode_default_model,
-    get_sandbox_tmux_scrollback,
-    get_sandbox_tmux_mouse,
 )
 from foundry_sandbox.config import (
     load_json,
@@ -44,16 +29,13 @@ from foundry_sandbox.config import (
     json_escape,
     json_array_from_lines,
 )
-from foundry_sandbox.models import SandboxMetadata
+from foundry_sandbox.models import SbxSandboxMetadata
 from foundry_sandbox.paths import (
     SandboxPaths,
     path_worktree,
     path_claude_config,
     path_claude_home,
-    path_override_file,
     path_metadata_file,
-    path_metadata_legacy_file,
-    path_opencode_plugins_marker,
     path_last_cast_new,
     path_last_attach,
     path_presets_dir,
@@ -67,26 +49,6 @@ from foundry_sandbox.paths import (
 # ============================================================================
 # Constants Tests
 # ============================================================================
-
-
-class TestConstantsStatic:
-    """Tests for structural invariants of static constants."""
-
-    def test_docker_image_has_tag(self):
-        assert ":" in DOCKER_IMAGE
-
-    def test_container_user_is_nonempty(self):
-        assert CONTAINER_USER
-        assert " " not in CONTAINER_USER
-
-    def test_container_home_is_absolute(self):
-        assert CONTAINER_HOME.startswith("/")
-
-    def test_ssh_agent_sock_is_absolute(self):
-        assert SSH_AGENT_CONTAINER_SOCK.startswith("/")
-
-    def test_opencode_plugin_dir_is_under_home(self):
-        assert CONTAINER_OPENCODE_PLUGIN_DIR.startswith(CONTAINER_HOME)
 
 
 class TestConstantsDirectoryGetters:
@@ -123,12 +85,6 @@ class TestConstantsRuntimeFlags:
         (get_sandbox_debug, "SANDBOX_DEBUG", 0),
         (get_sandbox_verbose, "SANDBOX_VERBOSE", 0),
         (get_sandbox_assume_yes, "SANDBOX_ASSUME_YES", 0),
-        (get_sandbox_sync_on_attach, "SANDBOX_SYNC_ON_ATTACH", 0),
-        (get_sandbox_sync_ssh, "SANDBOX_SYNC_SSH", 0),
-        (get_sandbox_opencode_disable_npm_plugins, "SANDBOX_OPENCODE_DISABLE_NPM_PLUGINS", 1),
-        (get_sandbox_opencode_prefetch_npm_plugins, "SANDBOX_OPENCODE_PREFETCH_NPM_PLUGINS", 1),
-        (get_sandbox_tmux_scrollback, "SANDBOX_TMUX_SCROLLBACK", 200000),
-        (get_sandbox_tmux_mouse, "SANDBOX_TMUX_MOUSE", 0),
     ])
     def test_int_flag_default(self, monkeypatch, getter, env_var, default):
         monkeypatch.delenv(env_var, raising=False)
@@ -138,31 +94,10 @@ class TestConstantsRuntimeFlags:
         (get_sandbox_debug, "SANDBOX_DEBUG"),
         (get_sandbox_verbose, "SANDBOX_VERBOSE"),
         (get_sandbox_assume_yes, "SANDBOX_ASSUME_YES"),
-        (get_sandbox_sync_on_attach, "SANDBOX_SYNC_ON_ATTACH"),
-        (get_sandbox_sync_ssh, "SANDBOX_SYNC_SSH"),
     ])
     def test_int_flag_override(self, monkeypatch, getter, env_var):
         monkeypatch.setenv(env_var, "1")
         assert getter() == 1
-
-    @pytest.mark.parametrize("getter,env_var,default", [
-        (get_sandbox_network_mode, "SANDBOX_NETWORK_MODE", "limited"),
-        (get_sandbox_ssh_mode, "SANDBOX_SSH_MODE", "always"),
-        (get_sandbox_opencode_plugin_dir, "SANDBOX_OPENCODE_PLUGIN_DIR", ""),
-        (get_sandbox_opencode_default_model, "SANDBOX_OPENCODE_DEFAULT_MODEL", "openai/gpt-5.3-codex"),
-    ])
-    def test_str_flag_default(self, monkeypatch, getter, env_var, default):
-        monkeypatch.delenv(env_var, raising=False)
-        assert getter() == default
-
-    @pytest.mark.parametrize("getter,env_var,value", [
-        (get_sandbox_network_mode, "SANDBOX_NETWORK_MODE", "host-only"),
-        (get_sandbox_ssh_mode, "SANDBOX_SSH_MODE", "disabled"),
-        (get_sandbox_opencode_plugin_dir, "SANDBOX_OPENCODE_PLUGIN_DIR", "/custom/plugins"),
-    ])
-    def test_str_flag_override(self, monkeypatch, getter, env_var, value):
-        monkeypatch.setenv(env_var, value)
-        assert getter() == value
 
 
 # ============================================================================
@@ -186,17 +121,8 @@ class TestPathDerivation:
     def test_path_claude_home(self):
         assert str(path_claude_home("my-sandbox")) == "/tmp/sb/claude-config/my-sandbox/claude"
 
-    def test_path_override_file(self):
-        assert str(path_override_file("my-sandbox")) == "/tmp/sb/claude-config/my-sandbox/docker-compose.override.yml"
-
     def test_path_metadata_file(self):
         assert str(path_metadata_file("my-sandbox")) == "/tmp/sb/claude-config/my-sandbox/metadata.json"
-
-    def test_path_metadata_legacy_file(self):
-        assert str(path_metadata_legacy_file("my-sandbox")) == "/tmp/sb/claude-config/my-sandbox/metadata.env"
-
-    def test_path_opencode_plugins_marker(self):
-        assert str(path_opencode_plugins_marker("my-sandbox")) == "/tmp/sb/claude-config/my-sandbox/opencode-plugins.synced"
 
     def test_path_last_cast_new(self):
         assert str(path_last_cast_new()) == "/tmp/sb/.last-cast-new.json"
@@ -226,10 +152,6 @@ class TestDeriveSandboxPaths:
         result = derive_sandbox_paths("test-box")
         assert str(result.worktree_path) == "/tmp/sb/worktrees/test-box"
 
-    def test_container_name(self):
-        result = derive_sandbox_paths("test-box")
-        assert result.container_name == "sandbox-test-box"
-
     def test_claude_config_path(self):
         result = derive_sandbox_paths("test-box")
         assert str(result.claude_config_path) == "/tmp/sb/claude-config/test-box"
@@ -237,10 +159,6 @@ class TestDeriveSandboxPaths:
     def test_claude_home_path(self):
         result = derive_sandbox_paths("test-box")
         assert str(result.claude_home_path) == "/tmp/sb/claude-config/test-box/claude"
-
-    def test_override_file(self):
-        result = derive_sandbox_paths("test-box")
-        assert str(result.override_file) == "/tmp/sb/claude-config/test-box/docker-compose.override.yml"
 
 
 class TestPathSafetyAssertions:
@@ -277,7 +195,6 @@ class TestPathSafetyAssertions:
             derive_sandbox_paths(bad_name)
 
     def test_valid_names_pass(self):
-        # Should NOT raise
         path_worktree("my-sandbox")
         path_preset_file("default")
         derive_sandbox_paths("test-box")
@@ -315,7 +232,6 @@ class TestFilesystemHelpers:
         assert not d.exists()
 
     def test_safe_remove_nonexistent(self, tmp_path):
-        # Should not raise
         safe_remove(tmp_path / "nope")
 
 
@@ -324,82 +240,58 @@ class TestFilesystemHelpers:
 # ============================================================================
 
 
-class TestSandboxMetadata:
-    """Tests for Pydantic SandboxMetadata model."""
+class TestSbxSandboxMetadata:
+    """Tests for Pydantic SbxSandboxMetadata model."""
 
     def test_required_fields_only(self):
-        m = SandboxMetadata(repo_url="https://github.com/user/repo", branch="main")
-        assert m.repo_url == "https://github.com/user/repo"
-        assert m.branch == "main"
-
-    def test_defaults(self):
-        m = SandboxMetadata(repo_url="url", branch="br")
-        assert m.from_branch == ""
-        assert m.network_mode == "limited"
-        assert m.sync_ssh == 0
-        assert m.ssh_mode == "always"
-        assert m.working_dir == ""
-        assert m.sparse_checkout == 0
-        assert m.pip_requirements == ""
-        assert m.allow_pr is False
-        assert m.enable_opencode is False
-        assert m.enable_zai is False
-        assert m.mounts == []
-        assert m.copies == []
-
-    def test_all_fields(self):
-        m = SandboxMetadata(
-            repo_url="https://github.com/user/repo",
-            branch="feature",
-            from_branch="main",
-            network_mode="host-only",
-            sync_ssh=1,
-            ssh_mode="disabled",
-            working_dir="src",
-            sparse_checkout=1,
-            pip_requirements="requirements.txt",
-            allow_pr=True,
-            enable_opencode=True,
-            enable_zai=True,
-            mounts=["/host:/container:ro"],
-            copies=["/src:/dst"],
-        )
-        assert m.network_mode == "host-only"
-        assert m.mounts == ["/host:/container:ro"]
-
-    def test_serialization_round_trip(self):
-        """Model should survive JSON serialization and deserialization."""
-        original = SandboxMetadata(
+        m = SbxSandboxMetadata(
+            sbx_name="test-sandbox",
             repo_url="https://github.com/user/repo",
             branch="main",
-            mounts=["/a:/b", "/c:/d"],
+            agent="claude",
+        )
+        assert m.repo_url == "https://github.com/user/repo"
+        assert m.branch == "main"
+        assert m.agent == "claude"
+        assert m.sbx_name == "test-sandbox"
+
+    def test_defaults(self):
+        m = SbxSandboxMetadata(sbx_name="test", repo_url="url", branch="br", agent="claude")
+        assert m.from_branch == ""
+        assert m.working_dir == ""
+        assert m.pip_requirements == ""
+        assert m.allow_pr is False
+        assert m.copies == []
+
+    def test_serialization_round_trip(self):
+        original = SbxSandboxMetadata(
+            sbx_name="test",
+            repo_url="https://github.com/user/repo",
+            branch="main",
+            agent="codex",
+            copies=["/a:/b"],
             allow_pr=True,
         )
         json_str = original.model_dump_json()
-        restored = SandboxMetadata.model_validate_json(json_str)
+        restored = SbxSandboxMetadata.model_validate_json(json_str)
         assert restored == original
 
     def test_dict_round_trip(self):
-        """Model should survive dict conversion and back."""
-        original = SandboxMetadata(
+        original = SbxSandboxMetadata(
+            sbx_name="test",
             repo_url="url",
             branch="br",
+            agent="claude",
             copies=["a:b"],
         )
         d = original.model_dump()
         assert isinstance(d, dict)
-        restored = SandboxMetadata(**d)
+        restored = SbxSandboxMetadata(**d)
         assert restored == original
 
     def test_missing_required_field_raises(self):
         with pytest.raises(Exception):
-            SandboxMetadata(repo_url="url")  # missing branch
-
-    def test_extra_fields_ignored_or_rejected(self):
-        """Extra fields should be handled per Pydantic config."""
-        # Default Pydantic v2 behavior is to ignore extra fields.
-        m = SandboxMetadata(repo_url="url", branch="br", unknown_field="value")
-        assert not hasattr(m, "unknown_field")
+            SbxSandboxMetadata(sbx_name="test", repo_url="url", branch="br")  # missing agent
 
 
 # ============================================================================
@@ -424,7 +316,6 @@ class TestLoadJson:
         assert load_json(str(f)) == {}
 
     def test_non_dict_json(self, tmp_path):
-        """JSON arrays or scalars should return empty dict."""
         f = tmp_path / "array.json"
         f.write_text("[1, 2, 3]")
         assert load_json(str(f)) == {}
@@ -549,7 +440,6 @@ class TestJsonArrayFromLines:
         result = json_array_from_lines('"a"\n\n"b"\n')
         assert '"a"' in result
         assert '"b"' in result
-        # Blank lines should not appear as entries
         lines = [line.strip() for line in result.splitlines() if line.strip() and line.strip() not in ("[", "]")]
         assert len(lines) == 2
 

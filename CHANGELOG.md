@@ -5,6 +5,65 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- **sbx CLI wrapper** (`foundry_sandbox/sbx.py`) — wraps all Docker `sbx` subprocess calls (create, run, stop, rm, ls, exec, secret, policy, template, diagnose)
+- **Git safety integration bridge** (`foundry_sandbox/git_safety.py`) — manages foundry-git-safety server lifecycle, HMAC secret provisioning, sandbox registration, and git wrapper injection
+- **sbx sandbox creation** (`foundry_sandbox/commands/new_sbx.py`) — 9-step setup: bare repo, worktree, sbx create, git safety server, HMAC, wrapper injection, metadata
+- **`--agent` flag** for `cast new` — select agent type: claude, codex, copilot, gemini, kiro, opencode, shell (default: claude)
+- **`--name` flag** for `cast new` — override auto-generated sandbox name
+- **`--save-as` flag** for `cast new` — save configuration as named preset
+- **`--skip-key-check` flag** for `cast new` — skip API key validation
+- **`--with-opencode` flag** for `cast new` — enable OpenCode setup
+- **`--with-zai` flag** for `cast new` — enable ZAI Claude alias
+- **`SbxSandboxMetadata` model** — Pydantic model for sbx sandbox state
+- **ADR-008: sbx Migration** — architecture decision record documenting the migration from docker-compose to Docker sbx backend
+
+### Changed
+
+- **All CLI commands** now delegate to `sbx` instead of docker-compose
+- **`cast new`** creates sbx microVM sandboxes instead of Docker containers; starts git safety server and injects git wrapper
+- **`cast start`** starts sandboxes via `sbx run`; verifies git safety server and re-injects wrapper if missing
+- **`cast stop`** stops sandboxes via `sbx stop`
+- **`cast destroy`** removes sandboxes via `sbx rm`; unregisters from git safety server
+- **`cast attach`** uses `sbx exec` with streaming I/O instead of tmux
+- **`cast list`** parses `sbx ls --json` output with foundry metadata enrichment
+- **`cast config`** checks for `sbx` availability instead of Docker
+- **`cast refresh-creds`** pushes API keys via `sbx secret set -g`; no more direct/isolation mode distinction
+- **`cast help`** updated for sbx backend flags and commands
+- **`cast destroy-all`** uses `sbx_ls()` and shared `destroy_impl()` for DRY cleanup
+- **Credential injection** now handled by sbx (`sbx secret set -g`) instead of unified proxy
+- **Network isolation** now handled by sbx policy instead of Squid/mitmproxy/iptables
+- **Git operations** proxied through standalone `foundry-git-safety` server instead of unified proxy git API
+- **All documentation** updated to reflect sbx architecture (architecture, security model, configuration, operations, observability, getting started, commands, ADRs)
+- **ADR-001, 002, 004, 005, 007** marked as superseded by ADR-008
+
+### Removed
+
+- **`unified-proxy/` directory** — entire proxy infrastructure deleted (mitmproxy, Squid, API gateways, DNS filter, circuit breaker, rate limiter, container registry, credential injector, policy engine)
+- **`cast build` command** — sandbox images managed by sbx templates
+- **`cast prune` command** — orphan cleanup handled by sbx
+- **`cast upgrade` command** — updates handled by sbx
+- **Docker-compose generation code** — no longer needed
+- **Network management code** — handled by sbx policy
+- **Container registry** — replaced by file-based registration with foundry-git-safety
+- **All proxy-related tests** — replaced by foundry-git-safety tests (727 tests)
+- **`--mount`, `-v` flag** — sbx uses file sync instead of bind mounts
+- **`--network`, `-n` flag** — replaced by `sbx policy` commands
+- **`--with-ssh` flag** — sbx handles SSH differently
+- **`--no-isolate-credentials` flag** — sbx always isolates credentials
+- **`--sparse` flag** — deferred to future implementation
+- **`--pre-foundry`, `--compose-extra` flags** — docker-compose specific
+- **`--allow-dangerous-mount` flag** — no bind mounts in sbx
+- **`--anthropic-base-url` flag** — sbx handles credential routing
+- **`foundry_sandbox/commands/new_setup.py`** — replaced by `new_sbx.py`
+- **`foundry_sandbox/commands/new_wizard.py`** — simplified
+- **`foundry_sandbox/commands/build.py`** — deleted
+- **`foundry_sandbox/commands/prune.py`** — deleted
+- **`foundry_sandbox/claude_settings.py`** — removed
+
 ## [0.20.15] - 2026-02-28
 
 ### Changed

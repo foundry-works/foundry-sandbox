@@ -90,9 +90,6 @@ CONTAINER_READY_ATTEMPTS: int = 5
 CONTAINER_READY_DELAY: float = 0.2
 """Seconds between container readiness retries."""
 
-PROXY_TIMEOUT: int = 30
-"""Default timeout in seconds for proxy HTTP operations."""
-
 CONTAINER_OPENCODE_PLUGIN_DIR: str = "/home/ubuntu/.config/opencode/plugins"
 """Default OpenCode plugins directory inside container."""
 

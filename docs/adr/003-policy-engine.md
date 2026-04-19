@@ -2,7 +2,7 @@
 
 ## Status
 
-Accepted
+Accepted (policy hierarchy concept still applicable to foundry-git-safety)
 
 Date: 2026-02-04
 Implemented: 2026-02-05

@@ -1,28 +1,29 @@
 # Foundry Sandbox Documentation
 
-Foundry Sandbox provides temporary, isolated development environments for AI-assisted coding. Each sandbox runs in a Docker container with security controls that protect your host system, credentials, and git history from accidental damage and supply chain attacks, while still giving AI coding assistants (Claude Code, Gemini CLI, Codex CLI, OpenCode) the tools they need to be productive.
+Foundry Sandbox provides temporary, isolated development environments for AI-assisted coding. Each sandbox runs in a microVM with security controls that protect your host system, credentials, and git history from accidental damage and supply chain attacks, while still giving AI coding assistants (Claude Code, Gemini CLI, Codex CLI, OpenCode) the tools they need to be productive.
 
 The key insight: AI assistants can hallucinate dangerous commands or act without full context, and malicious dependencies can steal credentials. Sandboxes let them work freely while limiting blast radius.
 
 ## Key Features
 
 - **Temporary workspaces** - Each sandbox gets a fresh git worktree; destroy it when done
-- **Credential isolation** - API keys and tokens never enter the sandbox; injected by proxy at the network level
-- **Git shadow mode** - `.git` hidden from sandboxes; all git operations proxied through authenticated API with policy enforcement
-- **Layered security** - Network isolation, credential isolation, read-only filesystem, branch isolation
+- **Credential isolation** - API keys stored on the host by sbx; injected at the network level, never entering the VM
+- **Git shadow mode** - All git operations proxied through authenticated API with policy enforcement (branch isolation, push protection)
+- **Layered security** - MicroVM isolation, network policy, credential injection, branch isolation, git safety
 - **Pre-installed AI tools** - Claude Code, Gemini CLI, Codex CLI, OpenCode ready to use
-- **Filesystem protection** - Read-only root filesystem; non-root user; writable areas are RAM-backed and reset on restart
+- **Multiple agent support** - Choose your agent at creation time (`--agent claude`, `codex`, `gemini`, etc.)
 
 ## Quick Start
 
 ```bash
-# Build the sandbox image
-cast build
+# Install prerequisites
+brew install docker/tap/sbx        # or see getting-started for other platforms
+pip install foundry-git-safety[server]
 
 # Create a sandbox from a GitHub repo
 cast new owner/repo
 
-# You're now in a tmux session inside the container
+# You're now in an interactive shell inside the sandbox
 # Run your AI assistant:
 claude
 ```
@@ -32,7 +33,7 @@ claude
 | Document | Description |
 |----------|-------------|
 | [Getting Started](getting-started.md) | Installation, setup, and first sandbox |
-| [Configuration](configuration.md) | API keys, plugins, and config files |
+| [Configuration](configuration.md) | API keys, git safety settings, network policy |
 | [Architecture](architecture.md) | Technical design and diagrams |
 | [Operations](operations.md) | Operational procedures and runbook |
 | [Observability](observability.md) | Metrics, logging, and alerting |
@@ -54,13 +55,14 @@ claude
 
 | Document | Description | Status |
 |----------|-------------|--------|
-| [ADR-001: Unified Proxy Architecture](adr/001-consolidation.md) | Single-service proxy for credential isolation and request interception | Accepted |
-| [ADR-002: Container Identity](adr/002-container-identity.md) | Container identity design for proxy authentication | Accepted |
+| [ADR-001: Unified Proxy Architecture](adr/001-consolidation.md) | Single-service proxy for credential isolation and request interception | Superseded |
+| [ADR-002: Container Identity](adr/002-container-identity.md) | Container identity design for proxy authentication | Superseded |
 | [ADR-003: Policy Engine](adr/003-policy-engine.md) | Policy engine design for access control | Accepted |
-| [ADR-004: DNS Integration](adr/004-dns-integration.md) | DNS filtering integration with unified proxy | Accepted |
-| [ADR-005: Failure Modes](adr/005-failure-modes.md) | Failure modes and readiness design | Accepted |
+| [ADR-004: DNS Integration](adr/004-dns-integration.md) | DNS filtering integration with unified proxy | Superseded |
+| [ADR-005: Failure Modes](adr/005-failure-modes.md) | Failure modes and readiness design | Superseded |
 | [ADR-006: Allowlist Layering](adr/006-allowlist-layering.md) | Layered allowlist architecture for network access | Accepted |
-| [ADR-007: API Gateways](adr/007-api-gateways.md) | API gateway routing and credential injection | Accepted |
+| [ADR-007: API Gateways](adr/007-api-gateways.md) | API gateway routing and credential injection | Superseded |
+| [ADR-008: sbx Migration](adr/008-sbx-migration.md) | Migration from docker-compose to Docker sbx backend | Accepted |
 
 ### Development
 
@@ -74,9 +76,11 @@ claude
 cast new owner/repo              # Create sandbox from main
 cast new owner/repo branch       # Create from existing branch
 cast new owner/repo new main     # Create new branch from main
+cast new owner/repo feature --agent codex  # Use a different agent
 cast list                        # List all sandboxes
 cast attach name                 # Attach to running sandbox
 cast stop name                   # Stop sandbox (preserves worktree)
 cast destroy name                # Remove sandbox completely
+cast refresh-creds               # Push API keys to sbx
 cast help                        # Show all commands
 ```

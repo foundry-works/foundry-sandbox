@@ -31,7 +31,6 @@ from .branch_types import (
     _is_allowed_branch_name,
     _is_sha_like,
     _normalize_base_branch,
-    get_subcommand,
     get_subcommand_args,
 )
 

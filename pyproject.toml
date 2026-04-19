@@ -56,15 +56,6 @@ dev = [
     "ruff>=0.5",
     "types-PyYAML>=2.0",
 ]
-test-orchestration = [
-    "pyyaml>=6.0",
-]
-test-proxy = [
-    "flask>=3.0",
-    "mitmproxy>=10.0",
-    "httpx>=0.25.0",
-    "pyyaml>=6.0",
-]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
@@ -90,7 +81,6 @@ exclude = ["tests/"]
 
 [tool.pyright]
 pythonVersion = "3.10"
-extraPaths = ["unified-proxy"]
 
 [tool.ruff]
 target-version = "py310"
@@ -98,7 +88,6 @@ line-length = 100
 
 [tool.ruff.lint.per-file-ignores]
 "tests/**" = ["E402"]
-"unified-proxy/tests/**" = ["E402"]
 "lib/python/**" = ["E402"]
 
 [tool.hatch.build.targets.wheel]

@@ -16,7 +16,6 @@ from foundry_git_safety.push_validation import (
     strip_credential_config_overrides,
 )
 from foundry_git_safety.config import ConfigError, FileRestrictionsData
-from foundry_git_safety.branch_types import ValidationError
 
 
 # ---------------------------------------------------------------------------

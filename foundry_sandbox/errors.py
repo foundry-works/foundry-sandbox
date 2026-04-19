@@ -20,11 +20,3 @@ class ValidationError(SandboxError):
 
 class SetupError(SandboxError):
     """Failures during sandbox creation / setup."""
-
-
-class ProxyError(SandboxError):
-    """Failures communicating with the unified proxy."""
-
-
-class DockerError(SandboxError):
-    """Failures in Docker operations (compose, exec, network, etc.)."""

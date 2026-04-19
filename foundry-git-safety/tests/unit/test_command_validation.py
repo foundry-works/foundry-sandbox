@@ -9,12 +9,9 @@ import pytest
 from foundry_git_safety.command_validation import (
     ALLOWED_COMMANDS,
     ALLOWED_MARKETPLACES,
-    COMMAND_BLOCKED_FLAGS,
-    GLOBAL_BLOCKED_FLAGS,
     MAX_ARG_LENGTH,
     MAX_ARGS_COUNT,
     MAX_STDIN_SIZE,
-    GitExecRequest,
     GitExecResponse,
     validate_clone_args,
     validate_command,
@@ -22,7 +19,6 @@ from foundry_git_safety.command_validation import (
     validate_path_args,
     validate_request,
 )
-from foundry_git_safety.branch_types import ValidationError
 
 
 # ---------------------------------------------------------------------------

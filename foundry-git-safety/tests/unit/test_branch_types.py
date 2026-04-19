@@ -4,7 +4,6 @@ import pytest
 
 from foundry_git_safety.branch_types import (
     WELL_KNOWN_BRANCHES,
-    WELL_KNOWN_BRANCH_PREFIXES,
     REF_ENUM_CMDS,
     ValidationError,
     _is_allowed_branch_name,

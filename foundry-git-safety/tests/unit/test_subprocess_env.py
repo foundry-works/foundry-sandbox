@@ -1,7 +1,6 @@
 """Tests for foundry_git_safety.subprocess_env — environment sanitization and lock cleanup."""
 
 import os
-import stat
 import time
 from unittest.mock import patch
 
@@ -9,7 +8,6 @@ import pytest
 
 from foundry_git_safety.subprocess_env import (
     ENV_ALLOWED,
-    _GIT_LOCK_NAMES,
     _STALE_LOCK_AGE,
     build_clean_env,
     remove_stale_config_locks,

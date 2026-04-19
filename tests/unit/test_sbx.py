@@ -242,6 +242,7 @@ class TestSbxExec:
             ["exec", "test", "--", "git", "status"],
             timeout=TIMEOUT_SBX_EXEC,
             quiet=False,
+            input=None,
         )
 
     @patch("foundry_sandbox.sbx._run_sbx")
@@ -252,6 +253,7 @@ class TestSbxExec:
             ["exec", "test", "-u", "root", "--", "cp", "a", "b"],
             timeout=TIMEOUT_SBX_EXEC,
             quiet=False,
+            input=None,
         )
 
     @patch("foundry_sandbox.sbx._run_sbx")
@@ -262,6 +264,7 @@ class TestSbxExec:
             ["exec", "test", "-e", "FOO=bar", "--", "echo", "hi"],
             timeout=TIMEOUT_SBX_EXEC,
             quiet=False,
+            input=None,
         )
 
     @patch("foundry_sandbox.sbx._run_sbx")
@@ -272,6 +275,18 @@ class TestSbxExec:
             ["exec", "test", "--", "ls"],
             timeout=TIMEOUT_SBX_EXEC,
             quiet=True,
+            input=None,
+        )
+
+    @patch("foundry_sandbox.sbx._run_sbx")
+    def test_with_input(self, mock_run):
+        mock_run.return_value = _mock_completed()
+        sbx_exec("test", ["tee", "/tmp/f"], input="hello")
+        mock_run.assert_called_once_with(
+            ["exec", "test", "--", "tee", "/tmp/f"],
+            timeout=TIMEOUT_SBX_EXEC,
+            quiet=False,
+            input="hello",
         )
 
 

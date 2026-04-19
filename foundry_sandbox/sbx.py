@@ -14,7 +14,7 @@ import shutil
 import subprocess
 import sys
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 from foundry_sandbox.constants import get_sandbox_verbose
 from foundry_sandbox.utils import log_warn
@@ -161,7 +161,7 @@ def sbx_ls() -> list[dict[str, str]]:
         if result.returncode != 0:
             log_warn(f"sbx ls failed: {result.stderr.strip()}")
             return []
-        return json.loads(result.stdout)
+        return cast(list[dict[str, str]], json.loads(result.stdout))
     except (json.JSONDecodeError, subprocess.TimeoutExpired) as exc:
         log_warn(f"sbx ls parse error: {exc}")
         return []
@@ -207,6 +207,7 @@ def sbx_exec(
     user: str | None = None,
     env: dict[str, str] | None = None,
     quiet: bool = False,
+    input: str | None = None,
 ) -> subprocess.CompletedProcess[str]:
     """Execute a command in a sandbox.
 
@@ -216,6 +217,7 @@ def sbx_exec(
         user: Optional user (e.g. 'root').
         env: Optional environment variables.
         quiet: If True, suppress output.
+        input: Optional stdin input.
 
     Returns:
         CompletedProcess result.
@@ -228,7 +230,7 @@ def sbx_exec(
             args.extend(["-e", f"{k}={v}"])
     args.append("--")
     args.extend(cmd)
-    return _run_sbx(args, timeout=TIMEOUT_SBX_EXEC, quiet=quiet)
+    return _run_sbx(args, timeout=TIMEOUT_SBX_EXEC, quiet=quiet, input=input)
 
 
 def sbx_exec_streaming(

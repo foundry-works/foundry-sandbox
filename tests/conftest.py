@@ -1,34 +1,16 @@
 """
-Top-level pytest conftest.py -- shared fixtures for orchestration tests.
+Top-level pytest conftest.py -- shared fixtures for tests.
 
 Provides:
     cli       - callable that runs sandbox CLI commands via subprocess
     local_repo - temporary directory with a deterministic git repo
-    has_docker - session-scoped check for Docker availability
 """
 
-import shutil
 import os
 import shlex
 import subprocess
 
 import pytest
-
-
-@pytest.fixture(scope="session")
-def has_docker():
-    """Check whether Docker is available on this system.
-
-    Returns True if the ``docker`` command is on PATH, False otherwise.
-    """
-    return shutil.which("docker") is not None
-
-
-@pytest.fixture(autouse=False)
-def requires_docker(has_docker):
-    """Skip the test when Docker is not installed."""
-    if not has_docker:
-        pytest.skip("Docker is not available")
 
 
 @pytest.fixture(scope="session")
@@ -38,8 +20,6 @@ def cli():
     Reads SANDBOX_CLI env var (default ``python3 -m foundry_sandbox.cli``)
     and splits it with ``shlex.split`` so multi-token entrypoints work
     correctly.
-
-    Session-scoped because the callable is stateless.
 
     Usage::
 

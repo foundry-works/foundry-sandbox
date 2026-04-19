@@ -12,7 +12,6 @@ import pytest
 
 from foundry_git_safety.server import create_git_api
 from foundry_git_safety.auth import (
-    NonceStore,
     RateLimiter,
     SecretStore,
     compute_signature,

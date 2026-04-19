@@ -181,7 +181,6 @@ def execute_git(args: list, cwd: str, repo_root: str, stdin_data: bytes | None =
         "bisect", "reflog", "worktree",
     }
 
-    subcmd = cmd
     if cmd == "config":
         # Only allow read-only config subcommands (--get, --get-all, --list, etc.)
         config_readonly_flags = {"--get", "--get-all", "--list", "-l", "--get-regexp", "--get-color", "--get-colorbool"}

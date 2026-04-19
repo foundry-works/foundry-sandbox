@@ -13,8 +13,6 @@ from foundry_git_safety.command_validation import (
     ALLOWED_COMMANDS,
     COMMAND_BLOCKED_FLAGS,
     CONFIG_NEVER_ALLOW,
-    CONFIG_PERMITTED_PREFIXES,
-    GLOBAL_BLOCKED_FLAGS,
     _validate_config_key,
     validate_command,
 )

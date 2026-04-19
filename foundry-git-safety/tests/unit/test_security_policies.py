@@ -5,7 +5,6 @@ import json
 import pytest
 
 from foundry_git_safety.security_policies import (
-    BLOCKED_PATH_PATTERNS,
     check_github_blocklist,
     check_github_body_policies,
     is_merge_request,

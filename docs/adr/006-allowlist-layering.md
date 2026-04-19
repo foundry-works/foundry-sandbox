@@ -2,7 +2,7 @@
 
 ## Status
 
-Accepted
+Accepted (merge semantics still applicable; mount paths updated for foundry-git-safety)
 
 Date: 2026-02-19
 

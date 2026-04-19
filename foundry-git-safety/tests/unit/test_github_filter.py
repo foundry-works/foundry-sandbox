@@ -5,11 +5,9 @@ import json
 import pytest
 
 from foundry_git_safety.github_filter import (
-    ALLOWED_OPERATIONS,
     ALWAYS_BLOCKED_GRAPHQL_MUTATIONS,
     BLOCKED_PATTERNS,
     CONDITIONAL_BLOCKED_GRAPHQL_MUTATIONS,
-    CONDITIONAL_PR_OPERATIONS,
     GitHubAPIChecker,
 )
 

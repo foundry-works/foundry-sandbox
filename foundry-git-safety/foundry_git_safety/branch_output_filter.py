@@ -12,7 +12,7 @@ import re
 # Pre-compiled patterns for hot-path output filtering
 _REMOTE_REF_RE = re.compile(r"(?:^|[\s\t])refs/remotes/[^/]+/([^\s]+)")
 
-from .branch_types import (
+from .branch_types import (  # noqa: E402
     REF_ENUM_CMDS,
     _BRANCH_LINE_RE,
     _CUSTOM_D_RE,

@@ -2,24 +2,21 @@
 set -euo pipefail
 
 # Local CI validation — mirrors .github/workflows/test.yml
-# Usage: ./scripts/ci-local.sh [--all] [--no-fail-fast]
+# Usage: ./scripts/ci-local.sh [--no-fail-fast]
 
 FAIL_FAST=true
-RUN_INTEGRATION=false
 
 for arg in "$@"; do
   case "$arg" in
-    --all) RUN_INTEGRATION=true ;;
     --no-fail-fast) FAIL_FAST=false ;;
     -h|--help)
-      echo "Usage: $0 [--all] [--no-fail-fast]"
-      echo "  --all           Include integration tests (off by default)"
+      echo "Usage: $0 [--no-fail-fast]"
       echo "  --no-fail-fast  Continue past failures instead of stopping"
       exit 0
       ;;
     *)
       echo "Unknown argument: $arg" >&2
-      echo "Usage: $0 [--all] [--no-fail-fast]" >&2
+      echo "Usage: $0 [--no-fail-fast]" >&2
       exit 1
       ;;
   esac
@@ -101,7 +98,6 @@ if command -v shellcheck &>/dev/null; then
     # Copied verbatim from CI lint job
     shellcheck entrypoint.sh entrypoint-root.sh stubs/git-wrapper.sh \
     && shellcheck -e SC2163 tests/run.sh \
-    && shellcheck -e SC2317,SC2034 unified-proxy/entrypoint.sh \
     && shellcheck -e SC2317,SC2155,SC2034,SC1091,SC2162,SC2064,SC2129 install.sh \
     && shellcheck -e SC2034 uninstall.sh \
     && shellcheck -e SC2163 safety/credential-redaction.sh \
@@ -117,24 +113,6 @@ if command -v pytest &>/dev/null; then
   run_step "Unit tests" pytest tests/unit/ -q --tb=short
 else
   skip_step "Unit tests" "pytest not found"
-fi
-
-# 5. Unified-proxy tests
-if command -v pytest &>/dev/null; then
-  run_step "Unified-proxy tests" pytest unified-proxy/tests/ -q --tb=short
-else
-  skip_step "Unified-proxy tests" "pytest not found"
-fi
-
-# 6. Integration tests (only with --all)
-if $RUN_INTEGRATION; then
-  if command -v pytest &>/dev/null; then
-    run_step "Integration tests" pytest tests/integration/ -q --tb=short
-  else
-    skip_step "Integration tests" "pytest not found"
-  fi
-else
-  skip_step "Integration tests" "pass --all to enable"
 fi
 
 # -- done --

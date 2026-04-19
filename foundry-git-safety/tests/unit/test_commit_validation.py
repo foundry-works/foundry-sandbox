@@ -1,6 +1,5 @@
 """Tests for foundry_git_safety.commit_validation."""
 
-import subprocess
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -8,7 +7,7 @@ import pytest
 from foundry_git_safety.commit_validation import (
     check_commit_file_restrictions,
 )
-from foundry_git_safety.config import ConfigError, FileRestrictionsData, ValidationResult
+from foundry_git_safety.config import ConfigError, FileRestrictionsData
 
 
 # ---------------------------------------------------------------------------

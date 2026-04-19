@@ -124,7 +124,7 @@ cast attach repo-feature-auth
 
 - Separate git worktrees
 - Separate Claude configs
-- Separate containers
+- Separate sandboxes
 - Changes in one don't affect others
 
 ---

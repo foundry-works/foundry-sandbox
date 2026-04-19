@@ -119,20 +119,8 @@ from foundry_sandbox.paths import (  # noqa: F401, E402
     strip_github_url,
 )
 
-# From foundry_sandbox.docker
-from foundry_sandbox.docker import (  # noqa: F401, E402
-    apply_network_restrictions,
-    cleanup_orphaned_networks,
-    proxy_cleanup,
-    remove_sandbox_networks,
-    uses_credential_isolation,
-)
-
 # From foundry_sandbox.utils
 from foundry_sandbox.utils import (  # noqa: F401, E402
     flag_enabled,
     generate_sandbox_id,
 )
-
-# From foundry_sandbox.tmux
-from foundry_sandbox.tmux import tmux_session_name  # noqa: F401, E402

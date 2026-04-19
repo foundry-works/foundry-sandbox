@@ -1,6 +1,5 @@
 """Tests for foundry_git_safety.policies."""
 
-import os
 from unittest.mock import patch
 
 import pytest
@@ -8,7 +7,6 @@ import pytest
 from foundry_git_safety.policies import (
     DEFAULT_PROTECTED_PATTERNS,
     ZERO_SHA,
-    BranchPolicyConfig,
     _check_bootstrap_creation,
     check_protected_branches,
     load_branch_policy,

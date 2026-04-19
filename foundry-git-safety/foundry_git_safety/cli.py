@@ -83,7 +83,7 @@ def _daemonize(host: str, port: int, data_dir: str, cfg, pid_file: str) -> None:
     os.setsid()
     try:
         _run_server(host, port, data_dir, cfg)
-    except Exception as exc:
+    except Exception:
         # Write startup error to stderr (parent has already exited,
         # but this at least gets it into any redirected logs)
         import traceback

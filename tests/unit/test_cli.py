@@ -1,15 +1,12 @@
 """Unit tests for the Click-based CLI entrypoint.
 
 Tests command registration, alias resolution, unknown command rejection,
-help output, and basic option parsing using Click's CliRunner. These tests
-do NOT require Docker, tmux, or a running sandbox.
+help output, and basic option parsing using Click's CliRunner.
 """
-
 from __future__ import annotations
 
 import subprocess
 import sys
-from unittest.mock import patch
 
 import click.testing
 import pytest
@@ -42,11 +39,10 @@ class TestCLIGroup:
         assert "Usage" in result.output
 
     def test_all_migrated_commands_registered(self) -> None:
-        """All 17 migrated commands are available via the CLI group."""
         expected = {
-            "attach", "build", "config", "destroy", "destroy-all",
-            "help", "info", "list", "new", "preset", "prune",
-            "refresh-credentials", "git-mode", "start", "status", "stop", "upgrade",
+            "attach", "config", "destroy", "destroy-all",
+            "help", "info", "list", "new", "preset",
+            "refresh-credentials", "git-mode", "start", "status", "stop",
         }
         ctx = click.Context(cli)
         registered = set(cli.list_commands(ctx))
@@ -100,11 +96,10 @@ class TestUnknownCommandValidation:
         assert result.exit_code != 0
 
     def test_all_commands_registered_no_shell_fallback(self) -> None:
-        """All expected commands are available as Click subcommands (no shell fallback needed)."""
         required = {
             "new", "list", "attach", "start", "stop", "destroy",
-            "build", "help", "status", "config", "prune", "info",
-            "upgrade", "preset", "refresh-credentials", "git-mode", "destroy-all",
+            "help", "status", "config", "info",
+            "preset", "refresh-credentials", "git-mode", "destroy-all",
         }
         ctx = click.Context(cli)
         registered = set(cli.list_commands(ctx))
@@ -127,10 +122,10 @@ class TestHelpCommand:
         assert "list" in result.output
         assert "attach" in result.output
 
-    def test_help_command_shows_options(self, runner: click.testing.CliRunner) -> None:
+    def test_help_command_shows_agent_option(self, runner: click.testing.CliRunner) -> None:
         result = runner.invoke(cli, ["help"])
         assert result.exit_code == 0
-        assert "--mount" in result.output or "--network" in result.output
+        assert "agent" in result.output.lower() or "sbx" in result.output.lower()
 
 
 # ---------------------------------------------------------------------------
@@ -150,7 +145,6 @@ class TestConfigCommand:
         data = json.loads(result.output)
         assert "sandbox_home" in data
         assert "script_dir" in data
-        assert "docker_image" in data
 
     def test_config_json_has_boolean_fields(self, runner: click.testing.CliRunner) -> None:
         from foundry_sandbox.commands.config import config
@@ -165,10 +159,7 @@ class TestConfigCommand:
     def test_config_text_output(self, runner: click.testing.CliRunner) -> None:
         from foundry_sandbox.commands.config import config
 
-        with patch("subprocess.run") as mock_run:
-            # Mock `docker info` check
-            mock_run.return_value.returncode = 0
-            result = runner.invoke(config, [])
+        result = runner.invoke(config, [])
         assert result.exit_code == 0
         assert "SANDBOX_HOME" in result.output
         assert "SCRIPT_DIR" in result.output
@@ -177,42 +168,10 @@ class TestConfigCommand:
 class TestCliFlagRouting:
     """Smoke tests that command-level flags are routed to subcommands."""
 
-    def test_list_json_flag_routes_to_list(self, runner: click.testing.CliRunner) -> None:
-        result = runner.invoke(cli, ["list", "--json"])
-        assert result.exit_code == 0
-
     def test_attach_help_routes_to_attach(self, runner: click.testing.CliRunner) -> None:
         result = runner.invoke(cli, ["attach", "--help"])
         assert result.exit_code == 0
         assert "--last" in result.output
-
-
-# ---------------------------------------------------------------------------
-# Info command tests
-# ---------------------------------------------------------------------------
-
-
-class TestInfoCommand:
-    """Tests for the info command (calls config + status internally)."""
-
-    def test_info_json_output_structure(self, runner: click.testing.CliRunner) -> None:
-        from foundry_sandbox.commands.info import info
-
-        result = runner.invoke(info, ["--json"])
-        assert result.exit_code == 0
-        import json
-        data = json.loads(result.output)
-        assert "config" in data
-        assert "status" in data
-
-    def test_info_text_includes_config_section(self, runner: click.testing.CliRunner) -> None:
-        from foundry_sandbox.commands.info import info
-
-        with patch("subprocess.run") as mock_run:
-            mock_run.return_value.returncode = 0
-            result = runner.invoke(info, [])
-        assert result.exit_code == 0
-        assert "SANDBOX_HOME" in result.output
 
 
 # ---------------------------------------------------------------------------

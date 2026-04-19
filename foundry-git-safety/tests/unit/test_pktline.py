@@ -193,9 +193,9 @@ class TestReadPktlinePrefix:
         # Create many lines — no flush packet so it keeps reading
         lines = [line] * 100
         data_no_flush = b""
-        for l in lines:
-            length = 4 + len(l)
-            data_no_flush += f"{length:04x}".encode("ascii") + l
+        for line_item in lines:
+            length = 4 + len(line_item)
+            data_no_flush += f"{length:04x}".encode("ascii") + line_item
 
         stream = io.BytesIO(data_no_flush)
         buf, end_idx, error = read_pktline_prefix(stream, max_bytes=64)

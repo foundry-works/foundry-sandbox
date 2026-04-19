@@ -6,8 +6,6 @@ sandbox-side git proxy mode can be switched explicitly.
 
 from __future__ import annotations
 
-import getpass
-import os
 import subprocess
 import sys
 from pathlib import Path
@@ -21,7 +19,6 @@ from foundry_sandbox.commands._helpers import (
 )
 from foundry_sandbox.constants import TIMEOUT_GIT_QUERY, get_repos_dir, get_worktrees_dir
 from foundry_sandbox.git import remove_stale_git_locks
-from foundry_sandbox.git_path_fixer import fix_proxy_worktree_paths
 from foundry_sandbox.paths import derive_sandbox_paths
 from foundry_sandbox.utils import log_error
 from foundry_sandbox.validate import validate_existing_sandbox_name
@@ -176,11 +173,6 @@ def _apply_git_mode(
             _git_config_set(bare_config, "core.repositoryformatversion", "1")
             _git_config_set(worktree_config, "core.worktree", "/git-workspace")
             _git_config_set(worktree_config, "core.bare", "false")
-
-    # Best-effort proxy sync for running sandboxes.
-    proxy_container = f"sandbox-{name}-unified-proxy-1"
-    host_user = os.environ.get("USER") or getpass.getuser()
-    fix_proxy_worktree_paths(proxy_container, host_user)
 
 
 @click.command("git-mode")

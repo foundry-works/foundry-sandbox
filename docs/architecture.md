@@ -7,49 +7,53 @@ This document explains the technical design of Foundry Sandbox: how components f
 - [System Overview](#system-overview)
 - [Sandbox Lifecycle](#sandbox-lifecycle)
 - [Git Worktree Strategy](#git-worktree-strategy)
-- [Docker Container Design](#docker-container-design)
-- [State Management](#state-management)
-- [Entrypoint Flow](#entrypoint-flow)
+- [sbx Backend](#sbx-backend)
+- [Git Safety Layer](#git-safety-layer)
+- [Host State Layout](#host-state-layout)
+- [Networking Model](#networking-model)
 - [Component Interactions](#component-interactions)
-- [Unified Proxy Architecture](#unified-proxy-architecture)
-- [Service Dependencies](#service-dependencies)
 
 ## System Overview
 
 ```
-┌─────────────────────────────────────────────────────────────┐
-│                       HOST SYSTEM                           │
-│                                                             │
-│  cast ──► foundry_sandbox.cli ──► commands/*.py              │
-│       │                                                     │
-│       ▼                                                     │
-│  ┌─────────────────────────────────────────────────────┐   │
-│  │               DOCKER CONTAINER                       │   │
-│  │                                                      │   │
-│  │  ┌──────────────────────────────────────────────┐   │   │
-│  │  │         SECURITY CONTROLS                     │   │   │
-│  │  │   (see docs/security/security-model)            │   │   │
-│  │  │                                               │   │   │
-│  │  │  • Read-only filesystem    (Docker)           │   │   │
-│  │  │  • Network isolation       (Docker/dns/ipt)   │   │   │
-│  │  │  • Credential isolation    (unified-proxy)    │   │   │
-│  │  │  • Branch isolation        (git_operations)   │   │   │
-│  │  │  • Git safety              (git_policies)     │   │   │
-│  │  └──────────────────────────────────────────────┘   │   │
-│  │                                                      │   │
-│  │  /workspace ◄─── volume mount (git worktree)        │   │
-│  │  /home/ubuntu ◄─ tmpfs (ephemeral; ~/.claude persisted)│   │
-│  │  /tmp, /var ◄─── tmpfs (ephemeral)                  │   │
-│  │  / (root) ◄────── read-only filesystem              │   │
-│  │                                                      │   │
-│  └─────────────────────────────────────────────────────┘   │
-│                                                             │
-│  ~/.sandboxes/                                              │
-│    ├── repos/      (bare git repositories)                  │
-│    ├── worktrees/  (checked-out code per sandbox)           │
-│    └── claude-config/ (AI tool configs per sandbox)         │
-│                                                             │
-└─────────────────────────────────────────────────────────────┘
+┌─────────────────────────────────────────────────────────────────┐
+│                         HOST SYSTEM                              │
+│                                                                  │
+│  cast ──► foundry_sandbox.cli ──► commands/*.py                  │
+│       │                                                          │
+│       ├── sbx CLI (Docker Sandboxes runtime)                     │
+│       │    └── creates/manages microVM sandboxes                 │
+│       │                                                          │
+│       └── foundry-git-safety (standalone service)                │
+│            ├── Git API server (port 8083)                        │
+│            ├── GitHub API filter (port 8084)                     │
+│            └── Policy enforcement (branch, push, command)        │
+│                                                                  │
+│  ┌──────────────────────────────────────────────────────────┐   │
+│  │                   SBX MICROVM                             │   │
+│  │                                                           │   │
+│  │  ┌────────────────────────────────────────────────────┐  │   │
+│  │  │         SECURITY CONTROLS                           │  │   │
+│  │  │   (see docs/security/security-model.md)             │  │   │
+│  │  │                                                     │  │   │
+│  │  │  • MicroVM isolation      (sbx / Docker)           │  │   │
+│  │  │  • Network policy          (sbx policy)             │  │   │
+│  │  │  • Credential injection    (sbx secrets)            │  │   │
+│  │  │  • Branch isolation        (foundry-git-safety)     │  │   │
+│  │  │  • Git safety              (foundry-git-safety)     │  │   │
+│  │  └────────────────────────────────────────────────────┘  │   │
+│  │                                                           │   │
+│  │  /workspace ◄─── file sync (git worktree on host)        │   │
+│  │  /usr/local/bin/git ◄─── git wrapper (policy enforced)   │   │
+│  │                                                           │   │
+│  └──────────────────────────────────────────────────────────┘   │
+│                                                                  │
+│  ~/.sandboxes/                                                   │
+│    ├── repos/       (bare git repositories)                      │
+│    ├── worktrees/   (checked-out code per sandbox)               │
+│    └── claude-config/ (AI tool configs per sandbox)              │
+│                                                                  │
+└─────────────────────────────────────────────────────────────────┘
 ```
 
 ## Sandbox Lifecycle
@@ -59,8 +63,8 @@ cast new repo        cast attach       cast stop         cast destroy
     │                  │               │                │
     ▼                  ▼               ▼                ▼
 ┌────────┐       ┌────────┐      ┌────────┐       ┌────────┐
-│ Clone  │──────▶│Running │◀────▶│Stopped │──────▶│Removed │
-│ Setup  │       │        │      │        │       │        │
+│ Setup  │──────▶│Running │◀────▶│Stopped │──────▶│Removed │
+│        │       │        │      │        │       │        │
 └────────┘       └────────┘      └────────┘       └────────┘
                      │               ▲
                      │               │
@@ -69,10 +73,10 @@ cast new repo        cast attach       cast stop         cast destroy
 ```
 
 **States:**
-- **Clone/Setup** - Repository cloned, worktree created, container started
-- **Running** - Container active, tmux session available
-- **Stopped** - Container stopped, worktree preserved on disk
-- **Removed** - All resources cleaned up (including sandbox branch cleanup from bare repo)
+- **Setup** - Bare repo cloned, worktree created, `sbx create` provisions microVM, git wrapper injected
+- **Running** - Sandbox active, `sbx exec` available for interactive use
+- **Stopped** - Sandbox stopped via `sbx stop`, worktree preserved on host
+- **Removed** - `sbx rm` removes sandbox, worktree and config cleaned up
 
 ## Git Worktree Strategy
 
@@ -104,116 +108,218 @@ Instead of cloning a full repository for each sandbox, we use git's worktree fea
 - **Branch isolation** - Each sandbox has its own branch/working directory
 - **Easy cleanup** - Delete worktree, bare repo stays for other sandboxes
 
-## Docker Container Design
+## sbx Backend
 
-### Read-Only Root Filesystem
+The `sbx` CLI (Docker Sandboxes) manages microVM-based sandbox lifecycle. All sandbox operations go through the `foundry_sandbox.sbx` module, which wraps `sbx` subprocess calls.
 
-The container runs with `read_only: true` in docker-compose.yml. This is the primary security boundary:
+### Supported Operations
 
-```yaml
-services:
-  dev:
-    read_only: true
+| Function | sbx Command | Purpose |
+|----------|-------------|---------|
+| `sbx_create` | `sbx create --name N AGENT PATH` | Create microVM, mount host worktree |
+| `sbx_run` | `sbx run NAME` | Start a stopped sandbox |
+| `sbx_stop` | `sbx stop NAME` | Stop a running sandbox |
+| `sbx_rm` | `sbx rm NAME` | Remove sandbox entirely |
+| `sbx_ls` | `sbx ls --json` | List sandboxes (JSON output) |
+| `sbx_exec` | `sbx exec NAME -- CMD` | Execute command inside sandbox |
+| `sbx_exec_streaming` | `sbx exec NAME -- CMD` | Interactive I/O (Popen) |
+| `sbx_secret_set` | `sbx secret set -g SERVICE` | Store API key on host |
+| `sbx_policy_set_default` | `sbx policy set-default PROFILE` | Set network policy (balanced/allow-all/deny-all) |
+| `sbx_policy_allow` | `sbx policy allow network SPEC` | Allow domain/CIDR |
+| `sbx_policy_deny` | `sbx policy deny network SPEC` | Deny domain/CIDR |
+| `sbx_template_save` | `sbx template save NAME TAG` | Save sandbox as reusable template |
+| `sbx_template_load` | `sbx template load TAG` | Load a saved template |
+| `sbx_diagnose` | `sbx diagnose` | Run diagnostics |
+
+### Agent Types
+
+The `--agent` flag selects which AI agent runs inside the sandbox:
+
+- `claude` (default) - Claude Code (Anthropic)
+- `codex` - OpenAI Codex
+- `copilot` - GitHub Copilot
+- `gemini` - Google Gemini
+- `kiro` - Amazon Kiro
+- `opencode` - OpenCode
+- `shell` - Plain shell (no AI agent)
+
+### MicroVM Isolation
+
+Each sandbox runs in its own microVM with a separate kernel. This provides stronger isolation than containers:
+
+- **Separate kernel** - Sandbox kernel differs from host (e.g., 6.12.44 inside vs 6.17.8 on host)
+- **No shared filesystem** - Only the synced workspace directory is accessible
+- **Network isolation** - All outbound traffic routed through sbx's HTTP proxy (`gateway.docker.internal:3128`)
+- **Credential injection** - API keys are injected into HTTP headers by sbx's host-side proxy; values never enter the VM
+
+### Credential Management
+
+Credentials are stored on the host via `sbx secret set -g` and injected at runtime:
+
+```
+Host: sbx secret set -g anthropic  ← stores ANTHROPIC_API_KEY on host
+Sandbox: agent makes API call      ← sbx proxy injects key into HTTP header
 ```
 
-Even if an AI runs `/bin/rm -rf /`, the operation fails because the filesystem is immutable.
+The sandbox environment never contains real API keys. The `GH_TOKEN` variable is set to `proxy-managed` (a placeholder).
 
-### Tmpfs Mounts (Ephemeral Storage)
+## Git Safety Layer
 
-Writable areas are RAM-backed and cleared on container stop:
+The git safety layer (`foundry-git-safety`) runs as a standalone host-side service. It intercepts all git operations from sandboxes, applies policy checks, then executes the real git binary on the host.
 
-```yaml
-tmpfs:
-  - /tmp:mode=1777,size=512m
-  - /var/tmp:mode=1777,size=256m
-  - /run:mode=755,size=64m
-  - /var/cache/apt:mode=755,size=256m
-  - /var/lib/apt/lists:mode=755,size=128m
-  - /home/ubuntu:mode=755,uid=1000,gid=1000,size=2g
+### Architecture
+
+```
+┌─────────────────────────────┐     ┌───────────────────────────────────┐
+│       SBX MICROVM            │     │            HOST                    │
+│                              │     │                                    │
+│  Agent runs: git status      │     │  foundry-git-safety                │
+│       │                      │     │  ┌──────────────────────────────┐ │
+│       ▼                      │     │  │   Git API Server (port 8083) │ │
+│  /usr/local/bin/git          │     │  │                               │ │
+│  (git-wrapper-sbx.sh)        │     │  │  1. HMAC-SHA256 auth          │ │
+│       │                      │     │  │  2. Command allowlist check    │ │
+│       │  HTTP POST           │     │  │  3. Branch isolation filter    │ │
+│       │  HMAC-signed         │     │  │  4. Protected branch check     │ │
+│       │  via proxy ──────────┼────►│  │  5. File restriction check     │ │
+│       │                      │     │  │  6. Rate limit check           │ │
+│       │                      │     │  │                               │ │
+│       │                      │     │  │  → Execute real git on host    │ │
+│       │  ◄───────────────────┼─────│  │  → Return JSON result          │ │
+│       │                      │     │  └──────────────────────────────┘ │
+│       ▼                      │     │                                    │
+│  Prints output               │     │  ~/.sandboxes/                     │
+│                              │     │    repos/ (bare repos)             │
+└─────────────────────────────┘     └───────────────────────────────────┘
 ```
 
-**Why tmpfs for /home?**
-- Most AI tool configs don't persist across restarts (except `~/.claude`, which is persisted per sandbox)
-- Prevents accumulation of cached data
-- Forces explicit config management via host mounts
+### Request Flow
 
-### Volume Mounts
+1. Agent runs a git command inside the sandbox
+2. `/usr/local/bin/git` (wrapper script) intercepts it
+3. Wrapper serializes arguments as JSON, computes HMAC-SHA256 signature
+4. Wrapper sends request through `gateway.docker.internal:3128` (sbx HTTP proxy) to `host.docker.internal:8083`
+5. Git safety server authenticates HMAC, applies policy checks
+6. If allowed, executes real git binary against the bare repository on the host
+7. Returns JSON response (exit_code, stdout, stderr) to the wrapper
+8. Wrapper prints output and exits with the correct exit code
 
-```yaml
-volumes:
-  - ${WORKSPACE_PATH}:/workspace    # Git worktree (read-write)
-  - ${HOME}/.foundry-mcp:/home/ubuntu/.foundry-mcp  # Metrics (persistent)
-```
+### Policy Layers
 
-Only the workspace and specific config directories are persisted to the host.
+The server enforces six policy layers in order:
 
-## State Management
+1. **HMAC authentication + nonce replay protection** - Rejects unauthenticated or replayed requests
+2. **Command allowlist + flag blocklist** - Only explicitly allowed git commands run; dangerous flags like `--force` are blocked
+3. **Branch isolation** - Sandbox agents see only their own branch and well-known branches (main, master, develop, production, release/*, hotfix/*)
+4. **Protected branch enforcement** - Pushes to main, master, release/*, and production are blocked
+5. **File restriction enforcement** - Pushes modifying `.github/workflows/`, CI configs, Makefiles, `.env*` files, etc. are blocked
+6. **Rate limiting** - Per-sandbox burst (300), sustained (120/min), and global ceiling (1000/min)
 
-Each sandbox has associated state stored on the host:
+### GitHub API Filtering
+
+A separate HTTP proxy on port 8084 blocks dangerous GitHub API operations (PR merges, release creation, webhook management, secrets access) while allowing read-only GETs and safe writes.
+
+### Wrapper Injection
+
+The git wrapper is installed into the sandbox during `cast new`:
+
+1. `stubs/git-wrapper-sbx.sh` is copied to `/usr/local/bin/git` inside the sandbox via `sbx exec --user root`
+2. Environment variables (`SANDBOX_ID`, `WORKSPACE_DIR`, `GIT_API_HOST`, `GIT_API_PORT`, `GIT_HMAC_SECRET_FILE`) are written to `/etc/profile.d/foundry-git-safety.sh`
+3. The HMAC secret is placed at `.foundry/hmac-secret` in the workspace, which sbx file-syncs into the sandbox
+
+**Note:** The wrapper is a regular file that the agent can remove. For persistence across `sbx reset`, use `sbx template save` to bake the wrapper into a custom template. See [Security Model](security/security-model.md) for the full threat analysis.
+
+## Host State Layout
 
 ```
 ~/.sandboxes/
-├── worktrees/<name>/           # Git worktree (the code)
-└── claude-config/<name>/       # Sandbox config + overrides
-    ├── claude/                 # Persisted ~/.claude
-    ├── docker-compose.override.yml
-    └── metadata.json           # Sandbox metadata (repo, branch, mounts)
+├── repos/                              # Bare git clones
+│   └── github.com/
+│       └── owner/
+│           └── repo.git/
+│
+├── worktrees/                          # Git worktrees (one per sandbox)
+│   ├── repo-feature-branch/
+│   │   ├── .foundry/
+│   │   │   └── hmac-secret            # HMAC secret for git safety
+│   │   ├── .git                        # Points to bare repo
+│   │   └── (working files)
+│   └── repo-bugfix-123/
+│       └── ...
+│
+├── claude-config/                      # Per-sandbox config + metadata
+│   ├── repo-feature-branch/
+│   │   ├── metadata.json              # SbxSandboxMetadata
+│   │   └── claude/                     # Claude home directory
+│   └── repo-bugfix-123/
+│       └── ...
+│
+├── .last-cast-new.json                 # Most recent cast-new invocation
+├── .last-attach.json                   # Most recent attach target
+├── .version-check.json                 # Version check cache
+└── presets/                            # Saved cast-new presets
+    └── <name>.json
 ```
 
 ### Metadata File
 
-Created by `cast new`, records sandbox configuration:
+Each sandbox has a `metadata.json` recording its configuration:
 
 ```json
 {
+  "backend": "sbx",
+  "sbx_name": "repo-feature-branch",
+  "agent": "claude",
   "repo_url": "https://github.com/owner/repo",
   "branch": "feature-branch",
   "from_branch": "main",
-  "network_mode": "limited",
-  "sync_ssh": 0,
-  "ssh_mode": "disabled",
-  "allow_pr": false,
-  "mounts": ["/data:/data"],
-  "copies": []
+  "network_profile": "balanced",
+  "git_safety_enabled": true,
+  "allow_pr": false
 }
 ```
 
-## Entrypoint Flow
+### Git Safety Server State
 
-Container startup uses two entrypoints depending on mode:
+The `foundry-git-safety` server stores its state in two directories on the host:
 
 ```
-Container Start
-      │
-      ├─────────────────────────────────────┐
-      │ (credential isolation enabled)      │ (standard mode)
-      ▼                                     │
-entrypoint-root.sh (as root)                │
-  • Set up DNS firewall (iptables)          │
-  • Overlay .git with tmpfs                 │
-  • Drop privileges (gosu)                  │
-      │                                     │
-      ▼                                     ▼
-entrypoint.sh (as ubuntu) ◄─────────────────┘
-  • Create /home directories (tmpfs is empty)
-  • Fix ownership of root-created dirs
-  • Set up npm prefix for local installs
-  • Configure Claude onboarding
-  • Copy proxy stubs (credential isolation mode)
-  • Apply proxy gitconfig (credential isolation mode)
-  • Trust mitmproxy CA (if mounted)
-      │
-      ▼
-Execute passed command (default: /bin/bash)
+/run/secrets/sandbox-hmac/           # HMAC secrets (one file per sandbox)
+    └── <sandbox-name>               # 64-hex-char secret
+
+/var/lib/foundry-git-safety/         # Sandbox registration data
+    └── sandboxes/
+        └── <sandbox-name>.json      # Branch isolation metadata
 ```
 
-**Note:** DNS configuration (`/etc/resolv.conf`, `/etc/hosts`) is handled at compose level via `dns:` and `extra_hosts:` directives, not by `entrypoint-root.sh`. Docker 29+ makes these files read-only when `read_only: true` is set.
+## Networking Model
 
-### Git Path Translation
+All network traffic from sandboxes is routed through sbx's built-in proxy:
 
-Worktrees reference the bare repo by absolute path. Since host and container have different paths, the **host script** (`foundry_sandbox/container_setup.py`) fixes these paths after copying the repos directory—not the container entrypoint.
+```
+┌──────────────────┐         ┌──────────────────────────────┐
+│  SBX MICROVM     │         │         HOST                  │
+│                  │         │                               │
+│  Agent ──────────┼──HTTP──►│  gateway.docker.internal:3128 │
+│                  │  proxy  │  (sbx HTTP proxy)              │
+│                  │         │         │                      │
+│  Git wrapper ────┼──HTTP──►│         ├──► host.docker.internal:8083
+│                  │         │         │   (foundry-git-safety) │
+│                  │         │         │                      │
+│                  │         │         ├──► api.anthropic.com  │
+│                  │         │         │   (credential injected│
+│                  │         │         │    by sbx proxy)      │
+│                  │         │         │                      │
+│                  │         │         └──► (other allowed     │
+│                  │         │              domains per policy)│
+└──────────────────┘         └──────────────────────────────┘
+```
 
-For the full directory tree with file-level descriptions, see [Code Organization](development/contributing.md#code-organization) in the contributing guide.
+**Key constraints:**
+- Sandboxes cannot reach arbitrary host ports directly
+- All traffic must go through `gateway.docker.internal:3128`
+- Git safety server is accessible at `host.docker.internal:8083` through the proxy
+- Network policy is configurable via `sbx policy` commands (balanced/allow-all/deny-all)
 
 ## Component Interactions
 
@@ -230,195 +336,30 @@ User runs: cast new owner/repo
               │
               ▼
 ┌─────────────────────────────────┐
-│ commands/new.py                 │
+│ commands/new_sbx.py             │
 │  - validate repo URL, API keys  │
 │  - ensure bare repo exists      │
 │  - create worktree              │
-│  - set up Claude config         │
-│  - prepopulate foundry skills   │
-│  - docker compose up            │
+│  - sbx create (provisions VM)   │
+│  - start git safety server      │
+│  - generate HMAC secret         │
+│  - inject git wrapper           │
+│  - copy files / pip install     │
+│  - write metadata               │
 └─────────────────────────────────┘
               │
               ▼
 ┌─────────────────────────────────┐
-│ Docker Container (starting)     │
-│  - entrypoint-root.sh (unified-proxy) │
-│  - entrypoint.sh runs           │
+│ sbx microVM (ready)             │
+│  - workspace synced from host   │
+│  - git wrapper active           │
+│  - agent can run                │
 └─────────────────────────────────┘
-              │
-              ▼
-┌─────────────────────────────────┐
-│ commands/new.py (continued)     │
-│  - setup unified-proxy session  │
-│    (if credential isolation)    │
-│  - copy configs to container    │
-│  - install workspace perms      │
-│  - apply network restrictions   │ ← after container starts
-│  - attach via tmux              │
-│  - rollback on failure          │
-└─────────────────────────────────┘
-              │
-              ▼
-┌─────────────────────────────────┐
-│ Docker Container (ready)        │
-│  - network restrictions active  │
-│  - user shell ready             │
-└─────────────────────────────────┘
-```
-
-## Unified Proxy Architecture
-
-The unified-proxy handles credential isolation, API proxying, and security policy enforcement for sandboxed containers. It runs three subsystems: dedicated API gateways for high-traffic providers, a Squid forward proxy for domain allowlisting, and a conditional mitmproxy instance for providers that require TLS interception.
-
-```
-┌──────────────────────────────────────────────────────────────────┐
-│                        UNIFIED PROXY                              │
-│                                                                   │
-│  ┌──────────────────────────────────────────────────────────────┐ │
-│  │              API GATEWAYS (aiohttp)                          │ │
-│  │                                                              │ │
-│  │  :9848  Anthropic gateway  ──► api.anthropic.com (HTTPS)     │ │
-│  │  :9849  OpenAI gateway     ──► api.openai.com    (HTTPS)     │ │
-│  │  :9850  GitHub gateway     ──► api.github.com    (HTTPS)     │ │
-│  │  :9851  Gemini gateway     ──► generativelanguage.. (HTTPS)  │ │
-│  │  :9852  ChatGPT gateway    ──► chatgpt.com  (HTTP)  │ │
-│  │  :443   ChatGPT gateway    ──► chatgpt.com  (TLS)   │ │
-│  │                                                              │ │
-│  │  Shared infrastructure:                                      │ │
-│  │    gateway_base.py         — app factory, forwarding, errors │ │
-│  │    gateway_middleware.py    — identity, metrics, circuit      │ │
-│  │                              breaker, rate limiter            │ │
-│  │    security_policies.py    — GitHub policy enforcement        │ │
-│  └──────────────────────────────────────────────────────────────┘ │
-│                                                                   │
-│  ┌──────────────────────────────────────────────────────────────┐ │
-│  │         SQUID FORWARD PROXY (:8080)                          │ │
-│  │                                                              │ │
-│  │  Allowed domains   → direct HTTPS tunnel (SNI, no decrypt)  │ │
-│  │  MITM domains      → cache_peer to mitmproxy (:8081)        │ │
-│  │  IP literals       → deny (all encodings blocked)           │ │
-│  │  Unknown domains   → deny                                   │ │
-│  └──────────────────────────────────────────────────────────────┘ │
-│                                                                   │
-│  ┌──────────────────────────────────────────────────────────────┐ │
-│  │     MITMPROXY (:8081, conditional)                           │ │
-│  │                                                              │ │
-│  │  ┌────────────────────────────────────────────────────────┐  │ │
-│  │  │              Addon Chain                               │  │ │
-│  │  │                                                        │  │ │
-│  │  │  container_identity → policy_engine → dns_filter       │  │ │
-│  │  │  → credential_injector → git_proxy → rate_limiter      │  │ │
-│  │  │  → circuit_breaker → metrics                           │  │ │
-│  │  └────────────────────────────────────────────────────────┘  │ │
-│  │                                                              │ │
-│  │  Active only when MITM-required provider credentials are     │ │
-│  │  configured (Gemini, Tavily, Semantic Scholar, Perplexity,   │ │
-│  │  Zhipu) or DNS filtering is enabled.                         │ │
-│  └──────────────────────────────────────────────────────────────┘ │
-│                                                                   │
-│  ┌─────────────┐  ┌─────────────┐  ┌────────────────────────┐   │
-│  │ Internal API│  │  Container  │  │  Git API (:8083)       │   │
-│  │ (Flask)     │  │  Registry   │  │  HMAC-authenticated    │   │
-│  │ (Unix sock) │──│  (SQLite)   │──│  git command execution │   │
-│  └─────────────┘  └─────────────┘  └────────────────────────┘   │
-└──────────────────────────────────────────────────────────────────┘
-```
-
-### API Gateways
-
-Sandboxes connect to API gateways via provider-specific `*_BASE_URL` environment variables. Gateways accept plaintext HTTP on the internal Docker network, validate container identity, inject real credentials, and forward to the upstream provider over HTTPS. Responses are streamed back chunk-by-chunk without buffering. The GitHub gateway additionally enforces security policies — see [Git Safety](security/security-model.md#git-safety).
-
-For the gateway architecture decision, routing table, shared infrastructure details, and rollback procedures, see [ADR-007](adr/007-api-gateways.md).
-
-### Squid Forward Proxy
-
-Squid handles all non-gateway HTTPS traffic on port 8080, performing SNI-based domain filtering against `config/allowlist.yaml`. Allowed domains are tunnelled without TLS decryption; MITM-required domains are forwarded to mitmproxy; IP literals and unknown domains are denied.
-
-### Mitmproxy (Conditional)
-
-mitmproxy runs on port 8081 when MITM-required provider credentials are configured or DNS filtering is enabled. It handles TLS interception for providers that lack `*_BASE_URL` env var support. When no MITM providers are configured, no CA certificate is generated.
-
-### Container Registration
-
-Containers register with the proxy via the internal API:
-
-```
-POST /internal/containers
-{
-  "container_id": "sandbox-abc123",
-  "ip_address": "172.17.0.2",
-  "ttl_seconds": 0,
-  "metadata": {
-    "sandbox_name": "my-project",
-    "repo": "owner/repo",
-    "sandbox_branch": "feature-branch",
-    "from_branch": "main",
-    "allow_pr": false
-  }
-}
-```
-
-Registrations persist in SQLite. TTL-based expiration is disabled by default (`ttl_seconds: 0`); registrations are removed explicitly on sandbox destroy.
-
-### Git API Server (Shadow Mode)
-
-In credential isolation mode, the `.git` directory is hidden from sandboxes (bind-mounted to `/dev/null`). All git operations are proxied through a git API server on the unified-proxy container:
-
-```
-┌─────────────────────┐          ┌──────────────────────────────┐
-│   SANDBOX CONTAINER │          │       UNIFIED PROXY          │
-│                     │          │                              │
-│  git push origin    │          │   ┌───────────────────────┐  │
-│       │             │  HTTP    │   │   Git API Server      │  │
-│       ▼             │  POST    │   │   (port 8083)         │  │
-│  /usr/local/bin/git ├─────────►│   │                       │  │
-│  (git-wrapper.sh)   │          │   │  • HMAC-SHA256 auth   │  │
-│                     │          │   │  • Policy enforcement  │  │
-│  • Intercepts git   │          │   │  • Executes real git   │  │
-│  • Builds JSON body │          │   │  • Returns JSON result │  │
-│  • Signs with HMAC  │          │   └───────────────────────┘  │
-│                     │          │                              │
-│  .git → /dev/null   │          │  /git-workspace (bind mount) │
-│  (hidden)           │          │  /home/ubuntu/.sandboxes/    │
-│                     │          │    repos/ (bare repos)       │
-└─────────────────────┘          └──────────────────────────────┘
-```
-
-**How it works:**
-
-1. `stubs/git-wrapper.sh` is bind-mounted at `/usr/local/bin/git`, taking precedence over `/usr/bin/git`
-2. For commands under `/workspace`, the wrapper serializes arguments as JSON and sends an HMAC-signed HTTP request to the git API (port 8083)
-3. For commands outside `/workspace`, the wrapper falls through to the real `/usr/bin/git`
-4. Each sandbox has a unique HMAC secret (provisioned at creation time) stored in a shared Docker volume
-5. The git API authenticates requests, applies policy checks (force-push blocking, branch deletion blocking, repo authorization), validates branch isolation via `branch_isolation.py`, then executes the real git command against the bare repository
-6. `git_operations.py` uses `fcntl.flock` to serialize concurrent fetch operations per bare repo, preventing corruption from parallel fetches
-
-## Service Dependencies
-
-```
-unified-proxy ───────> dev (sandbox)
-```
-
-The unified proxy must be healthy before the sandbox starts:
-
-```yaml
-depends_on:
-  unified-proxy:
-    condition: service_healthy
-```
-
-The healthcheck verifies the internal API is responsive via Unix socket:
-
-```yaml
-healthcheck:
-  test: ["CMD", "curl", "-sf", "--unix-socket", "/var/run/proxy/internal.sock", "http://localhost/internal/health"]
-  interval: 5s
-  timeout: 5s
-  retries: 5
-  start_period: 10s
 ```
 
 ## See Also
 
 - [Security Model](security/security-model.md) — Threats, defenses, and hardening
+- [Configuration](configuration.md) — Configuration options and `foundry.yaml`
 - [Commands](usage/commands.md) — Full command reference
+- [ADR-008: sbx Migration](adr/008-sbx-migration.md) — Decision record for this architecture

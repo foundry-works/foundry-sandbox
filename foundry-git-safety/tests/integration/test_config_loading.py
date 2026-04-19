@@ -3,8 +3,6 @@
 Tests that config files are loaded, validated, and merged with defaults correctly.
 """
 
-import os
-
 import pytest
 import yaml
 

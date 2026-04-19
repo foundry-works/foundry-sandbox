@@ -1,7 +1,6 @@
 """Tests for foundry_git_safety.operations."""
 
 import asyncio
-import logging
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -54,7 +53,6 @@ class TestAuditLog:
                 stdout=long_output,
             )
 
-        extra = mock_logger.info.call_args[1].get("extra") or mock_logger.info.call_args.kwargs.get("extra")
         # The extra dict is passed as the `extra` kwarg to the logger
         call_kwargs = mock_logger.info.call_args
         # audit_log passes `extra=entry` as a kwarg to log_fn

@@ -319,7 +319,7 @@ class TestCastNewHistory:
         assert result["branch"] == "dev"
 
     def test_command_line_included(self, sandbox_home):
-        cmd = save_last_cast_new(
+        save_last_cast_new(
             repo="org/repo",
             agent="codex",
             branch="feature-x",

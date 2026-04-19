@@ -9,7 +9,6 @@ import yaml
 from foundry_git_safety.config import (
     ConfigError,
     FileRestrictionsData,
-    ValidationResult,
     check_file_restrictions,
     load_file_restrictions_config,
     load_foundry_config,

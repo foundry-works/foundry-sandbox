@@ -1,8 +1,7 @@
 """Input validation for foundry-sandbox.
 
-Replaces lib/validate.sh (252 lines). Pure validation logic for sandbox names,
-URLs, mount paths, SSH modes, environment requirements, git remote credential
-detection, and Docker network capacity checking.
+Pure validation logic for sandbox names, URLs, SSH modes, environment
+requirements, and git remote credential detection.
 
 Convention:
 - Functions validating user input return (is_valid: bool, error_msg: str).
@@ -15,134 +14,15 @@ from __future__ import annotations
 import os
 import re
 import shutil
-import subprocess
 from pathlib import Path
 from urllib.parse import urlparse
 
 from foundry_sandbox.constants import (
-    TIMEOUT_DOCKER_NETWORK,
-    TIMEOUT_DOCKER_QUERY,
     get_repos_dir,
     get_worktrees_dir,
     get_claude_configs_dir,
 )
 from foundry_sandbox.paths import ensure_dir
-from foundry_sandbox.utils import log_warn
-
-
-# ============================================================================
-# Dangerous Paths (credential directories)
-# ============================================================================
-
-def _dangerous_paths() -> list[Path]:
-    """Return list of dangerous credential paths that should not be mounted.
-
-    Computed at call time (not module load) so $HOME is respected.
-    """
-    home = Path.home()
-    return [
-        home / ".ssh",
-        home / ".aws",
-        home / ".config" / "gcloud",
-        home / ".config" / "gh",
-        home / ".azure",
-        home / ".netrc",
-        home / ".kube",
-        home / ".gnupg",
-        home / ".docker",
-        home / ".npmrc",
-        home / ".pypirc",
-        Path("/var/run/docker.sock"),
-        Path("/run/docker.sock"),
-    ]
-
-
-# ============================================================================
-# Path Validation
-# ============================================================================
-
-
-def _resolve_path(path: str | Path, must_exist: bool = False) -> Path:
-    """Resolve a path to its canonical form.
-
-    Cross-platform equivalent of _realpath_canonical from validate.sh.
-
-    Args:
-        path: Path to resolve.
-        must_exist: If True, resolve symlinks strictly (path must exist).
-            Raises OSError if the path does not exist.
-
-    Returns:
-        Resolved Path object.
-
-    Raises:
-        OSError: If must_exist is True and the path does not exist.
-    """
-    p = Path(path)
-    if must_exist:
-        return p.resolve(strict=True)
-    return p.resolve(strict=False)
-
-
-def validate_mount_path(mount_path: str) -> tuple[bool, str]:
-    """Validate that a mount path does not expose credential directories.
-
-    Checks the canonical path against known dangerous paths to prevent
-    mounting credential directories into sandboxes.
-
-    When validation succeeds, the returned error_message contains the resolved
-    canonical path so callers can use it directly (avoiding TOCTOU races from
-    re-resolving the path later).
-
-    Args:
-        mount_path: Host path to validate.
-
-    Returns:
-        Tuple of (is_valid, canonical_or_error). On success, second element is
-        the resolved canonical path string. On failure, it is an error message.
-    """
-    # Resolve the canonical path, preferring existing paths for security
-    # (prevents TOCTOU race conditions with symlink swaps)
-    try:
-        canonical = _resolve_path(mount_path, must_exist=True)
-    except OSError:
-        return False, f"Mount path '{mount_path}' does not exist"
-
-    for dangerous in _dangerous_paths():
-        try:
-            dangerous_canonical = _resolve_path(str(dangerous), must_exist=True)
-        except OSError:
-            # Dangerous path doesn't exist on this system — skip it
-            continue
-
-        # Check exact match
-        if canonical == dangerous_canonical:
-            return False, (
-                f"Mount path '{mount_path}' is a dangerous credential path: "
-                f"{dangerous}"
-            )
-
-        # Check if mount is parent of dangerous (would expose credentials)
-        try:
-            dangerous_canonical.relative_to(canonical)
-            return False, (
-                f"Mount path '{mount_path}' would expose credential directory: "
-                f"{dangerous}"
-            )
-        except ValueError:
-            pass
-
-        # Check if mount is child of dangerous (inside credentials)
-        try:
-            canonical.relative_to(dangerous_canonical)
-            return False, (
-                f"Mount path '{mount_path}' is inside credential directory: "
-                f"{dangerous}"
-            )
-        except ValueError:
-            pass
-
-    return True, str(canonical)
 
 
 # ============================================================================
@@ -306,157 +186,21 @@ def require_command(cmd: str) -> tuple[bool, str]:
     return True, ""
 
 
-def check_docker_running() -> tuple[bool, str]:
-    """Check that Docker is running and accessible.
-
-    Returns:
-        Tuple of (is_running, error_message).
-    """
-    try:
-        result = subprocess.run(
-            ["docker", "info"],
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-            check=False,
-            timeout=TIMEOUT_DOCKER_QUERY,
-        )
-        if result.returncode != 0:
-            return False, "Docker is not running or not accessible"
-        return True, ""
-    except OSError:
-        return False, "Docker is not running or not accessible"
-
-
 def validate_environment() -> tuple[bool, str]:
-    """Validate the required environment (git, docker, directories).
+    """Validate the required environment (git, directories).
 
     Ensures required commands are available and creates necessary directories.
 
     Returns:
         Tuple of (is_valid, error_message).
     """
-    for cmd in ("git", "docker"):
-        ok, msg = require_command(cmd)
-        if not ok:
-            return False, msg
+    ok, msg = require_command("git")
+    if not ok:
+        return False, msg
 
     ensure_dir(get_repos_dir())
     ensure_dir(get_worktrees_dir())
     ensure_dir(get_claude_configs_dir())
-    return True, ""
-
-
-# ============================================================================
-# Docker Network Capacity
-# ============================================================================
-
-
-def check_docker_network_capacity(
-    isolate_credentials: bool = True,
-) -> tuple[bool, str]:
-    """Check Docker network pool availability.
-
-    Only relevant when credential isolation is enabled (creates networks).
-    Creates a test network to verify capacity, then cleans up.
-
-    Args:
-        isolate_credentials: Whether credential isolation is enabled.
-
-    Returns:
-        Tuple of (has_capacity, error_message).
-    """
-    if not isolate_credentials:
-        return True, ""
-
-    # Count existing sandbox networks
-    sandbox_network_count = 0
-    try:
-        result = subprocess.run(
-            ["docker", "network", "ls", "--format", "{{.Name}}"],
-            capture_output=True, text=True, check=False,
-            timeout=TIMEOUT_DOCKER_QUERY,
-        )
-        for line in result.stdout.splitlines():
-            if line.startswith("sandbox-"):
-                sandbox_network_count += 1
-    except OSError:
-        pass
-
-    # Try to create a test network to verify capacity
-    test_name = f"sandbox-network-capacity-test-{os.getpid()}"
-    try:
-        create_result = subprocess.run(
-            ["docker", "network", "create", test_name],
-            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-            check=False,
-            timeout=TIMEOUT_DOCKER_NETWORK,
-        )
-        if create_result.returncode != 0:
-            msg = (
-                "Docker network address pool exhausted\n"
-                "\n"
-                "Docker cannot create new networks. This typically happens when:\n"
-                "  - Many sandboxes have been created without cleanup\n"
-                "  - Orphaned networks remain from destroyed sandboxes\n"
-                "\n"
-                f"Current sandbox networks: {sandbox_network_count}\n"
-                "\n"
-                "Remediation steps:\n"
-                "  1. Clean up orphaned sandbox networks:\n"
-                "     cast prune --networks\n"
-                "\n"
-                "  2. If that doesn't help, remove ALL unused Docker networks:\n"
-                "     docker network prune\n"
-                "\n"
-                "  3. If problems persist, restart Docker Desktop"
-            )
-            return False, msg
-    except OSError:
-        return False, "Docker is not running or not accessible"
-
-    # Clean up test network
-    subprocess.run(
-        ["docker", "network", "rm", test_name],
-        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-        check=False,
-        timeout=TIMEOUT_DOCKER_NETWORK,
-    )
-
-    # Warn if many sandbox networks exist
-    if sandbox_network_count > 20:
-        # Count orphaned networks (no running containers)
-        orphaned_count = 0
-        try:
-            result = subprocess.run(
-                ["docker", "network", "ls", "--format", "{{.Name}}"],
-                capture_output=True, text=True, check=False,
-                timeout=TIMEOUT_DOCKER_QUERY,
-            )
-            for net in result.stdout.splitlines():
-                if not net.startswith("sandbox-"):
-                    continue
-                sandbox_name = net.removesuffix("_credential-isolation")
-                sandbox_name = sandbox_name.removesuffix("_proxy-egress")
-                check = subprocess.run(
-                    ["docker", "ps", "-q", "--filter", f"name=^{sandbox_name}-"],
-                    capture_output=True, text=True, check=False,
-                    timeout=TIMEOUT_DOCKER_QUERY,
-                )
-                if not check.stdout.strip():
-                    orphaned_count += 1
-        except OSError:
-            pass
-
-        if orphaned_count > 0:
-            log_warn(
-                f"Found {orphaned_count} orphaned sandbox networks "
-                f"(of {sandbox_network_count} total)"
-            )
-            log_warn("Run 'cast prune --networks' to clean up")
-        else:
-            log_warn(f"Found {sandbox_network_count} active sandbox networks")
-            log_warn("Consider destroying unused sandboxes with 'cast destroy <name>'")
-
     return True, ""
 
 
