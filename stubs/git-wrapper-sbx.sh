@@ -142,15 +142,17 @@ PY
 compute_hmac() {
     local method="$1" path="$2" body="$3" timestamp="$4" nonce="$5" secret_file="$6"
 
-    python3 - "$method" "$path" "$body" "$timestamp" "$nonce" "$secret_file" <<'PY'
+    # Pass body via stdin to avoid exposing it in /proc/<pid>/cmdline
+    printf '%s' "$body" | python3 - "$method" "$path" "$timestamp" "$nonce" "$secret_file" <<'PY'
 import hashlib, hmac, sys
 
 method = sys.argv[1]
 path = sys.argv[2]
-body = sys.argv[3]
-timestamp = sys.argv[4]
-nonce = sys.argv[5]
-secret_file = sys.argv[6]
+timestamp = sys.argv[3]
+nonce = sys.argv[4]
+secret_file = sys.argv[5]
+
+body = sys.stdin.buffer.read().decode("utf-8")
 
 with open(secret_file, "rb") as f:
     secret = f.read().rstrip(b"\n")

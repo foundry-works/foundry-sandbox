@@ -229,9 +229,12 @@ CONFIG_NEVER_ALLOW: tuple[str, ...] = (
     "remote.*.proxy",      # matched via special logic
     "remote.*.pushurl",    # matched via special logic
     "protocol.*.allow",    # matched via special logic
+    "diff.textconv",       # exact match: 2-segment bypass of diff.*.textconv
+    "diff.command",        # exact match: 2-segment bypass of diff.*.command
     "diff.*.textconv",     # matched via special logic
     "diff.*.command",      # matched via special logic
     "filter.",
+    "merge.driver",        # exact match: 2-segment bypass of merge.*.driver
     "merge.*.driver",      # matched via special logic
     "gpg.",
     "sendemail.",

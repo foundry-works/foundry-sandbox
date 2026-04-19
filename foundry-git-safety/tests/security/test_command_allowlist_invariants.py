@@ -195,9 +195,12 @@ class TestConfigKeyCompleteness:
         ("protocol.*.allow", "protocol.ext.allow"),
         ("diff.*.textconv", "diff.mydriver.textconv"),
         ("diff.*.command", "diff.mydriver.command"),
+        ("diff.textconv", "diff.textconv"),     # exact match: 2-segment bypass
+        ("diff.command", "diff.command"),         # exact match: 2-segment bypass
         ("filter.", "filter.lfs.clean"),
         ("filter.", "filter.lfs.smudge"),
         ("merge.*.driver", "merge.custom.driver"),
+        ("merge.driver", "merge.driver"),         # exact match: 2-segment bypass
         ("gpg.", "gpg.program"),
         ("gpg.", "gpg.sign"),
         ("sendemail.", "sendemail.smtpserver"),

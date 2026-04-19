@@ -136,7 +136,7 @@ class JSONFormatter(logging.Formatter):
             log_dict["timestamp"] = time.strftime(
                 "%Y-%m-%dT%H:%M:%S",
                 time.gmtime(record.created),
-            ) + f".{int(record.msecs * 1000):06d}Z"
+            ) + f".{int(record.msecs):03d}Z"
 
         # Standard fields
         log_dict["level"] = record.levelname
@@ -202,7 +202,7 @@ class TextFormatter(logging.Formatter):
             timestamp = time.strftime(
                 "%Y-%m-%dT%H:%M:%S",
                 time.gmtime(record.created),
-            ) + f".{int(record.msecs * 1000):06d}Z"
+            ) + f".{int(record.msecs):03d}Z"
             parts.append(timestamp)
 
         # Level and logger

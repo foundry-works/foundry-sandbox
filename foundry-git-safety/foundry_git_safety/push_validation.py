@@ -420,7 +420,12 @@ def check_push_protected_branches(
                 return ValidationError(block_reason)
         return None
 
-    # Check regular push refspecs (treated as updates)
+    # Check regular push refspecs (treated as updates).
+    # NOTE: synthetic non-zero SHAs mean check_protected_branches always
+    # classifies these as updates, never creations.  The security outcome is
+    # correct (protected branches are still blocked), but the bootstrap
+    # creation guard in policies.check_protected_branches is only reached
+    # via the git-receive-pack hook path.
     refnames = _parse_push_refspecs(args)
     for refname in refnames:
         block_reason = check_protected_branches(

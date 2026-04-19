@@ -7,16 +7,6 @@ import pytest
 
 
 @pytest.fixture
-def sandbox_branch():
-    return "sandbox/test-alice"
-
-
-@pytest.fixture
-def other_branch():
-    return "sandbox/test-bob"
-
-
-@pytest.fixture
 def base_branch():
     return "main"
 
@@ -72,18 +62,6 @@ def tmp_git_repo(tmp_path):
         env={**os.environ, **env},
     )
     return tmp_path
-
-
-@pytest.fixture
-def tmp_git_bare_repo(tmp_path_factory):
-    """Create a bare git repo (module-scoped for reuse)."""
-    path = tmp_path_factory.mktemp("bare_repo")
-    subprocess.run(
-        ["git", "init", "--bare", str(path)],
-        check=True,
-        capture_output=True,
-    )
-    return path
 
 
 def create_pktline_data(refs: list[tuple[str, str, str]], first_capabilities: str = "") -> bytes:

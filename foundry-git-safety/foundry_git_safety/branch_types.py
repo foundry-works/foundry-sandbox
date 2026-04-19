@@ -149,7 +149,7 @@ WELL_KNOWN_BRANCH_PREFIXES: tuple[str, ...] = (
 # of allowed branches, so a false-positive here cannot leak data.
 _MIN_SHA_LENGTH = 12
 
-_HEX_CHARS = frozenset("0123456789abcdefABCDEF")
+_HEX_CHARS = frozenset("0123456789abcdef")
 
 # Timeout for SHA reachability git subprocess calls (seconds).
 SHA_CHECK_TIMEOUT = 10

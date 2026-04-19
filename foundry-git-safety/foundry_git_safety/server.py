@@ -31,7 +31,7 @@ from .auth import (
     SecretStore,
     verify_signature,
 )
-from .logging_config import LogContext, generate_request_id
+from .logging_config import flask_request_middleware
 
 logger = logging.getLogger(__name__)
 
@@ -81,6 +81,8 @@ def create_git_api(
     """
     app = Flask(__name__)
     app.config["MAX_CONTENT_LENGTH"] = MAX_REQUEST_BODY
+
+    flask_request_middleware(app)
 
     secrets = secret_store or SecretStore()
     nonces = nonce_store or NonceStore()

@@ -222,16 +222,12 @@ class TestFailClosed:
         assert not allowed
         assert "unparseable" in (reason or "").lower() or reason is not None
 
-    def test_empty_graphql_body_blocked(self) -> None:
-        """Empty body on /graphql should not crash — must be handled."""
+    def test_empty_graphql_body_not_crash(self) -> None:
+        """Empty body on /graphql should not crash — must return a valid bool."""
         checker = GitHubAPIChecker(allow_pr_operations=True)
-        # Empty body (None) for graphql POST
         allowed, reason = checker.check_request("POST", "/graphql", None)
-        # With no body, the graphql check passes (no mutations found),
-        # but the POST /graphql is in the allowed list.
-        # This is fine — the mutation check just finds nothing to block.
-        # The point is it doesn't crash.
         assert isinstance(allowed, bool)
+        assert isinstance(reason, (str, type(None)))
 
     def test_bypass_via_query_string_blocked(self) -> None:
         """Query strings must not bypass blocklist matching.

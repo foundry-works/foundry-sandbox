@@ -149,7 +149,7 @@ def verify_signature(method, path, body, timestamp, nonce, provided_sig, secret)
 # Git Execution
 # ---------------------------------------------------------------------------
 
-def execute_git(args: list, cwd: str, repo_root: str) -> dict:
+def execute_git(args: list, cwd: str, repo_root: str, stdin_data: bytes | None = None) -> dict:
     if not args:
         return {"exit_code": 1, "stdout": "", "stderr": "error: no arguments provided"}
 
@@ -166,6 +166,7 @@ def execute_git(args: list, cwd: str, repo_root: str) -> dict:
         "rev-list", "diff-tree", "diff-files", "diff-index",
         "apply", "am", "format-patch", "describe", "name-rev",
         "config", "notes", "init", "version",
+        "bisect", "reflog", "worktree",
     }
 
     subcmd = cmd
@@ -207,15 +208,15 @@ def execute_git(args: list, cwd: str, repo_root: str) -> dict:
         result = subprocess.run(
             ["git"] + args,
             capture_output=True,
-            text=True,
             cwd=work_dir,
             env=env,
+            input=stdin_data,
             timeout=30,
         )
         return {
             "exit_code": result.returncode,
-            "stdout": result.stdout,
-            "stderr": result.stderr,
+            "stdout": result.stdout.decode("utf-8", errors="replace"),
+            "stderr": result.stderr.decode("utf-8", errors="replace"),
         }
     except subprocess.TimeoutExpired:
         return {"exit_code": 124, "stdout": "", "stderr": "error: git command timed out"}
@@ -313,13 +314,23 @@ class GitAPIHandler(BaseHTTPRequestHandler):
 
         cwd = req.get("cwd", ".")
         args = req.get("args", [])
+        stdin_b64 = req.get("stdin_b64")
 
         if not isinstance(args, list):
             self._send_json(400, {"error": "args must be a list"})
             return
 
+        stdin_data = None
+        if stdin_b64:
+            import base64
+            try:
+                stdin_data = base64.b64decode(stdin_b64)
+            except Exception:
+                self._send_json(400, {"error": "Invalid stdin_b64"})
+                return
+
         # Execute
-        result = execute_git(args, cwd, repo_root)
+        result = execute_git(args, cwd, repo_root, stdin_data)
         self._send_json(200, result)
 
 # ---------------------------------------------------------------------------

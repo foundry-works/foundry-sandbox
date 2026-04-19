@@ -25,7 +25,7 @@ git_safety:
     warned_patterns:
       - "package.json"
       - "pyproject.toml"
-    warn_action: "reject"  # "log" or "reject"
+    warn_action: "log"  # "log" (default) or "reject"
 
   branch_isolation:
     enabled: true

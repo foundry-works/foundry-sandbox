@@ -122,7 +122,12 @@ def parse_pktline(data: bytes) -> List[PktLineRef]:
         if len(parts) >= 3:
             old_sha, new_sha, refname = parts[0], parts[1], parts[2]
             # Validate SHA format (40 hex characters)
-            if len(old_sha) == 40 and len(new_sha) == 40:
+            if (
+                len(old_sha) == 40
+                and len(new_sha) == 40
+                and all(c in "0123456789abcdef" for c in old_sha)
+                and all(c in "0123456789abcdef" for c in new_sha)
+            ):
                 updates.append(
                     PktLineRef(
                         old_sha=old_sha,

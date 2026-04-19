@@ -1,7 +1,5 @@
 """Tests for foundry_git_safety.auth — HMAC auth, nonce store, and rate limiting."""
 
-import hashlib
-import hmac
 import time
 from unittest.mock import patch
 
@@ -115,6 +113,53 @@ class TestNonceStore:
         assert store.check_and_store("sandbox-1", "nonce-a") is True
         assert store.check_and_store("sandbox-1", "nonce-b") is True
 
+    def test_nonce_at_exact_ttl_boundary_still_valid(self):
+        """A nonce at exactly TTL seconds old is still valid (strict > check).
+
+        The implementation uses strict > for TTL expiry, which is
+        security-conservative: nonces live at least TTL seconds.
+        """
+        store = NonceStore(ttl=10, max_per_sandbox=100)
+        now = time.time()
+        with patch("foundry_git_safety.auth.time") as mock_time:
+            mock_time.time.return_value = now
+            store.check_and_store("sandbox-1", "nonce-boundary")
+
+            # At exactly TTL — still valid (strict > not >=)
+            mock_time.time.return_value = now + 10
+            assert store.check_and_store("sandbox-1", "nonce-boundary") is False
+
+            # Just past TTL — now expired
+            mock_time.time.return_value = now + 10.001
+            assert store.check_and_store("sandbox-1", "nonce-boundary") is True
+
+    def test_nonce_just_before_ttl_is_valid(self):
+        """A nonce just before TTL is still valid and rejected as duplicate."""
+        store = NonceStore(ttl=10, max_per_sandbox=100)
+        now = time.time()
+        with patch("foundry_git_safety.auth.time") as mock_time:
+            mock_time.time.return_value = now
+            store.check_and_store("sandbox-1", "nonce-alive")
+
+            # Just before TTL expires
+            mock_time.time.return_value = now + 9.99
+            assert store.check_and_store("sandbox-1", "nonce-alive") is False
+
+    def test_max_per_sandbox_eviction(self):
+        """When max_per_sandbox is reached, oldest nonces are evicted (FIFO)."""
+        store = NonceStore(ttl=600, max_per_sandbox=3)
+        store.check_and_store("sandbox-1", "nonce-1")
+        store.check_and_store("sandbox-1", "nonce-2")
+        store.check_and_store("sandbox-1", "nonce-3")
+        # Adding a 4th should evict nonce-1 (oldest)
+        assert store.check_and_store("sandbox-1", "nonce-4") is True
+        # nonce-1 was evicted, so re-adding it should succeed
+        # (which also evicts nonce-2 since we're back at max=3)
+        assert store.check_and_store("sandbox-1", "nonce-1") is True
+        # Store now has: nonce-3, nonce-4, nonce-1
+        # nonce-3 should still be present
+        assert store.check_and_store("sandbox-1", "nonce-3") is False
+
 
 # ---------------------------------------------------------------------------
 # TestTokenBucket
@@ -226,6 +271,25 @@ class TestHMAC:
         secret = b"test-secret"
         args = ("POST", "/api/push", b"body-data", "1234567890", "nonce-1")
         assert verify_signature(*args, provided_sig="bad-sig", secret=secret) is False
+
+    def test_uses_compare_digest(self):
+        """verify_signature uses hmac.compare_digest for timing-safe comparison."""
+        import inspect
+        from foundry_git_safety import auth as auth_module
+
+        source = inspect.getsource(auth_module.verify_signature)
+        assert "compare_digest" in source, (
+            "verify_signature must use hmac.compare_digest, not ==, "
+            "to prevent timing attacks"
+        )
+
+    def test_verify_rejects_wrong_secret(self):
+        """A signature computed with one secret must not validate with another."""
+        secret_a = b"secret-a"
+        secret_b = b"secret-b"
+        args = ("POST", "/api/push", b"body", "1234567890", "nonce-1")
+        sig = compute_signature(*args, secret=secret_a)
+        assert verify_signature(*args, provided_sig=sig, secret=secret_b) is False
 
 
 if __name__ == "__main__":

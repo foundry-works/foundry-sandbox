@@ -18,7 +18,7 @@
 | **Version** | Standalone `sbx` at v0.24.1; Docker Desktop plugin `docker sandbox` at v0.12.0 (diverged) |
 | **Releases** | 7 stable releases + nightly builds available |
 | **Breaking changes** | Community reports CLI migrated from `docker sandbox` to `sbx` with no migration path. Forum: "Docker Sandbox COMPLETELY changed in a minor update." |
-| **Linux support** | Install artifacts exist (.deb for Ubuntu 24.04/25.10/26.04, .rpm for Rocky Linux 8) but docs still say Linux gets **legacy container-based sandboxes**, NOT microVMs |
+| **Linux support** | Install artifacts exist (.deb for Ubuntu 24.04/25.10/26.04, .rpm for Rocky Linux 8). Docs say "legacy containers" but hands-on testing with sbx v0.26.1 on Fedora 43 confirmed **microVM isolation** (kernel 6.12.44 vs host 6.17.8). See Phase 0 report. |
 | **Licensing** | Proprietary (Docker Inc.). Individual standalone use appears free. Team/enterprise controls require contacting sales. No separate Sandboxes pricing tier. |
 | **Git safety features** | **None.** Policy system is network-only (domain allow/deny). No git operation guardrails, protected branches, ref filtering, or API-level policies. |
 | **Docker Desktop integration** | "Coming soon" per launch blog. Not yet available. |
@@ -29,7 +29,7 @@
 |------|-------------------|-------------------|
 | Experimental status | Medium likelihood of indefinite experimental | **Confirmed** — still experimental, <3 weeks old, rapid iteration expected |
 | Version stability | Medium — breaking changes expected | **High** — community reports surprise breaking changes between `docker sandbox` and `sbx` CLIs |
-| Linux support | Medium — KVM backend exists, no install docs | **Mixed** — install artifacts published but NOT microVM-based; legacy containers only |
+| Linux support | Medium — KVM backend exists, no install docs | **Updated** — install artifacts published; sbx v0.26.1 confirmed microVM on Fedora 43 (see Phase 0 report). Docs still say "legacy containers" but this is outdated. |
 | Git feature gap | Medium — Docker could add git policies | **Low** — no git features in docs, roadmap, or CLI; policy system is network-only |
 | Licensing risk | Low — unclear terms | **Low-Medium** — proprietary, free for individual use, team/enterprise requires sales contact |
 
@@ -141,7 +141,7 @@
 
 - [ ] Install Docker `sbx` on macOS test machine
   - **Blocker:** No macOS test machine available. Requires `brew install docker/tap/sbx`.
-  - Linux install available but provides **legacy container-based sandboxes** only (not microVM).
+  - Linux install confirmed microVM with sbx v0.26.1 on Fedora 43 (see Phase 0 report).
 - [ ] Run `sbx secret set -g anthropic -t "$ANTHROPIC_API_KEY"`
 - [ ] Create sandbox: `sbx create --name test-cred claude /tmp/test`
 - [ ] Exec into sandbox: `sbx exec test-cred -- env | grep -i anthropic`
@@ -171,17 +171,16 @@
   - `.rpm` package for Rocky Linux 8
   - APT install: `sudo apt install ./DockerSandboxes-linux-amd64-ubuntu2404.deb`
 - [x] Document Linux support status in weekly updates
-  - **Critical finding:** docs.docker.com still states: "MicroVM-based sandboxes require macOS or Windows (experimental). Linux users can use legacy container-based sandboxes with Docker Desktop 4.57."
-  - This means Linux gets **container-based** sandboxes, NOT microVM isolation.
-  - The KVM backend exists in the VMM codebase but is not yet activated for Linux users.
+  - **Updated:** docs.docker.com still states "MicroVM-based sandboxes require macOS or Windows" but hands-on testing with sbx v0.26.1 on Fedora 43 confirmed microVM isolation (kernel 6.12.44 vs host 6.17.8). The docs appear outdated.
+  - See `docs/sbx-phase0-report.md` Discovery 1 for details.
   - Architecture blog claims: "A developer on a MacBook gets the same isolation guarantees and startup performance as a developer on a Linux workstation." — but this is aspirational, not current.
 - [ ] When Linux install docs published: test KVM backend
-  - **Partial:** Install docs exist in GitHub README but microVM mode not yet available on Linux.
+  - **Partial:** Install docs exist in GitHub README. MicroVM confirmed on Fedora 43 with sbx v0.26.1 (see Phase 0 report).
 - [ ] Benchmark performance vs macOS/Windows
 - [ ] Document any Linux-specific limitations
-  - **Known:** Linux sandboxes are container-based (legacy), not microVM. No hypervisor-level isolation.
+  - **Updated:** Linux sandboxes confirmed microVM-based with sbx v0.26.1 (see Phase 0 report). Earlier docs claiming "legacy container-based" are outdated.
 - [x] If no Linux install docs after GA, document as project risk (see `docs/sbx-docker-questions.md`)
-  - **Risk updated:** Install artifacts exist but microVM isolation is NOT available on Linux. This is a blocker for foundry-sandbox migration since the primary value (hypervisor isolation) is missing on Linux.
+  - **Risk updated:** Install artifacts exist. MicroVM isolation confirmed on Linux with sbx v0.26.1 (Fedora 43). Docs claiming "legacy container-based" are outdated — see Phase 0 report for validation details.
 
 ### Review Licensing
 
@@ -302,7 +301,7 @@
 - [x] Integration test: start service, create sandbox, verify git safety
   - test_git_api_server.py (15 tests), test_config_loading.py (10 tests), test_github_proxy.py (21 tests)
 - [x] Test protected branch enforcement
-  - test_policies.py (22 tests), test_push_validation.py (48 tests), test_command_allowlist_invariants.py (25 tests)
+  - test_policies.py (18 tests), test_push_validation.py (48 tests), test_command_allowlist_invariants.py (25 tests)
 - [x] Test push file restrictions
   - test_push_validation.py (48 tests), test_config.py (34 tests)
 - [x] Test branch visibility isolation
@@ -310,7 +309,7 @@
 - [x] Test GitHub API blocking
   - test_github_filter.py (90 tests), test_github_blocklist_invariants.py (16 security tests)
 - [x] Test with multiple concurrent sandboxes
-  - test_operations.py (24 tests) covers SandboxSemaphorePool concurrency
+  - test_operations.py (21 tests) covers SandboxSemaphorePool concurrency
 - [ ] Performance benchmark: git operation latency
 
 ### 2.8 Documentation

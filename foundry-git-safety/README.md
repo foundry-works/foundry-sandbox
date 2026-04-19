@@ -90,7 +90,7 @@ git_safety:
     warned_patterns:
       - "package.json"
       - "pyproject.toml"
-    warn_action: "reject"  # "log" or "reject"
+    warn_action: "log"  # "log" (default) or "reject"
 
   branch_isolation:
     enabled: true
@@ -117,6 +117,7 @@ git_safety:
 | `FOUNDRY_CONFIG_PATH` | Path to `foundry.yaml` |
 | `FOUNDRY_FILE_RESTRICTIONS_PATH` | Path to `push-file-restrictions.yaml` |
 | `FOUNDRY_DATA_DIR` | Data directory for server state |
+| `GIT_CLIENT_WORKSPACE_ROOT` | Override workspace root path for git operations |
 | `GIT_API_SECRETS_PATH` | Path to HMAC secrets directory |
 | `LOG_LEVEL` | Log level (`DEBUG`, `INFO`, `WARNING`, `ERROR`) |
 | `LOG_FORMAT` | Log format (`json` or `text`) |
