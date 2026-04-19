@@ -13,9 +13,9 @@ Docker has shipped a native `sbx` CLI providing microVM lifecycle, network polic
 
 A rearchitecture could eliminate a significant majority of foundry-sandbox's codebase. The remaining value is in git safety (operation-level mediation, protected branches, push restrictions, branch visibility isolation) and deep API policy enforcement (method/path/body-level).
 
-**Caveat:** Docker Sandboxes is currently marked **"Experimental"** with no GA timeline announced. Linux support is architecturally ready (KVM backend exists) but no install instructions have been published.
+**Caveat:** Docker Sandboxes is currently marked **"Experimental"** with no GA timeline announced. Linux microVM support is confirmed (sbx v0.26.1 on Fedora 43).
 
-**Recommendation:** Maintain current architecture short-term, extract git safety layer as standalone module, and migrate when Docker Sandboxes reaches GA with Linux support.
+**Recommendation:** Proceed with migration to `sbx` backend now. Phase 2 (git safety extraction) is complete; Phase 3 (migration) can begin immediately.
 
 ---
 
@@ -122,9 +122,9 @@ Decouple git safety from proxy infrastructure, making it portable to any sandbox
 
 ---
 
-### Phase 3: Conditional Migration (When Docker Sandboxes GA)
+### Phase 3: Migration to `sbx` Backend (Now)
 
-If Docker Sandboxes reaches GA with acceptable terms and Linux support.
+Docker Sandboxes provides sufficient stability for migration. Linux microVM support confirmed on sbx v0.26.1.
 
 **Migration approach:**
 1. Rewrite `cast` CLI as thin wrapper over `sbx`
@@ -210,16 +210,11 @@ If Docker Sandboxes reaches GA with acceptable terms and Linux support.
 
 ## Decision Point
 
-**Do not proceed with full migration until:**
-1. Docker Sandboxes exits "Experimental" status
-2. Linux installation instructions are published
-3. Licensing terms are acceptable for your use case
-4. Git wrapper injection is validated as reliable
-
-**Do proceed with Phase 2 now:**
-- Extracting git safety layer reduces technical debt
-- Decoupling from proxy enables future flexibility
-- Work is valuable regardless of `sbx` adoption decision
+**Proceed with Phase 3 migration now:**
+1. ~~Docker Sandboxes exits "Experimental" status~~ — proceeding with experimental
+2. Linux microVM support confirmed (sbx v0.26.1 on Fedora 43)
+3. Licensing terms acceptable for individual use
+4. Git wrapper injection validated as reliable (Phase 0 pass)
 
 ---
 

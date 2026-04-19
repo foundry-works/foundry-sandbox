@@ -1,19 +1,18 @@
 """Sandbox metadata persistence and state management.
 
-Replaces lib/state.sh (891 lines). Handles:
-  - Sandbox metadata read/write (JSON format, with legacy ENV migration)
+Handles:
+  - Sandbox metadata read/write (JSON format, sbx backend)
   - Cast-new presets and history
   - Last-attach state tracking
   - File permission security validation
 
-Pure data management with no Docker calls.
+Pure data management with no subprocess calls.
 """
 
 from __future__ import annotations
 
 import json
 import os
-import shlex
 import stat
 from datetime import datetime, timezone
 from pathlib import Path
@@ -26,14 +25,13 @@ from foundry_sandbox.atomic_io import (
 )
 from foundry_sandbox.config import load_json
 from foundry_sandbox.constants import get_claude_configs_dir
-from foundry_sandbox.utils import flag_enabled as _flag_enabled, log_debug, log_error
-from foundry_sandbox.models import CastNewPreset, SandboxMetadata
+from foundry_sandbox.utils import log_debug, log_error
+from foundry_sandbox.models import CastNewPreset, SbxSandboxMetadata
 from foundry_sandbox.paths import (
     ensure_dir,
     path_last_attach,
     path_last_cast_new,
     path_metadata_file,
-    path_metadata_legacy_file,
     path_preset_file,
     path_presets_dir,
 )
@@ -66,11 +64,9 @@ def metadata_is_secure(path: str | Path) -> bool:
     except OSError:
         return False
 
-    # Check ownership
     if st.st_uid != os.getuid():
         return False
 
-    # Check not group/world-writable
     if st.st_mode & (stat.S_IWGRP | stat.S_IWOTH):
         return False
 
@@ -85,65 +81,52 @@ def metadata_is_secure(path: str | Path) -> bool:
 def write_sandbox_metadata(
     name: str,
     *,
+    sbx_name: str,
+    agent: str,
     repo_url: str,
     branch: str,
     from_branch: str = "",
-    network_mode: str = "",
-    sync_ssh: int = 0,
-    ssh_mode: str = "",
+    network_profile: str = "balanced",
+    git_safety_enabled: bool = True,
     working_dir: str = "",
-    sparse_checkout: bool = False,
     pip_requirements: str = "",
     allow_pr: bool = False,
-    pre_foundry: bool = False,
-    pre_foundry_version: str = "",
     enable_opencode: bool = False,
     enable_zai: bool = False,
-    mounts: list[str] | None = None,
     copies: list[str] | None = None,
-    compose_extras: list[str] | None = None,
 ) -> None:
     """Write sandbox metadata to a JSON file.
 
     Args:
         name: Sandbox name identifier.
+        sbx_name: Name as known to sbx CLI.
+        agent: Agent type (claude, codex, etc.).
         repo_url: Git repository URL.
         branch: Target branch name.
         from_branch: Base branch for PR creation.
-        network_mode: Network mode (limited, host-only, none).
-        sync_ssh: SSH sync flag (0 or 1).
-        ssh_mode: SSH mode (always, disabled).
+        network_profile: Network policy profile.
+        git_safety_enabled: Whether git safety server is active.
         working_dir: Working directory path.
-        sparse_checkout: Whether to use sparse checkout.
         pip_requirements: Path to requirements file.
         allow_pr: Whether to allow PR creation.
-        pre_foundry: Whether to upgrade foundry-mcp to pre-release.
-        pre_foundry_version: Pinned foundry-mcp pre-release version.
         enable_opencode: Whether to enable OpenCode.
         enable_zai: Whether to enable ZAI.
-        mounts: List of Docker mount specs.
         copies: List of copy specs.
-        compose_extras: List of compose extra file paths (relative to project root).
     """
-    # Validate through Pydantic model before persisting
-    model = SandboxMetadata(
+    model = SbxSandboxMetadata(
+        sbx_name=sbx_name,
+        agent=agent,
         repo_url=repo_url,
         branch=branch,
         from_branch=from_branch,
-        network_mode=network_mode,
-        sync_ssh=sync_ssh,
-        ssh_mode=ssh_mode,
+        network_profile=network_profile,
+        git_safety_enabled=git_safety_enabled,
         working_dir=working_dir,
-        sparse_checkout=sparse_checkout,
         pip_requirements=pip_requirements,
         allow_pr=allow_pr,
-        pre_foundry=pre_foundry,
-        pre_foundry_version=pre_foundry_version,
         enable_opencode=enable_opencode,
         enable_zai=enable_zai,
-        mounts=mounts or [],
         copies=copies or [],
-        compose_extras=compose_extras or [],
     )
     data = model.model_dump()
 
@@ -155,21 +138,18 @@ def write_sandbox_metadata(
 def patch_sandbox_metadata(name: str, **updates: Any) -> None:
     """Update specific fields in existing sandbox metadata.
 
-    Loads the current metadata, merges the updates, validates through the
-    Pydantic model, and writes back atomically.
-
     Args:
         name: Sandbox name identifier.
         **updates: Field names and values to update.
 
     Raises:
         FileNotFoundError: If no metadata file exists for *name*.
-        ValueError: If any key in *updates* is not a SandboxMetadata field.
+        ValueError: If any key in *updates* is not a SbxSandboxMetadata field.
     """
-    valid_fields = set(SandboxMetadata.model_fields)
+    valid_fields = set(SbxSandboxMetadata.model_fields)
     bad_keys = set(updates) - valid_fields
     if bad_keys:
-        raise ValueError(f"Unknown SandboxMetadata fields: {sorted(bad_keys)}")
+        raise ValueError(f"Unknown SbxSandboxMetadata fields: {sorted(bad_keys)}")
 
     json_path = path_metadata_file(name)
     if not json_path.exists():
@@ -180,73 +160,13 @@ def patch_sandbox_metadata(name: str, **updates: Any) -> None:
         if not data:
             raise FileNotFoundError(f"Empty metadata for sandbox '{name}'")
         data.update(updates)
-        model = SandboxMetadata(**data)
+        model = SbxSandboxMetadata(**data)
         content = json.dumps(model.model_dump()) + "\n"
         _secure_write_unlocked(json_path, content)
 
 
-def _parse_legacy_metadata(path: str | Path) -> dict[str, Any]:
-    """Parse legacy shell ENV format metadata file.
-
-    Legacy format uses shell variable assignments like:
-        SANDBOX_REPO_URL=value
-        SANDBOX_MOUNTS=(item1 item2)
-
-    Args:
-        path: Path to legacy metadata.env file.
-
-    Returns:
-        Dictionary matching the JSON metadata structure.
-    """
-    key_map = {
-        "SANDBOX_REPO_URL": "repo_url",
-        "SANDBOX_BRANCH": "branch",
-        "SANDBOX_FROM_BRANCH": "from_branch",
-        "SANDBOX_NETWORK_MODE": "network_mode",
-        "SANDBOX_SYNC_SSH": "sync_ssh",
-    }
-
-    data: dict[str, Any] = {"mounts": [], "copies": []}
-
-    with open(path, encoding="utf-8") as fh:
-        for raw in fh:
-            line = raw.strip()
-            if not line or line.startswith("#"):
-                continue
-
-            if line.startswith("SANDBOX_MOUNTS="):
-                inner = line.split("=", 1)[1].strip()
-                if inner.startswith("(") and inner.endswith(")"):
-                    inner = inner[1:-1]
-                data["mounts"] = shlex.split(inner)
-                continue
-
-            if line.startswith("SANDBOX_COPIES="):
-                inner = line.split("=", 1)[1].strip()
-                if inner.startswith("(") and inner.endswith(")"):
-                    inner = inner[1:-1]
-                data["copies"] = shlex.split(inner)
-                continue
-
-            if "=" not in line:
-                continue
-
-            key, value = line.split("=", 1)
-            key = key.strip()
-            value = value.strip()
-            if key not in key_map:
-                continue
-            parts = shlex.split(value)
-            data[key_map[key]] = parts[0] if parts else ""
-
-    return data
-
-
 def _load_metadata_from_json(json_path: Path) -> dict[str, Any] | None:
     """Read and validate metadata from a JSON file without acquiring a lock.
-
-    Callers are responsible for holding the appropriate lock (shared or
-    exclusive) before calling this function.
 
     Args:
         json_path: Path to the JSON metadata file.
@@ -257,32 +177,21 @@ def _load_metadata_from_json(json_path: Path) -> dict[str, Any] | None:
     data = load_json(str(json_path))
     if not data:
         return None
-    # Auto-derive ssh_mode if missing
-    if not data.get("ssh_mode"):
-        data["ssh_mode"] = "always" if str(data.get("sync_ssh", "0")) == "1" else "disabled"
-    # Validate through Pydantic model — fail fast on bad schema
     try:
-        model = SandboxMetadata(**data)
+        model = SbxSandboxMetadata(**data)
         return model.model_dump()
     except (ValueError, TypeError) as exc:
-        # Differentiate version skew (extra fields from a newer format) from
-        # genuine corruption (missing required fields, wrong types).
         from pydantic import ValidationError
 
         if isinstance(exc, ValidationError):
             error_types = {e["type"] for e in exc.errors()}
             version_skew_types = {"extra_forbidden"}
             if error_types and error_types <= version_skew_types:
-                # All errors are about unrecognised extra fields — likely a
-                # newer metadata format.  Return raw data so callers can still
-                # operate on what they understand.
                 log_debug(
                     f"Metadata at '{json_path}' has extra fields (version skew): {exc}; "
                     "returning raw data"
                 )
                 return data
-        # Missing required fields, invalid types, or other structural
-        # problems indicate corruption or an incompatible file.
         log_error(
             f"Metadata at '{json_path}' failed schema validation: {exc}; "
             "returning None (possible corruption)"
@@ -291,10 +200,7 @@ def _load_metadata_from_json(json_path: Path) -> dict[str, Any] | None:
 
 
 def load_sandbox_metadata(name: str) -> dict[str, Any] | None:
-    """Load sandbox metadata, with auto-migration from legacy format.
-
-    Checks for JSON metadata first, falls back to legacy ENV format.
-    Legacy files are auto-migrated to JSON and the legacy file is removed.
+    """Load sandbox metadata from JSON file.
 
     Args:
         name: Sandbox name identifier.
@@ -303,72 +209,19 @@ def load_sandbox_metadata(name: str) -> dict[str, Any] | None:
         Metadata dictionary, or None if not found.
     """
     json_path = path_metadata_file(name)
-    legacy_path = path_metadata_legacy_file(name)
 
-    if json_path.exists():
-        if not metadata_is_secure(json_path):
-            return None
-        try:
-            with _state_lock(json_path, shared=True):
-                return _load_metadata_from_json(json_path)
-        except OSError as exc:
-            # Read-only callers (list/status/info) should degrade gracefully when
-            # lock creation/acquisition is not permitted for a given sandbox.
-            log_debug(f"Skipping metadata for '{name}': lock unavailable ({exc})")
-            return None
+    if not json_path.exists():
+        return None
 
-    if legacy_path.exists():
-        if not metadata_is_secure(legacy_path):
-            return None
+    if not metadata_is_secure(json_path):
+        return None
 
-        try:
-            with _state_lock(json_path):
-                # Double-check: another process may have migrated while we waited
-                if json_path.exists():
-                    # Use the lock-free helper to avoid reentrant lock acquisition
-                    return _load_metadata_from_json(json_path)
-
-                try:
-                    data = _parse_legacy_metadata(legacy_path)
-                except (OSError, ValueError):
-                    return None
-
-                # Auto-derive ssh_mode
-                if not data.get("ssh_mode"):
-                    data["ssh_mode"] = "always" if str(data.get("sync_ssh", "0")) == "1" else "disabled"
-
-                # Migrate to JSON format (use _secure_write_unlocked to avoid
-                # deadlock — we already hold the exclusive lock on json_path)
-                model = SandboxMetadata(
-                    repo_url=data.get("repo_url", ""),
-                    branch=data.get("branch", ""),
-                    from_branch=data.get("from_branch", ""),
-                    network_mode=data.get("network_mode", ""),
-                    sync_ssh=int(data.get("sync_ssh", 0)),
-                    ssh_mode=data.get("ssh_mode", ""),
-                    working_dir=data.get("working_dir", ""),
-                    sparse_checkout=bool(data.get("sparse_checkout")),
-                    pip_requirements=data.get("pip_requirements", ""),
-                    allow_pr=bool(data.get("allow_pr")),
-                    enable_opencode=bool(data.get("enable_opencode")),
-                    enable_zai=bool(data.get("enable_zai")),
-                    mounts=data.get("mounts", []),
-                    copies=data.get("copies", []),
-                )
-                content = json.dumps(model.model_dump()) + "\n"
-                _secure_write_unlocked(json_path, content)
-                # Remove legacy file after successful migration
-                try:
-                    legacy_path.unlink()
-                except OSError:
-                    pass
-        except OSError as exc:
-            log_debug(f"Skipping legacy metadata for '{name}': lock unavailable ({exc})")
-            return None
-
-        return data
-
-    return None
+    try:
+        with _state_lock(json_path, shared=True):
+            return _load_metadata_from_json(json_path)
+    except OSError as exc:
+        log_debug(f"Skipping metadata for '{name}': lock unavailable ({exc})")
+        return None
 
 
 def list_sandboxes() -> list[dict[str, Any]]:
@@ -417,18 +270,15 @@ def inspect_sandbox(name: str) -> dict[str, Any] | None:
 
 def _build_command_line(
     repo: str,
+    agent: str = "claude",
     branch: str = "",
     from_branch: str = "",
     working_dir: str = "",
-    sparse: bool = False,
     pip_requirements: str = "",
     allow_pr: bool = False,
-    pre_foundry: bool = False,
-    network_mode: str = "limited",
-    sync_ssh: bool = False,
+    network_profile: str = "balanced",
     enable_opencode: bool = False,
     enable_zai: bool = False,
-    mounts: list[str] | None = None,
     copies: list[str] | None = None,
 ) -> str:
     """Build a display-friendly command line string from cast-new arguments."""
@@ -437,26 +287,20 @@ def _build_command_line(
         parts.append(branch)
     if from_branch:
         parts.append(from_branch)
+    if agent != "claude":
+        parts.extend(["--agent", agent])
     if working_dir:
         parts.extend(["--wd", working_dir])
-    if _flag_enabled(sparse):
-        parts.append("--sparse")
     if pip_requirements:
         parts.extend(["--pip-requirements", pip_requirements])
-    if _flag_enabled(allow_pr):
+    if allow_pr:
         parts.append("--allow-pr")
-    if _flag_enabled(pre_foundry):
-        parts.append("--pre-foundry")
-    if network_mode and network_mode != "limited":
-        parts.extend(["--network", network_mode])
-    if _flag_enabled(sync_ssh):
-        parts.append("--with-ssh")
-    if _flag_enabled(enable_opencode):
+    if network_profile and network_profile != "balanced":
+        parts.extend(["--network", network_profile])
+    if enable_opencode:
         parts.append("--with-opencode")
-    if _flag_enabled(enable_zai):
+    if enable_zai:
         parts.append("--with-zai")
-    for mount in (mounts or []):
-        parts.extend(["--mount", mount])
     for copy in (copies or []):
         parts.extend(["--copy", copy])
     return " ".join(parts)
@@ -466,50 +310,41 @@ def _write_cast_new_json(
     path: str | Path,
     *,
     repo: str,
+    agent: str = "claude",
     branch: str = "",
     from_branch: str = "",
     working_dir: str = "",
-    sparse: bool = False,
     pip_requirements: str = "",
     allow_pr: bool = False,
-    pre_foundry: bool = False,
-    network_mode: str = "limited",
-    sync_ssh: bool = False,
+    network_profile: str = "balanced",
     enable_opencode: bool = False,
     enable_zai: bool = False,
-    mounts: list[str] | None = None,
     copies: list[str] | None = None,
-    compose_extras: list[str] | None = None,
 ) -> str:
     """Write cast-new JSON to a file.
 
     Returns:
         The command line string for display.
     """
-    # Validate through Pydantic model before persisting
     preset = CastNewPreset(
         repo=repo,
+        agent=agent,
         branch=branch,
         from_branch=from_branch,
         working_dir=working_dir,
-        sparse=sparse,
         pip_requirements=pip_requirements,
         allow_pr=allow_pr,
-        pre_foundry=pre_foundry,
-        network_mode=network_mode,
-        sync_ssh=sync_ssh,
+        network_profile=network_profile,
         enable_opencode=enable_opencode,
         enable_zai=enable_zai,
-        mounts=mounts or [],
         copies=copies or [],
-        compose_extras=compose_extras or [],
     )
 
     timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
     command_line = _build_command_line(
-        repo, branch, from_branch, working_dir, sparse,
-        pip_requirements, allow_pr, pre_foundry, network_mode, sync_ssh,
-        enable_opencode, enable_zai, mounts, copies,
+        repo, agent, branch, from_branch, working_dir,
+        pip_requirements, allow_pr, network_profile,
+        enable_opencode, enable_zai, copies,
     )
 
     data = {
@@ -526,20 +361,16 @@ def _write_cast_new_json(
 def save_last_cast_new(
     *,
     repo: str,
+    agent: str = "claude",
     branch: str = "",
     from_branch: str = "",
     working_dir: str = "",
-    sparse: bool = False,
     pip_requirements: str = "",
     allow_pr: bool = False,
-    pre_foundry: bool = False,
-    network_mode: str = "limited",
-    sync_ssh: bool = False,
+    network_profile: str = "balanced",
     enable_opencode: bool = False,
     enable_zai: bool = False,
-    mounts: list[str] | None = None,
     copies: list[str] | None = None,
-    compose_extras: list[str] | None = None,
 ) -> str:
     """Save the most recent cast-new command.
 
@@ -548,14 +379,11 @@ def save_last_cast_new(
     """
     path = path_last_cast_new()
     return _write_cast_new_json(
-        path, repo=repo, branch=branch, from_branch=from_branch,
-        working_dir=working_dir, sparse=sparse,
-        pip_requirements=pip_requirements, allow_pr=allow_pr,
-        pre_foundry=pre_foundry,
-        network_mode=network_mode, sync_ssh=sync_ssh,
+        path, repo=repo, agent=agent, branch=branch, from_branch=from_branch,
+        working_dir=working_dir, pip_requirements=pip_requirements,
+        allow_pr=allow_pr, network_profile=network_profile,
         enable_opencode=enable_opencode, enable_zai=enable_zai,
-        mounts=mounts, copies=copies,
-        compose_extras=compose_extras,
+        copies=copies,
     )
 
 
@@ -563,37 +391,26 @@ def save_cast_preset(
     preset_name: str,
     *,
     repo: str,
+    agent: str = "claude",
     branch: str = "",
     from_branch: str = "",
     working_dir: str = "",
-    sparse: bool = False,
     pip_requirements: str = "",
     allow_pr: bool = False,
-    pre_foundry: bool = False,
-    network_mode: str = "limited",
-    sync_ssh: bool = False,
+    network_profile: str = "balanced",
     enable_opencode: bool = False,
     enable_zai: bool = False,
-    mounts: list[str] | None = None,
     copies: list[str] | None = None,
-    compose_extras: list[str] | None = None,
 ) -> None:
-    """Save a named cast-new preset.
-
-    Args:
-        preset_name: Name for the preset.
-    """
+    """Save a named cast-new preset."""
     ensure_dir(path_presets_dir())
     path = path_preset_file(preset_name)
     _write_cast_new_json(
-        path, repo=repo, branch=branch, from_branch=from_branch,
-        working_dir=working_dir, sparse=sparse,
-        pip_requirements=pip_requirements, allow_pr=allow_pr,
-        pre_foundry=pre_foundry,
-        network_mode=network_mode, sync_ssh=sync_ssh,
+        path, repo=repo, agent=agent, branch=branch, from_branch=from_branch,
+        working_dir=working_dir, pip_requirements=pip_requirements,
+        allow_pr=allow_pr, network_profile=network_profile,
         enable_opencode=enable_opencode, enable_zai=enable_zai,
-        mounts=mounts, copies=copies,
-        compose_extras=compose_extras,
+        copies=copies,
     )
 
 
@@ -612,22 +429,18 @@ def _load_cast_new_json(path: str | Path) -> dict[str, Any] | None:
         preset = CastNewPreset(**args)
         result = preset.model_dump()
     except (ValueError, TypeError):
-        # Fallback: manual extraction for backward compat with pre-model files
         result = {
             "repo": args.get("repo", ""),
+            "agent": args.get("agent", "claude"),
             "branch": args.get("branch", ""),
             "from_branch": args.get("from_branch", ""),
             "working_dir": args.get("working_dir", ""),
-            "sparse": _flag_enabled(args.get("sparse", False)),
             "pip_requirements": args.get("pip_requirements", ""),
-            "allow_pr": _flag_enabled(args.get("allow_pr", False)),
-            "pre_foundry": _flag_enabled(args.get("pre_foundry", False)),
-            "mounts": args.get("mounts", []),
+            "allow_pr": args.get("allow_pr", False),
+            "network_profile": args.get("network_profile", "balanced"),
+            "enable_opencode": args.get("enable_opencode", False),
+            "enable_zai": args.get("enable_zai", False),
             "copies": args.get("copies", []),
-            "network_mode": args.get("network_mode", "limited"),
-            "sync_ssh": _flag_enabled(args.get("sync_ssh", False)),
-            "enable_opencode": _flag_enabled(args.get("enable_opencode", False)),
-            "enable_zai": _flag_enabled(args.get("enable_zai", False)),
         }
     result["command_line"] = data.get("command_line", "")
     return result
@@ -670,9 +483,7 @@ def list_cast_presets() -> list[str]:
     if not presets_dir.exists():
         return []
 
-    return sorted(
-        p.stem for p in presets_dir.glob("*.json")
-    )
+    return sorted(p.stem for p in presets_dir.glob("*.json"))
 
 
 def show_cast_preset(preset_name: str) -> str | None:

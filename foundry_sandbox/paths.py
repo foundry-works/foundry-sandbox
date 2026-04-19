@@ -35,18 +35,14 @@ class SandboxPaths(NamedTuple):
     """Container for all derived paths related to a sandbox.
 
     Attributes:
-        worktree_path: Path to the Git worktree
-        container_name: Docker container name
+        worktree_path: Path to the Git worktree (also the sbx workspace dir)
         claude_config_path: Path to Claude configuration directory
         claude_home_path: Path to Claude home directory
-        override_file: Path to docker-compose override file
     """
 
     worktree_path: Path
-    container_name: str
     claude_config_path: Path
     claude_home_path: Path
-    override_file: Path
 
 
 # ============================================================================
@@ -111,19 +107,6 @@ def path_claude_home(name: str) -> Path:
     """
     _assert_safe_path_component(name)
     return path_claude_config(name) / "claude"
-
-
-def path_override_file(name: str) -> Path:
-    """Get the path to a sandbox's docker-compose override file.
-
-    Args:
-        name: Sandbox name
-
-    Returns:
-        Path to the override YAML file
-    """
-    _assert_safe_path_component(name)
-    return path_claude_config(name) / "docker-compose.override.yml"
 
 
 def path_metadata_file(name: str) -> Path:
@@ -222,22 +205,17 @@ def path_preset_file(name: str) -> Path:
 def derive_sandbox_paths(name: str) -> SandboxPaths:
     """Derive all paths related to a named sandbox.
 
-    This function combines several path helpers to create a complete
-    set of paths for a given sandbox.
-
     Args:
-        name: Sandbox name
+        name: Sandbox name (also used as the sbx sandbox name).
 
     Returns:
-        SandboxPaths with all derived paths and container name
+        SandboxPaths with all derived paths.
     """
     _assert_safe_path_component(name)
     return SandboxPaths(
         worktree_path=path_worktree(name),
-        container_name=f"sandbox-{name}",
         claude_config_path=path_claude_config(name),
         claude_home_path=path_claude_home(name),
-        override_file=path_override_file(name),
     )
 
 

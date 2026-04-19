@@ -3,36 +3,39 @@ from __future__ import annotations
 from pydantic import BaseModel, Field
 
 
-class SandboxMetadata(BaseModel):
-    """Pydantic model for sandbox metadata.
+class SbxSandboxMetadata(BaseModel):
+    """Metadata for an sbx-based sandbox.
 
-    Matches the structure of metadata.json files used in sandbox configurations.
-    All fields validate on construction using Pydantic V2.
+    Replaces the docker-compose-based SandboxMetadata. Stores only fields
+    relevant to the sbx backend.
     """
 
+    backend: str = "sbx"
+    """Backend identifier (always 'sbx')."""
+
+    sbx_name: str
+    """Sandbox name as known to sbx CLI."""
+
+    agent: str
+    """Agent type: claude, codex, copilot, gemini, kiro, opencode, shell."""
+
     repo_url: str
-    """Repository URL (required)."""
+    """Repository URL."""
 
     branch: str
-    """Branch name (required)."""
+    """Branch name."""
 
     from_branch: str = ""
     """Source branch for PR creation."""
 
-    network_mode: str = "limited"
-    """Network mode: limited, host-only, or none."""
+    network_profile: str = "balanced"
+    """Network policy profile: balanced, allow-all, deny-all."""
 
-    sync_ssh: int = 0
-    """Whether to sync SSH credentials (0 or 1)."""
-
-    ssh_mode: str = "always"
-    """SSH mode: always or disabled."""
+    git_safety_enabled: bool = True
+    """Whether git safety server is active for this sandbox."""
 
     working_dir: str = ""
     """Working directory relative path."""
-
-    sparse_checkout: bool = False
-    """Whether to use sparse checkout."""
 
     pip_requirements: str = ""
     """Path to pip requirements file or 'auto'."""
@@ -40,36 +43,24 @@ class SandboxMetadata(BaseModel):
     allow_pr: bool = False
     """Whether to allow PR creation."""
 
-    pre_foundry: bool = False
-    """Whether to upgrade foundry-mcp to pre-release."""
-
-    pre_foundry_version: str = ""
-    """Pinned foundry-mcp pre-release version (e.g. '1.2.0a3')."""
-
     enable_opencode: bool = False
     """Whether to enable OpenCode."""
 
     enable_zai: bool = False
     """Whether to enable ZAI."""
 
-    mounts: list[str] = Field(default_factory=list)
-    """List of mount specifications (host:container[:ro])."""
-
     copies: list[str] = Field(default_factory=list)
     """List of copy specifications (host:container)."""
 
-    compose_extras: list[str] = Field(default_factory=list)
-    """List of compose extra file paths (relative to project root)."""
-
 
 class CastNewPreset(BaseModel):
-    """Structured representation of cast-new preset arguments.
-
-    Replaces the raw dict used in state.py for preset persistence.
-    """
+    """Structured representation of cast-new preset arguments."""
 
     repo: str
     """Repository URL or org/repo shorthand."""
+
+    agent: str = "claude"
+    """Agent type."""
 
     branch: str = ""
     """Target branch name."""
@@ -80,23 +71,14 @@ class CastNewPreset(BaseModel):
     working_dir: str = ""
     """Working directory relative path."""
 
-    sparse: bool = False
-    """Whether to use sparse checkout."""
-
     pip_requirements: str = ""
     """Path to pip requirements file or 'auto'."""
 
     allow_pr: bool = False
     """Whether to allow PR creation."""
 
-    pre_foundry: bool = False
-    """Whether to upgrade foundry-mcp to pre-release."""
-
-    network_mode: str = "limited"
-    """Network mode: limited, host-only, or none."""
-
-    sync_ssh: bool = False
-    """Whether to sync SSH credentials."""
+    network_profile: str = "balanced"
+    """Network policy profile."""
 
     enable_opencode: bool = False
     """Whether to enable OpenCode."""
@@ -104,72 +86,5 @@ class CastNewPreset(BaseModel):
     enable_zai: bool = False
     """Whether to enable ZAI."""
 
-    mounts: list[str] = Field(default_factory=list)
-    """List of mount specifications (host:container[:ro])."""
-
     copies: list[str] = Field(default_factory=list)
     """List of copy specifications (host:container)."""
-
-    compose_extras: list[str] = Field(default_factory=list)
-    """List of compose extra file paths (relative to project root)."""
-
-
-class ProxyRegistration(BaseModel):
-    """Metadata passed to proxy registration API.
-
-    Built in new_setup.py and start.py, consumed by proxy.setup_proxy_registration().
-    """
-
-    repo: str = ""
-    """Repository spec (org/repo format)."""
-
-    allow_pr: bool = False
-    """Whether PR operations are allowed."""
-
-    sandbox_branch: str = ""
-    """Branch checked out in the sandbox."""
-
-    from_branch: str = ""
-    """Base branch for PR creation."""
-
-
-class CredentialPlaceholders(BaseModel):
-    """Credential placeholder env vars for sandbox credential isolation.
-
-    Returned by docker.setup_credential_placeholders(), consumed by compose_up().
-    """
-
-    sandbox_anthropic_api_key: str = ""
-    """Placeholder or empty for Anthropic API key."""
-
-    sandbox_claude_oauth: str = ""
-    """Placeholder or empty for Claude OAuth token."""
-
-    sandbox_gemini_api_key: str = ""
-    """Placeholder or empty for Gemini API key."""
-
-    sandbox_zhipu_api_key: str = ""
-    """Placeholder or empty for Zhipu API key."""
-
-    sandbox_enable_tavily: str = "0"
-    """Whether Tavily is enabled ('0' or '1')."""
-
-    sandbox_openai_base_url: str = ""
-    """OpenAI base URL (conditional: only set when host has OPENAI_API_KEY)."""
-
-    user_service_placeholders: dict[str, str] = Field(default_factory=dict)
-    """Placeholders for user-defined services (env_var -> placeholder)."""
-
-    def to_env_dict(self) -> dict[str, str]:
-        """Convert to uppercase env var dict for backward compatibility with compose_up()."""
-        env = {
-            "SANDBOX_ANTHROPIC_API_KEY": self.sandbox_anthropic_api_key,
-            "SANDBOX_CLAUDE_OAUTH": self.sandbox_claude_oauth,
-            "SANDBOX_GEMINI_API_KEY": self.sandbox_gemini_api_key,
-            "SANDBOX_ZHIPU_API_KEY": self.sandbox_zhipu_api_key,
-            "SANDBOX_ENABLE_TAVILY": self.sandbox_enable_tavily,
-            "SANDBOX_OPENAI_BASE_URL": self.sandbox_openai_base_url,
-        }
-        for env_var, placeholder in self.user_service_placeholders.items():
-            env[f"SANDBOX_{env_var}"] = placeholder
-        return env
