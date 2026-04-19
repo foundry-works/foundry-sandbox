@@ -263,7 +263,11 @@ def _is_allowed_branch_name(
     Allowed: the sandbox's own branch, well-known branches,
     the sandbox's base branch (if any), and branches matching
     well-known prefixes.
+
+    Raises ValueError if sandbox_branch is empty.
     """
+    if not sandbox_branch:
+        raise ValueError("sandbox_branch must be a non-empty string")
     if name == sandbox_branch:
         return True
     if base_branch and name == base_branch:

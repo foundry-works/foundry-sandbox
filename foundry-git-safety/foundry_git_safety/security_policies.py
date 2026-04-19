@@ -46,6 +46,8 @@ def normalize_path(raw_path: str) -> str | None:
     path = unquote(path)
     if "%" in path:
         return None
+    if "\0" in path:
+        return None
     path = posixpath.normpath(path)  # collapses //, resolves ./ segments
     if path == ".":
         path = "/"

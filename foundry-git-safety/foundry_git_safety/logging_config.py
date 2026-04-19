@@ -3,7 +3,7 @@
 This module provides a centralized logging configuration for the git safety
 layer, with support for:
 - JSON-formatted log output for machine parsing
-- Correlation IDs (request_id, container_id) for request tracing
+- Correlation IDs (request_id, sandbox_id) for request tracing
 - Configurable log levels via environment variables
 - Thread-local context for correlation IDs
 
@@ -17,12 +17,12 @@ Usage:
     logger = get_logger(__name__)
 
     # Set correlation context for the current request
-    set_context(request_id="req-123", container_id="container-abc")
+    set_context(request_id="req-123", sandbox_id="sandbox-abc")
 
     # Log with automatic context injection
     logger.info("Processing request")
     # Output: {"timestamp": "...", "level": "INFO", "message": "Processing request",
-    #          "request_id": "req-123", "container_id": "container-abc", ...}
+    #          "request_id": "req-123", "sandbox_id": "sandbox-abc", ...}
 
     # Clear context when request completes
     clear_context()
@@ -33,12 +33,13 @@ import logging
 import os
 import sys
 import time
+import uuid
 from contextvars import ContextVar
 from typing import Any
 
 # Context variables for correlation IDs (thread-safe)
 _request_id: ContextVar[str | None] = ContextVar("request_id", default=None)
-_container_id: ContextVar[str | None] = ContextVar("container_id", default=None)
+_sandbox_id: ContextVar[str | None] = ContextVar("sandbox_id", default=None)
 _extra_context: ContextVar[dict] = ContextVar("extra_context", default={})
 
 # Configuration from environment
@@ -50,20 +51,20 @@ LOG_INCLUDE_LOCATION = os.environ.get("LOG_INCLUDE_LOCATION", "true").lower() ==
 
 def set_context(
     request_id: str | None = None,
-    container_id: str | None = None,
+    sandbox_id: str | None = None,
     **extra: Any,
 ) -> None:
     """Set correlation context for the current async context / thread.
 
     Args:
         request_id: Unique request identifier for tracing.
-        container_id: Container identifier for the request source.
+        sandbox_id: Sandbox identifier for the request source.
         **extra: Additional context fields to include in logs.
     """
     if request_id is not None:
         _request_id.set(request_id)
-    if container_id is not None:
-        _container_id.set(container_id)
+    if sandbox_id is not None:
+        _sandbox_id.set(sandbox_id)
     if extra:
         current = _extra_context.get()
         _extra_context.set({**current, **extra})
@@ -73,15 +74,15 @@ def get_context() -> dict[str, Any]:
     """Get the current correlation context.
 
     Returns:
-        Dictionary with request_id, container_id, and any extra context.
+        Dictionary with request_id, sandbox_id, and any extra context.
     """
     context = {}
     request_id = _request_id.get()
     if request_id:
         context["request_id"] = request_id
-    container_id = _container_id.get()
-    if container_id:
-        context["container_id"] = container_id
+    sandbox_id = _sandbox_id.get()
+    if sandbox_id:
+        context["sandbox_id"] = sandbox_id
     extra = _extra_context.get()
     if extra:
         context.update(extra)
@@ -91,7 +92,7 @@ def get_context() -> dict[str, Any]:
 def clear_context() -> None:
     """Clear all correlation context for the current async context / thread."""
     _request_id.set(None)
-    _container_id.set(None)
+    _sandbox_id.set(None)
     _extra_context.set({})
 
 
@@ -105,7 +106,7 @@ class JSONFormatter(logging.Formatter):
         "logger": "mymodule",
         "message": "Something happened",
         "request_id": "req-123",
-        "container_id": "container-abc",
+        "sandbox_id": "sandbox-abc",
         "location": "mymodule.py:42:my_function",
         "extra_field": "extra_value"
     }
@@ -174,7 +175,7 @@ class TextFormatter(logging.Formatter):
     """Human-readable text formatter with correlation ID support.
 
     Produces logs in the format:
-    2024-01-15T10:30:00.123456Z INFO [mymodule] [req-123/container-abc] Something happened
+    2024-01-15T10:30:00.123456Z INFO [mymodule] [req-123/sandbox-abc] Something happened
     """
 
     def __init__(
@@ -215,8 +216,8 @@ class TextFormatter(logging.Formatter):
             ctx_parts = []
             if "request_id" in context:
                 ctx_parts.append(context["request_id"])
-            if "container_id" in context:
-                ctx_parts.append(context["container_id"])
+            if "sandbox_id" in context:
+                ctx_parts.append(context["sandbox_id"])
             if ctx_parts:
                 parts.append(f"[{'/'.join(ctx_parts)}]")
 
@@ -306,33 +307,33 @@ class LogContext:
     """Context manager for setting correlation context.
 
     Usage:
-        with LogContext(request_id="req-123", container_id="container-abc"):
-            logger.info("Processing")  # Will include request_id and container_id
+        with LogContext(request_id="req-123", sandbox_id="sandbox-abc"):
+            logger.info("Processing")  # Will include request_id and sandbox_id
         # Context automatically cleared after the block
     """
 
     def __init__(
         self,
         request_id: str | None = None,
-        container_id: str | None = None,
+        sandbox_id: str | None = None,
         **extra: Any,
     ):
         self.request_id = request_id
-        self.container_id = container_id
+        self.sandbox_id = sandbox_id
         self.extra = extra
         self._tokens: dict[str, Any] = {}
 
     def __enter__(self) -> "LogContext":
         # Save current values
         self._tokens["request_id"] = _request_id.get()
-        self._tokens["container_id"] = _container_id.get()
+        self._tokens["sandbox_id"] = _sandbox_id.get()
         self._tokens["extra"] = _extra_context.get()
 
         # Set new values
         if self.request_id is not None:
             _request_id.set(self.request_id)
-        if self.container_id is not None:
-            _container_id.set(self.container_id)
+        if self.sandbox_id is not None:
+            _sandbox_id.set(self.sandbox_id)
         if self.extra:
             current = _extra_context.get()
             _extra_context.set({**current, **self.extra})
@@ -342,7 +343,7 @@ class LogContext:
     def __exit__(self, exc_type, exc_val, exc_tb) -> None:
         # Restore previous values
         _request_id.set(self._tokens.get("request_id"))
-        _container_id.set(self._tokens.get("container_id"))
+        _sandbox_id.set(self._tokens.get("sandbox_id"))
         _extra_context.set(self._tokens.get("extra", {}))
 
 
@@ -352,7 +353,6 @@ def generate_request_id() -> str:
     Returns:
         A unique identifier string (UUID4 format).
     """
-    import uuid
     return str(uuid.uuid4())
 
 
@@ -362,7 +362,7 @@ def flask_request_middleware(app):
 
     This middleware:
     - Generates a request_id for each request (or uses X-Request-ID header)
-    - Sets logging context with request_id and container_id (from X-Container-Id)
+    - Sets logging context with request_id and sandbox_id (from X-Sandbox-Id)
     - Logs request start and completion
 
     Args:
@@ -378,13 +378,13 @@ def flask_request_middleware(app):
         request_id = request.headers.get("X-Request-ID") or generate_request_id()
         g.request_id = request_id
 
-        # Get container ID from header (if present)
-        container_id = request.headers.get("X-Container-ID")
+        # Get sandbox ID from header (if present)
+        sandbox_id = request.headers.get("X-Sandbox-Id")
 
         # Set logging context
         set_context(
             request_id=request_id,
-            container_id=container_id,
+            sandbox_id=sandbox_id,
             method=request.method,
             path=request.path,
         )

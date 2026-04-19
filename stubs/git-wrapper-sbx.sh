@@ -200,6 +200,12 @@ if [[ -z "$SANDBOX_ID" ]]; then
     exit 1
 fi
 
+# Validate SANDBOX_ID to prevent header injection (no newlines, CR, or control chars)
+if [[ "$SANDBOX_ID" =~ [[:cntrl:]] ]]; then
+    echo "error: git wrapper: SANDBOX_ID contains invalid characters" >&2
+    exit 1
+fi
+
 if [[ -z "$HMAC_SECRET_FILE" || ! -f "$HMAC_SECRET_FILE" ]]; then
     echo "error: git wrapper: HMAC secret file not found (set GIT_HMAC_SECRET_FILE or place .foundry/hmac-secret in workspace)" >&2
     exit 1
@@ -223,8 +229,11 @@ SIGNATURE=$(compute_hmac "POST" "/git/exec" "$BODY" "$TIMESTAMP" "$NONCE" "$HMAC
 
 RESPONSE_FILE=$(mktemp)
 HTTP_CODE_FILE=$(mktemp)
-trap 'rm -f "$RESPONSE_FILE" "$HTTP_CODE_FILE"; cleanup 2' INT
-trap 'rm -f "$RESPONSE_FILE" "$HTTP_CODE_FILE"; cleanup 15' TERM
+PARSED_EXIT=$(mktemp)
+PARSED_STDOUT=$(mktemp)
+PARSED_STDERR=$(mktemp)
+trap 'rm -f "$RESPONSE_FILE" "$HTTP_CODE_FILE" "$PARSED_EXIT" "$PARSED_STDOUT" "$PARSED_STDERR"; cleanup 2' INT
+trap 'rm -f "$RESPONSE_FILE" "$HTTP_CODE_FILE" "$PARSED_EXIT" "$PARSED_STDOUT" "$PARSED_STDERR"; cleanup 15' TERM
 
 curl -s --max-time "$PROXY_TIMEOUT" --connect-timeout 5 \
     --proxy "$SBX_PROXY" \
@@ -280,12 +289,6 @@ case "$HTTP_CODE" in
         exit 1
         ;;
 esac
-
-PARSED_EXIT=$(mktemp)
-PARSED_STDOUT=$(mktemp)
-PARSED_STDERR=$(mktemp)
-trap 'rm -f "$RESPONSE_FILE" "$HTTP_CODE_FILE" "$PARSED_EXIT" "$PARSED_STDOUT" "$PARSED_STDERR"; cleanup 2' INT
-trap 'rm -f "$RESPONSE_FILE" "$HTTP_CODE_FILE" "$PARSED_EXIT" "$PARSED_STDOUT" "$PARSED_STDERR"; cleanup 15' TERM
 
 python3 - "$RESPONSE_FILE" "$PARSED_EXIT" "$PARSED_STDOUT" "$PARSED_STDERR" <<'PY'
 import base64, json, sys

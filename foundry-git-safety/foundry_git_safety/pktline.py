@@ -19,8 +19,7 @@ For push operations, ref updates follow the format:
 from dataclasses import dataclass
 from typing import BinaryIO, Iterator, List, Optional, Tuple
 
-# Zero SHA for detecting branch creation/deletion
-ZERO_SHA = "0" * 40
+from .policies import ZERO_SHA
 
 # Default configuration for pkt-line reading
 DEFAULT_MAX_PKTLINE_BYTES = 65536

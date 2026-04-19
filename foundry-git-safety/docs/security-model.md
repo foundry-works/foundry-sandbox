@@ -60,8 +60,8 @@ Direct pushes (create, update, delete) to protected branches are blocked. The on
 ### Layer 6: File Restriction Enforcement
 
 Pushes and commits that modify restricted files are blocked:
-- **Blocked**: `.github/workflows/`, `.github/actions/`, `Makefile`, `.pre-commit-config.yaml`
-- **Warned**: `package.json`, `pyproject.toml`, `docker-compose.yml`, etc. (configurable as log or reject)
+- **Blocked**: `.github/workflows/`, `.github/actions/`, `Makefile`, `Justfile`, `Taskfile.yml`, `.pre-commit-config.yaml`, `CODEOWNERS`, `.github/FUNDING.yml`, `.env*`
+- **Warned**: `package.json`, `pyproject.toml`, `requirements.txt`, `Gemfile`, `go.mod`, `go.sum`, `Cargo.toml`, `Cargo.lock`, `docker-compose*.yml`, `Dockerfile` (default: reject; configurable as log or reject)
 
 Fails closed: if the config cannot be loaded or the diff cannot be computed, the operation is blocked.
 

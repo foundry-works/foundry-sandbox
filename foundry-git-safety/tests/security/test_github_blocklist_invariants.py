@@ -7,6 +7,7 @@ Security invariants under test:
 """
 
 import json
+import re
 
 import pytest
 
@@ -34,100 +35,70 @@ class TestBlocklistCompleteness:
         block a sample request."""
         checker = GitHubAPIChecker(allow_pr_operations=True)
 
-        # Concrete paths that should match each blocked pattern.
-        _CONCRETE_PATHS: dict[int, str] = {
-            # DELETE /repos/owner/repo
-            0: "/repos/acme/project",
-            # DELETE /repos/owner/repo/releases/123
-            1: "/repos/acme/project/releases/42",
-            # DELETE /repos/owner/repo/git/refs/...
-            2: "/repos/acme/project/git/refs/heads/main",
-            # PATCH /repos/owner/repo/git/refs/...
-            3: "/repos/acme/project/git/refs/heads/main",
-            # PUT /repos/owner/repo/pulls/1/merge
-            4: "/repos/acme/project/pulls/7/merge",
-            # PUT /repos/owner/repo/pulls/1/auto-merge
-            5: "/repos/acme/project/pulls/7/auto-merge",
-            # DELETE /repos/owner/repo/pulls/1/auto-merge
-            6: "/repos/acme/project/pulls/7/auto-merge",
-            # DELETE /repos/owner/repo/pulls/1/reviews/2
-            7: "/repos/acme/project/pulls/7/reviews/99",
-            # POST /repos/owner/repo/merges
-            8: "/repos/acme/project/merges",
-            # DELETE /repos/owner/repo/branches/main/protection
-            9: "/repos/acme/project/branches/main/protection",
-            # PUT /repos/owner/repo/branches/main/protection
-            10: "/repos/acme/project/branches/main/protection",
-            # POST /repos/owner/repo/branches/main/protection
-            11: "/repos/acme/project/branches/main/protection",
-            # POST /repos/owner/repo/git/refs
-            12: "/repos/acme/project/git/refs",
-            # GET /repos/owner/repo/actions/secrets
-            13: "/repos/acme/project/actions/secrets",
-            # PUT /repos/owner/repo/actions/secrets/MY_SECRET
-            14: "/repos/acme/project/actions/secrets/MY_SECRET",
-            # DELETE /repos/owner/repo/actions/secrets/MY_SECRET
-            15: "/repos/acme/project/actions/secrets/MY_SECRET",
-            # GET /repos/owner/repo/actions/variables
-            16: "/repos/acme/project/actions/variables",
-            # POST /repos/owner/repo/actions/variables
-            17: "/repos/acme/project/actions/variables",
-            # PATCH /repos/owner/repo/actions/variables/MY_VAR
-            18: "/repos/acme/project/actions/variables/MY_VAR",
-            # DELETE /repos/owner/repo/actions/variables/MY_VAR
-            19: "/repos/acme/project/actions/variables/MY_VAR",
-            # GET /orgs/acme/actions/secrets
-            20: "/orgs/acme/actions/secrets",
-            # PUT /orgs/acme/actions/secrets/ORG_SECRET
-            21: "/orgs/acme/actions/secrets/ORG_SECRET",
-            # DELETE /orgs/acme/actions/secrets/ORG_SECRET
-            22: "/orgs/acme/actions/secrets/ORG_SECRET",
-            # GET /orgs/acme/actions/variables
-            23: "/orgs/acme/actions/variables",
-            # POST /orgs/acme/actions/variables
-            24: "/orgs/acme/actions/variables",
-            # PATCH /orgs/acme/actions/variables/ORG_VAR
-            25: "/orgs/acme/actions/variables/ORG_VAR",
-            # DELETE /orgs/acme/actions/variables/ORG_VAR
-            26: "/orgs/acme/actions/variables/ORG_VAR",
-            # GET /repos/owner/repo/environments/prod/secrets
-            27: "/repos/acme/project/environments/prod/secrets",
-            # PUT /repos/owner/repo/environments/prod/secrets/ENV_SECRET
-            28: "/repos/acme/project/environments/prod/secrets/ENV_SECRET",
-            # DELETE /repos/owner/repo/environments/prod/secrets/ENV_SECRET
-            29: "/repos/acme/project/environments/prod/secrets/ENV_SECRET",
-            # GET /repos/owner/repo/environments/prod/variables
-            30: "/repos/acme/project/environments/prod/variables",
-            # POST /repos/owner/repo/environments/prod/variables
-            31: "/repos/acme/project/environments/prod/variables",
-            # PATCH /repos/owner/repo/environments/prod/variables/ENV_VAR
-            32: "/repos/acme/project/environments/prod/variables/ENV_VAR",
-            # DELETE /repos/owner/repo/environments/prod/variables/ENV_VAR
-            33: "/repos/acme/project/environments/prod/variables/ENV_VAR",
-            # GET /repos/owner/repo/dependabot/secrets
-            34: "/repos/acme/project/dependabot/secrets",
-            # PUT /repos/owner/repo/dependabot/secrets/DEP_SECRET
-            35: "/repos/acme/project/dependabot/secrets/DEP_SECRET",
-            # DELETE /repos/owner/repo/dependabot/secrets/DEP_SECRET
-            36: "/repos/acme/project/dependabot/secrets/DEP_SECRET",
-            # GET /repos/owner/repo/codespaces/secrets
-            37: "/repos/acme/project/codespaces/secrets",
-            # PUT /repos/owner/repo/codespaces/secrets/CS_SECRET
-            38: "/repos/acme/project/codespaces/secrets/CS_SECRET",
-            # DELETE /repos/owner/repo/codespaces/secrets/CS_SECRET
-            39: "/repos/acme/project/codespaces/secrets/CS_SECRET",
-        }
+        # Concrete test paths for blocked patterns.
+        # Each entry is (description, method, path) — method must match and
+        # path must match the corresponding BLOCKED_PATTERNS regex.
+        _CONCRETE_PATHS = [
+            ("DELETE /repos/owner/repo", "DELETE", "/repos/acme/project"),
+            ("DELETE releases", "DELETE", "/repos/acme/project/releases/42"),
+            ("DELETE git/refs", "DELETE", "/repos/acme/project/git/refs/heads/main"),
+            ("PATCH git/refs", "PATCH", "/repos/acme/project/git/refs/heads/main"),
+            ("PUT pulls/merge", "PUT", "/repos/acme/project/pulls/7/merge"),
+            ("PUT pulls/auto-merge", "PUT", "/repos/acme/project/pulls/7/auto-merge"),
+            ("DELETE pulls/auto-merge", "DELETE", "/repos/acme/project/pulls/7/auto-merge"),
+            ("DELETE pulls/reviews", "DELETE", "/repos/acme/project/pulls/7/reviews/99"),
+            ("POST merges", "POST", "/repos/acme/project/merges"),
+            ("DELETE branches/protection", "DELETE", "/repos/acme/project/branches/main/protection"),
+            ("PUT branches/protection", "PUT", "/repos/acme/project/branches/main/protection"),
+            ("POST branches/protection", "POST", "/repos/acme/project/branches/main/protection"),
+            ("POST git/refs", "POST", "/repos/acme/project/git/refs"),
+            ("GET actions/secrets", "GET", "/repos/acme/project/actions/secrets"),
+            ("PUT actions/secrets", "PUT", "/repos/acme/project/actions/secrets/MY_SECRET"),
+            ("DELETE actions/secrets", "DELETE", "/repos/acme/project/actions/secrets/MY_SECRET"),
+            ("GET actions/variables", "GET", "/repos/acme/project/actions/variables"),
+            ("POST actions/variables", "POST", "/repos/acme/project/actions/variables"),
+            ("PATCH actions/variables", "PATCH", "/repos/acme/project/actions/variables/MY_VAR"),
+            ("DELETE actions/variables", "DELETE", "/repos/acme/project/actions/variables/MY_VAR"),
+            ("GET orgs actions/secrets", "GET", "/orgs/acme/actions/secrets"),
+            ("PUT orgs actions/secrets", "PUT", "/orgs/acme/actions/secrets/ORG_SECRET"),
+            ("DELETE orgs actions/secrets", "DELETE", "/orgs/acme/actions/secrets/ORG_SECRET"),
+            ("GET orgs actions/variables", "GET", "/orgs/acme/actions/variables"),
+            ("POST orgs actions/variables", "POST", "/orgs/acme/actions/variables"),
+            ("PATCH orgs actions/variables", "PATCH", "/orgs/acme/actions/variables/ORG_VAR"),
+            ("DELETE orgs actions/variables", "DELETE", "/orgs/acme/actions/variables/ORG_VAR"),
+            ("GET environments/secrets", "GET", "/repos/acme/project/environments/prod/secrets"),
+            ("PUT environments/secrets", "PUT", "/repos/acme/project/environments/prod/secrets/ENV_SECRET"),
+            ("DELETE environments/secrets", "DELETE", "/repos/acme/project/environments/prod/secrets/ENV_SECRET"),
+            ("GET environments/variables", "GET", "/repos/acme/project/environments/prod/variables"),
+            ("POST environments/variables", "POST", "/repos/acme/project/environments/prod/variables"),
+            ("PATCH environments/variables", "PATCH", "/repos/acme/project/environments/prod/variables/ENV_VAR"),
+            ("DELETE environments/variables", "DELETE", "/repos/acme/project/environments/prod/variables/ENV_VAR"),
+            ("GET dependabot/secrets", "GET", "/repos/acme/project/dependabot/secrets"),
+            ("PUT dependabot/secrets", "PUT", "/repos/acme/project/dependabot/secrets/DEP_SECRET"),
+            ("DELETE dependabot/secrets", "DELETE", "/repos/acme/project/dependabot/secrets/DEP_SECRET"),
+            ("GET codespaces/secrets", "GET", "/repos/acme/project/codespaces/secrets"),
+            ("PUT codespaces/secrets", "PUT", "/repos/acme/project/codespaces/secrets/CS_SECRET"),
+            ("DELETE codespaces/secrets", "DELETE", "/repos/acme/project/codespaces/secrets/CS_SECRET"),
+        ]
 
+        # Verify each BLOCKED_PATTERNS entry matches at least one concrete path
         for idx, (method, pattern, message) in enumerate(BLOCKED_PATTERNS):
-            assert idx in _CONCRETE_PATHS, (
+            compiled = re.compile(pattern)
+            matched_paths = [
+                path for (_, m, path) in _CONCRETE_PATHS
+                if m == method and compiled.match(path)
+            ]
+            assert matched_paths, (
                 f"BLOCKED_PATTERNS[{idx}] ({method} {pattern}) has no concrete test path"
             )
-            path = _CONCRETE_PATHS[idx]
-            allowed, reason = checker.check_request(method, path)
-            assert not allowed, (
-                f"BLOCKED_PATTERNS[{idx}] ({method} {path}) was allowed: {reason}"
-            )
-            assert reason is not None
+            # Verify at least one matched path is actually blocked
+            for path in matched_paths:
+                allowed, reason = checker.check_request(method, path)
+                assert not allowed, (
+                    f"BLOCKED_PATTERNS[{idx}] ({method} {path}) was allowed: {reason}"
+                )
+                assert reason is not None
+                break  # One successful block per pattern is sufficient
 
     def test_all_always_blocked_graphql_mutations_are_tested(self) -> None:
         """Every mutation in ALWAYS_BLOCKED_GRAPHQL_MUTATIONS must be blocked

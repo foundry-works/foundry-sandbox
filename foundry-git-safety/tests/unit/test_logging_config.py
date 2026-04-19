@@ -37,13 +37,13 @@ class TestJSONFormatter:
         assert parsed["logger"] == "mymod"
 
     def test_includes_correlation_context(self):
-        set_context(request_id="req-1", container_id="c-1")
+        set_context(request_id="req-1", sandbox_id="c-1")
         try:
             formatter = JSONFormatter(include_timestamp=False, include_location=False)
             record = logging.LogRecord("t", logging.INFO, "f.py", 1, "m", (), None)
             parsed = json.loads(formatter.format(record))
             assert parsed["request_id"] == "req-1"
-            assert parsed["container_id"] == "c-1"
+            assert parsed["sandbox_id"] == "c-1"
         finally:
             clear_context()
 
@@ -71,7 +71,7 @@ class TestTextFormatter:
         assert "hello" in output
 
     def test_context_bracket_formatting(self):
-        set_context(request_id="r1", container_id="c1")
+        set_context(request_id="r1", sandbox_id="c1")
         try:
             formatter = TextFormatter(include_timestamp=False, include_location=False)
             record = logging.LogRecord("t", logging.INFO, "f.py", 1, "m", (), None)
@@ -112,10 +112,10 @@ class TestLogContext:
 
 class TestSetGetClearContext:
     def test_set_then_get(self):
-        set_context(request_id="r1", container_id="c1")
+        set_context(request_id="r1", sandbox_id="c1")
         ctx = get_context()
         assert ctx["request_id"] == "r1"
-        assert ctx["container_id"] == "c1"
+        assert ctx["sandbox_id"] == "c1"
         clear_context()
 
     def test_clear_removes_all(self):

@@ -65,6 +65,18 @@ def git_api_client(git_api_app):
     return git_api_app.test_client()
 
 
+@pytest.fixture(autouse=True)
+def _reset_stores(git_api_app):
+    """Reset rate limiter state between tests to prevent cross-test pollution."""
+    yield
+    # Reset per-IP throttle and per-sandbox buckets so rate-limit tests
+    # don't poison subsequent tests in the same session.
+    limiter = git_api_app.rate_limiter
+    limiter._ip_counters.clear()
+    limiter._sandbox_buckets.clear()
+    limiter._global_timestamps.clear()
+
+
 # ---------------------------------------------------------------------------
 # Auth headers factory
 # ---------------------------------------------------------------------------

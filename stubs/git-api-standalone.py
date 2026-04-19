@@ -190,8 +190,17 @@ def execute_git(args: list, cwd: str, repo_root: str, stdin_data: bytes | None =
                 "stderr": f"error: flag '{arg}' is not allowed",
             }
 
-    # Resolve working directory
-    work_dir = os.path.join(repo_root, cwd) if cwd != "." else repo_root
+    # Resolve working directory with path traversal protection
+    if cwd != ".":
+        work_dir = os.path.realpath(os.path.join(repo_root, cwd))
+        if not work_dir.startswith(os.path.realpath(repo_root) + os.sep) and work_dir != os.path.realpath(repo_root):
+            return {
+                "exit_code": 1,
+                "stdout": "",
+                "stderr": f"error: cwd '{cwd}' resolves outside repository",
+            }
+    else:
+        work_dir = repo_root
     if not os.path.isdir(work_dir):
         work_dir = repo_root
 

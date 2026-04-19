@@ -255,7 +255,48 @@ class GitHubAPIChecker:
         try:
             data = json.loads(body)
             query = data.get("query", "")
-            query = re.sub(r"#[^\n]*", "", query)
+            # Strip comments while respecting string literal boundaries.
+            # Only remove # comments that are outside triple-quoted or
+            # single-quoted string literals.
+            def _strip_graphql_comments(q: str) -> str:
+                result = []
+                i = 0
+                in_triple = False
+                in_single = False
+                while i < len(q):
+                    if not in_triple and not in_single:
+                        if q[i:i+3] == '"""':
+                            in_triple = True
+                            result.append(q[i:i+3])
+                            i += 3
+                            continue
+                        if q[i] == '"':
+                            in_single = True
+                            result.append(q[i])
+                            i += 1
+                            continue
+                        if q[i] == '#':
+                            # Skip until end of line
+                            while i < len(q) and q[i] != '\n':
+                                i += 1
+                            continue
+                    elif in_triple:
+                        if q[i:i+3] == '"""':
+                            in_triple = False
+                            result.append(q[i:i+3])
+                            i += 3
+                            continue
+                    elif in_single:
+                        if q[i] == '"' and (i == 0 or q[i-1] != '\\'):
+                            in_single = False
+                            result.append(q[i])
+                            i += 1
+                            continue
+                    result.append(q[i])
+                    i += 1
+                return "".join(result)
+
+            query = _strip_graphql_comments(query)
 
             for mutation in ALWAYS_BLOCKED_GRAPHQL_MUTATIONS:
                 if re.search(rf"\b{mutation}\s*\(", query, re.IGNORECASE):
@@ -367,11 +408,11 @@ def run_github_proxy(
                 conn.close()
 
             except Exception as exc:
-                logger.error("Proxy forwarding error: %s", exc)
+                logger.error("Proxy forwarding error: %s", exc, exc_info=True)
                 self.send_response(502)
                 self.send_header("Content-Type", "application/json")
                 self.end_headers()
-                self.wfile.write(json.dumps({"error": f"Proxy error: {exc}"}).encode())
+                self.wfile.write(json.dumps({"error": "Proxy error: unable to forward request"}).encode())
 
         def do_GET(self) -> None:
             self._handle_request()

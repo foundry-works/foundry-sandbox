@@ -78,7 +78,7 @@ Docker Sandboxes uses a **hybrid architecture: lightweight microVMs containing p
 
 - **Separate kernels** — Each sandbox runs its own OS kernel via a custom Virtual Machine Manager (VMM), providing hypervisor-level isolation (no shared kernel attacks)
 - **Private Docker daemon per sandbox** — Each microVM runs its own isolated Docker daemon. The agent container runs inside this daemon. Containers in one sandbox cannot see containers or images from another (or from the host)
-- **Three hypervisor backends** — macOS virtualization.framework, Windows Hyper-V Platform, and **Linux KVM**. All three are architecturally supported; the KVM backend exists in the VMM but no standalone Linux install instructions have been published yet
+- **Three hypervisor backends** — macOS virtualization.framework, Windows Hyper-V Platform, and **Linux KVM**. All three are architecturally supported; Linux KVM confirmed working with `sbx` v0.26.1 on Fedora 43 (see Phase 0 validation report).
 - **Standalone CLI — Docker Desktop NOT required** — The launch blog (March 31, 2026) explicitly states: *"Docker Sandboxes are standalone; you don't need Docker Desktop."* Docker Desktop integration is listed as "coming soon." Install via `brew install docker/tap/sbx` (macOS) or `winget install Docker.sbx` (Windows)
 - **File synchronization, not bind-mounts** — The host workspace is synced bidirectionally to the VM. Files appear at the same absolute paths as on the host. This is NOT a Docker bind-mount; it's a sync daemon. This has major implications for injecting custom binaries (see Section 5.2).
 - **Only HTTP/HTTPS is proxied** — Raw TCP, UDP, ICMP, and other non-HTTP protocols are **blocked at the network layer**. SSH git operations (`git@github.com:...`) would NOT be credential-injected. Only HTTPS git operations work through the proxy. DNS resolution is handled by the host-side proxy, not the sandbox VM.
@@ -273,7 +273,7 @@ These are the features that make foundry-sandbox unique and would need to surviv
 | SSH protocol support | ❌ (blocked) | ✅ | **Foundry wins** |
 | Arbitrary volume mounts | ❌ (workspace only) | ✅ | Foundry wins |
 | Custom entrypoint | ❌ (use templates) | ✅ | Foundry wins |
-| Linux host support | ❓ KVM backend exists in VMM, no install docs published | ✅ | Foundry wins (for now) |
+| Linux host support | ✅ KVM backend confirmed working (Phase 0 validation on Fedora 43) | ✅ | Parity |
 | Preset system | ❌ (templates instead) | ✅ | Different approach |
 
 ---
@@ -603,8 +603,8 @@ Docker Sandboxes is explicitly marked **"Experimental"** in official Docker docu
 ### 7.10 Platform Limitations (MEDIUM)
 
 - **Docker Desktop NOT required** — `sbx` is a standalone CLI. Install via `brew install docker/tap/sbx` (macOS) or `winget install Docker.sbx` (Windows). Docker Desktop integration is "coming soon."
-- **macOS and Windows documented; Linux KVM backend exists but no install docs** — The VMM has three hypervisor backends: Apple virtualization.framework, Windows Hyper-V Platform, and Linux KVM. The architecture blog (April 16, 2026) states: *"A developer on a MacBook gets the same isolation guarantees and startup performance as a developer on a Linux workstation."* However, no Linux install command has been published.
-- **Linux users currently excluded** — Foundry-sandbox currently runs on any Docker Engine host including Linux servers. Linux KVM support appears architecturally ready but is not yet documented for end users.
+- **macOS, Windows, and Linux all supported** — The VMM has three hypervisor backends: Apple virtualization.framework, Windows Hyper-V Platform, and Linux KVM. Phase 0 validation confirmed Linux KVM works with `sbx` v0.26.1 on Fedora 43.
+- **Linux support confirmed** — Phase 0 validation on Fedora 43 confirmed the KVM backend works with `sbx` v0.26.1.
 - **File sync limitations** — Bidirectional sync may have edge cases with large repos, binary files, or concurrent modifications
 
 ---
@@ -820,7 +820,7 @@ The answer is **git safety**: operation-level mediation, protected branch enforc
 However, several factors argue for caution rather than immediate migration:
 
 1. **Experimental status** — Docker Sandboxes is explicitly experimental with no stability guarantees. It launched March 31, 2026 — less than 3 weeks old as of this writing. No GA timeline has been announced.
-2. **Platform in flux** — Standalone CLI (no Docker Desktop required) with macOS and Windows support. Linux KVM backend exists in the VMM but no install docs published yet. Foundry-sandbox currently supports any Docker Engine host including Linux servers.
+2. **Platform coverage** — Standalone CLI (no Docker Desktop required) with macOS, Windows, and Linux support. Linux KVM backend confirmed working in Phase 0 validation. Foundry-sandbox currently supports any Docker Engine host including Linux servers.
 3. **File sync architecture** — Git wrapper injection is more fragile with file sync than with bind-mounts. The agent has full sudo and can remove the wrapper (`sbx exec --privileged` is available).
 4. **Non-HTTP protocol blocking** — SSH git operations are blocked; foundry-sandbox supports all protocols.
 5. **No arbitrary volume mounts** — Only workspace paths supported, limiting flexibility.

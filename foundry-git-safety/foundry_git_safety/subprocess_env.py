@@ -322,16 +322,19 @@ def remove_stale_config_locks(repo_root: str) -> None:
         for name in _GIT_LOCK_NAMES:
             lock_path = os.path.join(directory, name)
             try:
-                st = os.stat(lock_path)
+                fd = os.open(lock_path, os.O_RDONLY | os.O_NOFOLLOW)
             except FileNotFoundError:
                 continue
             except OSError:
+                # ELOOP (symlink) or other errors — skip safely
+                continue
+            try:
+                st = os.fstat(fd)
+            except OSError:
+                os.close(fd)
                 continue
             age = now - st.st_mtime
             if age >= _STALE_LOCK_AGE:
-                # Verify it's still a regular file (no TOCTOU symlink swap)
-                if not os.path.isfile(lock_path):
-                    continue
                 try:
                     os.unlink(lock_path)
                     logger.warning(
@@ -340,6 +343,7 @@ def remove_stale_config_locks(repo_root: str) -> None:
                     )
                 except OSError:
                     pass
+            os.close(fd)
 
 
 # ---------------------------------------------------------------------------

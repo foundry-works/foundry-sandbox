@@ -18,11 +18,6 @@ DEFAULT_PROTECTED_PATTERNS: list[str] = [
     "refs/heads/production",
 ]
 
-DEFAULT_RESTRICTED_PUSH_PATHS: list[str] = [
-    ".github/workflows",
-    ".github/actions",
-]
-
 ZERO_SHA = "0" * 40
 
 
@@ -103,7 +98,7 @@ def check_protected_branches(
 
     # Check if refname matches any protected pattern
     is_protected = any(
-        fnmatch.fnmatch(refname, pattern) for pattern in config.patterns
+        fnmatch.fnmatchcase(refname, pattern) for pattern in config.patterns
     )
 
     if not is_protected:

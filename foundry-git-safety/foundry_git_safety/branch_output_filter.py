@@ -25,6 +25,17 @@ from .branch_types import (
 
 logger = logging.getLogger(__name__)
 
+# Module-level compiled regexes for stderr branch redaction
+_SLASHED_BRANCH_RE = re.compile(
+    r"'(?P<bare_branch>[^\s'\"]+/[^\s'\"]+)'"
+)
+_GIT_CONTEXT_LINE_RE = re.compile(
+    r"^(?:error|fatal|hint):"
+)
+_SIMPLE_BRANCH_RE = re.compile(
+    r"'(?P<simple_branch>[a-zA-Z][a-zA-Z0-9_-]{1,254})'"
+)
+
 
 # ---------------------------------------------------------------------------
 # Branch Listings
@@ -556,11 +567,11 @@ def filter_stderr_branch_refs(
 
 
     def _redact_match(m: re.Match) -> str:
-        branch = m.group("branch") or m.group("remote_branch")
+        branch_group = "branch" if m.group("branch") else "remote_branch"
+        branch = m.group(branch_group)
         if branch and not _is_allowed_branch_name(branch, sandbox_branch, base_branch):
-            # Replace entire match with redacted version
-            full = m.group(0)
-            return full[:full.rfind(branch)] + "<redacted>"
+            start, end = m.span(branch_group)
+            return m.string[m.start():start] + "<redacted>"
         return m.group(0)
 
     result = _STDERR_REF_RE.sub(_redact_match, stderr)
@@ -570,13 +581,6 @@ def filter_stderr_branch_refs(
     # slash makes them clearly branch-like.  Simple names (e.g. 'alice') are
     # only matched on lines starting with a git error context keyword to avoid
     # false positives on quoted file names, option values, etc.
-    _slashed_re = re.compile(
-        r"'(?P<bare_branch>[^\s'\"]+/[^\s'\"]+)'"
-    )
-
-    _git_context_re = re.compile(
-        r"^(?:error|fatal|hint):.*'(?P<simple_branch>[a-zA-Z][a-zA-Z0-9_-]{1,63})'"
-    )
 
     def _redact_slashed(m: re.Match) -> str:
         branch = m.group("bare_branch")
@@ -584,15 +588,24 @@ def filter_stderr_branch_refs(
             return "'<redacted>'"
         return m.group(0)
 
-    result = _slashed_re.sub(_redact_slashed, result)
+    result = _SLASHED_BRANCH_RE.sub(_redact_slashed, result)
 
-    def _redact_simple_line(m: re.Match) -> str:
+    def _redact_simple(m: re.Match) -> str:
         branch = m.group("simple_branch")
         if branch and not _is_allowed_branch_name(branch, sandbox_branch, base_branch):
-            return m.group(0).replace(f"'{branch}'", "'<redacted>'")
+            return "'<redacted>'"
         return m.group(0)
 
-    result = _git_context_re.sub(_redact_simple_line, result)
+    # Redact simple names on git error/hint/fatal context lines only.
+    # Process line by line so we only match on context lines but match
+    # ALL occurrences within each such line.
+    out_lines = []
+    for line in result.splitlines():
+        if _GIT_CONTEXT_LINE_RE.match(line):
+            line = _SIMPLE_BRANCH_RE.sub(_redact_simple, line)
+        out_lines.append(line)
+    result = "\n".join(out_lines)
+
     return result
 
 

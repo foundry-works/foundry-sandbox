@@ -37,9 +37,9 @@ git_safety:
 
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
-| `blocked_patterns` | list of strings | `[".github/workflows/", ".github/actions/"]` | File patterns that trigger a hard block |
-| `warned_patterns` | list of strings | `["package.json", "pyproject.toml"]` | File patterns that trigger a warning |
-| `warn_action` | string | `"log"` | Warning behavior: `"log"` (allow with warning) or `"reject"` (treat as block) |
+| `blocked_patterns` | list of strings | `[".github/workflows/", ".github/actions/", "Makefile", "Justfile", "Taskfile.yml", ".pre-commit-config.yaml", "CODEOWNERS", ".github/FUNDING.yml", ".env*"]` | File patterns that trigger a hard block |
+| `warned_patterns` | list of strings | `["package.json", "pyproject.toml", "requirements.txt", "requirements-*.txt", "Gemfile", "go.mod", "go.sum", "Cargo.toml", "Cargo.lock", "docker-compose*.yml", "Dockerfile"]` | File patterns that trigger a warning |
+| `warn_action` | string | `"reject"` | Warning behavior: `"reject"` (default, blocks push) or `"log"` (allow with warning) |
 
 **Pattern semantics:**
 - Trailing `/` matches directory prefix (`.github/workflows/` matches all files in that directory)

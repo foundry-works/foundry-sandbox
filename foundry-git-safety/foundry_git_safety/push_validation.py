@@ -28,6 +28,7 @@ logger = logging.getLogger(__name__)
 # TTL cache for default branch detection to avoid subprocess on every push
 _DEFAULT_BRANCH_CACHE: dict[str, tuple[str | None, float]] = {}
 _DEFAULT_BRANCH_CACHE_TTL = 300.0  # 5 minutes
+_DEFAULT_BRANCH_CACHE_MAX = 256
 
 # SHA used by git_policies to detect creation/deletion operations.
 _ZERO_SHA = "0" * 40
@@ -322,6 +323,12 @@ def _detect_default_branch(bare_repo_path: str) -> str | None:
     on every push request.
     """
     now = time.monotonic()
+    # Prune expired entries to bound cache growth
+    if len(_DEFAULT_BRANCH_CACHE) > _DEFAULT_BRANCH_CACHE_MAX:
+        expired = [k for k, (_, ts) in _DEFAULT_BRANCH_CACHE.items()
+                   if now - ts >= _DEFAULT_BRANCH_CACHE_TTL]
+        for k in expired:
+            del _DEFAULT_BRANCH_CACHE[k]
     cached = _DEFAULT_BRANCH_CACHE.get(bare_repo_path)
     if cached is not None:
         branch, ts = cached

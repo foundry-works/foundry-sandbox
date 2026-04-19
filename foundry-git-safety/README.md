@@ -87,10 +87,17 @@ git_safety:
     blocked_patterns:
       - ".github/workflows/"
       - ".github/actions/"
+      - "Makefile"
+      - "Justfile"
+      - "Taskfile.yml"
+      - ".pre-commit-config.yaml"
+      - "CODEOWNERS"
+      - ".github/FUNDING.yml"
+      - ".env*"
     warned_patterns:
       - "package.json"
       - "pyproject.toml"
-    warn_action: "log"  # "log" (default) or "reject"
+    warn_action: "reject"  # "reject" (default, blocks push) or "log"
 
   branch_isolation:
     enabled: true

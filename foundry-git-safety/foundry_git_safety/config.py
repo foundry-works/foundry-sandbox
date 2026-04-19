@@ -8,6 +8,7 @@ import fnmatch
 import logging
 import os
 import posixpath
+import threading
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -229,20 +230,23 @@ class _FileRestrictionsCache:
         self._config: FileRestrictionsData | None = None
         self._loaded_at: float = 0.0
         self._ttl = ttl
+        self._lock = threading.Lock()
 
     def get(self, path: str | None = None) -> FileRestrictionsData:
         if path is not None:
             return load_file_restrictions_config(path)
-        now = time.time()
-        if self._config is not None and (now - self._loaded_at) < self._ttl:
+        with self._lock:
+            now = time.time()
+            if self._config is not None and (now - self._loaded_at) < self._ttl:
+                return self._config
+            self._config = load_file_restrictions_config()
+            self._loaded_at = now
             return self._config
-        self._config = load_file_restrictions_config()
-        self._loaded_at = now
-        return self._config
 
     def invalidate(self) -> None:
-        self._config = None
-        self._loaded_at = 0.0
+        with self._lock:
+            self._config = None
+            self._loaded_at = 0.0
 
 
 _file_restrictions_cache = _FileRestrictionsCache()
