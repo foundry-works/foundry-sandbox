@@ -8,7 +8,7 @@ from pydantic import BaseModel, Field, field_validator
 class GitSafetyServerConfig(BaseModel):
     """Git safety server configuration."""
 
-    host: str = "0.0.0.0"
+    host: str = "127.0.0.1"
     port: int = 8083
     secrets_path: str = "/run/secrets/sandbox-hmac"
     data_dir: str = "/var/lib/foundry-git-safety"

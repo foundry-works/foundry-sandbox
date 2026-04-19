@@ -19,26 +19,15 @@ import logging
 import os
 import re
 import subprocess
-from typing import FrozenSet, List, Optional, Tuple
 
 # Re-export shared types and constants from branch_types
-from .branch_types import (  # noqa: F401
+from .branch_types import (
     GIT_BINARY,
-    GLOBAL_VALUE_FLAGS,
     REF_ENUM_CMDS,
     SHA_CHECK_TIMEOUT,
     ValidationError,
     WELL_KNOWN_BRANCHES,
     WELL_KNOWN_BRANCH_PREFIXES,
-    _BRANCH_LINE_RE,
-    _CUSTOM_D_RE,
-    _DECORATION_LINE_RE,
-    _HEX_CHARS,
-    _MIN_SHA_LENGTH,
-    _REF_IN_LINE_RE,
-    _REMOTE_BRANCH_LINE_RE,
-    _STDERR_BARE_BRANCH_RE,
-    _STDERR_REF_RE,
     _is_allowed_branch_name,
     _is_sha_like,
     _normalize_base_branch,
@@ -46,17 +35,8 @@ from .branch_types import (  # noqa: F401
     get_subcommand_args,
 )
 
-# Re-export output filter functions from branch_output_filter
+# Re-export output filter functions from branch_output_filter for backward compat.
 from .branch_output_filter import (  # noqa: F401
-    _filter_branch_output,
-    _filter_custom_format_decorations,
-    _filter_log_decorations,
-    _filter_ref_enum_output,
-    _is_allowed_short_ref_token,
-    _log_has_bare_D_format,
-    _log_has_custom_decoration_format,
-    _log_has_source_flag,
-    _filter_log_source_refs,
     filter_ref_listing_output,
     filter_stderr_branch_refs,
 )
@@ -79,7 +59,7 @@ def _is_within_boundary(resolved: str, boundary: str) -> bool:
     return resolved == boundary or resolved.startswith(boundary + os.sep)
 
 
-def resolve_bare_repo_path(repo_root: str) -> Optional[str]:
+def resolve_bare_repo_path(repo_root: str) -> str | None:
     """Follow the worktree .git -> gitdir -> commondir chain to find the bare repo.
 
     Git worktrees have a ``.git`` *file* (not directory) that contains a
@@ -179,7 +159,7 @@ def resolve_bare_repo_path(repo_root: str) -> Optional[str]:
 # ---------------------------------------------------------------------------
 
 # Commands that accept ref arguments for reading (not switching branches)
-_REF_READING_CMDS: FrozenSet[str] = frozenset({
+_REF_READING_CMDS: frozenset[str] = frozenset({
     "log", "show", "diff", "blame", "cherry-pick", "merge", "rebase",
     "reset", "rev-list", "diff-tree", "rev-parse", "shortlog", "describe",
     "name-rev", "archive", "format-patch",
@@ -191,24 +171,24 @@ _REF_READING_CMDS: FrozenSet[str] = frozenset({
 _REF_ENUM_CMDS = REF_ENUM_CMDS
 
 # Notes sub-subcommands (used in branch isolation for positional arg parsing)
-_NOTES_SUBCMDS: FrozenSet[str] = frozenset({
+_NOTES_SUBCMDS: frozenset[str] = frozenset({
     "list", "add", "copy", "append", "edit", "show",
     "merge", "remove", "prune",
 })
 
 # Flags that implicitly reference all branches/refs
-_IMPLICIT_ALL_REF_FLAGS: FrozenSet[str] = frozenset({
+_IMPLICIT_ALL_REF_FLAGS: frozenset[str] = frozenset({
     "--all", "--branches", "--remotes", "--glob",
 })
 
 # Flag prefixes that implicitly reference refs with patterns
-_IMPLICIT_REF_FLAG_PREFIXES: Tuple[str, ...] = (
+_IMPLICIT_REF_FLAG_PREFIXES: tuple[str, ...] = (
     "--branches=", "--remotes=", "--glob=",
 )
 
 # Ref-reading flags that consume the next argument as a value.
 # This prevents option values (e.g. ``-n 5``) from being misclassified as refs.
-_REF_READING_VALUE_FLAGS: FrozenSet[str] = frozenset({
+_REF_READING_VALUE_FLAGS: frozenset[str] = frozenset({
     "-n", "--max-count", "--skip",
     "--since", "--until", "--after", "--before",
     "--author", "--committer", "--grep",
@@ -228,7 +208,7 @@ _REF_READING_VALUE_FLAGS: FrozenSet[str] = frozenset({
 _REV_SUFFIX_RE = re.compile(r"([~^]\d*|@\{[^}]*\})+$")
 
 # fetch/pull flags that consume the next argument as a value
-_FETCH_VALUE_FLAGS: FrozenSet[str] = frozenset({
+_FETCH_VALUE_FLAGS: frozenset[str] = frozenset({
     "--depth", "--deepen", "--shallow-since", "--shallow-exclude",
     "-j", "--jobs", "--negotiation-tip", "--server-option", "-o",
     "--upload-pack", "--refmap", "--recurse-submodules-default",
@@ -236,7 +216,7 @@ _FETCH_VALUE_FLAGS: FrozenSet[str] = frozenset({
 })
 
 # checkout/switch flags that consume the next argument as a value
-_CHECKOUT_VALUE_FLAGS: FrozenSet[str] = frozenset({
+_CHECKOUT_VALUE_FLAGS: frozenset[str] = frozenset({
     "-b", "-B",       # checkout: create branch
     "-c", "-C",       # switch: create branch
     "--orphan",       # checkout: create orphan branch
@@ -245,17 +225,17 @@ _CHECKOUT_VALUE_FLAGS: FrozenSet[str] = frozenset({
 })
 
 # checkout/switch flags that indicate branch creation (next arg is new branch name)
-_BRANCH_CREATE_FLAGS: FrozenSet[str] = frozenset({
+_BRANCH_CREATE_FLAGS: frozenset[str] = frozenset({
     "-b", "-B", "-c", "-C", "--orphan",
 })
 
-_TAG_VALUE_FLAGS: FrozenSet[str] = frozenset({
+_TAG_VALUE_FLAGS: frozenset[str] = frozenset({
     "-m", "--message", "-F", "--file", "-u", "--local-user",
     "--cleanup", "--sort",
 })
 
 # push flags that consume the next argument as a value
-_PUSH_VALUE_FLAGS: FrozenSet[str] = frozenset({
+_PUSH_VALUE_FLAGS: frozenset[str] = frozenset({
     "--repo", "--receive-pack", "--exec", "--push-option", "-o",
 })
 
@@ -285,7 +265,7 @@ def _strip_rev_suffixes(ref: str) -> str:
 def _is_allowed_ref(
     ref: str,
     sandbox_branch: str,
-    base_branch: Optional[str] = None,
+    base_branch: str | None = None,
 ) -> bool:
     """Check if a ref argument is allowed under branch isolation.
 
@@ -379,9 +359,9 @@ def _is_allowed_ref(
 
 
 def validate_branch_isolation(
-    args: List[str],
-    metadata: Optional[dict],
-) -> Optional[ValidationError]:
+    args: list[str],
+    metadata: dict | None,
+) -> ValidationError | None:
     """Validate git command args for branch isolation.
 
     Enforces that a sandbox can only access its own branch, well-known
@@ -405,7 +385,7 @@ def validate_branch_isolation(
         )
     base_branch = _normalize_base_branch(metadata.get("from_branch"))
 
-    subcommand, sub_args, _ = get_subcommand_args(args)
+    subcommand, sub_args, _, _ = get_subcommand_args(args)
     if subcommand is None:
         return None  # will be caught by validate_command
 
@@ -503,7 +483,7 @@ def validate_branch_isolation(
                 pending_ref_check = True
 
         # Check positional args (skip sub-subcommand and flags)
-        positionals: List[str] = []
+        positionals: list[str] = []
         seen_subcmd = False
         for a in sub_args:
             if a == "--":
@@ -541,15 +521,15 @@ def validate_branch_isolation(
 
 
 def _validate_checkout_isolation(
-    sub_args: List[str],
+    sub_args: list[str],
     sandbox_branch: str,
-    base_branch: Optional[str] = None,
-) -> Optional[ValidationError]:
+    base_branch: str | None = None,
+) -> ValidationError | None:
     """Validate checkout/switch args for branch isolation."""
     creating_branch = False
     skip_next = False
-    positionals: List[str] = []
-    start_point: Optional[str] = None
+    positionals: list[str] = []
+    start_point: str | None = None
 
     i = 0
     while i < len(sub_args):
@@ -608,13 +588,13 @@ def _validate_checkout_isolation(
 
 
 def _validate_fetch_isolation(
-    sub_args: List[str],
+    sub_args: list[str],
     sandbox_branch: str,
-    base_branch: Optional[str] = None,
-) -> Optional[ValidationError]:
+    base_branch: str | None = None,
+) -> ValidationError | None:
     """Validate fetch/pull args for branch isolation."""
     skip_next = False
-    positionals: List[str] = []
+    positionals: list[str] = []
 
     for i, a in enumerate(sub_args):
         if a == "--":
@@ -658,10 +638,10 @@ def _validate_fetch_isolation(
 
 
 def _validate_push_isolation(
-    sub_args: List[str],
+    sub_args: list[str],
     sandbox_branch: str,
-    base_branch: Optional[str] = None,
-) -> Optional[ValidationError]:
+    base_branch: str | None = None,
+) -> ValidationError | None:
     """Validate push args for branch isolation.
 
     Ensures that a sandbox can only push to its own branch and well-known
@@ -669,7 +649,7 @@ def _validate_push_isolation(
     by check_push_protected_branches).
     """
     skip_next = False
-    positionals: List[str] = []
+    positionals: list[str] = []
 
     for a in sub_args:
         if a == "--":
@@ -733,13 +713,13 @@ def _validate_push_isolation(
 
 
 def _validate_worktree_add_isolation(
-    sub_args: List[str],
+    sub_args: list[str],
     sandbox_branch: str,
-    base_branch: Optional[str] = None,
-) -> Optional[ValidationError]:
+    base_branch: str | None = None,
+) -> ValidationError | None:
     """Validate worktree add args for branch isolation."""
     skip_next = False
-    positionals: List[str] = []
+    positionals: list[str] = []
 
     for a in sub_args:
         if a == "--":
@@ -767,10 +747,10 @@ def _validate_worktree_add_isolation(
 
 
 def _validate_tag_isolation(
-    sub_args: List[str],
+    sub_args: list[str],
     sandbox_branch: str,
-    base_branch: Optional[str] = None,
-) -> Optional[ValidationError]:
+    base_branch: str | None = None,
+) -> ValidationError | None:
     """Validate tag args for branch isolation.
 
     ``git tag <tagname> [<commit-ish>]`` -- the commit-ish (if present)
@@ -779,7 +759,7 @@ def _validate_tag_isolation(
     argument that lets a sandbox read from another branch.
     """
     skip_next = False
-    positionals: List[str] = []
+    positionals: list[str] = []
 
     for a in sub_args:
         if a == "--":
@@ -810,10 +790,10 @@ def _validate_tag_isolation(
 
 
 def _validate_ref_reading_isolation(
-    sub_args: List[str],
+    sub_args: list[str],
     sandbox_branch: str,
-    base_branch: Optional[str] = None,
-) -> Optional[ValidationError]:
+    base_branch: str | None = None,
+) -> ValidationError | None:
     """Validate ref-reading command args for branch isolation.
 
     Blocks --all/--branches/--remotes/--glob flags and checks each
@@ -890,9 +870,9 @@ def _looks_like_path(arg: str) -> bool:
 
 
 def normalize_pathspec_args(
-    args: List[str],
-    metadata: Optional[dict],
-) -> Tuple[List[str], bool]:
+    args: list[str],
+    metadata: dict | None,
+) -> tuple[list[str], bool]:
     """Auto-insert ``--`` for ref-reading commands when args look like paths.
 
     When a user runs ``git diff docs/foo.md`` without a ``--`` separator,
@@ -918,10 +898,10 @@ def normalize_pathspec_args(
     if not metadata or not metadata.get("sandbox_branch"):
         return args, False
 
-    sandbox_branch = metadata.get("sandbox_branch")
+    sandbox_branch = metadata["sandbox_branch"]
     base_branch = _normalize_base_branch(metadata.get("from_branch"))
 
-    subcommand, sub_args, _ = get_subcommand_args(args)
+    subcommand, sub_args, _, _ = get_subcommand_args(args)
     if subcommand is None:
         return args, False
 
@@ -979,7 +959,7 @@ def normalize_pathspec_args(
 # ---------------------------------------------------------------------------
 
 
-def _extract_sha_args(sub_args: List[str]) -> List[str]:
+def _extract_sha_args(sub_args: list[str]) -> list[str]:
     """Collect SHA-like positional args from a ref-reading command.
 
     Handles range operators (``..``, ``...``) and strips revision
@@ -988,7 +968,7 @@ def _extract_sha_args(sub_args: List[str]) -> List[str]:
     Skips values consumed by known option flags (mirrors
     ``_validate_ref_reading_isolation`` behaviour).
     """
-    shas: List[str] = []
+    shas: list[str] = []
     skip_next = False
     for arg in sub_args:
         if arg == "--":
@@ -1023,8 +1003,8 @@ def _extract_sha_args(sub_args: List[str]) -> List[str]:
 def _get_allowed_refs(
     bare_repo: str,
     sandbox_branch: str,
-    base_branch: Optional[str] = None,
-) -> List[str]:
+    base_branch: str | None = None,
+) -> list[str]:
     """Build the list of fully-qualified refs this sandbox may access.
 
     Includes the sandbox's own branch, base branch (if any), well-known
@@ -1037,7 +1017,7 @@ def _get_allowed_refs(
     Returns:
         List of fully-qualified ref patterns for ``--stdin`` input.
     """
-    refs: List[str] = [f"refs/heads/{sandbox_branch}"]
+    refs: list[str] = [f"refs/heads/{sandbox_branch}"]
     if base_branch:
         refs.append(f"refs/heads/{base_branch}")
 
@@ -1071,7 +1051,7 @@ def _get_allowed_refs(
 def _check_sha_reachability(
     sha: str,
     bare_repo: str,
-    allowed_refs: List[str],
+    allowed_refs: list[str],
     cache: dict,
 ) -> bool:
     """Check whether *sha* is reachable from any allowed ref.
@@ -1146,10 +1126,10 @@ def _check_sha_reachability(
 
 
 def validate_sha_reachability(
-    args: List[str],
+    args: list[str],
     repo_root: str,
-    metadata: Optional[dict],
-) -> Optional[ValidationError]:
+    metadata: dict | None,
+) -> ValidationError | None:
     """Validate that SHA arguments are reachable from allowed branches.
 
     Only applies to ref-reading commands (log, show, diff, etc.) when
@@ -1170,7 +1150,7 @@ def validate_sha_reachability(
         return None
     base_branch = _normalize_base_branch(metadata.get("from_branch"))
 
-    subcommand, sub_args, _ = get_subcommand_args(args)
+    subcommand, sub_args, _, _ = get_subcommand_args(args)
     if subcommand is None:
         return None
 

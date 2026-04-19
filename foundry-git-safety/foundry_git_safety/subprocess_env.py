@@ -12,7 +12,7 @@ import os
 import re
 import subprocess
 import time
-from typing import Any, Dict, Generator, List, Optional
+from typing import Any, Generator
 
 from .branch_types import GIT_BINARY
 from .command_validation import SUBPROCESS_TIMEOUT
@@ -56,13 +56,13 @@ ENV_ALLOWED: frozenset = frozenset({
 })
 
 
-def build_clean_env() -> Dict[str, str]:
+def build_clean_env() -> dict[str, str]:
     """Build a sanitized environment for git subprocess execution.
 
     Starts from an empty env and only copies allowed variables.
     All GIT_* and SSH_* vars are excluded.
     """
-    clean: Dict[str, str] = {}
+    clean: dict[str, str] = {}
 
     for key in ENV_ALLOWED:
         val = os.environ.get(key)
@@ -92,10 +92,10 @@ def build_clean_env() -> Dict[str, str]:
 
 def _git_config_get(
     cwd: str,
-    env: Dict[str, str],
+    env: dict[str, str],
     key: str,
-    git_dir: Optional[str] = None,
-) -> Optional[str]:
+    git_dir: str | None = None,
+) -> str | None:
     """Read a single git config value (best-effort)."""
     try:
         cmd = [GIT_BINARY]
@@ -117,8 +117,8 @@ def _git_config_get(
 
 
 def _read_remote_urls_from_bare_config(
-    bare_repo: Optional[str],
-) -> Dict[str, Dict[str, Any]]:
+    bare_repo: str | None,
+) -> dict[str, dict[str, Any]]:
     """Parse remote URLs directly from a bare repo config file.
 
     Returns mapping: remote -> {"url": str|None, "pushurls": [str]}.
@@ -128,8 +128,8 @@ def _read_remote_urls_from_bare_config(
     config_path = os.path.join(bare_repo, "config")
     if not os.path.isfile(config_path):
         return {}
-    remotes: Dict[str, Dict[str, Any]] = {}
-    current: Optional[str] = None
+    remotes: dict[str, dict[str, Any]] = {}
+    current: str | None = None
     try:
         with open(config_path, "r", encoding="utf-8", errors="replace") as f:
             for line in f:
@@ -139,7 +139,7 @@ def _read_remote_urls_from_bare_config(
                 if stripped.startswith("[") and stripped.endswith("]"):
                     m = re.match(r'\[remote "(.+)"\]', stripped)
                     if m:
-                        current = m.group(1)
+                        current = m.group(1) or ""
                         remotes.setdefault(current, {"url": None, "pushurls": []})
                     else:
                         current = None
@@ -159,10 +159,10 @@ def _read_remote_urls_from_bare_config(
 
 def _git_config_get_all(
     cwd: str,
-    env: Dict[str, str],
+    env: dict[str, str],
     key: str,
-    git_dir: Optional[str] = None,
-) -> List[str]:
+    git_dir: str | None = None,
+) -> list[str]:
     """Read all values for a git config key (best-effort)."""
     try:
         cmd = [GIT_BINARY]
@@ -186,9 +186,9 @@ def _git_config_get_all(
 
 def _get_remote_names_from_config(
     cwd: str,
-    env: Dict[str, str],
-    git_dir: Optional[str] = None,
-) -> List[str]:
+    env: dict[str, str],
+    git_dir: str | None = None,
+) -> list[str]:
     """Extract remote names from git config (best-effort)."""
     try:
         cmd = [GIT_BINARY]
@@ -208,7 +208,7 @@ def _get_remote_names_from_config(
         # Fall back to parsing the bare config directly
         remotes = _read_remote_urls_from_bare_config(git_dir)
         return sorted(remotes.keys())
-    names: List[str] = []
+    names: list[str] = []
     for line in result.stdout.decode("utf-8", errors="replace").splitlines():
         if not line:
             continue
@@ -222,8 +222,8 @@ def _get_remote_names_from_config(
 
 def _synthesize_remote_verbose_output(
     cwd: str,
-    env: Dict[str, str],
-    git_dir: Optional[str] = None,
+    env: dict[str, str],
+    git_dir: str | None = None,
 ) -> str:
     """Build a fallback `git remote -v` output from config (best-effort)."""
     remotes = _get_remote_names_from_config(cwd, env, git_dir)
@@ -233,7 +233,7 @@ def _synthesize_remote_verbose_output(
     if not remotes:
         return ""
 
-    lines: List[str] = []
+    lines: list[str] = []
     for name in remotes:
         url = _git_config_get(cwd, env, f"remote.{name}.url", git_dir=git_dir)
         if not url and name in remotes_from_file:
@@ -280,7 +280,7 @@ def remove_stale_config_locks(repo_root: str) -> None:
     Args:
         repo_root: The worktree or bare repo root path.
     """
-    from branch_isolation import resolve_bare_repo_path
+    from .branch_isolation import resolve_bare_repo_path
 
     bare_repo = resolve_bare_repo_path(repo_root)
     if not bare_repo:
@@ -340,7 +340,7 @@ _FETCH_LOCK_POLL_INTERVAL = 0.1
 @contextlib.contextmanager
 def _fetch_lock(
     bare_repo_dir: str, timeout: float = _FETCH_LOCK_TIMEOUT,
-) -> Generator[None, None, None]:
+) -> Generator[None]:
     """Acquire an exclusive file lock for fetch serialization.
 
     Creates ``.foundry-fetch.lock`` in the bare repo directory and holds

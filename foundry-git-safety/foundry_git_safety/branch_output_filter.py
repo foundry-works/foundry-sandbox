@@ -8,7 +8,6 @@ Extracted from branch_isolation.py to reduce module size.
 
 import logging
 import re
-from typing import List, Optional
 
 from .branch_types import (
     REF_ENUM_CMDS,
@@ -17,7 +16,6 @@ from .branch_types import (
     _DECORATION_LINE_RE,
     _REF_IN_LINE_RE,
     _REMOTE_BRANCH_LINE_RE,
-    _STDERR_BARE_BRANCH_RE,
     _STDERR_REF_RE,
     _is_allowed_branch_name,
     _is_sha_like,
@@ -36,7 +34,7 @@ logger = logging.getLogger(__name__)
 def _filter_branch_output(
     output: str,
     sandbox_branch: str,
-    base_branch: Optional[str] = None,
+    base_branch: str | None = None,
 ) -> str:
     """Filter git branch output to hide other sandbox branches.
 
@@ -56,7 +54,7 @@ def _filter_branch_output(
         return output
 
 
-    filtered_lines: List[str] = []
+    filtered_lines: list[str] = []
     for line in output.splitlines(True):
         stripped = line.rstrip("\n\r")
 
@@ -102,7 +100,7 @@ def _filter_branch_output(
 def _is_allowed_short_ref_token(
     token: str,
     sandbox_branch: str,
-    base_branch: Optional[str] = None,
+    base_branch: str | None = None,
 ) -> bool:
     """Check whether a short/custom ref token from ref-enum output is allowed."""
 
@@ -156,7 +154,7 @@ def _looks_like_ref_token(token: str) -> bool:
 def _filter_ref_enum_output(
     output: str,
     sandbox_branch: str,
-    base_branch: Optional[str] = None,
+    base_branch: str | None = None,
 ) -> str:
     """Filter ref enumeration output (for-each-ref, ls-remote, show-ref).
 
@@ -179,7 +177,7 @@ def _filter_ref_enum_output(
         return output
 
 
-    filtered_lines: List[str] = []
+    filtered_lines: list[str] = []
     for line in output.splitlines(True):
         stripped = line.rstrip("\n\r")
         if not stripped:
@@ -252,7 +250,7 @@ def _filter_ref_enum_output(
 def _is_decoration_ref_allowed(
     ref: str,
     sandbox_branch: str,
-    base_branch: Optional[str] = None,
+    base_branch: str | None = None,
 ) -> bool:
     """Check if a single decoration ref should be kept.
 
@@ -292,8 +290,8 @@ def _is_decoration_ref_allowed(
 def _filter_decoration_refs(
     decorations: str,
     sandbox_branch: str,
-    base_branch: Optional[str] = None,
-) -> Optional[str]:
+    base_branch: str | None = None,
+) -> str | None:
     """Filter individual refs within a decoration string.
 
     Args:
@@ -315,7 +313,7 @@ def _filter_decoration_refs(
 def _filter_log_decorations(
     output: str,
     sandbox_branch: str,
-    base_branch: Optional[str] = None,
+    base_branch: str | None = None,
 ) -> str:
     """Filter SHA-anchored decoration lines in git log output.
 
@@ -332,7 +330,7 @@ def _filter_log_decorations(
     if not output:
         return output
 
-    filtered_lines: List[str] = []
+    filtered_lines: list[str] = []
     for line in output.splitlines(True):
         stripped = line.rstrip("\n\r")
 
@@ -366,7 +364,7 @@ def _filter_log_decorations(
 def _filter_custom_format_decorations(
     output: str,
     sandbox_branch: str,
-    base_branch: Optional[str] = None,
+    base_branch: str | None = None,
     has_bare_D: bool = True,
 ) -> str:
     """Filter custom --format=%d/%D decoration output.
@@ -387,7 +385,7 @@ def _filter_custom_format_decorations(
         return output
 
 
-    filtered_lines: List[str] = []
+    filtered_lines: list[str] = []
     for line in output.splitlines(True):
         stripped = line.rstrip("\n\r")
         trailing = line[len(stripped):]
@@ -449,7 +447,7 @@ def _filter_custom_format_decorations(
     return "".join(filtered_lines)
 
 
-def _log_has_custom_decoration_format(args: List[str]) -> bool:
+def _log_has_custom_decoration_format(args: list[str]) -> bool:
     """Detect if git log args use --format/--pretty with %d or %D."""
     for idx, arg in enumerate(args):
         for prefix in ("--format=", "--pretty=", "--pretty=format:"):
@@ -465,7 +463,7 @@ def _log_has_custom_decoration_format(args: List[str]) -> bool:
     return False
 
 
-def _log_has_bare_D_format(args: List[str]) -> bool:
+def _log_has_bare_D_format(args: list[str]) -> bool:
     """Detect if git log args use --format/--pretty with bare %D (not %d)."""
     for idx, arg in enumerate(args):
         for prefix in ("--format=", "--pretty=", "--pretty=format:"):
@@ -480,7 +478,7 @@ def _log_has_bare_D_format(args: List[str]) -> bool:
     return False
 
 
-def _log_has_source_flag(args: List[str]) -> bool:
+def _log_has_source_flag(args: list[str]) -> bool:
     """Detect if git log args include --source."""
     return "--source" in args
 
@@ -488,7 +486,7 @@ def _log_has_source_flag(args: List[str]) -> bool:
 def _filter_log_source_refs(
     output: str,
     sandbox_branch: str,
-    base_branch: Optional[str] = None,
+    base_branch: str | None = None,
 ) -> str:
     """Redact disallowed branch refs from --source output.
 
@@ -506,7 +504,7 @@ def _filter_log_source_refs(
         return output
 
 
-    filtered_lines: List[str] = []
+    filtered_lines: list[str] = []
     for line in output.splitlines(True):
         stripped = line.rstrip("\n\r")
         trailing = line[len(stripped):]
@@ -538,13 +536,19 @@ def _filter_log_source_refs(
 def filter_stderr_branch_refs(
     stderr: str,
     sandbox_branch: str,
-    base_branch: Optional[str] = None,
+    base_branch: str | None = None,
 ) -> str:
     """Redact disallowed branch names from stderr output.
 
     Git error messages, hints, and verbose output may contain branch names
     (e.g. ``error: pathspec 'sandbox/other' did not match``).  This function
     replaces disallowed branch ref paths with a generic placeholder.
+
+    Handles both slashed branch names (e.g. ``sandbox/alice``) and simple
+    names (e.g. ``alice``) in single-quoted contexts.  Simple names require
+    the token to look like a git branch identifier (letters, digits, hyphens,
+    underscores) to reduce false positives on file paths and other quoted
+    strings.
     """
     if not stderr or not sandbox_branch:
         return stderr
@@ -561,14 +565,35 @@ def filter_stderr_branch_refs(
 
     result = _STDERR_REF_RE.sub(_redact_match, stderr)
 
-    # Second pass: redact bare branch names in single-quoted contexts
-    def _redact_bare_match(m: re.Match) -> str:
+    # Second pass: redact bare branch names in single-quoted contexts.
+    # Slashed names (e.g. 'sandbox/alice') are matched everywhere since the
+    # slash makes them clearly branch-like.  Simple names (e.g. 'alice') are
+    # only matched on lines starting with a git error context keyword to avoid
+    # false positives on quoted file names, option values, etc.
+    _slashed_re = re.compile(
+        r"'(?P<bare_branch>[^\s'\"]+/[^\s'\"]+)'"
+    )
+
+    _git_context_re = re.compile(
+        r"^(?:error|fatal|hint):.*'(?P<simple_branch>[a-zA-Z][a-zA-Z0-9_-]{1,63})'"
+    )
+
+    def _redact_slashed(m: re.Match) -> str:
         branch = m.group("bare_branch")
         if branch and not _is_allowed_branch_name(branch, sandbox_branch, base_branch):
             return "'<redacted>'"
         return m.group(0)
 
-    return _STDERR_BARE_BRANCH_RE.sub(_redact_bare_match, result)
+    result = _slashed_re.sub(_redact_slashed, result)
+
+    def _redact_simple_line(m: re.Match) -> str:
+        branch = m.group("simple_branch")
+        if branch and not _is_allowed_branch_name(branch, sandbox_branch, base_branch):
+            return m.group(0).replace(f"'{branch}'", "'<redacted>'")
+        return m.group(0)
+
+    result = _git_context_re.sub(_redact_simple_line, result)
+    return result
 
 
 # ---------------------------------------------------------------------------
@@ -578,9 +603,9 @@ def filter_stderr_branch_refs(
 
 def filter_ref_listing_output(
     output: str,
-    args: List[str],
+    args: list[str],
     sandbox_branch: str,
-    base_branch: Optional[str] = None,
+    base_branch: str | None = None,
 ) -> str:
     """Dispatch to the appropriate output filter based on git subcommand.
 
@@ -599,7 +624,7 @@ def filter_ref_listing_output(
         return output
     base_branch = _normalize_base_branch(base_branch)
 
-    subcommand, sub_args, _ = get_subcommand_args(args)
+    subcommand, sub_args, _, _ = get_subcommand_args(args)
     if subcommand is None:
         return output
 

@@ -1,8 +1,8 @@
 """Shared GitHub security policy enforcement.
 
 Single source of truth for GitHub API security policies used by both
-the GitHub API gateway (github_gateway.py) and the mitmproxy policy
-engine (addons/policy_engine.py).
+the GitHub API filter (github_filter.py) and the git safety server
+for push policy enforcement.
 
 Policy layers:
   - Path normalization (URL decode, double-encoding rejection, slash collapsing)
@@ -17,7 +17,6 @@ Both consumers import from this module to prevent pattern drift.
 import json
 import posixpath
 import re
-from typing import Optional
 from urllib.parse import unquote, urlparse
 
 
@@ -25,7 +24,7 @@ from urllib.parse import unquote, urlparse
 # Path normalization
 # ---------------------------------------------------------------------------
 
-def normalize_path(raw_path: str) -> Optional[str]:
+def normalize_path(raw_path: str) -> str | None:
     """Normalize a URL path with strict security rules.
 
     Steps:
@@ -47,9 +46,7 @@ def normalize_path(raw_path: str) -> Optional[str]:
     path = unquote(path)
     if "%" in path:
         return None
-    path = posixpath.normpath(path)
-    while "//" in path:
-        path = path.replace("//", "/")
+    path = posixpath.normpath(path)  # collapses //, resolves ./ segments
     if path == ".":
         path = "/"
     if not path.startswith("/"):
@@ -164,7 +161,7 @@ BLOCKED_PATH_PATTERNS = [
 ]
 
 
-def check_github_blocklist(method: str, path: str) -> Optional[str]:
+def check_github_blocklist(method: str, path: str) -> str | None:
     """Check GitHub-specific blocklist policies.
 
     Returns block reason if request should be blocked, None otherwise.
@@ -214,10 +211,10 @@ GITHUB_PR_REVIEW_PATTERN = re.compile(
 def check_github_body_policies(
     method: str,
     path: str,
-    body: Optional[bytes],
+    body: bytes | None,
     content_type: str,
     content_encoding: str,
-) -> Optional[str]:
+) -> str | None:
     """Check GitHub body-level policies for PATCH and POST operations.
 
     Inspects request bodies on security-relevant endpoints to block

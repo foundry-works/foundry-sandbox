@@ -5,7 +5,7 @@ version: "1.0"
 
 git_safety:
   server:
-    host: "0.0.0.0"
+    host: "127.0.0.1"
     port: 8083
     secrets_path: "/run/secrets/sandbox-hmac"
     data_dir: "/var/lib/foundry-git-safety"
@@ -25,7 +25,7 @@ git_safety:
     warned_patterns:
       - "package.json"
       - "pyproject.toml"
-    warn_action: "log"  # "log" or "reject"
+    warn_action: "reject"  # "log" or "reject"
 
   branch_isolation:
     enabled: true

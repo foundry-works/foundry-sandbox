@@ -6,7 +6,6 @@ independent reuse by git_operations.py and branch_output_filter.py.
 
 import re
 from dataclasses import dataclass
-from typing import FrozenSet, List, Optional, Tuple
 
 # ---------------------------------------------------------------------------
 # Git Binary
@@ -24,7 +23,7 @@ class ValidationError:
     """Validation failure with reason."""
 
     reason: str
-    field: Optional[str] = None
+    field: str | None = None
 
     def to_dict(self) -> dict:
         result = {"error": self.reason}
@@ -39,7 +38,7 @@ class ValidationError:
 
 # Global flags that consume the next argument as their value.
 # Used by get_subcommand_args() to skip over value arguments.
-GLOBAL_VALUE_FLAGS: FrozenSet[str] = frozenset({
+GLOBAL_VALUE_FLAGS: frozenset[str] = frozenset({
     "-C",
     "--git-dir",
     "--work-tree",
@@ -53,8 +52,8 @@ GLOBAL_VALUE_FLAGS: FrozenSet[str] = frozenset({
 
 
 def get_subcommand_args(
-    args: List[str],
-) -> Tuple[Optional[str], List[str], List[str]]:
+    args: list[str],
+) -> tuple[str | None, list[str], list[str], int]:
     """Extract the git subcommand and its arguments from a full arg list.
 
     Handles global flags (-c key=val, -C <path>, --git-dir, --work-tree,
@@ -64,12 +63,14 @@ def get_subcommand_args(
         args: Git command arguments (without the ``git`` prefix).
 
     Returns:
-        (subcommand, subcommand_args, config_pairs) where subcommand is
-        None if no subcommand was found.  config_pairs contains any
-        ``-c key=value`` strings encountered before the subcommand.
+        (subcommand, subcommand_args, config_pairs, subcommand_index)
+        where subcommand is None if no subcommand was found.
+        config_pairs contains any ``-c key=value`` strings encountered
+        before the subcommand.  subcommand_index is the position of the
+        subcommand in args (or len(args) if not found).
     """
     idx = 0
-    config_pairs: List[str] = []
+    config_pairs: list[str] = []
 
     while idx < len(args):
         arg = args[idx]
@@ -107,14 +108,14 @@ def get_subcommand_args(
         idx += 1
 
     if idx >= len(args):
-        return None, [], config_pairs
+        return None, [], config_pairs, len(args)
 
-    return args[idx], args[idx + 1:], config_pairs
+    return args[idx], args[idx + 1:], config_pairs, idx
 
 
-def get_subcommand(args: List[str]) -> Optional[str]:
+def get_subcommand(args: list[str]) -> str | None:
     """Return the git subcommand from *args*, or None."""
-    subcmd, _, _ = get_subcommand_args(args)
+    subcmd, _, _, _ = get_subcommand_args(args)
     return subcmd
 
 
@@ -122,11 +123,11 @@ def get_subcommand(args: List[str]) -> Optional[str]:
 # Branch Constants
 # ---------------------------------------------------------------------------
 
-WELL_KNOWN_BRANCHES: FrozenSet[str] = frozenset({
+WELL_KNOWN_BRANCHES: frozenset[str] = frozenset({
     "main", "master", "develop", "production",
 })
 
-WELL_KNOWN_BRANCH_PREFIXES: Tuple[str, ...] = (
+WELL_KNOWN_BRANCH_PREFIXES: tuple[str, ...] = (
     "release/", "hotfix/",
 )
 
@@ -216,12 +217,9 @@ _STDERR_REF_RE = re.compile(
     r"|refs/remotes/[^/]+/(?P<remote_branch>[^\s'\"]+)"
 )
 
-# Bare branch names in single-quoted contexts (e.g. 'sandbox/other').
-# Only matches tokens containing "/" to avoid false-positives on file paths
-# and other single-quoted strings.
-_STDERR_BARE_BRANCH_RE = re.compile(
-    r"'(?P<bare_branch>[^\s'\"]+/[^\s'\"]+)'"
-)
+# Bare branch names in single-quoted contexts are handled in
+# branch_output_filter.py which builds the regex inline with access to
+# sandbox_branch for more precise filtering.
 
 
 # ---------------------------------------------------------------------------
@@ -229,7 +227,7 @@ _STDERR_BARE_BRANCH_RE = re.compile(
 # ---------------------------------------------------------------------------
 
 
-def _normalize_base_branch(base_branch: Optional[str]) -> Optional[str]:
+def _normalize_base_branch(base_branch: str | None) -> str | None:
     """Normalize a base branch name from metadata to a bare branch name."""
     if not base_branch:
         return None
@@ -258,7 +256,7 @@ def _normalize_base_branch(base_branch: Optional[str]) -> Optional[str]:
 def _is_allowed_branch_name(
     name: str,
     sandbox_branch: str,
-    base_branch: Optional[str] = None,
+    base_branch: str | None = None,
 ) -> bool:
     """Check if a bare branch name is allowed for this sandbox.
 
@@ -284,6 +282,6 @@ def _is_allowed_branch_name(
 
 # Commands that enumerate refs (used by both branch_isolation and
 # branch_output_filter for dispatch).
-REF_ENUM_CMDS: FrozenSet[str] = frozenset({
+REF_ENUM_CMDS: frozenset[str] = frozenset({
     "for-each-ref", "ls-remote", "show-ref",
 })

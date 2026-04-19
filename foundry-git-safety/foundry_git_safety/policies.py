@@ -1,7 +1,8 @@
 """Shared validator for protected branch enforcement.
 
 Prevents direct pushes (create/update/delete) to protected branches like
-main, master, release/*, and production. Used by git_proxy.py addon.
+main, master, release/*, and production. Used by the git safety server
+for push policy enforcement.
 
 Metadata precedence: flow metadata > env vars > hardcoded defaults.
 """
@@ -9,16 +10,15 @@ Metadata precedence: flow metadata > env vars > hardcoded defaults.
 import fnmatch
 import os
 from dataclasses import dataclass, field
-from typing import List, Optional
 
-DEFAULT_PROTECTED_PATTERNS: List[str] = [
+DEFAULT_PROTECTED_PATTERNS: list[str] = [
     "refs/heads/main",
     "refs/heads/master",
     "refs/heads/release/*",
     "refs/heads/production",
 ]
 
-DEFAULT_RESTRICTED_PUSH_PATHS: List[str] = [
+DEFAULT_RESTRICTED_PUSH_PATHS: list[str] = [
     ".github/workflows",
     ".github/actions",
 ]
@@ -31,12 +31,12 @@ class BranchPolicyConfig:
     """Configuration for protected branch enforcement."""
 
     enabled: bool = True
-    patterns: List[str] = field(
+    patterns: list[str] = field(
         default_factory=lambda: list(DEFAULT_PROTECTED_PATTERNS)
     )
 
 
-def load_branch_policy(metadata: Optional[dict] = None) -> BranchPolicyConfig:
+def load_branch_policy(metadata: dict | None = None) -> BranchPolicyConfig:
     """Load branch policy config with precedence: metadata > env vars > defaults.
 
     Args:
@@ -81,9 +81,9 @@ def check_protected_branches(
     refname: str,
     old_sha: str,
     new_sha: str,
-    bare_repo_path: Optional[str] = None,
-    metadata: Optional[dict] = None,
-) -> Optional[str]:
+    bare_repo_path: str | None = None,
+    metadata: dict | None = None,
+) -> str | None:
     """Check if a ref update violates protected branch policy.
 
     Args:
@@ -124,8 +124,8 @@ def check_protected_branches(
 
 def _check_bootstrap_creation(
     refname: str,
-    bare_repo_path: Optional[str],
-) -> Optional[str]:
+    bare_repo_path: str | None,
+) -> str | None:
     """Allow first refs/heads/main creation via atomic lock file, block all others.
 
     The bootstrap guard uses O_CREAT | O_EXCL | O_WRONLY to atomically create

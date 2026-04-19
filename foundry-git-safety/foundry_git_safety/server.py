@@ -14,12 +14,18 @@ Security model:
 import json
 import logging
 import os
-from typing import Optional
 
-from flask import Flask, Response, jsonify, request
+try:
+    from flask import Flask, Response, jsonify, request
+except ImportError as exc:
+    raise ImportError(
+        "Flask is required for the git safety server. "
+        "Install with: pip install foundry-git-safety[server]"
+    ) from exc
 
 from .auth import (
     MAX_REQUEST_BODY,
+    SANDBOX_ID_RE,
     NonceStore,
     RateLimiter,
     SecretStore,
@@ -38,11 +44,14 @@ DEFAULT_DATA_DIR = os.environ.get(
 def _load_sandbox_metadata(
     sandbox_id: str,
     data_dir: str = DEFAULT_DATA_DIR,
-) -> Optional[dict]:
+) -> dict | None:
     """Load sandbox metadata from a JSON file.
 
     File path: {data_dir}/sandboxes/{sandbox_id}.json
     """
+    if not SANDBOX_ID_RE.match(sandbox_id):
+        logger.warning("Invalid sandbox_id rejected: %r", sandbox_id)
+        return None
     metadata_path = os.path.join(data_dir, "sandboxes", f"{sandbox_id}.json")
     try:
         with open(metadata_path, "r") as f:
@@ -55,10 +64,10 @@ def _load_sandbox_metadata(
 
 
 def create_git_api(
-    secret_store: Optional[SecretStore] = None,
-    nonce_store: Optional[NonceStore] = None,
-    rate_limiter: Optional[RateLimiter] = None,
-    data_dir: Optional[str] = None,
+    secret_store: SecretStore | None = None,
+    nonce_store: NonceStore | None = None,
+    rate_limiter: RateLimiter | None = None,
+    data_dir: str | None = None,
     repo_root_resolver=None,
 ) -> Flask:
     """Create the git API Flask application.
@@ -79,9 +88,10 @@ def create_git_api(
     resolved_data_dir = data_dir or DEFAULT_DATA_DIR
 
     # Import here to avoid circular imports
-    from .operations import execute_git, validate_request
+    from .command_validation import validate_request
+    from .operations import execute_git
 
-    def _resolve_repo_root(sandbox_id: str, metadata: Optional[dict]) -> str:
+    def _resolve_repo_root(sandbox_id: str, metadata: dict | None) -> str:
         if repo_root_resolver:
             return repo_root_resolver(sandbox_id, metadata)
         if metadata:
@@ -219,8 +229,8 @@ def create_git_api(
 
 
 def run_tcp_server(
-    app: Optional[Flask] = None,
-    host: str = "0.0.0.0",
+    app: Flask | None = None,
+    host: str = "127.0.0.1",
     port: int = 8083,
 ) -> None:
     """Run the git API on a TCP socket."""

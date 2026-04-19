@@ -13,8 +13,7 @@ import json
 import logging
 import os
 import re
-from http.server import BaseHTTPRequestHandler, HTTPServer
-from typing import List, Optional, Tuple
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlparse
 
 from .github_config import GITHUB_API_HOSTS
@@ -26,7 +25,7 @@ ALLOW_PR_OPERATIONS = os.environ.get("ALLOW_PR_OPERATIONS", "").lower() in (
 )
 
 # Allowlisted safe operations (method, path_pattern)
-ALLOWED_OPERATIONS: List[Tuple[str, str]] = [
+ALLOWED_OPERATIONS: list[tuple[str, str]] = [
     ("GET", r"^/repos/[^/]+/[^/]+$"),
     ("GET", r"^/repos/[^/]+/[^/]+/.*"),
     ("GET", r"^/repos/[^/]+/[^/]+/issues.*"),
@@ -85,7 +84,7 @@ ALLOWED_OPERATIONS: List[Tuple[str, str]] = [
     ("POST", r"^/repos/[^/]+/[^/]+/pulls/\d+/reviews$"),
 ]
 
-CONDITIONAL_PR_OPERATIONS: List[Tuple[str, str]] = [
+CONDITIONAL_PR_OPERATIONS: list[tuple[str, str]] = [
     ("POST", r"^/repos/[^/]+/[^/]+/pulls$"),
     ("POST", r"^/repos/[^/]+/[^/]+/pulls/\d+/comments$"),
     ("PATCH", r"^/repos/[^/]+/[^/]+/pulls/\d+$"),
@@ -109,7 +108,7 @@ CONDITIONAL_BLOCKED_GRAPHQL_MUTATIONS = [
     "addPullRequestReviewComment",
 ]
 
-BLOCKED_PATTERNS: List[Tuple[str, str, str]] = [
+BLOCKED_PATTERNS: list[tuple[str, str, str]] = [
     ("DELETE", r"^/repos/[^/]+/[^/]+$", "gh repo delete: permanently destroys repository"),
     ("DELETE", r"^/repos/[^/]+/[^/]+/releases/\d+$", "gh release delete: removes release artifacts"),
     ("DELETE", r"^/repos/[^/]+/[^/]+/git/refs/.*", "gh api: deletes branch/tag (history loss)"),
@@ -173,8 +172,8 @@ class GitHubAPIChecker:
         self,
         method: str,
         path: str,
-        body: Optional[bytes] = None,
-    ) -> Tuple[bool, Optional[str]]:
+        body: bytes | None = None,
+    ) -> tuple[bool, str | None]:
         """Check if a GitHub API request should be allowed.
 
         Args:
@@ -226,16 +225,21 @@ class GitHubAPIChecker:
 
         return False, f"gh api: raw API access not permitted ({method} {path_no_query})"
 
-    def _is_pr_reopen(self, body: Optional[bytes]) -> bool:
+    def _is_pr_reopen(self, body: bytes | None) -> bool:
         if not body:
             return False
         try:
             data = json.loads(body)
-            return str(data.get("state", "")).lower() == "open"
+            state = str(data.get("state", "")).lower()
+            # Block any PATCH that sets state=open.  This catches both explicit
+            # reopens and ambiguous cases where GitHub may not include
+            # state_reason.  Legitimate title/body updates on open PRs don't
+            # include a state field.
+            return state == "open"
         except (json.JSONDecodeError, UnicodeDecodeError):
             return False
 
-    def _check_graphql_mutations(self, body: Optional[bytes]) -> Optional[str]:
+    def _check_graphql_mutations(self, body: bytes | None) -> str | None:
         if not body:
             return None
         try:
@@ -260,7 +264,7 @@ class GitHubAPIChecker:
 def run_github_proxy(
     host: str = "127.0.0.1",
     port: int = 8084,
-    upstream_proxy: Optional[str] = None,
+    upstream_proxy: str | None = None,
 ) -> None:
     """Run the GitHub API filter as a local HTTP proxy server.
 
@@ -289,11 +293,13 @@ def run_github_proxy(
             host = parsed.hostname
             path = parsed.path or "/"
 
+            # Read body up-front for all requests (not just GitHub API) so that
+            # the connection isn't left hanging with unread data.
+            content_length = int(self.headers.get("Content-Length", 0))
+            body = self.rfile.read(content_length) if content_length > 0 else None
+
             # Only filter GitHub API hosts
             if host in GITHUB_API_HOSTS:
-                content_length = int(self.headers.get("Content-Length", 0))
-                body = self.rfile.read(content_length) if content_length > 0 else None
-
                 allowed, reason = checker.check_request(
                     method=self.command,
                     path=path,
@@ -318,13 +324,17 @@ def run_github_proxy(
             # Forward the request
             import http.client
             try:
-                target_host = host or "api.github.com"
-                target_port = parsed.port or 443 if parsed.scheme == "https" else 80
+                if not host:
+                    self.send_response(400)
+                    self.send_header("Content-Type", "application/json")
+                    self.end_headers()
+                    self.wfile.write(json.dumps({"error": "Missing host in request URL"}).encode())
+                    return
+
+                target_host = host
+                target_port = parsed.port or (443 if parsed.scheme == "https" else 80)
 
                 conn = http.client.HTTPSConnection(target_host, target_port) if parsed.scheme == "https" else http.client.HTTPConnection(target_host, target_port)
-
-                content_length = int(self.headers.get("Content-Length", 0))
-                body = self.rfile.read(content_length) if content_length > 0 else None
 
                 headers = {k: v for k, v in self.headers.items() if k.lower() != "host"}
                 headers["Host"] = target_host
@@ -367,7 +377,7 @@ def run_github_proxy(
         def log_message(self, format, *args) -> None:
             logger.debug("Proxy: %s", format % args)
 
-    server = HTTPServer((host, port), GitHubAPIProxyHandler)
+    server = ThreadingHTTPServer((host, port), GitHubAPIProxyHandler)
     logger.info("Starting GitHub API filter proxy on %s:%d", host, port)
     try:
         server.serve_forever()

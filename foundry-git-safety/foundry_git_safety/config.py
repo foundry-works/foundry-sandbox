@@ -8,9 +8,10 @@ import fnmatch
 import logging
 import os
 import posixpath
+import time
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 import yaml
 
@@ -29,15 +30,15 @@ class ValidationResult:
 
     blocked: bool
     reason: str = ""
-    warned_files: List[str] = field(default_factory=list)
+    warned_files: list[str] = field(default_factory=list)
 
 
 @dataclass
 class FileRestrictionsData:
     """Configuration for push/commit file restrictions."""
 
-    blocked_patterns: List[str]
-    warned_patterns: List[str]
+    blocked_patterns: list[str]
+    warned_patterns: list[str]
     warn_action: str  # "log" or "reject"
 
     def __post_init__(self) -> None:
@@ -64,13 +65,13 @@ def _matches_pattern(path: str, pattern: str) -> bool:
     return os.path.basename(path) == pattern
 
 
-def matches_any(path: str, patterns: List[str]) -> bool:
+def matches_any(path: str, patterns: list[str]) -> bool:
     """Check if a file path matches any pattern in a list."""
     return any(_matches_pattern(path, p) for p in patterns)
 
 
 def check_file_restrictions(
-    changed_files: List[str],
+    changed_files: list[str],
     config: FileRestrictionsData,
 ) -> ValidationResult:
     """Check a list of changed file paths against blocked/warned patterns."""
@@ -106,7 +107,7 @@ def check_file_restrictions(
     return ValidationResult(blocked=False)
 
 
-def _load_yaml_file(file_path: str) -> Dict[str, Any]:
+def _load_yaml_file(file_path: str) -> dict[str, Any]:
     """Load and parse a YAML file."""
     path = Path(file_path)
 
@@ -130,7 +131,7 @@ def _load_yaml_file(file_path: str) -> Dict[str, Any]:
     return data
 
 
-def load_foundry_config(path: Optional[str] = None) -> FoundryConfig:
+def load_foundry_config(path: str | None = None) -> FoundryConfig:
     """Load and validate foundry.yaml configuration.
 
     Returns a FoundryConfig with defaults for any missing sections.
@@ -164,7 +165,7 @@ def load_foundry_config(path: Optional[str] = None) -> FoundryConfig:
 
 
 def load_file_restrictions_config(
-    path: Optional[str] = None,
+    path: str | None = None,
 ) -> FileRestrictionsData:
     """Load and validate file restrictions configuration from YAML.
 
@@ -180,8 +181,18 @@ def load_file_restrictions_config(
     if path is None:
         path = os.environ.get(
             "FOUNDRY_FILE_RESTRICTIONS_PATH",
-            os.path.join(os.path.dirname(__file__), "..", "default_config", "push-file-restrictions.yaml"),
         )
+        if path is None:
+            try:
+                from importlib.resources import files
+                config_dir = files("foundry_git_safety").joinpath("default_config")
+                path = str(config_dir.joinpath("push-file-restrictions.yaml"))
+            except (ImportError, TypeError):
+                # Fallback for dev/editable installs
+                path = os.path.join(
+                    os.path.dirname(__file__), "default_config",
+                    "push-file-restrictions.yaml",
+                )
 
     data = _load_yaml_file(path)
 
@@ -207,20 +218,41 @@ def load_file_restrictions_config(
     )
 
 
-# Module-level cache for file restrictions config.
-_file_restrictions_config: Optional[FileRestrictionsData] = None
+class _FileRestrictionsCache:
+    """TTL-based cache for file restrictions configuration.
+
+    Avoids re-reading the YAML file on every request while still
+    picking up changes within the TTL window.
+    """
+
+    def __init__(self, ttl: float = 30.0) -> None:
+        self._config: FileRestrictionsData | None = None
+        self._loaded_at: float = 0.0
+        self._ttl = ttl
+
+    def get(self, path: str | None = None) -> FileRestrictionsData:
+        if path is not None:
+            return load_file_restrictions_config(path)
+        now = time.time()
+        if self._config is not None and (now - self._loaded_at) < self._ttl:
+            return self._config
+        self._config = load_file_restrictions_config()
+        self._loaded_at = now
+        return self._config
+
+    def invalidate(self) -> None:
+        self._config = None
+        self._loaded_at = 0.0
+
+
+_file_restrictions_cache = _FileRestrictionsCache()
 
 
 def get_file_restrictions_config(
-    path: Optional[str] = None,
+    path: str | None = None,
 ) -> FileRestrictionsData:
     """Get the file restrictions config, loading and caching on first call."""
-    global _file_restrictions_config
-    if path is not None:
-        return load_file_restrictions_config(path)
-    if _file_restrictions_config is None:
-        _file_restrictions_config = load_file_restrictions_config()
-    return _file_restrictions_config
+    return _file_restrictions_cache.get(path)
 
 
 logger = logging.getLogger(__name__)

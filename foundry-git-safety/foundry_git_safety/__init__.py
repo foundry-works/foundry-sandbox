@@ -6,5 +6,5 @@ try:
     from importlib.metadata import version
 
     __version__ = version("foundry-git-safety")
-except Exception:
-    pass
+except ImportError:
+    __version__ = "unknown"

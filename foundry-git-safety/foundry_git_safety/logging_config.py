@@ -34,11 +34,11 @@ import os
 import sys
 import time
 from contextvars import ContextVar
-from typing import Any, Optional
+from typing import Any
 
 # Context variables for correlation IDs (thread-safe)
-_request_id: ContextVar[Optional[str]] = ContextVar("request_id", default=None)
-_container_id: ContextVar[Optional[str]] = ContextVar("container_id", default=None)
+_request_id: ContextVar[str | None] = ContextVar("request_id", default=None)
+_container_id: ContextVar[str | None] = ContextVar("container_id", default=None)
 _extra_context: ContextVar[dict] = ContextVar("extra_context", default={})
 
 # Configuration from environment
@@ -49,8 +49,8 @@ LOG_INCLUDE_LOCATION = os.environ.get("LOG_INCLUDE_LOCATION", "true").lower() ==
 
 
 def set_context(
-    request_id: Optional[str] = None,
-    container_id: Optional[str] = None,
+    request_id: str | None = None,
+    container_id: str | None = None,
     **extra: Any,
 ) -> None:
     """Set correlation context for the current async context / thread.
@@ -237,10 +237,10 @@ class TextFormatter(logging.Formatter):
 
 
 def setup_logging(
-    level: Optional[str] = None,
-    format_type: Optional[str] = None,
-    include_timestamp: Optional[bool] = None,
-    include_location: Optional[bool] = None,
+    level: str | None = None,
+    format_type: str | None = None,
+    include_timestamp: bool | None = None,
+    include_location: bool | None = None,
 ) -> None:
     """Configure the root logger with the specified settings.
 
@@ -313,8 +313,8 @@ class LogContext:
 
     def __init__(
         self,
-        request_id: Optional[str] = None,
-        container_id: Optional[str] = None,
+        request_id: str | None = None,
+        container_id: str | None = None,
         **extra: Any,
     ):
         self.request_id = request_id
@@ -435,5 +435,5 @@ def flask_request_middleware(app):
             )
 
 
-# Initialize logging when module is imported (with defaults)
-setup_logging()
+# Logging is initialized explicitly at application entry points.
+# Importing this module does NOT reconfigure the root logger.

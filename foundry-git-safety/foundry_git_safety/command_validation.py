@@ -9,7 +9,6 @@ import base64
 import os
 import re
 from dataclasses import dataclass
-from typing import Dict, FrozenSet, List, Optional, Set, Tuple
 
 from .branch_types import ValidationError, get_subcommand_args
 
@@ -87,7 +86,7 @@ _PLUMBING_CMDS = frozenset({
     "diff-tree", "diff-files", "diff-index",
 })
 
-ALLOWED_COMMANDS: FrozenSet[str] = (
+ALLOWED_COMMANDS: frozenset[str] = (
     _WORKING_TREE_CMDS
     | _COMMIT_CMDS
     | _BRANCH_CMDS
@@ -105,7 +104,7 @@ ALLOWED_COMMANDS: FrozenSet[str] = (
 # Flag Blocklist (per-operation)
 # ---------------------------------------------------------------------------
 
-GLOBAL_BLOCKED_FLAGS: FrozenSet[str] = frozenset({
+GLOBAL_BLOCKED_FLAGS: frozenset[str] = frozenset({
     "--git-dir",
     "--work-tree",
     "--exec",
@@ -114,38 +113,38 @@ GLOBAL_BLOCKED_FLAGS: FrozenSet[str] = frozenset({
 })
 
 # Per-command destructive flag blocking
-_PUSH_BLOCKED_FLAGS: FrozenSet[str] = frozenset({
+_PUSH_BLOCKED_FLAGS: frozenset[str] = frozenset({
     "--force", "-f", "--force-with-lease", "--force-if-includes",
 })
 
-_REBASE_BLOCKED_FLAGS: FrozenSet[str] = frozenset({
+_REBASE_BLOCKED_FLAGS: frozenset[str] = frozenset({
     "--interactive", "-i",
 })
 
 # Destructive variants for checkout/switch/branch/clean
-_CHECKOUT_BLOCKED_FLAGS: FrozenSet[str] = frozenset({
+_CHECKOUT_BLOCKED_FLAGS: frozenset[str] = frozenset({
     "--force", "-f",
 })
 
-_SWITCH_BLOCKED_FLAGS: FrozenSet[str] = frozenset({
+_SWITCH_BLOCKED_FLAGS: frozenset[str] = frozenset({
     "--force", "-f", "--discard-changes",
 })
 
-_BRANCH_BLOCKED_FLAGS: FrozenSet[str] = frozenset({
+_BRANCH_BLOCKED_FLAGS: frozenset[str] = frozenset({
     "--force", "-f", "-D",
 })
 
-_CLEAN_BLOCKED_FLAGS: FrozenSet[str] = frozenset({
+_CLEAN_BLOCKED_FLAGS: frozenset[str] = frozenset({
     "-f", "--force", "-fd", "-fx", "-fxd", "-fX",
     "-d", "-x", "-X",
 })
 
 # Only --dry-run is allowed for clean
-_CLEAN_ALLOWED_FLAGS: FrozenSet[str] = frozenset({
+_CLEAN_ALLOWED_FLAGS: frozenset[str] = frozenset({
     "--dry-run", "-n",
 })
 
-COMMAND_BLOCKED_FLAGS: Dict[str, FrozenSet[str]] = {
+COMMAND_BLOCKED_FLAGS: dict[str, frozenset[str]] = {
     "push": _PUSH_BLOCKED_FLAGS,
     "rebase": _REBASE_BLOCKED_FLAGS,
     "checkout": _CHECKOUT_BLOCKED_FLAGS,
@@ -158,11 +157,11 @@ COMMAND_BLOCKED_FLAGS: Dict[str, FrozenSet[str]] = {
 # Remote Subcommand Validation
 # ---------------------------------------------------------------------------
 
-REMOTE_ALLOWED_SUBCOMMANDS: FrozenSet[str] = frozenset({
+REMOTE_ALLOWED_SUBCOMMANDS: frozenset[str] = frozenset({
     "-v", "--verbose", "show", "get-url",
 })
 
-REMOTE_BLOCKED_SUBCOMMANDS: FrozenSet[str] = frozenset({
+REMOTE_BLOCKED_SUBCOMMANDS: frozenset[str] = frozenset({
     "add", "set-url", "remove", "rename",
 })
 
@@ -172,7 +171,7 @@ REMOTE_BLOCKED_SUBCOMMANDS: FrozenSet[str] = frozenset({
 
 # Always-allowed repos for Claude plugin marketplaces (read-only)
 # Must match unified-proxy/addons/git_proxy.py
-ALLOWED_MARKETPLACES: FrozenSet[str] = frozenset({
+ALLOWED_MARKETPLACES: frozenset[str] = frozenset({
     "anthropics/claude-plugins-official",
     "foundry-works/claude-foundry",
 })
@@ -184,7 +183,7 @@ _GITHUB_HTTPS_RE = re.compile(
 )
 
 # Clone options that consume a value argument.
-_CLONE_OPTIONS_WITH_VALUE: FrozenSet[str] = frozenset({
+_CLONE_OPTIONS_WITH_VALUE: frozenset[str] = frozenset({
     "-b", "--branch",
     "-o", "--origin",
     "-c", "--config",
@@ -201,7 +200,7 @@ _CLONE_OPTIONS_WITH_VALUE: FrozenSet[str] = frozenset({
 })
 
 # Short options that may embed their value (e.g. -bmain)
-_CLONE_SHORT_EMBED_OPTS: Tuple[str, ...] = (
+_CLONE_SHORT_EMBED_OPTS: tuple[str, ...] = (
     "-b",
     "-o",
     "-c",
@@ -216,7 +215,7 @@ _CLONE_CRED_RE = re.compile(r"://[^/@]+@")
 # ---------------------------------------------------------------------------
 
 # Never-allow list: checked FIRST, always rejected
-CONFIG_NEVER_ALLOW: Tuple[str, ...] = (
+CONFIG_NEVER_ALLOW: tuple[str, ...] = (
     "alias.",
     "core.sshCommand",
     "core.pager",
@@ -244,7 +243,7 @@ CONFIG_NEVER_ALLOW: Tuple[str, ...] = (
 )
 
 # Permitted prefixes: only checked if not in never-allow
-CONFIG_PERMITTED_PREFIXES: Tuple[str, ...] = (
+CONFIG_PERMITTED_PREFIXES: tuple[str, ...] = (
     "user.",
     "color.",
     "core.quotepath",
@@ -266,7 +265,7 @@ CONFIG_PERMITTED_PREFIXES: Tuple[str, ...] = (
 # Config Subcommand Validation
 # ---------------------------------------------------------------------------
 
-CONFIG_ALLOWED_FLAGS: FrozenSet[str] = frozenset({
+CONFIG_ALLOWED_FLAGS: frozenset[str] = frozenset({
     "--get", "--list", "--get-regexp",
     "--get-all", "--get-urlmatch",
     "-l",
@@ -281,9 +280,9 @@ CONFIG_ALLOWED_FLAGS: FrozenSet[str] = frozenset({
 class GitExecRequest:
     """Request to execute a git command."""
 
-    args: List[str]
-    cwd: Optional[str] = None
-    stdin_b64: Optional[str] = None
+    args: list[str]
+    cwd: str | None = None
+    stdin_b64: str | None = None
 
 
 @dataclass
@@ -293,7 +292,7 @@ class GitExecResponse:
     exit_code: int
     stdout: str
     stderr: str
-    stdout_b64: Optional[str] = None
+    stdout_b64: str | None = None
     truncated: bool = False
 
     def to_dict(self) -> dict:
@@ -313,7 +312,7 @@ class GitExecResponse:
 # ---------------------------------------------------------------------------
 
 
-def validate_request(raw: dict) -> Tuple[Optional[GitExecRequest], Optional[ValidationError]]:
+def validate_request(raw: dict) -> tuple[GitExecRequest | None, ValidationError | None]:
     """Parse and validate a raw request dict.
 
     Returns (request, None) on success, (None, error) on failure.
@@ -367,9 +366,9 @@ def validate_request(raw: dict) -> Tuple[Optional[GitExecRequest], Optional[Vali
 
 
 def validate_command(
-    args: List[str],
-    extra_allowed: Optional[Set[str]] = None,
-) -> Optional[ValidationError]:
+    args: list[str],
+    extra_allowed: set[str] | None = None,
+) -> ValidationError | None:
     """Validate git command args against allowlist and flag restrictions.
 
     Args:
@@ -384,14 +383,10 @@ def validate_command(
 
     # Extract subcommand and args using shared helper (needed before flag
     # checking so we can distinguish global options from subcommand args)
-    subcommand, subcommand_args, config_pairs = get_subcommand_args(args)
+    subcommand, subcommand_args, config_pairs, sub_idx = get_subcommand_args(args)
 
-    # Determine pre-subcommand args (true global options)
+    # Determine pre-subcommand args (true global options).
     if subcommand is not None:
-        try:
-            sub_idx = args.index(subcommand)
-        except ValueError:
-            sub_idx = len(args)
         pre_subcommand_args = args[:sub_idx]
     else:
         pre_subcommand_args = args
@@ -468,7 +463,7 @@ def validate_command(
     return None
 
 
-def _validate_config_key(pair: str) -> Optional[ValidationError]:
+def _validate_config_key(pair: str) -> ValidationError | None:
     """Validate a -c key=value config override.
 
     Never-allow list is checked BEFORE permitted prefixes.
@@ -527,24 +522,39 @@ def _matches_wildcard_config(key: str, pattern: str) -> bool:
 
 
 def _validate_command_flags(
-    subcommand: str, args: List[str]
-) -> Optional[ValidationError]:
-    """Check per-command blocked flags."""
+    subcommand: str, args: list[str]
+) -> ValidationError | None:
+    """Check per-command blocked flags.
+
+    Handles combined short flags (e.g. ``-fD`` is treated as ``-f -D``).
+    """
     blocked = COMMAND_BLOCKED_FLAGS.get(subcommand)
     if not blocked:
         return None
 
     for arg in args:
         flag_name = arg.split("=", 1)[0]
+        # Check exact match first (e.g. --force, -f)
         if flag_name in blocked:
             return ValidationError(
                 f"Blocked flag for {subcommand}: {flag_name}"
             )
+        # Expand combined short flags (e.g. -fD -> -f, -D)
+        if (
+            len(flag_name) > 2
+            and flag_name.startswith("-")
+            and not flag_name.startswith("--")
+        ):
+            for ch in flag_name[1:]:
+                if f"-{ch}" in blocked:
+                    return ValidationError(
+                        f"Blocked flag for {subcommand}: -{ch} (in combined flag {flag_name})"
+                    )
 
     return None
 
 
-def _validate_remote_subcommand(args: List[str]) -> Optional[ValidationError]:
+def _validate_remote_subcommand(args: list[str]) -> ValidationError | None:
     """Validate git remote subcommands — explicit enumeration."""
     if not args:
         # bare 'git remote' lists remotes — allowed
@@ -568,13 +578,13 @@ def _validate_remote_subcommand(args: List[str]) -> Optional[ValidationError]:
     return ValidationError(f"Remote subcommand not allowed: {subcmd}")
 
 
-def _extract_clone_positionals(args: List[str]) -> List[str]:
+def _extract_clone_positionals(args: list[str]) -> list[str]:
     """Extract positional args from clone subcommand args.
 
     Returns [repo, dest] (dest optional) after stripping flags and
     options that consume values.
     """
-    positionals: List[str] = []
+    positionals: list[str] = []
     idx = 0
     while idx < len(args):
         arg = args[idx]
@@ -619,7 +629,7 @@ def _extract_clone_positionals(args: List[str]) -> List[str]:
     return positionals
 
 
-def _parse_github_https_repo(url: str) -> Optional[str]:
+def _parse_github_https_repo(url: str) -> str | None:
     """Parse https://github.com/<owner>/<repo>[.git] URLs into owner/repo."""
     if not url:
         return None
@@ -633,7 +643,7 @@ def _parse_github_https_repo(url: str) -> Optional[str]:
     return f"{owner}/{repo}"
 
 
-def _get_allowed_repos(metadata: Optional[dict]) -> List[str]:
+def _get_allowed_repos(metadata: dict | None) -> list[str]:
     """Get allowed repos from container metadata in owner/repo form."""
     if not metadata:
         return []
@@ -646,9 +656,9 @@ def _get_allowed_repos(metadata: Optional[dict]) -> List[str]:
 
 
 def validate_clone_args(
-    args: List[str],
-    metadata: Optional[dict] = None,
-) -> Tuple[Optional[List[str]], Optional[ValidationError]]:
+    args: list[str],
+    metadata: dict | None = None,
+) -> tuple[list[str] | None, ValidationError | None]:
     """Validate clone arguments and return extra allowed roots.
 
     Enforces:
@@ -660,7 +670,7 @@ def validate_clone_args(
         (extra_allowed_roots, None) if valid, (None, ValidationError) if blocked.
         For non-clone commands, returns (None, None).
     """
-    subcommand, sub_args, _ = get_subcommand_args(args)
+    subcommand, sub_args, _, _ = get_subcommand_args(args)
     if subcommand != "clone":
         return None, None
 
@@ -691,14 +701,14 @@ def validate_clone_args(
     return [plugin_cache_root, plugin_marketplaces_root], None
 
 
-def _strip_clone_config_overrides(args: List[str]) -> List[str]:
+def _strip_clone_config_overrides(args: list[str]) -> list[str]:
     """Strip config overrides that are safe to ignore for HTTPS clones.
 
     Currently drops core.sshCommand when present as a global -c option.
     This avoids blocking marketplace clones that inject sshCommand even
     though HTTPS URLs do not use SSH.
     """
-    stripped: List[str] = []
+    stripped: list[str] = []
     idx = 0
     while idx < len(args):
         arg = args[idx]
@@ -725,7 +735,7 @@ def _strip_clone_config_overrides(args: List[str]) -> List[str]:
     return stripped
 
 
-def _validate_config_subcommand(args: List[str]) -> Optional[ValidationError]:
+def _validate_config_subcommand(args: list[str]) -> ValidationError | None:
     """Validate git config — only read-only operations allowed."""
     if not args:
         # bare 'git config' shows help — allowed
@@ -746,7 +756,7 @@ def _validate_config_subcommand(args: List[str]) -> Optional[ValidationError]:
     return None
 
 
-def _validate_notes_subcommand(args: List[str]) -> Optional[ValidationError]:
+def _validate_notes_subcommand(args: list[str]) -> ValidationError | None:
     """Validate git notes — only read-only operations allowed."""
     write_subcmds = {"add", "append", "copy", "edit", "merge", "remove", "prune"}
     if args and args[0] in write_subcmds:
@@ -754,7 +764,7 @@ def _validate_notes_subcommand(args: List[str]) -> Optional[ValidationError]:
     return None
 
 
-def _validate_sparse_checkout_subcommand(args: List[str]) -> Optional[ValidationError]:
+def _validate_sparse_checkout_subcommand(args: list[str]) -> ValidationError | None:
     """Validate git sparse-checkout — only read-only 'list' subcommand allowed."""
     if not args:
         # bare 'git sparse-checkout' shows help — allowed
@@ -769,7 +779,7 @@ def _validate_sparse_checkout_subcommand(args: List[str]) -> Optional[Validation
     return None
 
 
-def _validate_clean_flags(args: List[str]) -> Optional[ValidationError]:
+def _validate_clean_flags(args: list[str]) -> ValidationError | None:
     """Validate git clean — only --dry-run is allowed.
 
     Note: combined short options (e.g. ``-nfd``) are intentionally blocked
@@ -785,8 +795,8 @@ def _validate_clean_flags(args: List[str]) -> Optional[ValidationError]:
 
 
 def validate_path(
-    cwd: Optional[str], repo_root: str
-) -> Tuple[str, Optional[ValidationError]]:
+    cwd: str | None, repo_root: str
+) -> tuple[str, ValidationError | None]:
     """Validate and resolve working directory within repo root.
 
     Server-side repo root is authoritative. Client cwd is only used
@@ -838,10 +848,10 @@ def validate_path(
 
 
 def validate_path_args(
-    args: List[str],
+    args: list[str],
     repo_root: str,
-    extra_allowed_roots: Optional[List[str]] = None,
-) -> Optional[ValidationError]:
+    extra_allowed_roots: list[str] | None = None,
+) -> ValidationError | None:
     """Check that path-like arguments don't contain traversal.
 
     Allows optional extra roots (absolute paths) for sanctioned operations

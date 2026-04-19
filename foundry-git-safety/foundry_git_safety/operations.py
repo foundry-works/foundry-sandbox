@@ -21,18 +21,12 @@ import logging
 import os
 import re
 import subprocess
+import threading
 import uuid
-from typing import Any, Dict, FrozenSet, List, Optional, Tuple
+from typing import Any
 
-from .config import (
-    ConfigError,
-    check_file_restrictions,
-    get_file_restrictions_config,
-)
-from .policies import check_protected_branches
 from .branch_types import (
     GIT_BINARY,
-    SHA_CHECK_TIMEOUT,
     ValidationError,
     get_subcommand,
     get_subcommand_args,
@@ -47,50 +41,33 @@ from .branch_output_filter import (
     filter_ref_listing_output,
     filter_stderr_branch_refs,
 )
-
-# Re-export from command_validation for backward compatibility
-from .command_validation import (  # noqa: F401
-    ALLOWED_COMMANDS,
-    COMMAND_BLOCKED_FLAGS,
-    CONFIG_ALLOWED_FLAGS,
-    CONFIG_NEVER_ALLOW,
-    CONFIG_PERMITTED_PREFIXES,
-    GLOBAL_BLOCKED_FLAGS,
+from .command_validation import (
     GitExecRequest,
     GitExecResponse,
-    MAX_ARG_LENGTH,
-    MAX_ARGS_COUNT,
     MAX_CONCURRENT_PER_SANDBOX,
-    MAX_REQUEST_BODY_SIZE,
     MAX_RESPONSE_SIZE,
-    MAX_STDIN_SIZE,
-    REMOTE_ALLOWED_SUBCOMMANDS,
-    REMOTE_BLOCKED_SUBCOMMANDS,
     SUBPROCESS_TIMEOUT,
     _strip_clone_config_overrides,
     validate_clone_args,
     validate_command,
     validate_path,
     validate_path_args,
-    validate_request,
 )
-
-# Re-export from subprocess_env for backward compatibility
-from .subprocess_env import (  # noqa: F401
-    ENV_ALLOWED,
-    ENV_PREFIX_STRIP,
-    ENV_VARS_TO_CLEAR,
-    _FETCH_LOCK_FILENAME,
-    _FETCH_LOCK_POLL_INTERVAL,
-    _FETCH_LOCK_TIMEOUT,
-    _fetch_lock,
-    _get_remote_names_from_config,
-    _git_config_get,
-    _git_config_get_all,
-    _read_remote_urls_from_bare_config,
-    _synthesize_remote_verbose_output,
+from .commit_validation import check_commit_file_restrictions
+from .push_validation import (
+    check_push_file_restrictions,
+    check_push_protected_branches,
+    extract_push_args,
+    normalize_push_args,
+    strip_credential_config_overrides,
+)
+from .subprocess_env import (
     build_clean_env,
     remove_stale_config_locks,
+    _fetch_lock,
+    _git_config_get,
+    _read_remote_urls_from_bare_config,
+    _synthesize_remote_verbose_output,
 )
 
 logger = logging.getLogger(__name__)
@@ -112,16 +89,16 @@ def audit_log(
     event: str,
     action: str,
     decision: str,
-    command_args: Optional[List[str]] = None,
-    sandbox_id: Optional[str] = None,
-    source_ip: Optional[str] = None,
-    container_id: Optional[str] = None,
-    request_id: Optional[str] = None,
-    reason: Optional[str] = None,
-    matched_rule: Optional[str] = None,
-    exit_code: Optional[int] = None,
-    stdout: Optional[str] = None,
-    stderr: Optional[str] = None,
+    command_args: list[str] | None = None,
+    sandbox_id: str | None = None,
+    source_ip: str | None = None,
+    container_id: str | None = None,
+    request_id: str | None = None,
+    reason: str | None = None,
+    matched_rule: str | None = None,
+    exit_code: int | None = None,
+    stdout: str | None = None,
+    stderr: str | None = None,
     component: str = "git_operations",
     **extra: Any,
 ) -> None:
@@ -133,7 +110,7 @@ def audit_log(
     - HMAC secrets are NEVER passed
     - stdout/stderr are truncated to AUDIT_OUTPUT_TRUNCATE bytes
     """
-    entry: Dict[str, Any] = {
+    entry: dict[str, Any] = {
         "event": event,
         "component": component,
         "action": action,
@@ -184,19 +161,28 @@ def audit_log(
 
 
 class SandboxSemaphorePool:
-    """Per-sandbox concurrency limiter using asyncio semaphores."""
+    """Per-sandbox concurrency limiter using asyncio semaphores.
+
+    Uses asyncio.Semaphore for async concurrency control in
+    execute_git_async(). A threading.Lock protects dict access since
+    the pool may be accessed from both the async event loop and
+    Flask/Werkzeug handler threads.
+    """
 
     def __init__(self, max_concurrent: int = MAX_CONCURRENT_PER_SANDBOX):
-        self._semaphores: Dict[str, asyncio.Semaphore] = {}
+        self._semaphores: dict[str, asyncio.Semaphore] = {}
         self._max = max_concurrent
+        self._lock = threading.Lock()
 
     def get(self, sandbox_id: str) -> asyncio.Semaphore:
-        if sandbox_id not in self._semaphores:
-            self._semaphores[sandbox_id] = asyncio.Semaphore(self._max)
-        return self._semaphores[sandbox_id]
+        with self._lock:
+            if sandbox_id not in self._semaphores:
+                self._semaphores[sandbox_id] = asyncio.Semaphore(self._max)
+            return self._semaphores[sandbox_id]
 
     def cleanup(self, sandbox_id: str) -> None:
-        self._semaphores.pop(sandbox_id, None)
+        with self._lock:
+            self._semaphores.pop(sandbox_id, None)
 
 
 # Module-level semaphore pool
@@ -204,740 +190,53 @@ _semaphore_pool = SandboxSemaphorePool()
 
 
 # ---------------------------------------------------------------------------
-# Protected Branch Enforcement (push operations)
+# Git Execution
 # ---------------------------------------------------------------------------
 
-# SHA used by git_policies to detect creation/deletion operations.
-_ZERO_SHA = "0" * 40
+# Git output prefixes that reliably precede path segments.
+_TRANSLATE_PREFIXES = (
+    "M ", "A ", "D ", "R ", "C ", "U ",  # status short format
+    "fatal: ", "error: ", "warning: ",    # git messages
+    "# ",                                # comments (e.g. commit template)
+)
 
-# Synthetic SHAs for policy checks where real SHAs are unavailable.
-# Any non-zero SHA signals "existing ref" to check_protected_branches.
-_SYNTHETIC_OLD_SHA = "1" * 40
-_SYNTHETIC_NEW_SHA = "2" * 40
-
-# Push options that consume the following argument.
-_PUSH_OPTIONS_WITH_VALUE: FrozenSet[str] = frozenset({
-    "--repo",
-    "--receive-pack",
-    "--exec",
-    "--upload-pack",
-    "--push-option",
-    "-o",
+# Subcommands whose output is known to contain repo paths.
+_PATH_TRANSLATE_SUBCOMMANDS = frozenset({
+    "rev-parse", "status", "diff", "log", "show", "ls-files",
+    "ls-tree", "blame", "grep", "add", "reset", "checkout",
+    "commit", "merge", "rebase", "stash", "remote", "fetch",
+    "pull", "push", "branch", "worktree", "submodule",
 })
 
 
-def _has_push_flag(args: List[str], flag: str) -> bool:
-    """Check if a push flag is present in args."""
-    return any(arg == flag or arg.startswith(flag + "=") for arg in args)
+def _translate_paths(text: str, real_repo: str, client_root: str) -> str:
+    """Replace real repo root with client root on lines that look like git output.
 
-
-def _is_wildcard_refspec(spec: str) -> bool:
-    """Check if a push refspec uses wildcard patterns."""
-    if spec.startswith("+"):
-        spec = spec[1:]
-
-    parts: List[str]
-    if ":" in spec:
-        src, dst = spec.split(":", 1)
-        parts = [src, dst]
-    else:
-        parts = [spec]
-
-    wildcard_chars = ("*", "?", "[")
-    for part in parts:
-        if any(ch in part for ch in wildcard_chars):
-            return True
-    return False
-
-
-def _extract_push_positionals(args: List[str]) -> List[str]:
-    """Extract positional args from push subcommand args.
-
-    Returns [remote, refspec1, refspec2, ...] after stripping flags
-    and options that consume values.
+    Only translates lines that either start with the repo path, contain the repo
+    path after whitespace, or start with a known git output prefix (fatal:,
+    error:, status codes, etc.). This avoids corrupting file content in commits
+    or diffs that legitimately contains the repo path string.
     """
-    positionals: List[str] = []
-    idx = 0
-    while idx < len(args):
-        arg = args[idx]
-
-        # -- terminates options; everything after is positional
-        if arg == "--":
-            idx += 1
-            positionals.extend(args[idx:])
-            break
-
-        if arg in _PUSH_OPTIONS_WITH_VALUE:
-            idx += 2
-            continue
-
-        if any(
-            arg.startswith(opt + "=")
-            for opt in _PUSH_OPTIONS_WITH_VALUE
-            if opt.startswith("--")
-        ):
-            idx += 1
-            continue
-
-        if arg.startswith("-o") and arg != "-o":
-            idx += 1
-            continue
-
-        if arg.startswith("-"):
-            idx += 1
-            continue
-
-        positionals.append(arg)
-        idx += 1
-
-    return positionals
-
-
-def _parse_push_refspecs(args: List[str]) -> List[str]:
-    """Extract target refnames from push command arguments.
-
-    Parses push subcommand args (after 'push') to find refspecs and extracts
-    destination refs.
-
-    Returns a list of fully qualified refnames (refs/heads/<branch>).
-    """
-    refs: List[str] = []
-
-    positionals = _extract_push_positionals(args)
-    if len(positionals) <= 1:
-        return refs
-
-    for spec in positionals[1:]:
-        refs.extend(_parse_single_refspec(spec))
-
-    return refs
-
-
-def _parse_single_refspec(spec: str) -> List[str]:
-    """Parse a single refspec into target refnames.
-
-    Refspec forms:
-      "branch"          -> push local branch to refs/heads/branch
-      "src:dst"         -> push src to dst
-      ":branch"         -> delete remote branch (handled separately)
-      "+src:dst"        -> force push (+ prefix ignored, force flag handled elsewhere)
-      "refs/heads/main" -> fully qualified ref
-    """
-    # Strip force prefix
-    if spec.startswith("+"):
-        spec = spec[1:]
-
-    if ":" in spec:
-        src, dst = spec.split(":", 1)
-        if not dst:
-            return []
-        if not src:
-            # Deletion refspec — handled separately in check_push_protected_branches
-            return []
-        return [_qualify_ref(dst)]
-    else:
-        if not spec:
-            return []
-        # "HEAD" without explicit destination is ambiguous for policy checks.
-        if spec == "HEAD":
-            return []
-        return [_qualify_ref(spec)]
-
-
-def _qualify_ref(ref: str) -> str:
-    """Ensure a ref is fully qualified (refs/heads/...)."""
-    if ref.startswith("refs/"):
-        return ref
-    return f"refs/heads/{ref}"
-
-
-def _extract_push_args(args: List[str]) -> Optional[List[str]]:
-    """Extract push subcommand arguments from a full git args list.
-
-    Skips global flags and -c options to find the subcommand.
-    Returns the args after 'push' if the command is a push,
-    or None if it's not a push command.
-    """
-    idx = _find_push_index(args)
-    if idx is None:
-        return None
-    return args[idx + 1:]
-
-
-def _find_push_index(args: List[str]) -> Optional[int]:
-    """Return the index of ``"push"`` in a full git args list, or ``None``.
-
-    Skips global ``-c`` key=value pairs and other global flags to locate
-    the subcommand position.  Mirrors the skip logic of
-    :func:`_extract_push_args` but returns the index instead of the tail.
-    """
-    idx = 0
-    while idx < len(args):
-        arg = args[idx]
-        # Skip -c key=value pairs
-        if arg == "-c" and idx + 1 < len(args):
-            idx += 2
-            continue
-        if arg.startswith("-c") and len(arg) > 2:
-            idx += 1
-            continue
-        # Skip other global flags
-        if arg.startswith("-"):
-            idx += 1
-            continue
-        # Found the subcommand
-        if arg == "push":
-            return idx
-        return None
-    return None
-
-
-def _strip_credential_config_overrides(
-    args: List[str],
-) -> Tuple[List[str], bool]:
-    """Strip ``-c credential.*=...`` config overrides from git args.
-
-    GitHub CLI (``gh``) and other tools inject ``-c credential.helper=...``
-    overrides into their internal git commands.  The proxy's
-    ``CONFIG_NEVER_ALLOW`` blocklist rejects these, causing the entire
-    command to fail.
-
-    Since the proxy manages credentials independently (via
-    ``FOUNDRY_PROXY_GIT_TOKEN`` and the credential-helper script installed
-    in ``entrypoint.sh``), client-side credential overrides are redundant
-    and safe to remove.
-
-    Args:
-        args: Full git argument list (without the ``git`` binary itself).
-
-    Returns:
-        ``(args, True)`` if any overrides were stripped,
-        ``(args, False)`` otherwise.  The original list is never mutated.
-    """
-    stripped: List[str] = []
-    changed = False
-    idx = 0
-    while idx < len(args):
-        arg = args[idx]
-        # -c key=value (separate args)
-        if arg == "-c" and idx + 1 < len(args):
-            pair = args[idx + 1]
-            key = pair.split("=", 1)[0] if "=" in pair else pair
-            if key.startswith("credential.") or key == "credential":
-                idx += 2
-                changed = True
-                continue
-            stripped.extend([arg, pair])
-            idx += 2
-            continue
-        # -ckey=value (combined form)
-        if arg.startswith("-c") and len(arg) > 2:
-            pair = arg[2:]
-            key = pair.split("=", 1)[0] if "=" in pair else pair
-            if key.startswith("credential.") or key == "credential":
-                idx += 1
-                changed = True
-                continue
-            stripped.append(arg)
-            idx += 1
-            continue
-        stripped.append(arg)
-        idx += 1
-    return stripped, changed
-
-
-def _normalize_push_args(
-    args: List[str], metadata: Optional[dict],
-) -> Tuple[List[str], bool]:
-    """Auto-expand bare ``git push`` with the sandbox branch as refspec.
-
-    When the sandbox AI runs ``git push`` or ``git push origin`` without a
-    refspec, the proxy rejects it because branch isolation requires explicit
-    targets.  Since the proxy always knows ``metadata["sandbox_branch"]``,
-    we can infer the intended target and append it.
-
-    Args:
-        args: Full git argument list (without the ``git`` binary itself).
-        metadata: Container metadata containing ``sandbox_branch``.
-
-    Returns:
-        ``(args, True)`` if the args were expanded, ``(args, False)`` otherwise.
-        The original *args* list is never mutated; a new list is returned
-        when expansion occurs.
-    """
-    if not metadata or not metadata.get("sandbox_branch"):
-        return args, False
-
-    push_idx = _find_push_index(args)
-    if push_idx is None:
-        return args, False
-
-    push_sub_args = args[push_idx + 1:]
-
-    # Don't interfere with broad push modes — existing validation handles them.
-    for flag in ("--tags", "--all", "--mirror"):
-        if _has_push_flag(push_sub_args, flag):
-            return args, False
-
-    positionals = _extract_push_positionals(push_sub_args)
-    sandbox_branch = metadata["sandbox_branch"]
-
-    if len(positionals) == 0:
-        # git push → git push origin <branch>
-        return list(args) + ["origin", sandbox_branch], True
-    elif len(positionals) == 1:
-        # git push origin → git push origin <branch>
-        return list(args) + [sandbox_branch], True
-    else:
-        # Already has remote + refspec(s)
-        return args, False
-
-
-def _detect_default_branch(bare_repo_path: str) -> Optional[str]:
-    """Detect the default branch name from a bare repo's HEAD symref.
-
-    Runs ``git symbolic-ref HEAD`` against the bare repo and extracts
-    the branch name from the ``refs/heads/`` prefix.
-
-    Args:
-        bare_repo_path: Path to the bare git repository.
-
-    Returns:
-        The branch name (e.g. ``"main"``), or None if detection fails.
-    """
-    try:
-        result = subprocess.run(
-            [GIT_BINARY, "--git-dir", bare_repo_path,
-             "symbolic-ref", "HEAD"],
-            capture_output=True, timeout=SHA_CHECK_TIMEOUT,
+    lines = []
+    for line in text.split("\n"):
+        stripped = line.strip()
+        should_translate = (
+            stripped.startswith(real_repo)
+            or f" {real_repo}" in line
+            or f"\t{real_repo}" in line
+            or any(stripped.startswith(p) for p in _TRANSLATE_PREFIXES)
         )
-        if result.returncode == 0:
-            head_ref = result.stdout.decode("utf-8", errors="replace").strip()
-            if head_ref.startswith("refs/heads/"):
-                return head_ref[len("refs/heads/"):]
-    except (subprocess.TimeoutExpired, OSError):
-        pass
-    return None
-
-
-def _inject_default_branch_protection(
-    metadata: dict, default_branch: str,
-) -> dict:
-    """Return a shallow copy of *metadata* with the default branch added to protected patterns.
-
-    Adds ``refs/heads/<default_branch>`` to
-    ``metadata["git"]["protected_branches"]["patterns"]`` if not already present.
-    Never mutates the caller's metadata dict.
-
-    Args:
-        metadata: Container metadata dict.
-        default_branch: The default branch name to protect.
-
-    Returns:
-        A (possibly shallow-copied) metadata dict with the pattern added.
-    """
-    default_pattern = f"refs/heads/{default_branch}"
-    git_config = metadata.get("git", {})
-    if not isinstance(git_config, dict):
-        git_config = {}
-    pb_config = git_config.get("protected_branches", {})
-    if not isinstance(pb_config, dict):
-        pb_config = {}
-    patterns = list(pb_config.get("patterns", []))
-    if default_pattern not in patterns:
-        patterns.append(default_pattern)
-        metadata = dict(metadata)
-        metadata["git"] = dict(git_config)
-        metadata["git"]["protected_branches"] = dict(pb_config)
-        metadata["git"]["protected_branches"]["patterns"] = patterns
-    return metadata
-
-
-def check_push_protected_branches(
-    args: List[str],
-    repo_root: str,
-    metadata: Optional[dict] = None,
-) -> Optional[ValidationError]:
-    """Check if a push command targets protected branches.
-
-    Parses push CLI arguments to extract target refspecs, then checks
-    each against the protected branch policy using the shared validator
-    from git_policies.py.
-
-    To avoid bypasses from implicit push targets, this validator requires
-    explicit refspecs for branch pushes and blocks broad push modes
-    (--all, --mirror).
-
-    Args:
-        args: The push subcommand arguments (after the 'push' subcommand).
-        repo_root: Repository root path (unused here but kept for consistency).
-        metadata: Container metadata for policy configuration.
-
-    Returns:
-        None if allowed, ValidationError if a protected branch would be pushed to.
-    """
-    bare_repo_path = resolve_bare_repo_path(repo_root)
-
-    # Detect default branch from bare repo HEAD and inject into metadata
-    # so that load_branch_policy() protects it.  Best-effort: if detection
-    # fails, the existing protected set still applies.
-    if bare_repo_path and metadata is not None:
-        default_branch = _detect_default_branch(bare_repo_path)
-        if default_branch:
-            metadata = _inject_default_branch_protection(metadata, default_branch)
-
-    if _has_push_flag(args, "--all") or _has_push_flag(args, "--mirror"):
-        return ValidationError(
-            "Push modes --all and --mirror are not allowed; use explicit refspecs"
-        )
-
-    positionals = _extract_push_positionals(args)
-    if not positionals:
-        return ValidationError("Push command must include a remote")
-
-    # Only a remote specified: this relies on implicit/default push targets.
-    # Require explicit refspecs to ensure protected-branch enforcement applies.
-    if len(positionals) == 1:
-        if _has_push_flag(args, "--tags"):
-            return None
-        return ValidationError(
-            "Push command must include explicit refspecs for policy enforcement"
-        )
-
-    refspecs = positionals[1:]
-    for spec in refspecs:
-        if _is_wildcard_refspec(spec):
-            return ValidationError(
-                "Wildcard push refspecs are not allowed; use explicit branch names"
-            )
-
-    # --delete mode uses plain ref names after remote.
-    if _has_push_flag(args, "--delete"):
-        for target in refspecs:
-            qualified = _qualify_ref(target)
-            block_reason = check_protected_branches(
-                refname=qualified,
-                old_sha=_SYNTHETIC_OLD_SHA,
-                new_sha=_ZERO_SHA,  # Deletion
-                bare_repo_path=bare_repo_path,
-                metadata=metadata,
-            )
-            if block_reason:
-                return ValidationError(block_reason)
-        return None
-
-    # Check regular push refspecs (treated as updates)
-    refnames = _parse_push_refspecs(args)
-    for refname in refnames:
-        block_reason = check_protected_branches(
-            refname=refname,
-            old_sha=_SYNTHETIC_OLD_SHA,   # Non-zero: treat as update
-            new_sha=_SYNTHETIC_NEW_SHA,   # Non-zero: treat as update
-            bare_repo_path=bare_repo_path,
-            metadata=metadata,
-        )
-        if block_reason:
-            return ValidationError(block_reason)
-
-    # Check deletion refspecs (":ref" form)
-    saw_deletion = False
-    for spec in refspecs:
-        if spec.startswith("+"):
-            spec = spec[1:]
-        if ":" in spec:
-            src, dst = spec.split(":", 1)
-            if not src and dst:
-                saw_deletion = True
-                qualified = _qualify_ref(dst)
-                block_reason = check_protected_branches(
-                    refname=qualified,
-                    old_sha=_SYNTHETIC_OLD_SHA,
-                    new_sha=_ZERO_SHA,  # Deletion
-                    bare_repo_path=bare_repo_path,
-                    metadata=metadata,
-                )
-                if block_reason:
-                    return ValidationError(block_reason)
-
-    if not refnames and not saw_deletion and not _has_push_flag(args, "--tags"):
-        return ValidationError(
-            "Push refspecs could not be resolved; use explicit <src>:<dst> forms"
-        )
-
-    return None
-
-
-# ---------------------------------------------------------------------------
-# Push File Restrictions
-# ---------------------------------------------------------------------------
-
-
-def check_push_file_restrictions(
-    args: List[str],
-    repo_root: str,
-    metadata: Optional[dict] = None,
-) -> Optional[ValidationError]:
-    """Check if a push modifies restricted files.
-
-    Enumerates files changed between the remote branch and HEAD, then
-    checks each against the file restriction config (blocked/warned patterns).
-
-    Fails closed: if the config cannot be loaded or the diff cannot be
-    computed, returns a ValidationError (blocks the push).
-
-    Args:
-        args: The push subcommand arguments (after the 'push' subcommand).
-        repo_root: Repository root path for running git commands.
-        metadata: Container metadata (unused currently, reserved for
-                  per-sandbox overrides).
-
-    Returns:
-        None if allowed, ValidationError if restricted files are modified.
-    """
-    # Load file restrictions config (fail closed on error)
-    try:
-        config = get_file_restrictions_config()
-    except ConfigError as exc:
-        logger.warning("File restrictions config unavailable: %s", exc)
-        return ValidationError(
-            "File restrictions config unavailable; push blocked (fail-closed)"
-        )
-
-    # Parse the push target to determine the remote and branch
-    positionals = _extract_push_positionals(args)
-    if not positionals:
-        return None  # No remote specified; other validation handles this
-
-    remote = positionals[0]
-    refspecs = positionals[1:] if len(positionals) > 1 else []
-
-    # Determine the remote branch to diff against
-    # Use the first refspec's destination, or fall back to sandbox branch
-    target_branch = None
-    if refspecs:
-        parsed = _parse_push_refspecs(args)
-        if parsed:
-            # Strip refs/heads/ prefix for remote tracking ref
-            ref = parsed[0]
-            if ref.startswith("refs/heads/"):
-                target_branch = ref[len("refs/heads/"):]
-
-    if not target_branch and metadata:
-        target_branch = metadata.get("sandbox_branch")
-
-    if not target_branch:
-        return None  # Can't determine target; other validation handles this
-
-    remote_ref = f"{remote}/{target_branch}"
-
-    # Try diffing against the remote tracking branch
-    resolved_cwd = os.path.realpath(repo_root)
-    env = build_clean_env()
-    changed_files = _enumerate_push_changed_files(
-        resolved_cwd, env, remote_ref,
-    )
-
-    if changed_files is None and metadata:
-        # Remote branch may not exist (first push). Prefer from_branch
-        # (the branch the sandbox was created from) over the repo default
-        # branch. Diffing against from_branch only captures the agent's
-        # own changes, whereas diffing against 'main' would include all
-        # pre-existing branch history and flag files the agent never touched.
-        from_branch = metadata.get("from_branch")
-        if from_branch:
-            changed_files = _enumerate_push_changed_files(
-                resolved_cwd, env, from_branch,
-            )
-
-    if changed_files is None:
-        # Last resort: diff against the repo default branch.
-        bare_repo_path = resolve_bare_repo_path(repo_root)
-        default_branch = None
-        if bare_repo_path:
-            default_branch = _detect_default_branch(bare_repo_path)
-        if default_branch:
-            changed_files = _enumerate_push_changed_files(
-                resolved_cwd, env, default_branch,
-            )
-
-    if changed_files is None:
-        # Fail closed: can't enumerate files
-        return ValidationError(
-            "Cannot enumerate changed files for push file validation; "
-            "push blocked (fail-closed)"
-        )
-
-    if not changed_files:
-        return None  # No changed files
-
-    result = check_file_restrictions(changed_files, config)
-
-    if result.blocked:
-        return ValidationError(result.reason)
-
-    if result.warned_files:
-        logger.warning(
-            "Push modifies sensitive files: %s",
-            ", ".join(result.warned_files),
-        )
-
-    return None
-
-
-def _enumerate_push_changed_files(
-    cwd: str,
-    env: Dict[str, str],
-    base_ref: str,
-) -> Optional[List[str]]:
-    """Enumerate files changed between base_ref and HEAD.
-
-    Args:
-        cwd: Working directory for git command.
-        env: Clean environment for git command.
-        base_ref: The ref to diff against (e.g. 'origin/sandbox-branch').
-
-    Returns:
-        List of changed file paths, or None if the diff fails
-        (e.g. the base ref doesn't exist).
-    """
-    try:
-        result = subprocess.run(
-            [GIT_BINARY, "diff", "--name-only", f"{base_ref}..HEAD", "--"],
-            cwd=cwd,
-            capture_output=True,
-            timeout=SHA_CHECK_TIMEOUT,
-            env=env,
-        )
-        if result.returncode != 0:
-            return None
-        output = result.stdout.decode("utf-8", errors="replace").strip()
-        if not output:
-            return []
-        return output.splitlines()
-    except (subprocess.TimeoutExpired, OSError):
-        return None
-
-
-# ---------------------------------------------------------------------------
-# Commit File Restrictions
-# ---------------------------------------------------------------------------
-
-
-def check_commit_file_restrictions(
-    repo_root: str,
-    metadata: Optional[dict] = None,
-) -> Optional[ValidationError]:
-    """Check if a commit stages restricted files.
-
-    Enumerates staged files via ``git diff --cached --name-only`` and
-    checks each against the file restriction config (blocked/warned patterns).
-
-    This is a developer-experience improvement — the security boundary is
-    at push time (check_push_file_restrictions). Commit-time validation
-    prevents the agent from building up commits that will all be rejected
-    at push.
-
-    Fails closed: if the config cannot be loaded or the diff cannot be
-    computed, returns a ValidationError (blocks the commit).
-
-    Args:
-        repo_root: Repository root path for running git commands.
-        metadata: Container metadata (unused currently, reserved for
-                  per-sandbox overrides).
-
-    Returns:
-        None if allowed, ValidationError if restricted files are staged.
-    """
-    # Load file restrictions config (warn-and-allow on error — security
-    # boundary is at push time via check_push_file_restrictions)
-    try:
-        config = get_file_restrictions_config()
-    except ConfigError as exc:
-        logger.warning(
-            "File restrictions config unavailable at commit time, "
-            "allowing commit (push-time validation remains active): %s", exc,
-        )
-        return None
-
-    # Enumerate staged files
-    resolved_cwd = os.path.realpath(repo_root)
-    env = build_clean_env()
-    changed_files = _enumerate_staged_files(resolved_cwd, env)
-
-    if changed_files is None:
-        # Warn-and-allow: can't enumerate staged files, but push-time
-        # validation (check_push_file_restrictions) will still enforce.
-        logger.warning(
-            "Cannot enumerate staged files for commit file validation; "
-            "allowing commit (push-time validation remains active)"
-        )
-        return None
-
-    if not changed_files:
-        return None  # No staged files
-
-    result = check_file_restrictions(changed_files, config)
-
-    if result.blocked:
-        return ValidationError(result.reason)
-
-    if result.warned_files:
-        logger.warning(
-            "Commit stages sensitive files: %s",
-            ", ".join(result.warned_files),
-        )
-
-    return None
-
-
-def _enumerate_staged_files(
-    cwd: str,
-    env: Dict[str, str],
-) -> Optional[List[str]]:
-    """Enumerate files staged for commit.
-
-    Args:
-        cwd: Working directory for git command.
-        env: Clean environment for git command.
-
-    Returns:
-        List of staged file paths, or None if the diff fails.
-    """
-    try:
-        result = subprocess.run(
-            [GIT_BINARY, "diff", "--cached", "--name-only", "--"],
-            cwd=cwd,
-            capture_output=True,
-            timeout=SHA_CHECK_TIMEOUT,
-            env=env,
-        )
-        if result.returncode != 0:
-            stderr_out = result.stderr.decode("utf-8", errors="replace").strip()
-            logger.warning(
-                "git diff --cached failed (exit %d): %s",
-                result.returncode,
-                stderr_out or "(no stderr)",
-            )
-            return None
-        output = result.stdout.decode("utf-8", errors="replace").strip()
-        if not output:
-            return []
-        return output.splitlines()
-    except (subprocess.TimeoutExpired, OSError) as exc:
-        logger.warning("git diff --cached raised exception: %s", exc)
-        return None
-
-
-# ---------------------------------------------------------------------------
-# Git Execution
-# ---------------------------------------------------------------------------
+        if should_translate:
+            line = line.replace(real_repo, client_root)
+        lines.append(line)
+    return "\n".join(lines)
 
 
 def execute_git(
     request: GitExecRequest,
     repo_root: str,
-    metadata: Optional[dict] = None,
-) -> Tuple[Optional[GitExecResponse], Optional[ValidationError]]:
+    metadata: dict[str, Any] | None = None,
+) -> tuple[GitExecResponse | None, ValidationError | None]:
     """Validate and execute a git command synchronously.
 
     Args:
@@ -974,7 +273,7 @@ def execute_git(
 
     # Strip credential config overrides injected by tools like GitHub CLI.
     # The proxy manages credentials independently, so these are redundant.
-    args, creds_stripped = _strip_credential_config_overrides(args)
+    args, creds_stripped = strip_credential_config_overrides(args)
     if creds_stripped:
         audit_log(
             event="credential_config_stripped",
@@ -1019,7 +318,7 @@ def execute_git(
         return None, err
 
     # Auto-expand bare push commands with the sandbox branch
-    args, push_expanded = _normalize_push_args(args, metadata)
+    args, push_expanded = normalize_push_args(args, metadata)
     if push_expanded:
         audit_log(
             event="push_auto_expanded",
@@ -1091,7 +390,7 @@ def execute_git(
         return None, err
 
     # Check protected branches for push operations
-    push_args = _extract_push_args(args)
+    push_args = extract_push_args(args)
     if push_args is not None:
         err = check_push_protected_branches(push_args, repo_root, metadata)
         if err:
@@ -1136,9 +435,6 @@ def execute_git(
         translated_args.append(arg)
 
     # Build command — inject hook-disabling flags before client args.
-    # core.hooksPath=/dev/null  -> disables all git hooks
-    # core.fsmonitor=false      -> disables fs-monitor (can execute arbitrary commands)
-    # Safe because CONFIG_NEVER_ALLOW blocks clients from sending either key.
     cmd = [
         GIT_BINARY,
         "-c", "core.hooksPath=/dev/null",
@@ -1150,9 +446,8 @@ def execute_git(
 
     # Fetch locking: serialize concurrent fetch/pull per bare repo
     subcommand = get_subcommand(args)
-    fetch_lock_ctx: Optional[contextlib.AbstractContextManager] = None
+    fetch_lock_ctx: contextlib.AbstractContextManager | None = None
     if subcommand in ("fetch", "pull"):
-        # Check break-glass override
         allow_unlocked = os.environ.get("FOUNDRY_ALLOW_UNLOCKED_FETCH") == "1"
         bare_repo = resolve_bare_repo_path(resolved_cwd)
         if bare_repo is None and not allow_unlocked:
@@ -1182,9 +477,7 @@ def execute_git(
                 request_id=req_id,
             )
 
-    # Stale lock cleanup: remove config.lock before push -u to prevent
-    # "could not lock config file" errors from stale locks left by
-    # interrupted config writes (e.g. fix_proxy_worktree_paths).
+    # Stale lock cleanup: remove config.lock before push -u
     if subcommand == "push":
         remove_stale_config_locks(resolved_cwd)
 
@@ -1246,19 +539,19 @@ def execute_git(
     # Stderr is always best-effort UTF-8
     stderr_str = result.stderr.decode("utf-8", errors="replace")
 
-    # Translate proxy-side paths back to client-side paths in output
-    # (e.g., /git-workspace -> /workspace for rev-parse --show-toplevel)
+    # Translate proxy-side paths back to client-side paths in output.
     client_root = os.environ.get("GIT_CLIENT_WORKSPACE_ROOT", "/workspace")
     if repo_root and client_root and repo_root != client_root:
         real_repo = os.path.realpath(repo_root)
-        if stdout_str:
-            stdout_str = stdout_str.replace(real_repo, client_root)
-        if stderr_str:
-            stderr_str = stderr_str.replace(real_repo, client_root)
+        if subcommand in _PATH_TRANSLATE_SUBCOMMANDS:
+            if stdout_str:
+                stdout_str = _translate_paths(stdout_str, real_repo, client_root)
+            if stderr_str:
+                stderr_str = _translate_paths(stderr_str, real_repo, client_root)
 
     # Fallback: synthesize remote output when empty or command failed
     if subcommand == "remote" and stdout_str.strip() == "":
-        subcmd, sub_args, _ = get_subcommand_args(args)
+        _, sub_args, _, _ = get_subcommand_args(args)
         bare_repo = resolve_bare_repo_path(resolved_cwd)
         remotes_from_file = _read_remote_urls_from_bare_config(bare_repo)
         if sub_args and "get-url" in sub_args:
@@ -1340,8 +633,8 @@ async def execute_git_async(
     request: GitExecRequest,
     repo_root: str,
     sandbox_id: str,
-    metadata: Optional[dict] = None,
-) -> Tuple[Optional[GitExecResponse], Optional[ValidationError]]:
+    metadata: dict[str, Any] | None = None,
+) -> tuple[GitExecResponse | None, ValidationError | None]:
     """Execute git command with per-sandbox concurrency control.
 
     Uses a non-blocking acquire to reject immediately when at capacity

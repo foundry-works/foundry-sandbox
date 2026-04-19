@@ -4,11 +4,12 @@ import hashlib
 import hmac
 import logging
 import os
+import re
 import threading
 import time
 from collections import OrderedDict
 from dataclasses import dataclass
-from typing import Dict, Optional, Tuple
+
 
 logger = logging.getLogger(__name__)
 
@@ -26,37 +27,44 @@ IP_THROTTLE_WINDOW = 60
 IP_THROTTLE_MAX = 100
 MAX_REQUEST_BODY = 256 * 1024
 
+SANDBOX_ID_RE = re.compile(r"^[a-zA-Z0-9_-]{1,64}$")
+
 
 class SecretStore:
     """Manages per-sandbox HMAC secrets from file-based storage."""
 
     def __init__(self, secrets_path: str = SECRETS_MOUNT_PATH):
         self._path = secrets_path
-        self._cache: Dict[str, bytes] = {}
+        self._cache: dict[str, bytes] = {}
         self._lock = threading.Lock()
 
-    def get_secret(self, sandbox_id: str) -> Optional[bytes]:
+    _MAX_SECRET_SIZE = 1024
+
+    @staticmethod
+    def _validate_sandbox_id(sandbox_id: str) -> None:
+        if not SANDBOX_ID_RE.match(sandbox_id):
+            raise ValueError(f"Invalid sandbox_id: {sandbox_id!r}")
+
+    def get_secret(self, sandbox_id: str) -> bytes | None:
         """Get the HMAC secret for a sandbox."""
+        self._validate_sandbox_id(sandbox_id)
         with self._lock:
             if sandbox_id in self._cache:
                 return self._cache[sandbox_id]
-
-        secret_path = os.path.join(self._path, sandbox_id)
-        try:
-            with open(secret_path, "rb") as f:
-                secret = f.read()
-                if secret.endswith(b"\n"):
-                    secret = secret[:-1]
-            if secret:
-                with self._lock:
+            secret_path = os.path.join(self._path, sandbox_id)
+            try:
+                with open(secret_path, "rb") as f:
+                    secret = f.read(self._MAX_SECRET_SIZE)
+                    if secret.endswith(b"\n"):
+                        secret = secret[:-1]
+                if secret:
                     self._cache[sandbox_id] = secret
-                return secret
-        except FileNotFoundError:
-            logger.warning("No secret found for sandbox: %s", sandbox_id)
-        except OSError as exc:
-            logger.error("Failed to read secret for %s: %s", sandbox_id, exc)
-
-        return None
+                    return secret
+            except FileNotFoundError:
+                logger.warning("No secret found for sandbox: %s", sandbox_id)
+            except OSError as exc:
+                logger.error("Failed to read secret for %s: %s", sandbox_id, exc)
+            return None
 
     def revoke(self, sandbox_id: str) -> None:
         with self._lock:
@@ -79,7 +87,7 @@ class NonceStore:
         ttl: int = NONCE_TTL_SECONDS,
         max_per_sandbox: int = NONCE_MAX_PER_SANDBOX,
     ):
-        self._stores: Dict[str, OrderedDict] = {}
+        self._stores: dict[str, OrderedDict] = {}
         self._lock = threading.Lock()
         self._ttl = ttl
         self._max = max_per_sandbox
@@ -151,8 +159,8 @@ class RateLimiter:
         ip_window: int = IP_THROTTLE_WINDOW,
         ip_max: int = IP_THROTTLE_MAX,
     ):
-        self._sandbox_buckets: Dict[str, TokenBucket] = {}
-        self._ip_counters: Dict[str, list] = {}
+        self._sandbox_buckets: dict[str, TokenBucket] = {}
+        self._ip_counters: dict[str, list] = {}
         self._global_timestamps: list = []
         self._lock = threading.Lock()
         self._burst = burst
@@ -161,7 +169,7 @@ class RateLimiter:
         self._ip_window = ip_window
         self._ip_max = ip_max
 
-    def check_ip_throttle(self, ip: str) -> Tuple[bool, float]:
+    def check_ip_throttle(self, ip: str) -> tuple[bool, float]:
         now = time.time()
         with self._lock:
             if ip not in self._ip_counters:
@@ -180,7 +188,7 @@ class RateLimiter:
             timestamps.append(now)
             return True, 0.0
 
-    def check_sandbox_rate(self, sandbox_id: str) -> Tuple[bool, float]:
+    def check_sandbox_rate(self, sandbox_id: str) -> tuple[bool, float]:
         now = time.time()
         with self._lock:
             if sandbox_id not in self._sandbox_buckets:
@@ -196,7 +204,7 @@ class RateLimiter:
                 return True, 0.0
             return False, bucket.retry_after
 
-    def check_global_rate(self) -> Tuple[bool, float]:
+    def check_global_rate(self) -> tuple[bool, float]:
         now = time.time()
         with self._lock:
             cutoff = now - 60.0
@@ -212,6 +220,9 @@ class RateLimiter:
             self._global_timestamps.append(now)
             return True, 0.0
 
+    # Multiplier applied to the longest rate window to determine stale entry age.
+    _STALE_AGE_MULTIPLIER = 3
+
     def clear_sandbox(self, sandbox_id: str) -> None:
         with self._lock:
             self._sandbox_buckets.pop(sandbox_id, None)
@@ -226,6 +237,13 @@ class RateLimiter:
             ]
             for ip in stale_ips:
                 del self._ip_counters[ip]
+            stale_buckets = [
+                sid
+                for sid, bucket in self._sandbox_buckets.items()
+                if (now - bucket.last_refill) > max_age
+            ]
+            for sid in stale_buckets:
+                del self._sandbox_buckets[sid]
 
 
 def compute_signature(
@@ -239,7 +257,7 @@ def compute_signature(
     """Compute HMAC-SHA256 signature over canonical request string."""
     body_hash = hashlib.sha256(body).hexdigest()
     canonical = f"{method}\n{path}\n{body_hash}\n{timestamp}\n{nonce}"
-    sig = hmac.new(secret, canonical.encode("utf-8"), hashlib.sha256)
+    sig = hmac.HMAC(secret, canonical.encode("utf-8"), hashlib.sha256)
     return sig.hexdigest()
 
 

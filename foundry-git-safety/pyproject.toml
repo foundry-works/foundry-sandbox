@@ -30,7 +30,6 @@ classifiers = [
 ]
 dependencies = [
     "click>=8.1",
-    "flask>=3.0",
     "pydantic>=2.0",
     "pyyaml>=6.0",
 ]
@@ -44,7 +43,12 @@ Issues = "https://github.com/foundry-works/foundry-sandbox/issues"
 foundry-git-safety = "foundry_git_safety.cli:main"
 
 [project.optional-dependencies]
+server = [
+    "flask>=3.0",
+    "werkzeug>=3.0",
+]
 dev = [
+    "foundry-git-safety[server]",
     "pytest>=8.0",
     "pytest-cov>=5.0",
     "pytest-timeout>=2.3",
@@ -78,3 +82,4 @@ line-length = 100
 
 [tool.hatch.build.targets.wheel]
 packages = ["foundry_git_safety"]
+artifacts = ["foundry_git_safety/default_config/*.yaml"]
