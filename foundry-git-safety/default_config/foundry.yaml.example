@@ -1,0 +1,52 @@
+# foundry.yaml — Git Safety Layer Configuration
+# Place this file in your workspace root or set FOUNDRY_CONFIG_PATH.
+
+version: "1.0"
+
+git_safety:
+  server:
+    host: "0.0.0.0"
+    port: 8083
+    secrets_path: "/run/secrets/sandbox-hmac"
+    data_dir: "/var/lib/foundry-git-safety"
+
+  protected_branches:
+    enabled: true
+    patterns:
+      - "refs/heads/main"
+      - "refs/heads/master"
+      - "refs/heads/release/*"
+      - "refs/heads/production"
+
+  file_restrictions:
+    blocked_patterns:
+      - ".github/workflows/"
+      - ".github/actions/"
+    warned_patterns:
+      - "package.json"
+      - "pyproject.toml"
+    warn_action: "log"  # "log" or "reject"
+
+  branch_isolation:
+    enabled: true
+    well_known_branches:
+      - "main"
+      - "master"
+      - "develop"
+      - "production"
+    well_known_prefixes:
+      - "release/"
+      - "hotfix/"
+
+  github_api:
+    enabled: true
+    proxy_port: 8084
+    allow_pr_operations: false
+    allowed_hosts:
+      - "api.github.com"
+      - "uploads.github.com"
+
+  rate_limits:
+    burst: 300
+    sustained: 120
+    global_ceiling: 1000

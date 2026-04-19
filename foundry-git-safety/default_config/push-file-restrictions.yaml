@@ -1,0 +1,45 @@
+# Push-time file restriction configuration.
+#
+# Prevents sandboxed agents from pushing modifications to sensitive files
+# (CI/CD pipelines, build system, etc.) that could enable persistent
+# compromise outside the sandbox.
+#
+# Pattern semantics:
+#   - Patterns ending in "/" match any file under that directory
+#     (implemented as path.startswith(pattern))
+#   - Patterns with glob characters (*, ?) use fnmatch against both
+#     the basename and the full relative path
+#   - Bare patterns (no /, no glob) match any file at any depth with
+#     that exact name (basename match)
+
+version: "1.0"
+
+# Files that are always blocked from being pushed.
+blocked_patterns:
+  - ".github/workflows/"
+  - ".github/actions/"
+  - "Makefile"
+  - "Justfile"
+  - "Taskfile.yml"
+  - ".pre-commit-config.yaml"
+  - "CODEOWNERS"
+  - ".github/FUNDING.yml"
+
+# Files that generate warnings (or rejections, per warn_action).
+warned_patterns:
+  - "package.json"
+  - "pyproject.toml"
+  - "requirements.txt"
+  - "requirements-*.txt"
+  - "Gemfile"
+  - "go.mod"
+  - "go.sum"
+  - "Cargo.toml"
+  - "Cargo.lock"
+  - "docker-compose*.yml"
+  - "Dockerfile"
+  - ".env*"
+
+# What to do with warned files: "log" (warn only) or "reject" (block push)
+# Use "log" for initial rollout; switch to "reject" once patterns are validated.
+warn_action: "log"

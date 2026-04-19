@@ -1,6 +1,6 @@
 # Docker `sbx` Rearchitecture Checklist
 
-**Status:** Phase 0 (Validation Spike) **COMPLETE** — Phase 1 (Monitor) ongoing — Phase 2 ready to start
+**Status:** Phase 0 **COMPLETE** — Phase 1 (Monitor) ongoing — Phase 2 **IN PROGRESS** (Steps 1-11 done, tests + docs remaining)
 **Last updated:** 2026-04-18
 
 ---
@@ -210,54 +210,84 @@
 
 ### 2.1 Create Standalone Git Safety Service
 
-- [ ] Create `foundry-git-safety/` package directory
-- [ ] Extract `unified-proxy/mitmproxy_addons/git_api.py` to standalone module
-- [ ] Remove all proxy dependencies (credential injector, gateways, etc.)
-- [ ] Create new entrypoint: `foundry-git-safety` CLI
-- [ ] Implement `foundry-git-safety start/stop/status` commands
-- [ ] Add configuration via `foundry.yaml` in workspace
+- [x] Create `foundry-git-safety/` package directory
+  - `foundry-git-safety/` with `pyproject.toml` (hatchling, deps: click, flask, pydantic, pyyaml)
+  - Entry point: `foundry-git-safety = "foundry_git_safety.cli:main"`
+- [x] Extract `unified-proxy/git_api.py` to standalone module
+  - Split into `auth.py` (SecretStore, NonceStore, RateLimiter, HMAC) and `server.py` (Flask app)
+- [x] Remove all proxy dependencies (credential injector, gateways, etc.)
+  - Removed ContainerRegistry dependency, replaced with file-based metadata resolver
+  - All mitmproxy imports eliminated
+- [x] Create new entrypoint: `foundry-git-safety` CLI
+  - `cli.py` with Click commands: start, stop, status, validate
+- [x] Implement `foundry-git-safety start/stop/status` commands
+  - `start [--foreground] [--port]`, `stop`, `status` (health check), `validate`
+- [x] Add configuration via `foundry.yaml` in workspace
+  - `schemas/foundry_yaml.py` with Pydantic models, `default_config/foundry.yaml.example`
 
 ### 2.2 Decouple Git Wrapper
 
-- [ ] Extract `stubs/git-wrapper.sh` to `foundry-git-safety/`
-- [ ] Make wrapper endpoint configurable (env var or config file)
-- [ ] Add auto-discovery of git safety server via workspace config
+- [x] Extract `stubs/git-wrapper-sbx.sh` to `foundry-git-safety/`
+  - `foundry_git_safety/wrapper.sh`
+- [x] Make wrapper endpoint configurable (env var or config file)
+  - GIT_API_HOST, GIT_API_PORT, SBX_PROXY env vars
+  - Auto-discovers from `.foundry/config` in workspace
+- [x] Add auto-discovery of git safety server via workspace config
+  - Reads `.foundry/config` for GIT_API_HOST/GIT_API_PORT if env vars not set
+  - HMAC secret auto-discovered from `.foundry/hmac-secret`
 - [ ] Test wrapper with standalone service
 - [ ] Document wrapper installation methods (`sbx exec`, templates, bind-mount)
 
 ### 2.3 Extract Branch Isolation Module
 
-- [ ] Extract `unified-proxy/mitmproxy_addons/branch_isolation.py`
-- [ ] Remove proxy-specific logging and metrics
-- [ ] Adapt to standalone service context
+- [x] Extract `unified-proxy/branch_isolation.py`
+  - Copied with relative imports (`from .branch_types import ...`)
+- [x] Remove proxy-specific logging and metrics
+  - No proxy-specific code found in this module (already clean)
+- [x] Adapt to standalone service context
+  - Relative imports updated, all stdlib deps only
 - [ ] Add tests for branch filtering logic
 - [ ] Document configuration options
 
 ### 2.4 Extract Push Restrictions
 
-- [ ] Extract `unified-proxy/mitmproxy_addons/git_policies.py`
-- [ ] Extract push file restrictions logic
-- [ ] Extract protected branch enforcement
-- [ ] Create policy configuration schema
+- [x] Extract `unified-proxy/git_policies.py`
+  - Copied as `policies.py` (pure stdlib, zero changes needed)
+- [x] Extract push file restrictions logic
+  - `config.py` retains `FileRestrictionsData`, `check_file_restrictions`, `matches_any`
+- [x] Extract protected branch enforcement
+  - `operations.py` retains `check_push_protected_branches`, `check_push_file_restrictions`
+- [x] Create policy configuration schema
+  - `schemas/foundry_yaml.py` with `ProtectedBranchesConfig`, `FileRestrictionsConfig`
 - [ ] Add tests for restriction enforcement
 - [ ] Document policy YAML format
 
 ### 2.5 Extract GitHub API Filter
 
-- [ ] Extract `unified-proxy/mitmproxy_addons/github-api-filter.py`
-- [ ] Remove gateway-specific code
-- [ ] Adapt to standalone context
+- [x] Extract `unified-proxy/github-api-filter.py`
+  - Rewritten as `github_filter.py` — `GitHubAPIChecker` class + HTTP proxy handler
+- [x] Remove gateway-specific code
+  - All mitmproxy imports eliminated, filtering rules ported directly
+- [x] Adapt to standalone context
+  - `GitHubAPIChecker.check_request(method, path, body) -> (allowed, reason)`
+  - `run_github_proxy()` runs HTTP proxy on port 8084
 - [ ] Add tests for GitHub policy enforcement
 - [ ] Document GitHub blocklist configuration
 
 ### 2.6 Create Workspace Configuration
 
-- [ ] Design `foundry.yaml` schema for workspace-level config
-- [ ] Support git safety server endpoint
-- [ ] Support protected branches list
-- [ ] Support push file restrictions
-- [ ] Support GitHub API blocklist
-- [ ] Add validation for configuration
+- [x] Design `foundry.yaml` schema for workspace-level config
+  - Pydantic models in `schemas/foundry_yaml.py`
+- [x] Support git safety server endpoint
+  - `GitSafetyServerConfig` with host, port, secrets_path, data_dir
+- [x] Support protected branches list
+  - `ProtectedBranchesConfig` with enabled flag and patterns
+- [x] Support push file restrictions
+  - `FileRestrictionsConfig` with blocked/warned patterns and warn_action
+- [x] Support GitHub API blocklist
+  - `GitHubAPIConfig` with enabled, proxy_port, allow_pr_operations, allowed_hosts
+- [x] Add validation for configuration
+  - Pydantic field validators for port, warn_action; `load_foundry_config()` with error handling
 - [ ] Document all configuration options
 
 ### 2.7 Testing
