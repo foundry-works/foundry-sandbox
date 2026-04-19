@@ -342,6 +342,17 @@ class TestGraphQLMutations:
         assert allowed is False
         assert "addPullRequestReviewComment" in reason
 
+    def test_graphql_escaped_quotes_bypass_blocked(self):
+        """Escaped quotes inside triple quotes do not bypass comment stripping."""
+        checker = GitHubAPIChecker()
+        # The malicious query tries to escape a triple quote, then start a comment
+        # to hide the blocked mutation mergePullRequest.
+        query = 'mutation { allowedMutation(arg: """ \\""" # """) mergePullRequest(input: {}) { clientMutationId } }'
+        body = json.dumps({"query": query}).encode()
+        allowed, reason = checker.check_request("POST", "/graphql", body)
+        assert allowed is False
+        assert "mergePullRequest" in reason
+
     def test_graphql_null_body_not_blocked(self):
         """POST /graphql with no body does not trigger GraphQL mutation blocking."""
         checker = GitHubAPIChecker()

@@ -48,17 +48,20 @@ class _InFlightCounter:
 
     def __init__(self) -> None:
         self._count = 0
+        self._lock = threading.Lock()
         self._zero = threading.Event()
         self._zero.set()
 
     def increment(self) -> None:
-        self._count += 1
-        self._zero.clear()
+        with self._lock:
+            self._count += 1
+            self._zero.clear()
 
     def decrement(self) -> None:
-        self._count -= 1
-        if self._count <= 0:
-            self._zero.set()
+        with self._lock:
+            self._count -= 1
+            if self._count <= 0:
+                self._zero.set()
 
     def wait_for_zero(self, timeout: float = 30.0) -> bool:
         return self._zero.wait(timeout)

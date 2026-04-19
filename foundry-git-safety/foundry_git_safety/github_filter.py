@@ -283,13 +283,27 @@ class GitHubAPIChecker:
                                 i += 1
                             continue
                     elif in_triple:
+                        if q[i:i+4] == '\\"""':
+                            # Escaped triple quote
+                            result.append(q[i:i+4])
+                            i += 4
+                            continue
                         if q[i:i+3] == '"""':
                             in_triple = False
                             result.append(q[i:i+3])
                             i += 3
                             continue
                     elif in_single:
-                        if q[i] == '"' and (i == 0 or q[i-1] != '\\'):
+                        if q[i] == '\\':
+                            # Escape character, skip next char as well
+                            result.append(q[i])
+                            if i + 1 < len(q):
+                                result.append(q[i+1])
+                                i += 2
+                            else:
+                                i += 1
+                            continue
+                        if q[i] == '"':
                             in_single = False
                             result.append(q[i])
                             i += 1

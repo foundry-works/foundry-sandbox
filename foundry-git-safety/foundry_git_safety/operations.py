@@ -643,16 +643,9 @@ async def execute_git_async(
     semaphore = _semaphore_pool.get(sandbox_id)
 
     # Non-blocking acquire: avoid wait_for(timeout=0) which can double-release
-    # semaphores on cancellation.  Instead, attempt acquire with a very short
-    # timeout and handle the TimeoutError explicitly.  On timeout we cancel
-    # the acquire task to prevent the semaphore from being released on cleanup.
-    acquire_task = asyncio.create_task(semaphore.acquire())
-    try:
-        await asyncio.wait_for(acquire_task, timeout=0.001)
-    except asyncio.TimeoutError:
-        acquire_task.cancel()
-        with contextlib.suppress(asyncio.CancelledError):
-            await acquire_task
+    # semaphores on cancellation. Since the asyncio event loop is single-threaded,
+    # checking locked status then acquiring is atomic.
+    if semaphore.locked():
         audit_log(
             event="concurrency_limit",
             action=" ".join(request.args[:3]) if request.args else "unknown",
@@ -665,6 +658,7 @@ async def execute_git_async(
         return None, ValidationError(
             f"Too many concurrent operations for sandbox {sandbox_id}"
         )
+    await semaphore.acquire()
 
     try:
         loop = asyncio.get_event_loop()
