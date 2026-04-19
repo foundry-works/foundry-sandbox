@@ -37,12 +37,19 @@ class TestFilterBranchOutput:
         assert "develop" in result
         assert "production" in result
 
-    def test_preserves_well_known_prefixes(self):
-        """Branches matching well-known prefixes (release/*, hotfix/*) are kept."""
+    def test_preserves_well_known_prefixes_same_prefix(self):
+        """release/* branches visible from a release/* sandbox."""
+        output = "  release/1.0\n  hotfix/urgent-fix\n"
+        result = filter_ref_listing_output(output, ["branch"], "release/my-fix", None)
+        assert "release/1.0" in result
+        assert "hotfix/urgent-fix" not in result
+
+    def test_well_known_prefixes_cross_prefix_blocked(self):
+        """release/* branches NOT visible from a non-release sandbox."""
         output = "  release/1.0\n  hotfix/urgent-fix\n"
         result = filter_ref_listing_output(output, ["branch"], "sandbox/alice", None)
-        assert "release/1.0" in result
-        assert "hotfix/urgent-fix" in result
+        assert "release/1.0" not in result
+        assert "hotfix/urgent-fix" not in result
 
     def test_empty_output_passthrough(self):
         """Empty string input returns empty string."""

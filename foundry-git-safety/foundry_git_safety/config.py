@@ -79,9 +79,15 @@ def check_file_restrictions(
     normalized = []
     for f in changed_files:
         f = posixpath.normpath(f)
+        # Reject literal .. traversal
         if ".." in f.split("/"):
             return ValidationResult(
                 blocked=True, reason=f"Path traversal detected: {f}"
+            )
+        # Reject URL-encoded traversal sequences
+        if "%2e" in f.lower() or "%2f" in f.lower() or "%5c" in f.lower():
+            return ValidationResult(
+                blocked=True, reason=f"Encoded path traversal detected: {f}"
             )
         if f.startswith("./"):
             f = f[2:]
@@ -233,13 +239,11 @@ class _FileRestrictionsCache:
         self._lock = threading.Lock()
 
     def get(self, path: str | None = None) -> FileRestrictionsData:
-        if path is not None:
-            return load_file_restrictions_config(path)
         with self._lock:
             now = time.time()
             if self._config is not None and (now - self._loaded_at) < self._ttl:
                 return self._config
-            self._config = load_file_restrictions_config()
+            self._config = load_file_restrictions_config(path)
             self._loaded_at = now
             return self._config
 

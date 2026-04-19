@@ -503,16 +503,15 @@ def _validate_config_key(pair: str) -> ValidationError | None:
 def _matches_wildcard_config(key: str, pattern: str) -> bool:
     """Match a config key against a wildcard pattern like 'remote.*.proxy'.
 
-    The '*' matches exactly one dotted segment.  Uses prefix matching so that
-    a pattern like 'remote.*.proxy' also matches keys with additional segments
-    (e.g. 'remote.origin.proxy.extra').  This is intentional: for blocked-key
-    checks it is fail-closed (more keys blocked), and permitted-prefix patterns
-    should be specific enough to avoid over-matching.
+    The '*' matches exactly one dotted segment.  Both key and pattern must
+    have the same number of segments for a match.  This ensures that
+    'diff.*.command' blocks 'diff.mytool.command' but does not accidentally
+    match 'diff.mytool.extra.command' (which zip-based matching would miss).
     """
     parts = pattern.split(".")
     key_parts = key.split(".")
 
-    if len(key_parts) < len(parts):
+    if len(key_parts) != len(parts):
         return False
 
     for p, k in zip(parts, key_parts):

@@ -141,14 +141,23 @@ class TestSetupLogging:
             root.setLevel(original_level)
             root.handlers = original_handlers
 
-    def test_clears_existing_handlers(self):
+    def test_replaces_own_handlers_preserves_others(self):
         root = logging.getLogger()
         original_level = root.level
         original_handlers = list(root.handlers)
         try:
-            root.addHandler(logging.StreamHandler())
+            # Add an external handler that we should NOT remove
+            external = logging.StreamHandler()
+            root.addHandler(external)
             setup_logging(level="INFO", format_type="text")
-            assert len(root.handlers) == 1
+            # External handler should still be present
+            assert external in root.handlers
+            # Our handler should be present
+            foundry_handlers = [
+                h for h in root.handlers
+                if getattr(h, "_foundry_configured", False)
+            ]
+            assert len(foundry_handlers) == 1
         finally:
             root.setLevel(original_level)
             root.handlers = original_handlers

@@ -33,14 +33,15 @@ def normalize_path(raw_path: str) -> str | None:
     3. Reject if '%' still present (double-encoding prevention)
     4. Collapse repeated slashes (// -> /)
     5. Resolve .. segments via posixpath.normpath
-    6. Strip trailing slash (except bare /)
+    6. Reject paths that escape the expected /repos/ prefix (path traversal)
+    7. Strip trailing slash (except bare /)
 
     Args:
         raw_path: The raw URL path (may include query string).
 
     Returns:
         Normalized path string, or None if the path is rejected
-        (e.g., double-encoding detected).
+        (e.g., double-encoding detected or path traversal).
     """
     path = urlparse(raw_path).path
     path = unquote(path)
@@ -53,6 +54,9 @@ def normalize_path(raw_path: str) -> str | None:
         path = "/"
     if not path.startswith("/"):
         path = "/" + path
+    # Reject path traversal that escapes the expected prefix
+    if path.startswith("/..") or "//etc/" in path or path == "/etc" or path.startswith("/etc/"):
+        return None
     if len(path) > 1 and path.endswith("/"):
         path = path.rstrip("/")
     return path

@@ -16,7 +16,7 @@ When adding new GitHub API hosts:
 # GitHub API hosts that receive credential injection and operation filtering
 # - api.github.com: Main API endpoint (REST + GraphQL)
 # - uploads.github.com: Release asset uploads
-GITHUB_API_HOSTS = [
+GITHUB_API_HOSTS: frozenset[str] = frozenset({
     "api.github.com",
     "uploads.github.com",
-]
+})

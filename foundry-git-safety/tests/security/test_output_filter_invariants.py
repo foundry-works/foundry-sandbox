@@ -124,7 +124,11 @@ class TestNoCrossSandboxLeakInRefEnum:
         assert "refs/tags/v1.0" in result
 
     def test_show_ref_no_leak(self) -> None:
-        """show-ref output must strip other sandbox branches."""
+        """show-ref output must strip other sandbox branches.
+
+        release/* branches are only visible to sandboxes whose branch name
+        also starts with release/ (prevents cross-sandbox enumeration).
+        """
         raw = "\n".join([
             "abc1234 refs/heads/main",
             "def5678 refs/heads/sandbox/alice",
@@ -136,7 +140,8 @@ class TestNoCrossSandboxLeakInRefEnum:
         _assert_no_leak(result)
         assert "refs/heads/main" in result
         assert "refs/heads/sandbox/alice" in result
-        assert "refs/heads/release/1.0" in result
+        # release/ branches not visible from sandbox/alice (different prefix)
+        assert "refs/heads/release/1.0" not in result
 
     def test_for_each_ref_custom_format_no_leak(self) -> None:
         """Custom --format with short refnames must still filter."""

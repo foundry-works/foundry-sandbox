@@ -17,9 +17,13 @@ For push operations, ref updates follow the format:
 """
 
 from dataclasses import dataclass
-from typing import BinaryIO, Iterator, List, Optional, Tuple
+from typing import BinaryIO, Iterator
 
-from .policies import ZERO_SHA
+# Git pkt-line protocol maximum data length (65520 data + 4 length prefix)
+MAX_PKTLINE_DATA_LENGTH = 65524
+
+# Sentinel for zero SHA (defined locally to avoid cross-module coupling)
+ZERO_SHA = "0" * 40
 
 # Default configuration for pkt-line reading
 DEFAULT_MAX_PKTLINE_BYTES = 65536
@@ -55,7 +59,7 @@ class PktLineRef:
         return self.old_sha != ZERO_SHA and self.new_sha != ZERO_SHA
 
 
-def parse_pktline(data: bytes) -> List[PktLineRef]:
+def parse_pktline(data: bytes) -> list[PktLineRef]:
     """
     Parse git pkt-line format from git-receive-pack request body.
 
@@ -74,7 +78,8 @@ def parse_pktline(data: bytes) -> List[PktLineRef]:
     Returns:
         List of PktLineRef objects representing each ref update
     """
-    updates: List[PktLineRef] = []
+    updates: list[PktLineRef] = []
+    _HEX_CHARS = frozenset("0123456789abcdef")
     pos = 0
 
     while pos < len(data):
@@ -94,7 +99,9 @@ def parse_pktline(data: bytes) -> List[PktLineRef]:
             continue
 
         # Length includes the 4-byte prefix itself
-        if length < 4 or pos + length > len(data):
+        if length < 4 or length > MAX_PKTLINE_DATA_LENGTH:
+            break
+        if pos + length > len(data):
             break
 
         # Extract line content (excluding length prefix)
@@ -124,8 +131,8 @@ def parse_pktline(data: bytes) -> List[PktLineRef]:
             if (
                 len(old_sha) == 40
                 and len(new_sha) == 40
-                and all(c in "0123456789abcdef" for c in old_sha)
-                and all(c in "0123456789abcdef" for c in new_sha)
+                and all(c in _HEX_CHARS for c in old_sha)
+                and all(c in _HEX_CHARS for c in new_sha)
             ):
                 updates.append(
                     PktLineRef(
@@ -143,7 +150,7 @@ def read_pktline_prefix(
     stream: BinaryIO,
     max_bytes: int = DEFAULT_MAX_PKTLINE_BYTES,
     chunk_size: int = DEFAULT_PKTLINE_CHUNK_SIZE,
-) -> Tuple[bytes, Optional[int], Optional[str]]:
+) -> tuple[bytes, int | None, str | None]:
     """
     Read and parse the pkt-line header section from a git-receive-pack body.
 
@@ -182,6 +189,9 @@ def read_pktline_prefix(
                 return bytes(buf), pos + 4, None
 
             if length < 4:
+                return bytes(buf), None, "invalid_length"
+
+            if length > MAX_PKTLINE_DATA_LENGTH:
                 return bytes(buf), None, "invalid_length"
 
             # Need more data for this pkt-line
@@ -225,6 +235,8 @@ def iter_prefixed_stream(
     """
     total = 0
     if prefix:
+        if len(prefix) > max_bytes:
+            return
         yield prefix
         total += len(prefix)
     while total < max_bytes:

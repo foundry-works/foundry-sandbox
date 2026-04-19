@@ -121,11 +121,13 @@ def _check_bootstrap_creation(
     refname: str,
     bare_repo_path: str | None,
 ) -> str | None:
-    """Allow first refs/heads/main creation via atomic lock file, block all others.
+    """Allow first creation of a protected branch via atomic lock file.
 
     The bootstrap guard uses O_CREAT | O_EXCL | O_WRONLY to atomically create
     a lock file. If the file already exists, the bootstrap window has closed.
     Lock cleanup is admin-only (no automatic time-based orphan cleanup).
+
+    Supports all protected branch patterns, not just main.
 
     Args:
         refname: The ref being created.
@@ -134,8 +136,10 @@ def _check_bootstrap_creation(
     Returns:
         None if bootstrap creation is allowed, or a block reason string.
     """
-    if refname == "refs/heads/main" and bare_repo_path:
-        lock_path = os.path.join(bare_repo_path, "foundry-bootstrap.lock")
+    if bare_repo_path:
+        # Use refname-specific lock to allow bootstrapping each protected branch
+        safe_name = refname.replace("/", "_")
+        lock_path = os.path.join(bare_repo_path, f"foundry-bootstrap-{safe_name}.lock")
         try:
             fd = os.open(lock_path, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
             os.close(fd)

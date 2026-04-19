@@ -195,22 +195,23 @@ class TestBootstrapCreation:
         """First creation of refs/heads/main is allowed and creates lock file."""
         result = _check_bootstrap_creation("refs/heads/main", str(tmp_path))
         assert result is None
-        lock_file = tmp_path / "foundry-bootstrap.lock"
+        lock_file = tmp_path / "foundry-bootstrap-refs_heads_main.lock"
         assert lock_file.exists()
 
     def test_second_creation_blocked(self, tmp_path):
         """Second creation of refs/heads/main is blocked (lock exists)."""
-        lock_file = tmp_path / "foundry-bootstrap.lock"
+        lock_file = tmp_path / "foundry-bootstrap-refs_heads_main.lock"
         lock_file.write_text("")
         result = _check_bootstrap_creation("refs/heads/main", str(tmp_path))
         assert result is not None
         assert "bootstrap" in result
 
-    def test_non_main_creation_always_blocked(self, tmp_path):
-        """Creating any branch other than refs/heads/main is always blocked."""
+    def test_first_creation_of_production_succeeds(self, tmp_path):
+        """First creation of refs/heads/production is also allowed via bootstrap."""
         result = _check_bootstrap_creation("refs/heads/production", str(tmp_path))
-        assert result is not None
-        assert "protected" in result
+        assert result is None
+        lock_file = tmp_path / "foundry-bootstrap-refs_heads_production.lock"
+        assert lock_file.exists()
 
     def test_none_bare_repo_path_blocks_creation(self):
         """When bare_repo_path is None, even refs/heads/main creation is blocked."""

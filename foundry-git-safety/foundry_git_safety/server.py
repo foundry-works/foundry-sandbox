@@ -14,6 +14,8 @@ Security model:
 import json
 import logging
 import os
+import threading
+import time
 
 try:
     from flask import Flask, Response, jsonify, request
@@ -39,6 +41,30 @@ logger = logging.getLogger(__name__)
 DEFAULT_DATA_DIR = os.environ.get(
     "FOUNDRY_DATA_DIR", "/var/lib/foundry-git-safety"
 )
+
+
+class _InFlightCounter:
+    """Thread-safe counter for tracking in-flight requests during shutdown."""
+
+    def __init__(self) -> None:
+        self._count = 0
+        self._zero = threading.Event()
+        self._zero.set()
+
+    def increment(self) -> None:
+        self._count += 1
+        self._zero.clear()
+
+    def decrement(self) -> None:
+        self._count -= 1
+        if self._count <= 0:
+            self._zero.set()
+
+    def wait_for_zero(self, timeout: float = 30.0) -> bool:
+        return self._zero.wait(timeout)
+
+
+_in_flight_count = _InFlightCounter()
 
 
 def _load_sandbox_metadata(
@@ -117,6 +143,13 @@ def create_git_api(
         from .auth import CLOCK_WINDOW_SECONDS
 
         client_ip = request.remote_addr or "unknown"
+        _in_flight_count.increment()
+        try:
+            return _git_exec_inner(CLOCK_WINDOW_SECONDS, client_ip)
+        finally:
+            _in_flight_count.decrement()
+
+    def _git_exec_inner(clock_window: float, client_ip: str) -> Response:
 
         # Pre-auth IP throttle
         allowed, retry = limiter.check_ip_throttle(client_ip)
@@ -139,9 +172,8 @@ def create_git_api(
         except (ValueError, TypeError):
             return _make_error("Invalid timestamp", 401)
 
-        import time
         now = time.time()
-        if abs(now - req_time) > CLOCK_WINDOW_SECONDS:
+        if abs(now - req_time) > clock_window:
             logger.warning(
                 "Clock skew for sandbox %s: delta=%.1fs",
                 sandbox_id,
@@ -248,9 +280,15 @@ def run_tcp_server(
     try:
         server.serve_forever()
     except KeyboardInterrupt:
-        logger.info("Git API server shutting down")
+        logger.info("Git API server shutting down, draining in-flight requests...")
     finally:
         server.shutdown()
+        # Wait for in-flight requests to complete before closing
+        drained = _in_flight_count.wait_for_zero(timeout=30.0)
+        if not drained:
+            logger.warning("Shutdown timed out with in-flight requests still pending")
+        else:
+            logger.info("All in-flight requests completed")
 
 
 def revoke_sandbox_secret(app: Flask, sandbox_id: str) -> None:

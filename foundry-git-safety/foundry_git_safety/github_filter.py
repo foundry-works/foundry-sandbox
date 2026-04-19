@@ -368,28 +368,37 @@ def run_github_proxy(
                 return
             body = self.rfile.read(content_length) if content_length > 0 else None
 
-            # Only filter GitHub API hosts
-            if host in GITHUB_API_HOSTS:
-                allowed, reason = checker.check_request(
-                    method=self.command,
-                    path=path,
-                    body=body,
-                )
+            # Fail-closed: only proxy known GitHub API hosts
+            if host not in GITHUB_API_HOSTS:
+                self.send_response(403)
+                self.send_header("Content-Type", "application/json")
+                self.end_headers()
+                self.wfile.write(json.dumps({
+                    "error": "BLOCKED",
+                    "message": f"Host '{host}' is not a permitted GitHub API endpoint",
+                }).encode())
+                logger.warning("BLOCKED non-GitHub host: %s %s", self.command, host)
+                return
 
-                if not allowed:
-                    self.send_response(403)
-                    self.send_header("Content-Type", "application/json")
-                    self.send_header("X-Sandbox-Blocked", "true")
-                    self.end_headers()
-                    response_body = json.dumps({
-                        "error": "BLOCKED",
-                        "message": reason,
-                        "documentation_url": "https://docs.github.com/rest",
-                        "hint": "This operation requires human operator approval.",
-                    }, indent=2)
-                    self.wfile.write(response_body.encode())
-                    logger.warning("BLOCKED GitHub API: %s %s - %s", self.command, path, reason)
-                    return
+            allowed, reason = checker.check_request(
+                method=self.command,
+                path=path,
+                body=body,
+            )
+
+            if not allowed:
+                self.send_response(403)
+                self.send_header("Content-Type", "application/json")
+                self.send_header("X-Sandbox-Blocked", "true")
+                self.end_headers()
+                self.wfile.write(json.dumps({
+                    "error": "BLOCKED",
+                    "message": reason,
+                    "documentation_url": "https://docs.github.com/rest",
+                    "hint": "This operation requires human operator approval.",
+                }, indent=2).encode())
+                logger.warning("BLOCKED GitHub API: %s %s - %s", self.command, path, reason)
+                return
 
             # Forward the request
             import http.client
@@ -413,8 +422,12 @@ def run_github_proxy(
                 response = conn.getresponse()
 
                 self.send_response(response.status)
+                _HOP_BY_HOP = frozenset({
+                    "transfer-encoding", "connection", "keep-alive",
+                    "proxy-authenticate", "proxy-authorization", "te", "upgrade",
+                })
                 for key, value in response.getheaders():
-                    if key.lower() not in ("transfer-encoding", "connection"):
+                    if key.lower() not in _HOP_BY_HOP:
                         self.send_header(key, value)
                 self.end_headers()
 
@@ -425,7 +438,6 @@ def run_github_proxy(
                     if not chunk:
                         break
                     self.wfile.write(chunk)
-                self.wfile.write(response_body)
                 conn.close()
 
             except Exception as exc:

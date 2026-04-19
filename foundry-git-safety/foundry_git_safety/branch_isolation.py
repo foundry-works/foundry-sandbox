@@ -157,7 +157,8 @@ def resolve_bare_repo_path(repo_root: str) -> str | None:
 
         return bare_path
 
-    except (OSError, IOError):
+    except (OSError, IOError) as exc:
+        logger.debug("Could not resolve bare repo path from %s: %s", repo_root, exc)
         return None
 
 

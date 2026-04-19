@@ -149,7 +149,7 @@ WELL_KNOWN_BRANCH_PREFIXES: tuple[str, ...] = (
 # of allowed branches, so a false-positive here cannot leak data.
 _MIN_SHA_LENGTH = 12
 
-_HEX_CHARS = frozenset("0123456789abcdef")
+_HEX_CHARS = frozenset("0123456789abcdefABCDEF")
 
 # Timeout for SHA reachability git subprocess calls (seconds).
 SHA_CHECK_TIMEOUT = 10
@@ -239,6 +239,9 @@ def _normalize_base_branch(base_branch: str | None) -> str | None:
             base_branch = parts[3]
         else:
             return None
+    elif base_branch.startswith("refs/tags/"):
+        # Tags are not branches — strip prefix and return as-is
+        base_branch = base_branch[len("refs/tags/"):]
     else:
         for remote in ("origin", "upstream"):
             prefix = f"{remote}/"
@@ -262,7 +265,8 @@ def _is_allowed_branch_name(
 
     Allowed: the sandbox's own branch, well-known branches,
     the sandbox's base branch (if any), and branches matching
-    well-known prefixes.
+    well-known prefixes only if the sandbox branch itself uses
+    that prefix (prevents cross-sandbox enumeration).
 
     Raises ValueError if sandbox_branch is empty.
     """
@@ -275,7 +279,7 @@ def _is_allowed_branch_name(
     if name in WELL_KNOWN_BRANCHES:
         return True
     for prefix in WELL_KNOWN_BRANCH_PREFIXES:
-        if name.startswith(prefix):
+        if name.startswith(prefix) and sandbox_branch.startswith(prefix):
             return True
     return False
 

@@ -225,8 +225,17 @@ class TestIsAllowedBranchName:
     def test_well_known_branch(self):
         assert _is_allowed_branch_name("main", "feature/x") is True
 
-    def test_well_known_prefix(self):
-        assert _is_allowed_branch_name("release/v1.0", "feature/x") is True
+    def test_well_known_prefix_same_prefix(self):
+        """release/* branches visible from a release/* sandbox."""
+        assert _is_allowed_branch_name("release/v1.0", "release/my-fix") is True
+
+    def test_well_known_prefix_cross_prefix_blocked(self):
+        """release/* branches NOT visible from a non-release sandbox."""
+        assert _is_allowed_branch_name("release/v1.0", "feature/x") is False
+
+    def test_hotfix_prefix_same_prefix(self):
+        """hotfix/* branches visible from a hotfix/* sandbox."""
+        assert _is_allowed_branch_name("hotfix/urgent-fix", "hotfix/my-hotfix") is True
 
     def test_unknown_blocked(self):
         assert _is_allowed_branch_name("other/branch", "feature/x") is False

@@ -91,7 +91,7 @@ class NonceStore:
 
             cache = self._nonces[sandbox_id]
 
-            # Evict expired
+            # Evict expired nonces (TTL-based, matching production behavior)
             while cache:
                 oldest_n, oldest_t = next(iter(cache.items()))
                 if now - oldest_t > NONCE_TTL_SECONDS:
@@ -103,8 +103,13 @@ class NonceStore:
             while len(cache) >= NONCE_MAX:
                 cache.popitem(last=False)
 
+            # Reject if nonce was already seen (and is still within TTL)
             if nonce in cache:
-                return False
+                # Check if the stored nonce has expired
+                if now - cache[nonce] <= NONCE_TTL_SECONDS:
+                    return False
+                else:
+                    del cache[nonce]
 
             cache[nonce] = now
             return True
@@ -140,6 +145,13 @@ class RateLimiter:
 # ---------------------------------------------------------------------------
 
 def verify_signature(method, path, body, timestamp, nonce, provided_sig, secret):
+    # Pre-validate signature format (must be 64 hex chars)
+    if not provided_sig or len(provided_sig) != 64:
+        return False
+    try:
+        int(provided_sig, 16)
+    except ValueError:
+        return False
     body_hash = hashlib.sha256(body).hexdigest()
     canonical = f"{method}\n{path}\n{body_hash}\n{timestamp}\n{nonce}"
     expected = hmac.new(secret, canonical.encode("utf-8"), hashlib.sha256).hexdigest()

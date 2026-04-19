@@ -425,7 +425,7 @@ def execute_git(
             return None, ValidationError("Invalid base64 in stdin_b64")
 
     # Translate client-side paths (/workspace/...) to server-side (/git-workspace/...)
-    client_root = os.environ.get("GIT_CLIENT_WORKSPACE_ROOT", "/workspace")
+    client_root = os.environ.get("GIT_CLIENT_WORKSPACE_ROOT", "/workspace").rstrip("/")
     real_repo = os.path.realpath(repo_root)
     translated_args = []
     for arg in args:
@@ -493,6 +493,8 @@ def execute_git(
                 timeout=SUBPROCESS_TIMEOUT,
                 env=env,
             )
+    # TimeoutError comes from fetch_lock context manager, not subprocess.run
+    # (which raises subprocess.TimeoutExpired, caught below).
     except TimeoutError as exc:
         audit_log(
             event="fetch_lock_timeout",
@@ -540,7 +542,7 @@ def execute_git(
     stderr_str = result.stderr.decode("utf-8", errors="replace")
 
     # Translate proxy-side paths back to client-side paths in output.
-    client_root = os.environ.get("GIT_CLIENT_WORKSPACE_ROOT", "/workspace")
+    # client_root is already defined above; reuse it here.
     if repo_root and client_root and repo_root != client_root:
         real_repo = os.path.realpath(repo_root)
         if subcommand in _PATH_TRANSLATE_SUBCOMMANDS:
@@ -640,10 +642,17 @@ async def execute_git_async(
     """
     semaphore = _semaphore_pool.get(sandbox_id)
 
-    # Atomic non-blocking acquire: avoids race between check and acquire.
+    # Non-blocking acquire: avoid wait_for(timeout=0) which can double-release
+    # semaphores on cancellation.  Instead, attempt acquire with a very short
+    # timeout and handle the TimeoutError explicitly.  On timeout we cancel
+    # the acquire task to prevent the semaphore from being released on cleanup.
+    acquire_task = asyncio.create_task(semaphore.acquire())
     try:
-        await asyncio.wait_for(semaphore.acquire(), timeout=0)
+        await asyncio.wait_for(acquire_task, timeout=0.001)
     except asyncio.TimeoutError:
+        acquire_task.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await acquire_task
         audit_log(
             event="concurrency_limit",
             action=" ".join(request.args[:3]) if request.args else "unknown",

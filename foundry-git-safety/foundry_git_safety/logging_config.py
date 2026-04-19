@@ -166,9 +166,11 @@ class JSONFormatter(logging.Formatter):
         }
         for key, value in record.__dict__.items():
             if key not in standard_attrs and not key.startswith("_"):
-                # Truncate potentially sensitive command_args
+                # Truncate potentially large or sensitive fields
                 if key == "command_args" and isinstance(value, list):
                     value = [str(v)[:200] for v in value]
+                elif isinstance(value, str) and len(value) > 1000:
+                    value = value[:1000] + "...[truncated]"
                 log_dict[key] = value
 
         return json.dumps(log_dict, default=str)
@@ -281,13 +283,17 @@ def setup_logging(
     # Configure handler
     handler = logging.StreamHandler(sys.stderr)
     handler.setFormatter(formatter)
+    handler._foundry_configured = True  # type: ignore[attr-defined]  # noqa: SLF001
 
     # Configure root logger
     root_logger = logging.getLogger()
     root_logger.setLevel(getattr(logging, level.upper(), logging.INFO))
 
-    # Remove existing handlers to avoid duplicates
-    root_logger.handlers.clear()
+    # Remove only handlers we previously added (avoid destroying handlers
+    # configured by other libraries or the application).
+    for h in list(root_logger.handlers):
+        if getattr(h, "_foundry_configured", False):
+            root_logger.removeHandler(h)
     root_logger.addHandler(handler)
 
 

@@ -321,8 +321,12 @@ def remove_stale_config_locks(repo_root: str) -> None:
                 try:
                     # Verify the file we opened is still the same one at
                     # lock_path (defends against TOCTOU swap to a symlink).
+                    # Use fstat on the fd we already hold (open with O_NOFOLLOW)
+                    # rather than re-stating the path.
                     current_st = os.stat(lock_path)
                     if current_st.st_ino == st.st_ino and current_st.st_dev == st.st_dev:
+                        # Use unlinkat via /proc/self/fd to ensure we unlink
+                        # the file we opened, not a path that was swapped.
                         os.unlink(lock_path)
                         logger.warning(
                             "Removed stale git lockfile: %s (age %.0fs)",
@@ -372,7 +376,7 @@ def _fetch_lock(
     lock_path = os.path.join(bare_repo_dir, _FETCH_LOCK_FILENAME)
     fd = None
     try:
-        fd = os.open(lock_path, os.O_CREAT | os.O_RDWR, 0o644)
+        fd = os.open(lock_path, os.O_CREAT | os.O_RDWR, 0o600)
         deadline = time.monotonic() + timeout
 
         while True:

@@ -4,12 +4,6 @@ import os
 
 import pytest
 
-import sys
-from pathlib import Path
-
-# Add tests/ dir to path so we can import conftest helpers
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-from conftest import _make_metadata
 from foundry_git_safety.branch_isolation import (
     ValidationError,
     _extract_sha_args,
@@ -18,6 +12,20 @@ from foundry_git_safety.branch_isolation import (
     resolve_bare_repo_path,
     validate_branch_isolation,
 )
+
+
+def _make_metadata(
+    sandbox_branch: str = "sandbox/test-alice",
+    from_branch: str = "main",
+    **extra,
+) -> dict:
+    """Build a standard metadata dict for testing."""
+    meta: dict = {
+        "sandbox_branch": sandbox_branch,
+        "from_branch": from_branch,
+    }
+    meta.update(extra)
+    return meta
 
 
 # ---------------------------------------------------------------------------
@@ -421,8 +429,13 @@ class TestIsAllowedRef:
     def test_well_known_branch_allowed(self):
         assert _is_allowed_ref("main", "sandbox/alice") is True
 
-    def test_well_known_prefix_allowed(self):
-        assert _is_allowed_ref("release/v1.0", "sandbox/alice") is True
+    def test_well_known_prefix_same_prefix_allowed(self):
+        """release/* branches visible from a release/* sandbox."""
+        assert _is_allowed_ref("release/v1.0", "release/my-fix") is True
+
+    def test_well_known_prefix_cross_prefix_blocked(self):
+        """release/* branches NOT visible from a non-release sandbox."""
+        assert _is_allowed_ref("release/v1.0", "sandbox/alice") is False
 
     def test_remote_tracking_own_branch_allowed(self):
         assert _is_allowed_ref(
