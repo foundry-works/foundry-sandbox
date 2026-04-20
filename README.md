@@ -46,7 +46,7 @@ Each sandbox is a git worktree — create one in seconds, destroy it with zero t
 - Claude Code, Gemini CLI, and Codex CLI are pre-installed
 - Fast creation: worktrees share git objects, new sandboxes spin up in seconds
 - Presets and history: save configurations, repeat last command with `cast repeat`
-- Spec-driven development: [foundry-mcp](https://github.com/foundry-works/claude-foundry) server pre-configured for Claude Code
+- [claude-foundry](https://github.com/foundry-works/claude-foundry) plugin pre-configured for Claude Code
 
 **Automation**
 - Volume mounts (read-write or read-only)

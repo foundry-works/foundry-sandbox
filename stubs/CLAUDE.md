@@ -46,8 +46,6 @@ foundry-spec → foundry-implement → [CODE] → foundry-review → foundry-tes
 
 ## Key Patterns
 
-**MCP-First**: All skills use Foundry MCP tools exclusively. No CLI fallbacks.
-
 **Unattended Posture**: This sandbox runs with `autonomy_posture.profile = "unattended"`. User prompts are skipped — auto-select recommended tasks, auto-approve plans, auto-continue between tasks. Safety limits (context >= 85%, error thresholds, task limits) are still enforced.
 
 **Task States**: `pending` → `in_progress` → `completed` | `blocked`
@@ -60,12 +58,12 @@ foundry-spec → foundry-implement → [CODE] → foundry-review → foundry-tes
 **Context Flow**: Spec metadata (journals, dependencies, completion notes) passes through the workflow.
 
 **Note (Autonomous Capture)**: Proactively add notes when encountering issues - do NOT prompt the user:
-- MCP tool errors or unexpected failures → `[Error]`
+- Tool errors or unexpected failures → `[Error]`
 - Missing/wished-for tools → `[Feature]`
 - Confusing behavior or documentation gaps → `[Docs]`
 - Ideas beyond current scope → `[Idea]`
 
-Use `authoring` MCP tool with `action="intake-add"` to capture notes programmatically.
+Use the authoring tool with `action="intake-add"` to capture notes programmatically.
 
 User can invoke `foundry-note` skill for manual capture or list pending items.
 

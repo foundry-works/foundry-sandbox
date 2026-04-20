@@ -59,7 +59,7 @@ services:
       - CLAUDE_CODE_OAUTH_TOKEN
       - ANTHROPIC_BASE_URL=${ANTHROPIC_BASE_URL:-}
       - ANTHROPIC_CUSTOM_HEADERS
-      # Deep research providers (foundry-mcp)
+      # Search providers
       - TAVILY_API_KEY
       - PERPLEXITY_API_KEY
       - SEMANTIC_SCHOLAR_API_KEY

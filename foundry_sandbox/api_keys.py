@@ -277,7 +277,7 @@ def get_missing_keys_warning() -> str:
     if missing_search:
         parts.append(
             "Warning: No search provider API keys found.\n"
-            "Deep research features (foundry-mcp) will be unavailable.\n"
+            "Deep research features will be unavailable.\n"
             "\n"
             "Expected at least one of:\n"
             "  - TAVILY_API_KEY\n"

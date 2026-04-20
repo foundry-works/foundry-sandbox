@@ -5,7 +5,6 @@ This guide covers configuration options for Foundry Sandbox, including AI tool p
 ## Claude Plugin
 
 The [claude-foundry](https://github.com/foundry-works/claude-foundry) plugin is installed automatically when you create a new sandbox. This provides:
-- **foundry-mcp** MCP server with spec-driven development tools
 - Skills: `/foundry-spec`, `/foundry-implement`, `/foundry-review`, `/foundry-test`, etc.
 
 No host installation required. The plugin is fetched from GitHub and configured during sandbox creation.
@@ -105,7 +104,7 @@ Requires `ZHIPU_API_KEY` set in your environment.
 
 ### Search Providers
 
-The `foundry-mcp` research tools support multiple search providers. Set these optional API keys for enhanced research capabilities:
+The research tools support multiple search providers. Set these optional API keys for enhanced research capabilities:
 
 | Variable | Provider | Purpose |
 |----------|----------|---------|

@@ -10,10 +10,7 @@ mkdir -p "$HOME/.claude" \
          "$HOME/.ssh" \
          "$HOME/.local/bin" \
          "$HOME/.cache" \
-         "$HOME/.npm" \
-         "$HOME/.foundry-mcp/cache" \
-         "$HOME/.foundry-mcp/errors" \
-         "$HOME/.foundry-mcp/metrics"
+         "$HOME/.npm"
 
 # Pre-trust /workspace for Gemini CLI (avoids interactive prompt)
 cat > "$HOME/.gemini/trustedFolders.json" << 'EOF'
@@ -53,9 +50,6 @@ npm config set prefix "$HOME/.local" 2>/dev/null || true
 
 # Suppress Ubuntu's "To run a command as administrator" hint
 touch ~/.sudo_as_admin_successful
-
-# Add foundry-upgrade alias for easy MCP plugin updates
-echo "alias foundry-upgrade='pip install --pre --upgrade --user foundry-mcp'" >> ~/.bashrc
 
 # Claude Code with ZAI GLM models (opt-in; requires ZHIPU_API_KEY on host)
 # Requires global-agent for Node.js proxy support (installed in Dockerfile)

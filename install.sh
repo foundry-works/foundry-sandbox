@@ -291,7 +291,7 @@ else
         if [ "$has_ai_key" = "true" ]; then
             echo -e "  ${GREEN}✓${NC} AI provider keys configured"
             echo -e "${YELLOW}Warning: No search provider API keys found.${NC}"
-            echo "Deep research features (foundry-mcp) will be unavailable."
+            echo "Deep research features will be unavailable."
             echo ""
             echo "Expected at least one of:"
             echo "  - TAVILY_API_KEY"
@@ -309,7 +309,7 @@ else
         echo ""
         if [ "$has_search_key" = "false" ]; then
             echo -e "${YELLOW}Warning: No search provider API keys found.${NC}"
-            echo "Deep research features (foundry-mcp) will be unavailable."
+            echo "Deep research features will be unavailable."
             echo ""
             echo "Expected at least one of:"
             echo "  - TAVILY_API_KEY"
