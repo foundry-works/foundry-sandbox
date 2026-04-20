@@ -1,262 +1,211 @@
-# Rearchitecting foundry-sandbox on Docker's Native `sbx`
+# foundry-sandbox on Docker `sbx` — Plan
 
-**Date:** 2026-04-18
+**Last updated:** 2026-04-20
 **Branch:** sbx
-**Status:** Phase 2 **COMPLETE** (727 tests passing, documentation written)
-**Approach:** Option E (Wait and Watch) with Phase 0 Validation + Option C Preparation
+**Status:** Phase 0, 1, 2 **COMPLETE**. Phase 3 steps 3.0–3.3 **COMPLETE** (~67k lines removed). Phase 3.4–3.5, Observability, and Security Extensions **IN PROGRESS**.
 
 ---
 
-## Executive Summary
+## 1. Objective
 
-Docker has shipped a native `sbx` CLI providing microVM lifecycle, network policies, secret management, file synchronization, and multi-agent support. Docker's `sbx` already provides credential isolation through a network-level HTTP/HTTPS proxy (secrets never enter the VM), eliminating the primary reason foundry-sandbox built its own proxy layer.
+Rebase foundry-sandbox (`cast`) on Docker's native `sbx` microVM backend, delegating microVM lifecycle, network policy, secret storage, credential injection, and worktree management to `sbx`. Extend `sbx` with the security features it doesn't provide: git operation mediation, branch isolation, push/commit guardrails, GitHub API filtering, and — as follow-on work — a deep method/path/body policy layer and wrapper-integrity enforcement.
 
-A rearchitecture could eliminate a significant majority of foundry-sandbox's codebase. The remaining value is in git safety (operation-level mediation, protected branches, push restrictions, branch visibility isolation) and deep API policy enforcement (method/path/body-level).
-
-**Caveat:** Docker Sandboxes is currently marked **"Experimental"** with no GA timeline announced. Linux microVM support is confirmed (sbx v0.26.1 on Fedora 43).
-
-**Recommendation:** Proceed with migration to `sbx` backend now. Phase 2 (git safety extraction) is complete; Phase 3 (migration) can begin immediately.
+The full rationale, architectural trade-offs, and risk register live in `sbx-analysis.md`. This document tracks **what remains to ship** on top of that analysis.
 
 ---
 
-## Proposed Architecture
+## 2. Current Architecture (already shipped on this branch)
 
 ```
 ┌──────────────────────────────────────────────────────────────────────┐
-│  Layer 3: Foundry Additive Layer (what we build)                     │
+│  Foundry Additive Layer                                              │
 │                                                                      │
-│  ┌──────────────┐  ┌─────────────────────────────────────────────┐  │
-│  │  Git Safety  │  │  Deep Policy Engine (optional)              │  │
-│  │  Server      │  │  - GitHub blocklist (merges, releases)     │  │
-│  │              │  │  - Push file restrictions                   │  │
-│  │  - Branch    │  │  - Body inspection for PATCH operations     │  │
-│  │    isolation │  │  - Per-container rate limiting              │  │
-│  │  - Push      │  │  - Circuit breaker (fail-closed)            │  │
-│  │    guards    │  └─────────────────────────────────────────────┘  │
-│  │  - HMAC      │                                                    │
-│  │    auth      │  NOTE: Credential isolation is NO LONGER needed   │
-│  └──────────────┘  here — Docker's sbx already provides it via      │
-│                    network-level proxy injection (confirmed by       │
-│                    official Docker security docs).                   │
+│  foundry-git-safety (standalone Python package, 727 tests)           │
+│    • HMAC-authed HTTP server mediating git operations                │
+│    • Branch isolation + ref output filtering                         │
+│    • Protected branches, push file restrictions, commit validation   │
+│    • GitHub API filter (method/path/body blocklist)                  │
+│    • YAML config (foundry.yaml) + workspace auto-discovery           │
 │                                                                      │
-│  ┌─────────────────┐                                                │
-│  │  cast CLI       │  Translates cast commands → sbx commands +     │
-│  │  (thin wrapper) │  configures git-safety layer only              │
-│  └─────────────────┘                                                │
+│  cast CLI (thin sbx wrapper)                                         │
+│    • foundry_sandbox/sbx.py — 20 wrappers over sbx subcommands       │
+│    • foundry_sandbox/git_safety.py — server + wrapper injection      │
+│    • commands/{new,start,stop,destroy,attach,list,...} delegate      │
+│      lifecycle to sbx and configure the safety layer                 │
 ├──────────────────────────────────────────────────────────────────────┤
-│  Layer 2: Docker `sbx` (what Docker provides)                       │
-│                                                                      │
-│  Each sandbox is a microVM containing a private Docker daemon:      │
-│  - MicroVM lifecycle (create/run/stop/rm)                           │
-│  - Network policy (allow/deny, balanced profile)                    │
-│  - Secret storage + proxy injection (HTTP/HTTPS only)               │
-│  - Git worktree creation (--branch, --branch auto)                  │
-│  - Port publishing, templates, diagnostics, TUI dashboard            │
-│  - 8 AI agents (claude, codex, copilot, gemini, kiro, opencode,     │
-│    shell, docker-agent)                                              │
-│  - Resource limits (CPU/memory), multiple workspaces                 │
+│  Docker `sbx` (v0.26.1+)                                             │
+│    • MicroVM lifecycle (hypervisor-level isolation)                  │
+│    • Network policy (domain/IP allow/deny, balanced profile)         │
+│    • Secret storage + network-level credential injection             │
+│    • Git worktree creation (--branch)                                │
+│    • Templates, diagnostics, resource limits, TUI                    │
 ├──────────────────────────────────────────────────────────────────────┤
-│  Layer 1: Host Hypervisor                                            │
-│  macOS virtualization.framework │ Windows Hyper-V │ Linux KVM       │
-│                                                                      │
-│  NOTE: sbx is standalone — Docker Desktop NOT required               │
+│  Hypervisor: macOS virtualization.framework / Windows Hyper-V /      │
+│              Linux KVM (confirmed on sbx v0.26.1, Fedora 43)         │
 └──────────────────────────────────────────────────────────────────────┘
 ```
 
----
-
-## Implementation Phases
-
-### Phase 0: One-Week Validation Spike (Before Phase 2)
-
-**Critical blockers to validate before investing in extraction:**
-
-| Validation | Method | Success Criteria | If Failed |
-|------------|--------|------------------|-----------|
-| Git wrapper injection via `sbx exec -u root` | Prototype injection, test reset behavior | Wrapper persists after `sbx reset` without manual re-injection | Document blocker, reconsider architecture |
-| Git wrapper agent removal resistance | Simulate agent removal, test auto-recovery | Wrapper survives `rm /usr/local/bin/git` attempts | Build into template as fallback |
-| Privileged injection security boundaries | Security audit of root-level injection | No sandbox escape vectors identified | Explore alternative injection mechanisms |
-| Credential isolation verification | Test `env | grep anthropic` inside VM | Zero credential leakage confirmed | Document as Docker security bug |
-
-**Duration:** 1 week
-**Outcome:** Pass/Fail report with technical findings. Proceed to Phase 2 only on pass.
+**Deleted in this branch:** entire `unified-proxy/` (credential injector, API gateways, policy engine, DNS filter, rate limiter, circuit breaker, container registry), docker-compose generation, network management, and the original in-package git_api / branch_isolation / git_policies / github-api-filter modules (now living in `foundry-git-safety/`).
 
 ---
 
-### Phase 1: Monitor and Validate (Ongoing)
+## 3. Deviation from `sbx-analysis.md` — and why
 
-Track Docker Sandboxes development and validate assumptions.
+`sbx-analysis.md` §10 recommended **Option E (Wait and Watch)** with Option C preparation, citing experimental status and CLI divergence risk. This branch has executed **Option A (full rearchitecture)** instead.
 
-**Phase 1 Research Results (2026-04-18):**
+Rationale for proceeding now, despite the analysis's caution:
+- Phase 0 validation passed on Linux KVM (kernel 6.12.44 vs host 6.17.8).
+- `foundry-git-safety` is already runnable standalone, so rollback is a clean revert to `main`.
+- The code-reduction win (~67k lines removed) is realized immediately.
+- Experimental-status risk is mitigated by version-pinning `sbx` (see §6.6 below).
 
-| Validation | Status | Finding |
-|------------|--------|---------|
-| Experimental status | **Confirmed** | Still "Experimental" in docs. Launched Mar 31, 2026. No GA timeline. |
-| Linux support | **Partial** | Install artifacts exist (.deb/.rpm) but Linux gets **legacy container-based** sandboxes, NOT microVMs. KVM backend not yet activated. |
-| Licensing | **Resolved** | Proprietary (Docker Inc.). Individual standalone use free. Team/enterprise requires sales contact. |
-| Git policy features | **Confirmed absent** | `sbx policy` is network-only. No git operation guardrails, protected branches, ref filtering, or API-level policies. |
-| Version stability | **Risk identified** | `docker sandbox` (v0.12.0) and `sbx` (v0.24.1) are two diverged systems with no migration path. Community reports surprise breaking changes. |
-| GitHub presence | **Found** | `docker/sbx-releases` — releases only, proprietary, no source code. 7 releases + nightly builds. |
-
-**Remaining hands-on validations (require macOS/Windows with `sbx` installed):**
-- Verify credential isolation: `env | grep -i anthropic` returns nothing inside VM
-- Test git wrapper injection via `sbx exec -u root`
-- Test `sbx reset` behavior with injected binaries
-
-**Exit criteria:** Docker Sandboxes reaches GA with acceptable licensing and Linux microVM support.
+This means several risks the analysis flagged as hypothetical are now live and must be addressed by the remaining work in §5.
 
 ---
 
-### Phase 2: Extract Git Safety Layer (2-3 weeks)
+## 4. What `sbx` Handles vs. What Foundry Must Keep Extending
 
-Decouple git safety from proxy infrastructure, making it portable to any sandbox runtime.
-
-**Components to extract:**
-- Git API server (standalone service, no proxy dependency)
-- Git wrapper (installable via `sbx exec` or bind-mount)
-- Branch isolation and output filtering
-- Push restrictions and protected branch enforcement
-- Configuration via workspace-level `foundry.yaml`
-
-**Exit criteria:** Git safety layer runs independently of unified-proxy.
-
----
-
-### Phase 3: Migration to `sbx` Backend (Now)
-
-Docker Sandboxes provides sufficient stability for migration. Linux microVM support confirmed on sbx v0.26.1.
-
-**Migration approach:**
-1. Rewrite `cast` CLI as thin wrapper over `sbx`
-2. Replace unified-proxy with Docker's built-in credential injection
-3. Deploy extracted git safety layer as only additive component
-4. Maintain backward compatibility during transition
-
-**Exit criteria:** All existing `cast` workflows work with `sbx` backend.
+| Capability | Provider |
+|------------|----------|
+| MicroVM lifecycle, network policy, secrets | `sbx` |
+| Credential injection (9 providers, HTTP header) | `sbx` host-side proxy |
+| Git worktree creation | `sbx --branch` |
+| Git operation mediation (protected branches, push restrictions, commit validation) | `foundry-git-safety` |
+| Branch visibility isolation / ref output filter | `foundry-git-safety` |
+| GitHub API blocklist (merges, releases, workflows) | `foundry-git-safety` |
+| **Wrapper persistence against agent removal** | **Not yet built — §5.1** |
+| **User-defined credential injection (Tavily, Perplexity, …)** | **Removed with proxy — §5.4** |
+| **Deep method/path/body policy (general, not just GitHub)** | **Not yet built — §5.5** |
+| **Existing-user migration path** | **Not yet built — §5.2** |
+| **Observability (health, metrics, decision logs)** | **Not yet built — §5.3** |
 
 ---
 
-## What Docker `sbx` Handles
+## 5. Remaining Work (in priority order)
 
-| Capability | Foundry-sandbox fate |
-|------------|---------------------|
-| MicroVM lifecycle | Delete — delegate to `sbx` |
-| Network policies | Delete — delegate to `sbx policy` |
-| Secret storage | Delete — delegate to `sbx secret` |
-| Credential injection | Delete — Docker's proxy handles this |
-| Git worktree creation | Delete — `sbx --branch` handles this |
-| Container orchestration | Delete — `sbx` manages private daemon |
-| API gateways (streaming) | Delete — or keep for performance |
-| Rate limiting | Delete — or keep for depth |
-| Circuit breaker | Delete — or keep for fail-closed |
+### 5.1 Wrapper Integrity Enforcement — **HIGH**
 
----
+The single largest live security gap. An agent with sudo can `rm /usr/local/bin/git` and regain unrestricted git access. Analysis §7 and Phase 0 report both flag this as accepted risk, but it remains unmitigated.
 
-## What Foundry Must Keep
+**Deliverables:**
+- Build the git wrapper into a custom `sbx template` so it survives `sbx reset`.
+- Host-side watchdog (polls `sbx exec <name> -- sha256sum /usr/local/bin/git`; re-injects on drift or missing).
+- Deny-list approach on `sbx exec` usage by non-foundry callers — document the residual risk.
+- Surface wrapper status in `cast info` and `cast list`.
 
-| Capability | Why Docker `sbx` doesn't have it |
-|------------|----------------------------------|
-| Git operation mediation | No operation-level guardrails |
-| Protected branch enforcement | Full git access to agent |
-| Push file restrictions | No workspace path policies |
-| Branch visibility isolation | Worktrees don't filter refs |
-| GitHub API blocklist | No method/path/body policies |
-| Deep policy engine | Domain-level policies only |
+### 5.2 Migration Path for Existing 0.20.x Users — **HIGH**
 
----
+No supported upgrade path exists today. Users on `main` have docker-compose-based sandboxes and cannot take a `sbx` release without manual intervention.
 
-## Key Risks
+**Deliverables:**
+- `cast migrate-to-sbx` command: snapshot `~/.sandboxes/`, migrate host credentials into `sbx secret set -g`, translate presets, print rollback.
+- Breaking-changes doc with concrete workarounds.
+- Rollback procedure: documented steps to revert to last 0.20.x release.
+- Tested dual-mode operation during transition (optional; decide whether worth the complexity).
 
-| Risk | Mitigation |
-|------|------------|
-| Docker Sandboxes remains experimental indefinitely | Maintain current architecture as fallback |
-| Linux gets container-based sandboxes only (not microVM) | Wait for KVM activation; maintain dual architecture if needed |
-| CLI version divergence (`docker sandbox` vs `sbx`) | Target standalone `sbx` only; ignore Desktop plugin |
-| Breaking changes during experimental phase | Pin to specific `sbx` version; test before upgrading |
-| Proprietary license with no source access | Accept dependency; maintain fallback architecture |
-| Git wrapper can't be reliably injected | Phase 0 spike validates before proceeding |
-| Agent removes injected git wrapper | Build wrapper into template; add watchdog |
-| Docker deprecates or changes `sbx` API | Keep git safety as standalone tool; version pin `sbx` |
-| Linux users excluded | Wait for Linux install docs; maintain dual architecture if needed |
-| `sbx reset` destroys injected binaries | Build wrapper into template; Phase 0 confirms behavior |
-| Non-HTTP protocols blocked | Configure git to use HTTPS URLs only |
-| Docker adds native git safety features | Monitor roadmap; prepared to sunset differentiation |
-| Privileged injection introduces sandbox escape | Security audit in Phase 0; explore alternatives |
-| Migration causes production downtime | Zero-downtime migration strategy required |
-| Licensing terms are unacceptable for commercial use | Document for `docs/sbx-licensing-questions.md` |
-| Git safety layer performance is unacceptable | Establish baselines; add caching if needed |
+### 5.3 Observability — **HIGH**
 
----
+Git safety server is currently a black box — no way to detect failures or enforcement decisions in production.
 
-## Open Questions (Require Investigation)
+**Deliverables:**
+- `/health` endpoint on foundry-git-safety server.
+- `/metrics` Prometheus endpoint (operation counts, latency, policy outcomes).
+- Structured JSON decision log (every allow/deny with reason, branch, sandbox).
+- Wrapper-injection failure tracking.
+- One alert rule per fail-closed code path.
+- Runbook for common failure modes.
 
-| # | Question | Impact |
-|---|----------|--------|
-| U7 | Does `sbx` support user-defined service credential injection? | Medium — custom providers |
-| U8 | Does `sbx` enforce API-level policies (e.g., GitHub merge blocking)? | Medium — policy layer needed |
-| U9 | Does `sbx` allow custom CA certificates inside the VM? | Low — MITM for niche providers |
-| U10 | What is the licensing model for teams/enterprise? | High — commercial use |
-| U12 | What happens to injected binaries after `sbx reset`? | Critical — wrapper persistence |
-| U13 | Can file sync be configured or disabled for specific paths? | Medium — wrapper installation |
-| U15 | Does `sbx create` support `--branch auto`? | Low — workflow separation |
-| U20 | Can `sbx exec --privileged` be restricted by policy? | High — wrapper enforceability |
-| U21 | What is the standalone install path for Linux? | Critical — Linux support |
-| U22 | What is Docker's commitment level to `sbx` long-term? | High — project risk |
-| U23 | Are there any API versioning guarantees for `sbx`? | Medium — stability |
-| U24 | What is the performance overhead of the git safety hop? | Medium — UX impact |
-| U25 | Can templates include pre-installed binaries? | Medium — wrapper distribution |
+### 5.4 User-Defined Credential Injection — **MEDIUM**
 
----
+`sbx` covers 9 providers. Foundry used to cover Tavily, Perplexity, Semantic Scholar, Zhipu, plus arbitrary services via `config/user-services.yaml`. Those are currently dead.
 
-## Decision Point
+**Deliverables:**
+- Thin HTTP proxy (host-side) that reads a restored `user-services.yaml` and injects headers for declared hosts.
+- Chain from `sbx`'s proxy via allow-rule for the sidecar's port, or position it between the VM and upstream.
+- Document constraint: HTTPS with SNI-based routing only; no MITM.
 
-**Proceed with Phase 3 migration now:**
-1. ~~Docker Sandboxes exits "Experimental" status~~ — proceeding with experimental
-2. Linux microVM support confirmed (sbx v0.26.1 on Fedora 43)
-3. Licensing terms acceptable for individual use
-4. Git wrapper injection validated as reliable (Phase 0 pass)
+### 5.5 Deep Policy Sidecar — **MEDIUM** (was Phase 4)
+
+`sbx policy` is domain/IP only. Foundry's GitHub filter is the one surviving method/path/body rule set — generalize it so any service can have request-shape policies.
+
+**Deliverables:**
+- Promote `foundry-git-safety/github_filter.py` into a general request-inspecting HTTP proxy.
+- YAML rule format: `{host, method, path_pattern, body_jsonpath, action}`.
+- Per-container rate limiting (existing code removed with proxy, can be reimplemented on the sidecar).
+- Circuit breaker / fail-closed behavior.
+- Document when to enable this layer (most users won't need it).
+
+### 5.6 Chaos, Security Audit, Performance — **MEDIUM**
+
+Unit tests pass but no negative-path validation.
+
+**Deliverables:**
+- Chaos tests: `sbx` daemon crash, git-safety server crash mid-push, network partition between VM and host server, corrupted `sbx reset`.
+- Security audit: HMAC rotation, wrapper injection privilege review, credential leakage through the safety layer, privilege escalation via the git-safety HTTP surface.
+- Performance baselines: clone, status, fetch, push latency vs. 0.20.x proxy baseline.
+
+### 5.7 `sbx` Version Pinning and Drift Detection — **LOW**
+
+Analysis §7.9 and U23 flag experimental churn. No automated defense today.
+
+**Deliverables:**
+- Pin a known-good `sbx` version in `foundry_sandbox/sbx.py`; fail loudly if the installed binary differs by more than a minor version.
+- CI job that runs weekly, invokes `sbx version`, and posts drift to an issue.
+- Document the tested-against-matrix in `docs/sbx-compatibility.md` (new file).
+
+### 5.8 Nice-to-Have (Defer Unless Needed)
+
+- DNS-level filtering (was in old proxy; unclear if achievable inside microVM network stack).
+- Native `sbx template` integration for presets (currently presets are JSON CLI-arg snapshots).
+- Docker Desktop plugin parity (track `docker sandbox` CLI convergence per U27).
 
 ---
 
-## Migration Concerns
+## 6. Risks (updated from analysis §11)
 
-### Zero-Downtime Migration
-
-Existing users with production sandboxes require:
-
-- State preservation (running sandboxes, uncommitted work, active tmux sessions)
-- Gradual migration path with rollback capability
-- Dual-mode operation during transition period
-- Data migration validation and integrity checks
-
-### Performance Baseline
-
-Git operations through the safety layer introduce an additional network hop. Establish baseline targets before migration:
-
-- Clone operation latency increase should be minimal
-- Status/fetch operations should remain responsive
-- Push operations with policy enforcement have acceptable overhead
+| Risk | Status | Mitigation |
+|------|--------|------------|
+| Experimental `sbx` churn breaks CLI | **Live** | §5.7 version pin + drift check |
+| Agent removes git wrapper | **Live, accepted** | §5.1 watchdog + template bake |
+| `sbx reset` destroys injected binaries | **Live, accepted** | §5.1 template-bake addresses persistence |
+| CLI divergence (`docker sandbox` vs `sbx`) | **Live** | Target standalone `sbx` only; §5.7 surfaces breakage fast |
+| Existing users have no upgrade path | **Live** | §5.2 blocks any release |
+| Git-safety server is unobservable | **Live** | §5.3 |
+| User-defined providers not supported | **Live, regression vs 0.20.x** | §5.4 |
+| Docker deprecates `sbx` | Low likelihood | foundry-git-safety already runs against any backend; fall back to current docker architecture via git revert |
+| Linux microVM docs still say "legacy container" | Docs-only | Phase 0 confirmed otherwise on sbx v0.26.1 |
 
 ---
 
-## Alternative Scenarios
+## 7. Decision Gates
 
-| Scenario | Trigger | Response |
-|----------|---------|----------|
-| Docker Sandboxes is cancelled | Official announcement or 6+ months without updates | Continue current architecture; Phase 2 work still provides value |
-| Linux support never ships | No Linux install docs after GA | Maintain dual architecture (current + `sbx` for macOS/Windows) |
-| Git wrapper injection proves impossible | Phase 0 fails on wrapper persistence | Reconsider entire approach; evaluate building git safety into `sbx` templates directly |
-| Docker adds git safety natively | Operation-level policies appear in `sbx` roadmap | Sunset Foundry git safety layer; pivot to configuration/wrapper role |
-| `sbx reset` always destroys injected binaries | Confirmed behavior that can't be worked around | Build wrapper into custom templates; accept template maintenance burden |
+### Gate A — Cut a pre-release (0.21.0-rc)
+Requires: §5.2 (migration) **and** §5.3 (observability) shipped. Everything else can follow behind a feature flag or in follow-up releases.
+
+### Gate B — Cut a stable release (0.21.0)
+Requires Gate A plus: §5.1 (wrapper integrity) shipped, §5.6 security audit signed off, one user has successfully migrated end-to-end.
+
+### Gate C — Deprecate `main` architecture
+Requires Gate B plus: 30 days of production use across ≥3 users without a critical regression.
+
+### Gate D — Enable §5.5 (deep policy sidecar) by default
+Requires: a concrete user request, and evidence Docker's domain-level policy is insufficient for that use case. Do not build speculatively.
 
 ---
 
-## Additional Technical Gaps
+## 8. What This Plan Explicitly Defers
 
-| Area | Concern |
-|------|---------|
-| **Observability** | No monitoring plan for git safety layer health and performance |
-| **Testing** | No chaos engineering for `sbx` daemon crash scenarios |
-| **Security** | Git safety server communication channel needs audit for new attack surface |
-| **CI/CD** | No plan for testing during transition (dual backend?) |
-| **Cost** | Docker Sandboxes pricing is TBD — budget impact unknown |
+- Phase 4's full deep policy engine at §5.5 depth — generalized method/path/body enforcement is scoped, but SSE streaming, per-provider gateways, and MITM for non-base-URL providers are out.
+- Docker Desktop integration (`docker sandbox` plugin) — monitor per U27, do not target.
+- DNS-level filtering — track as U28 in the questions doc; may be impossible inside `sbx`'s network stack.
+- Dual-mode operation during migration — decide during §5.2 scoping; likely not worth the complexity.
+- Re-adding rate limiting and circuit breaker — folded into §5.5 if we build the sidecar, dropped otherwise.
+
+---
+
+## 9. Links
+
+- `sbx-analysis.md` — original architectural analysis and risk register
+- `PLAN-CHECKLIST.md` — actionable checklist mirroring this plan
+- `docs/adr/008-sbx-migration.md` — architectural decision record
+- `foundry-git-safety/README.md` — standalone package docs
