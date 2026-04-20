@@ -2,7 +2,7 @@
 
 **Last updated:** 2026-04-20
 **Branch:** sbx
-**Status:** Phase 0, 1, 2 **COMPLETE**. Phase 3 steps 3.0–3.3 **COMPLETE** (~67k lines removed). §5.2 Migration **SHIPPED**. §5.3 Observability **SHIPPED**. §5.1, §5.4–5.8 **IN PROGRESS**.
+**Status:** Phase 0, 1, 2 **COMPLETE**. Phase 3 steps 3.0–3.3 **COMPLETE** (~67k lines removed). §5.2 Migration **SHIPPED**. §5.3 Observability **SHIPPED**. §5.4 User-Defined Credential Injection **SHIPPED**. §5.1, §5.5–5.8 **IN PROGRESS**.
 
 ---
 
@@ -74,7 +74,7 @@ This means several risks the analysis flagged as hypothetical are now live and m
 | Branch visibility isolation / ref output filter | `foundry-git-safety` |
 | GitHub API blocklist (merges, releases, workflows) | `foundry-git-safety` |
 | **Wrapper persistence against agent removal** | **Not yet built — §5.1** |
-| **User-defined credential injection (Tavily, Perplexity, …)** | **Removed with proxy — §5.4** |
+| **User-defined credential injection (Tavily, Perplexity, …)** | **Shipped — §5.4** |
 | **Deep method/path/body policy (general, not just GitHub)** | **Not yet built — §5.5** |
 | **Existing-user migration path** | **Not yet built — §5.2** |
 | **Observability (health, metrics, decision logs)** | **Not yet built — §5.3** |
@@ -105,14 +105,11 @@ The single largest live security gap. An agent with sudo can `rm /usr/local/bin/
 
 **Remaining:** Runbook addendum to `docs/operations.md`.
 
-### 5.4 User-Defined Credential Injection — **MEDIUM**
+### 5.4 User-Defined Credential Injection — **MEDIUM** — **SHIPPED**
 
-`sbx` covers 9 providers. Foundry used to cover Tavily, Perplexity, Semantic Scholar, Zhipu, plus arbitrary services via `config/user-services.yaml`. Those are currently dead.
+Reverse-proxy routes on the foundry-git-safety Flask server. `config/user-services.yaml` declares services with domain, header, format. Sandbox talks HTTP to `host.docker.internal:8083/proxy/<slug>/...`, proxy reads API key from host env, adds header, forwards HTTPS to upstream. No MITM, no custom CA. Integrated with `cast new` (env var injection), `cast refresh-credentials` (secret push), and `migration.py` (credential map). 30 unit tests (15 config + 15 proxy). ADR-010 documents the decision.
 
-**Deliverables:**
-- Thin HTTP proxy (host-side) that reads a restored `user-services.yaml` and injects headers for declared hosts.
-- Chain from `sbx`'s proxy via allow-rule for the sidecar's port, or position it between the VM and upstream.
-- Document constraint: HTTPS with SNI-based routing only; no MITM.
+**Remaining:** Test with real service endpoints (manual, pre-release validation).
 
 ### 5.5 Deep Policy Sidecar — **MEDIUM** (was Phase 4)
 
@@ -161,7 +158,7 @@ Analysis §7.9 and U23 flag experimental churn. No automated defense today.
 | CLI divergence (`docker sandbox` vs `sbx`) | **Live** | Target standalone `sbx` only; §5.7 surfaces breakage fast |
 | Existing users have no upgrade path | **Live** | §5.2 blocks any release |
 | Git-safety server is unobservable | **Shipped** | §5.3 shipped |
-| User-defined providers not supported | **Live, regression vs 0.20.x** | §5.4 |
+| User-defined providers not supported | **Shipped** | §5.4 reverse proxy |
 | Docker deprecates `sbx` | Low likelihood | foundry-git-safety already runs against any backend; fall back to current docker architecture via git revert |
 | Linux microVM docs still say "legacy container" | Docs-only | Phase 0 confirmed otherwise on sbx v0.26.1 |
 

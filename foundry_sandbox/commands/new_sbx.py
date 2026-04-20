@@ -147,6 +147,34 @@ def new_sbx_setup(
         log_warn(f"Git wrapper injection failed: {exc}")
 
     # ------------------------------------------------------------------
+    # 7.5. Inject user service environment overrides
+    # ------------------------------------------------------------------
+    user_service_overrides: dict[str, str] = {}
+    try:
+        from foundry_sandbox.user_services import get_proxy_env_overrides
+
+        user_service_overrides = get_proxy_env_overrides()
+        if user_service_overrides:
+            lines = [f"export {k}={v}" for k, v in sorted(user_service_overrides.items())]
+            env_script = "\n".join(lines) + "\n"
+            sbx_exec(
+                name,
+                ["tee", "/etc/profile.d/foundry-user-services.sh"],
+                user="root",
+                input=env_script,
+                quiet=True,
+            )
+            sbx_exec(
+                name,
+                ["chmod", "644", "/etc/profile.d/foundry-user-services.sh"],
+                user="root",
+                quiet=True,
+            )
+            log_info(f"Injected {len(user_service_overrides)} user service proxy URLs")
+    except Exception as exc:
+        log_warn(f"User service env injection failed: {exc}")
+
+    # ------------------------------------------------------------------
     # 8. Copy files and install pip requirements
     # ------------------------------------------------------------------
     if copies:
@@ -190,6 +218,7 @@ def new_sbx_setup(
         enable_zai=with_zai,
         copies=copies,
         template=use_template or "",
+        user_services=user_service_overrides,
     )
 
 

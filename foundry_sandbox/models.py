@@ -58,6 +58,9 @@ class SbxSandboxMetadata(BaseModel):
     template: str = ""
     """Template tag used to create the sandbox (empty = no template)."""
 
+    user_services: dict[str, str] = Field(default_factory=dict)
+    """Maps env var name to proxy URL for user-defined services."""
+
 
 class CastNewPreset(BaseModel):
     """Structured representation of cast-new preset arguments."""

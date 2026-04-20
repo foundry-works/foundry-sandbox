@@ -66,6 +66,19 @@ def _refresh_one(name: str) -> bool:
         if not _push_secret(service, value):
             ok = False
 
+    # Push user-defined service credentials
+    try:
+        from foundry_sandbox.user_services import _slug, get_user_services
+
+        for svc in get_user_services():
+            slug = _slug(str(svc["name"]))
+            value = os.environ.get(str(svc["env_var"]), "")
+            if not _push_secret(slug, value):
+                ok = False
+    except Exception as exc:
+        from foundry_sandbox.utils import log_warn
+        log_warn(f"User service credential push failed: {exc}")
+
     return ok
 
 

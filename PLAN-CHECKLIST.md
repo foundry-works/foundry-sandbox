@@ -116,22 +116,37 @@ All checkboxes from the prior checklist remain done. Package lives at
   - [ ] `docs/operations.md` addendum: common failure modes and diagnostic steps
   - [ ] How to collect a support bundle (`cast diagnose`)
 
-### §5.4 User-Defined Credential Injection — **MEDIUM**
+### §5.4 User-Defined Credential Injection — **MEDIUM** — **SHIPPED**
 
-- [ ] Restore `config/user-services.yaml` schema (Pydantic)
-- [ ] Standalone HTTP proxy (or extension to git-safety server)
-  - [ ] Reads declared services, injects headers by host match
-  - [ ] Host-side only; credentials never reach VM
-  - [ ] HTTPS SNI routing (no MITM)
-- [ ] Integration with `sbx`
-  - [ ] `sbx policy allow network <sidecar-host>` wired up by `cast new`
-  - [ ] Route decision documented
-- [ ] Tests
-  - [ ] Integration: declared Tavily/Perplexity endpoints get headers, others don't
-  - [ ] Negative: undeclared host gets no injection, no placeholder leak
-- [ ] Documentation
-  - [ ] `docs/configuration.md` section for user services
-  - [ ] Migration note: which services were auto-included in 0.20.x
+- [x] Restore `config/user-services.yaml` schema (Pydantic)
+  - [x] `UserServiceEntry` model in `foundry-git-safety/schemas/foundry_yaml.py`
+  - [x] Fields: name, env_var, domain, header, format, methods, paths, scheme, port
+  - [x] `UserServicesConfig` added to `FoundryConfig`
+- [x] Reverse proxy blueprint on foundry-git-safety server
+  - [x] `foundry-git-safety/foundry_git_safety/user_services_proxy.py`
+  - [x] `/proxy/<slug>/<path>` route with header injection and response streaming
+  - [x] `/proxy/health` endpoint listing registered services + key status
+  - [x] Host-side only; credentials never reach VM
+  - [x] No MITM — sandbox talks HTTP, proxy forwards HTTPS
+- [x] Config loader
+  - [x] `foundry_sandbox/user_services.py` — loads `user-services.yaml` with env override
+  - [x] `get_proxy_env_overrides()` — generates sandbox env vars
+  - [x] LRU-cached accessor
+- [x] Integration with `cast`
+  - [x] `cast new` injects user service env vars into sandbox profile
+  - [x] `cast refresh-credentials` pushes user service secrets via `sbx secret set`
+  - [x] `migration.py` extends `CREDENTIAL_ENV_MAP` from user services
+  - [x] `models.py` — `user_services: dict[str, str]` on `SbxSandboxMetadata`
+  - [x] `state.py` — `write_sandbox_metadata` accepts `user_services` parameter
+- [x] Tests (30 unit tests)
+  - [x] Schema validation, config loading, env overrides, slug generation (15 tests)
+  - [x] Proxy routes: bearer/value format, method/path filtering, 404/405/403/503/502 (15 tests)
+- [x] Documentation
+  - [x] `docs/configuration.md` — user services section with field reference
+  - [x] `docs/adr/010-user-service-credential-injection.md`
+  - [x] `config/user-services.yaml.example` updated for proxy-based approach
+  - [x] Migration note: 0.20.x auto-included services table
+- [ ] Test with real service endpoints (manual, pre-release validation)
 
 ### §5.5 Deep Policy Sidecar (was Phase 4) — **MEDIUM**
 

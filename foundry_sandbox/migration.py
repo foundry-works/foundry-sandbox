@@ -476,6 +476,31 @@ def push_credentials(
 
         pushed.append(service)
 
+    # Push user-defined service credentials
+    try:
+        from foundry_sandbox.user_services import _slug, get_user_services
+
+        for svc in get_user_services():
+            slug = _slug(str(svc["name"]))
+            value = os.environ.get(str(svc["env_var"]), "")
+            if not value:
+                missing.append(slug)
+                continue
+            if dry_run:
+                log_step(f"Would push: {slug}")
+            else:
+                try:
+                    sbx_secret_set(slug, value, global_scope=True)
+                    log_step(f"Pushed: {slug}")
+                except Exception as exc:
+                    log_error(f"Failed to push {slug}: {exc}")
+                    missing.append(slug)
+                    continue
+            pushed.append(slug)
+    except Exception as exc:
+        from foundry_sandbox.utils import log_warn
+        log_warn(f"User service credential migration skipped: {exc}")
+
     return pushed, missing
 
 

@@ -1,8 +1,11 @@
 """Pydantic models for foundry.yaml configuration schema."""
 
-from typing import List
+import re
+from typing import List, Literal
 
 from pydantic import BaseModel, Field, field_validator
+
+_ENV_VAR_RE = re.compile(r"^[A-Z_][A-Z0-9_]*$")
 
 
 class GitSafetyServerConfig(BaseModel):
@@ -150,8 +153,44 @@ class GitSafetyConfig(BaseModel):
     observability: ObservabilityConfig = Field(default_factory=ObservabilityConfig)
 
 
+class UserServiceEntry(BaseModel):
+    """A single user-defined service for credential injection."""
+
+    name: str
+    env_var: str
+    domain: str
+    header: str
+    format: Literal["bearer", "value"]
+    methods: List[str] = Field(default_factory=list)
+    paths: List[str] = Field(default_factory=list)
+    scheme: str = "https"
+    port: int = 0
+
+    @field_validator("env_var")
+    @classmethod
+    def validate_env_var(cls, v: str) -> str:
+        if not _ENV_VAR_RE.match(v):
+            raise ValueError(f"env_var must match [A-Z_][A-Z0-9_]*, got {v!r}")
+        return v
+
+    @field_validator("port")
+    @classmethod
+    def validate_port(cls, v: int) -> int:
+        if v < 0 or v > 65535:
+            raise ValueError(f"Port must be 0-65535, got {v}")
+        return v
+
+
+class UserServicesConfig(BaseModel):
+    """User-defined service credential injection configuration."""
+
+    version: str = "1"
+    services: List[UserServiceEntry] = Field(default_factory=list)
+
+
 class FoundryConfig(BaseModel):
     """Root foundry.yaml configuration."""
 
     version: str = "1.0"
     git_safety: GitSafetyConfig = Field(default_factory=GitSafetyConfig)
+    user_services: UserServicesConfig = Field(default_factory=UserServicesConfig)

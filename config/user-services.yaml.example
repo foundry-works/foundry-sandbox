@@ -1,22 +1,29 @@
 # User-Defined Services
 #
-# Define custom API services for credential injection and proxy allowlisting.
-# Copy this file to config/user-services.yaml and uncomment the services you need.
+# Define custom API services for credential injection via the host-side
+# reverse proxy. Copy this file to config/user-services.yaml and uncomment
+# the services you need.
 #
 # Each service gets:
-#   - A credential placeholder injected into the sandbox (sandbox never sees real key)
-#   - Automatic proxy credential injection on matching outbound requests
-#   - Domain added to the proxy allowlist and MITM interception list
+#   - A reverse-proxy route on the git-safety server (host-side)
+#   - An environment variable injected into the sandbox pointing at the proxy
+#   - Real credentials never enter the sandbox VM
+#
+# How it works:
+#   The sandbox agent calls http://host.docker.internal:8083/proxy/<slug>/...
+#   The proxy reads the real API key from the host environment, adds the
+#   configured header, and forwards the request to the upstream service.
+#   No MITM, no custom CA.
 #
 # Config file search order:
 #   1. FOUNDRY_USER_SERVICES_PATH environment variable
 #   2. ./config/user-services.yaml (relative to project root)
 #
-# Limitations (MVP):
+# Limitations:
 #   - Header-based credential injection only
+#   - SDKs must support custom base URLs (e.g., TAVILY_API_BASE)
 #   - No OAuth token refresh flows
 #   - No request body injection
-#   - No file-based credential loading
 #
 # See docs/configuration.md for full documentation.
 
@@ -61,11 +68,13 @@ services:
 
 # Field reference:
 #
-#   name       (required)  Display name shown in CLI status output
+#   name       (required)  Display name and slug source for the proxy route
 #   env_var    (required)  Host environment variable holding the real API key
 #                          Must match [A-Z_][A-Z0-9_]*
-#   domain     (required)  Target domain for credential injection
+#   domain     (required)  Upstream domain to forward requests to
 #   header     (required)  HTTP header name for credential injection
 #   format     (required)  "bearer" -> "Bearer <key>", "value" -> raw key
 #   methods    (optional)  Allowed HTTP methods (default: all standard methods)
-#   paths      (optional)  Allowed URL path globs (default: ["/**"])
+#   paths      (optional)  Allowed URL path globs (default: all paths)
+#   scheme     (optional)  Upstream scheme (default: "https")
+#   port       (optional)  Upstream port (default: scheme default)

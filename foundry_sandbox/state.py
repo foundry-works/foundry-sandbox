@@ -96,6 +96,7 @@ def write_sandbox_metadata(
     enable_zai: bool = False,
     copies: list[str] | None = None,
     template: str = "",
+    user_services: dict[str, str] | None = None,
 ) -> None:
     """Write sandbox metadata to a JSON file.
 
@@ -133,6 +134,7 @@ def write_sandbox_metadata(
         enable_zai=enable_zai,
         copies=copies or [],
         template=template,
+        user_services=user_services or {},
     )
     data = model.model_dump()
 

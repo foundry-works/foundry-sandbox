@@ -43,6 +43,40 @@ DEFAULT_DATA_DIR = os.environ.get(
 )
 
 
+def _load_user_services_config() -> list[dict]:
+    """Load user-defined services from config/user-services.yaml."""
+    import yaml
+    from pathlib import Path
+    from .schemas.foundry_yaml import UserServicesConfig
+
+    path = os.environ.get("FOUNDRY_USER_SERVICES_PATH")
+    if not path:
+        candidate = Path("config/user-services.yaml")
+        if candidate.exists():
+            path = str(candidate)
+
+    if not path or not Path(path).exists():
+        return []
+
+    try:
+        with open(path) as f:
+            raw = yaml.safe_load(f) or {}
+    except (OSError, Exception) as exc:
+        logger.warning("Failed to load user services config: %s", exc)
+        return []
+
+    if not raw:
+        return []
+
+    try:
+        config = UserServicesConfig(**raw)
+    except Exception as exc:
+        logger.warning("Invalid user services config: %s", exc)
+        return []
+
+    return [s.model_dump() for s in config.services]
+
+
 class _InFlightCounter:
     """Thread-safe counter for tracking in-flight requests during shutdown."""
 
@@ -322,6 +356,20 @@ def create_git_api(
         from .metrics import registry as metrics_registry
         content = metrics_registry.render_prometheus()
         return Response(content, content_type="text/plain; version=0.0.4; charset=utf-8")
+
+    # Register user services proxy blueprint (if configured)
+    try:
+        from .user_services_proxy import create_user_services_blueprint
+        from .schemas.foundry_yaml import UserServiceEntry
+
+        service_dicts = _load_user_services_config()
+        if service_dicts:
+            entries = [UserServiceEntry(**s) for s in service_dicts]
+            bp = create_user_services_blueprint(entries)
+            app.register_blueprint(bp)
+            logger.info("Registered %d user service proxy routes", len(entries))
+    except Exception as exc:
+        logger.debug("User services proxy not loaded: %s", exc)
 
     @app.errorhandler(404)
     def not_found(e):

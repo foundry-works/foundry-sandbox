@@ -236,6 +236,97 @@ For pattern matching semantics (directory prefix, glob, basename) and the differ
 | `GIT_API_SECRETS_PATH` | `/run/secrets/sandbox-hmac` | HMAC secrets directory |
 | `FOUNDRY_DATA_DIR` | `/var/lib/foundry-git-safety` | Git safety data directory |
 
+## User-Defined Service Credential Injection
+
+For services not covered by sbx's built-in providers (Tavily, Perplexity, Semantic Scholar, Zhipu, etc.), you can declare them in `config/user-services.yaml`. The host-side git-safety server acts as a reverse proxy, injecting credentials on the fly.
+
+### How It Works
+
+```
+Sandbox → http://host.docker.internal:8083/proxy/<service-slug>/<path>
+         → foundry-git-safety reads API key from host env
+         → adds credential header, forwards to upstream via HTTPS
+         → streams response back
+```
+
+Credentials never enter the sandbox VM. The sandbox only sees a local HTTP URL.
+
+### Configuration
+
+Copy `config/user-services.yaml.example` to `config/user-services.yaml` and uncomment the services you need:
+
+```yaml
+version: "1"
+
+services:
+  - name: Tavily
+    env_var: TAVILY_API_KEY
+    domain: api.tavily.com
+    header: Authorization
+    format: bearer
+
+  - name: Semantic Scholar
+    env_var: SEMANTIC_SCHOLAR_API_KEY
+    domain: api.semanticscholar.org
+    header: X-Api-Key
+    format: value
+```
+
+Set the corresponding environment variables on the host:
+
+```bash
+export TAVILY_API_KEY="tvly-..."
+export SEMANTIC_SCHOLAR_API_KEY="..."
+```
+
+### What Happens During `cast new`
+
+1. The proxy routes are registered on the git-safety server
+2. Environment variables are injected into the sandbox pointing each service at its proxy URL:
+   - `TAVILY_API_KEY=http://host.docker.internal:8083/proxy/tavily`
+   - `SEMANTIC_SCHOLAR_API_KEY=http://host.docker.internal:8083/proxy/semantic-scholar`
+3. The agent uses these URLs as base URLs for API calls
+
+### Field Reference
+
+| Field | Required | Description |
+|-------|----------|-------------|
+| `name` | Yes | Display name and proxy slug source |
+| `env_var` | Yes | Host environment variable holding the API key |
+| `domain` | Yes | Upstream domain to forward to |
+| `header` | Yes | HTTP header name (e.g., `Authorization`, `X-Api-Key`) |
+| `format` | Yes | `bearer` (prepends `Bearer `) or `value` (raw key) |
+| `methods` | No | Allowed HTTP methods (default: all) |
+| `paths` | No | Allowed URL path globs (default: all) |
+| `scheme` | No | Upstream scheme (default: `https`) |
+| `port` | No | Upstream port (default: scheme default) |
+
+### Limitations
+
+- SDKs must support custom base URLs to use the proxy. SDKs that hardcode their API domain need wrapper code.
+- No OAuth token refresh flows.
+- No request body credential injection.
+- The `HTTPS_PROXY` environment variable is not used — the proxy uses explicit base URLs.
+
+### Migration from 0.20.x
+
+Services that were auto-included in 0.20.x now require explicit declaration:
+
+| Service | env_var | domain |
+|---------|---------|--------|
+| Tavily | `TAVILY_API_KEY` | `api.tavily.com` |
+| Perplexity | `PERPLEXITY_API_KEY` | `api.perplexity.ai` |
+| Semantic Scholar | `SEMANTIC_SCHOLAR_API_KEY` | `api.semanticscholar.org` |
+| Zhipu | `ZHIPU_API_KEY` | `open.bigmodel.cn` |
+
+### Health Check
+
+```bash
+curl http://localhost:8083/proxy/health
+```
+
+Returns JSON listing registered services and whether their API keys are present on the host.
+
 ## See Also
 
 - [Commands](usage/commands.md) — Full CLI reference
