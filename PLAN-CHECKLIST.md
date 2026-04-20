@@ -151,26 +151,32 @@ All checkboxes from the prior checklist remain done. Package lives at
   - [x] Migration note: 0.20.x auto-included services table
 - [ ] Test with real service endpoints (manual, pre-release validation)
 
-### §5.5 Deep Policy Sidecar (was Phase 4) — **MEDIUM**
+### §5.5 Deep Policy Sidecar (was Phase 4) — **MEDIUM** — **SHIPPED**
 
-- [ ] Promote `github_filter.py` logic into generalized request inspector
-  - [ ] Extract host/method/path/body rule engine
-  - [ ] Keep the GitHub rules as a bundled policy set
-- [ ] General rule format
-  - [ ] YAML schema: `{host, method, path_pattern, body_jsonpath, action}`
-  - [ ] Pydantic validation
-  - [ ] Example rulesets for common providers
-- [ ] Per-container rate limiting
-  - [ ] Token-bucket by sandbox ID
-  - [ ] Configurable limits
-- [ ] Circuit breaker
-  - [ ] Fail-closed behavior on upstream errors above threshold
-  - [ ] Automatic half-open recovery
-- [ ] Enable/disable toggle
-  - [ ] Off by default; enabled via `foundry.yaml` or `cast new --deep-policy`
-- [ ] Documentation
-  - [ ] When to enable and example threat models addressed
-  - [ ] Performance impact measurements
+- [x] Promote `github_filter.py` logic into generalized request inspector
+  - [x] Extract host/method/path/body rule engine
+  - [x] Keep the GitHub rules as a bundled policy set
+- [x] General rule format
+  - [x] YAML schema: `{host, method, path_pattern, body_jsonpath, action}`
+  - [x] Pydantic validation
+  - [x] Example rulesets for common providers
+- [x] Per-container rate limiting
+  - [x] Token-bucket by sandbox ID (reuses existing RateLimiter)
+  - [x] Configurable limits
+- [x] Circuit breaker
+  - [x] Fail-closed behavior on upstream errors above threshold
+  - [x] Automatic half-open recovery
+- [x] Enable/disable toggle
+  - [x] Off by default; enabled via `foundry.yaml` or `foundry-git-safety start --deep-policy`
+- [x] Tests
+  - [x] Unit: rule engine, policy evaluation, jsonpath, body matching, circuit breaker (46 tests)
+  - [x] Unit: Flask Blueprint proxy — health, deny/allow, rate limiting, circuit breaker, upstream failures (8 tests)
+  - [x] Security: GitHub parity — 120 parametric tests verifying bundled YAML matches GitHubAPIChecker
+- [x] Documentation
+  - [x] ADR-011: deep-policy-sidecar decision record
+  - [x] foundry.yaml.example: commented-out deep_policy section
+  - [ ] When to enable and example threat models addressed (deferred to docs/operations.md)
+  - [ ] Performance impact measurements (folded into §5.6)
 
 ### §5.6 Chaos, Security Audit, Performance — **MEDIUM**
 
@@ -215,7 +221,7 @@ All checkboxes from the prior checklist remain done. Package lives at
 - [ ] `foundry-git-safety/docs/troubleshooting.md`
 - [ ] `foundry-git-safety/docs/migration.md` (from foundry-sandbox 0.20.x)
 - [x] `docs/security/wrapper-integrity.md` (§5.1)
-- [ ] `docs/migration/0.20-to-0.21.md` (§5.2)
+- [x] `docs/migration/0.20-to-0.21.md` (§5.2)
 - [ ] `docs/observability/alerts.yaml` (§5.3)
 - [ ] Runbook addendum to `docs/operations.md` (§5.3)
 - [ ] Update `docs/security/security-model.md` to reflect wrapper integrity model

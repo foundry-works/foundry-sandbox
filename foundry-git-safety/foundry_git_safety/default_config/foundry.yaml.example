@@ -66,3 +66,12 @@ git_safety:
     burst: 300
     sustained: 120
     global_ceiling: 1000
+
+  # Deep policy sidecar — YAML-driven request-shape policies.
+  # Off by default. Enable to generalize the GitHub API filter to any service.
+  # See docs/adr/011-deep-policy-sidecar.md for rationale.
+  # deep_policy:
+  #   enabled: false
+  #   policy_file: "bundled://github-default"  # or path to custom YAML
+  #   circuit_breaker_threshold: 5
+  #   circuit_breaker_recovery_seconds: 30

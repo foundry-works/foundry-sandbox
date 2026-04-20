@@ -1,0 +1,634 @@
+# GitHub API default policy set — mirrors github_filter.py hardcoded rules.
+#
+# Loaded automatically when deep_policy.enabled: true and
+# deep_policy.policy_file: "bundled://github-default".
+#
+# Priority scheme:
+#   100 = explicit blocklist (evaluated first)
+#    95 = PR reopen detection
+#    90 = GraphQL mutation blocklist
+#    50 = conditional PR operations (gated by allow_pr_operations)
+#    10 = allowlist (evaluated last)
+#
+# Rules are sorted by priority descending; deny wins over allow on ties.
+# If no rule matches, default_action (deny) is applied.
+
+version: "1"
+description: "GitHub API default policy set"
+
+services:
+  - slug: github
+    host: "api.github.com"
+    scheme: https
+    default_action: deny
+    rules:
+      # ── Blocklist (priority 100) ──────────────────────────────
+
+      - method: DELETE
+        path_pattern: "^/repos/[^/]+/[^/]+$"
+        action: deny
+        reason: "gh repo delete: permanently destroys repository"
+        priority: 100
+
+      - method: DELETE
+        path_pattern: "^/repos/[^/]+/[^/]+/releases/\\d+$"
+        action: deny
+        reason: "gh release delete: removes release artifacts"
+        priority: 100
+
+      - method: DELETE
+        path_pattern: "^/repos/[^/]+/[^/]+/git/refs/.*"
+        action: deny
+        reason: "gh api: deletes branch/tag (history loss)"
+        priority: 100
+
+      - method: PATCH
+        path_pattern: "^/repos/[^/]+/[^/]+/git/refs/.*"
+        action: deny
+        reason: "gh api: force updates ref (history rewrite)"
+        priority: 100
+
+      - method: PUT
+        path_pattern: "^/repos/[^/]+/[^/]+/pulls/\\d+/merge$"
+        action: deny
+        reason: "gh pr merge: merges pull request (requires human approval)"
+        priority: 100
+
+      - method: PUT
+        path_pattern: "^/repos/[^/]+/[^/]+/pulls/\\d+/auto-merge$"
+        action: deny
+        reason: "auto-merge: enables automatic merge (requires human approval)"
+        priority: 100
+
+      - method: DELETE
+        path_pattern: "^/repos/[^/]+/[^/]+/pulls/\\d+/auto-merge$"
+        action: deny
+        reason: "auto-merge: disables automatic merge (requires human approval)"
+        priority: 100
+
+      - method: DELETE
+        path_pattern: "^/repos/[^/]+/[^/]+/pulls/\\d+/reviews/\\d+$"
+        action: deny
+        reason: "review deletion: removes review (requires human approval)"
+        priority: 100
+
+      - method: POST
+        path_pattern: "^/repos/[^/]+/[^/]+/merges$"
+        action: deny
+        reason: "gh api: creates merge commit (requires human approval)"
+        priority: 100
+
+      - method: DELETE
+        path_pattern: "^/repos/[^/]+/[^/]+/branches/[^/]+/protection.*"
+        action: deny
+        reason: "gh api: removes branch protection"
+        priority: 100
+
+      - method: PUT
+        path_pattern: "^/repos/[^/]+/[^/]+/branches/[^/]+/protection.*"
+        action: deny
+        reason: "gh api: modifies branch protection"
+        priority: 100
+
+      - method: POST
+        path_pattern: "^/repos/[^/]+/[^/]+/branches/[^/]+/protection.*"
+        action: deny
+        reason: "gh api: creates branch protection rule"
+        priority: 100
+
+      - method: POST
+        path_pattern: "^/repos/[^/]+/[^/]+/git/refs$"
+        action: deny
+        reason: "gh api: creates git ref (use git push instead)"
+        priority: 100
+
+      # Secrets/variables — repo
+      - method: GET
+        path_pattern: "^/repos/[^/]+/[^/]+/actions/secrets.*"
+        action: deny
+        reason: "gh secret: accesses repository secrets"
+        priority: 100
+      - method: PUT
+        path_pattern: "^/repos/[^/]+/[^/]+/actions/secrets.*"
+        action: deny
+        reason: "gh secret: modifies repository secrets"
+        priority: 100
+      - method: DELETE
+        path_pattern: "^/repos/[^/]+/[^/]+/actions/secrets.*"
+        action: deny
+        reason: "gh secret: deletes repository secrets"
+        priority: 100
+      - method: GET
+        path_pattern: "^/repos/[^/]+/[^/]+/actions/variables.*"
+        action: deny
+        reason: "gh variable: accesses repository variables"
+        priority: 100
+      - method: POST
+        path_pattern: "^/repos/[^/]+/[^/]+/actions/variables.*"
+        action: deny
+        reason: "gh variable: creates repository variables"
+        priority: 100
+      - method: PATCH
+        path_pattern: "^/repos/[^/]+/[^/]+/actions/variables.*"
+        action: deny
+        reason: "gh variable: modifies repository variables"
+        priority: 100
+      - method: DELETE
+        path_pattern: "^/repos/[^/]+/[^/]+/actions/variables.*"
+        action: deny
+        reason: "gh variable: deletes repository variables"
+        priority: 100
+
+      # Secrets/variables — org
+      - method: GET
+        path_pattern: "^/orgs/[^/]+/actions/secrets.*"
+        action: deny
+        reason: "gh secret: accesses organization secrets"
+        priority: 100
+      - method: PUT
+        path_pattern: "^/orgs/[^/]+/actions/secrets.*"
+        action: deny
+        reason: "gh secret: modifies organization secrets"
+        priority: 100
+      - method: DELETE
+        path_pattern: "^/orgs/[^/]+/actions/secrets.*"
+        action: deny
+        reason: "gh secret: deletes organization secrets"
+        priority: 100
+      - method: GET
+        path_pattern: "^/orgs/[^/]+/actions/variables.*"
+        action: deny
+        reason: "gh variable: accesses organization variables"
+        priority: 100
+      - method: POST
+        path_pattern: "^/orgs/[^/]+/actions/variables.*"
+        action: deny
+        reason: "gh variable: creates organization variables"
+        priority: 100
+      - method: PATCH
+        path_pattern: "^/orgs/[^/]+/actions/variables.*"
+        action: deny
+        reason: "gh variable: modifies organization variables"
+        priority: 100
+      - method: DELETE
+        path_pattern: "^/orgs/[^/]+/actions/variables.*"
+        action: deny
+        reason: "gh variable: deletes organization variables"
+        priority: 100
+
+      # Secrets/variables — environment
+      - method: GET
+        path_pattern: "^/repos/[^/]+/[^/]+/environments/[^/]+/secrets.*"
+        action: deny
+        reason: "gh secret: accesses environment secrets"
+        priority: 100
+      - method: PUT
+        path_pattern: "^/repos/[^/]+/[^/]+/environments/[^/]+/secrets.*"
+        action: deny
+        reason: "gh secret: modifies environment secrets"
+        priority: 100
+      - method: DELETE
+        path_pattern: "^/repos/[^/]+/[^/]+/environments/[^/]+/secrets.*"
+        action: deny
+        reason: "gh secret: deletes environment secrets"
+        priority: 100
+      - method: GET
+        path_pattern: "^/repos/[^/]+/[^/]+/environments/[^/]+/variables.*"
+        action: deny
+        reason: "gh variable: accesses environment variables"
+        priority: 100
+      - method: POST
+        path_pattern: "^/repos/[^/]+/[^/]+/environments/[^/]+/variables.*"
+        action: deny
+        reason: "gh variable: creates environment variables"
+        priority: 100
+      - method: PATCH
+        path_pattern: "^/repos/[^/]+/[^/]+/environments/[^/]+/variables.*"
+        action: deny
+        reason: "gh variable: modifies environment variables"
+        priority: 100
+      - method: DELETE
+        path_pattern: "^/repos/[^/]+/[^/]+/environments/[^/]+/variables.*"
+        action: deny
+        reason: "gh variable: deletes environment variables"
+        priority: 100
+
+      # Secrets — dependabot
+      - method: GET
+        path_pattern: "^/repos/[^/]+/[^/]+/dependabot/secrets.*"
+        action: deny
+        reason: "gh secret: accesses dependabot secrets"
+        priority: 100
+      - method: PUT
+        path_pattern: "^/repos/[^/]+/[^/]+/dependabot/secrets.*"
+        action: deny
+        reason: "gh secret: modifies dependabot secrets"
+        priority: 100
+      - method: DELETE
+        path_pattern: "^/repos/[^/]+/[^/]+/dependabot/secrets.*"
+        action: deny
+        reason: "gh secret: deletes dependabot secrets"
+        priority: 100
+
+      # Secrets — codespaces
+      - method: GET
+        path_pattern: "^/repos/[^/]+/[^/]+/codespaces/secrets.*"
+        action: deny
+        reason: "gh secret: accesses codespaces secrets"
+        priority: 100
+      - method: PUT
+        path_pattern: "^/repos/[^/]+/[^/]+/codespaces/secrets.*"
+        action: deny
+        reason: "gh secret: modifies codespaces secrets"
+        priority: 100
+      - method: DELETE
+        path_pattern: "^/repos/[^/]+/[^/]+/codespaces/secrets.*"
+        action: deny
+        reason: "gh secret: deletes codespaces secrets"
+        priority: 100
+
+      # ── PR reopen detection (priority 95) ──────────────────────
+      # Catches PATCH to /repos/o/r/pulls/N with state="open" and
+      # state_reason="reopened", or bare state="open" with no other
+      # mutable fields.
+
+      - method: PATCH
+        path_pattern: "^/repos/[^/]+/[^/]+/pulls/\\d+$"
+        body_jsonpath: "state"
+        body_value: "open"
+        body_pattern: ".*"
+        action: deny
+        reason: "gh pr reopen: reopening closed PRs requires human approval"
+        priority: 95
+
+      # ── GraphQL mutation blocklist (priority 90) ───────────────
+
+      - method: POST
+        path_pattern: "^/graphql$"
+        body_jsonpath: "query"
+        body_pattern: "\\bmergePullRequest\\s*\\("
+        action: deny
+        reason: "GraphQL mutation 'mergePullRequest' is not permitted"
+        priority: 90
+
+      - method: POST
+        path_pattern: "^/graphql$"
+        body_jsonpath: "query"
+        body_pattern: "\\breopenPullRequest\\s*\\("
+        action: deny
+        reason: "GraphQL mutation 'reopenPullRequest' is not permitted"
+        priority: 90
+
+      - method: POST
+        path_pattern: "^/graphql$"
+        body_jsonpath: "query"
+        body_pattern: "\\benablePullRequestAutoMerge\\s*\\("
+        action: deny
+        reason: "GraphQL mutation 'enablePullRequestAutoMerge' is not permitted"
+        priority: 90
+
+      - method: POST
+        path_pattern: "^/graphql$"
+        body_jsonpath: "query"
+        body_pattern: "\\bdisablePullRequestAutoMerge\\s*\\("
+        action: deny
+        reason: "GraphQL mutation 'disablePullRequestAutoMerge' is not permitted"
+        priority: 90
+
+      - method: POST
+        path_pattern: "^/graphql$"
+        body_jsonpath: "query"
+        body_pattern: "\\bdismissPullRequestReview\\s*\\("
+        action: deny
+        reason: "GraphQL mutation 'dismissPullRequestReview' is not permitted"
+        priority: 90
+
+      - method: POST
+        path_pattern: "^/graphql$"
+        body_jsonpath: "query"
+        body_pattern: "\\bupdatePullRequestBranch\\s*\\("
+        action: deny
+        reason: "GraphQL mutation 'updatePullRequestBranch' is not permitted"
+        priority: 90
+
+      - method: POST
+        path_pattern: "^/graphql$"
+        body_jsonpath: "query"
+        body_pattern: "\\baddPullRequestReview\\s*\\("
+        action: deny
+        reason: "GraphQL mutation 'addPullRequestReview' is not permitted"
+        priority: 90
+
+      # ── Conditional PR GraphQL mutations (priority 50) ─────────
+
+      - method: POST
+        path_pattern: "^/graphql$"
+        body_jsonpath: "query"
+        body_pattern: "\\bcreatePullRequest\\s*\\("
+        action: deny
+        reason: "GraphQL mutation 'createPullRequest' requires --allow-pr"
+        priority: 50
+        condition: "allow_pr_operations == false"
+
+      - method: POST
+        path_pattern: "^/graphql$"
+        body_jsonpath: "query"
+        body_pattern: "\\bupdatePullRequest\\s*\\("
+        action: deny
+        reason: "GraphQL mutation 'updatePullRequest' requires --allow-pr"
+        priority: 50
+        condition: "allow_pr_operations == false"
+
+      - method: POST
+        path_pattern: "^/graphql$"
+        body_jsonpath: "query"
+        body_pattern: "\\bsubmitPullRequestReview\\s*\\("
+        action: deny
+        reason: "GraphQL mutation 'submitPullRequestReview' requires --allow-pr"
+        priority: 50
+        condition: "allow_pr_operations == false"
+
+      - method: POST
+        path_pattern: "^/graphql$"
+        body_jsonpath: "query"
+        body_pattern: "\\bclosePullRequest\\s*\\("
+        action: deny
+        reason: "GraphQL mutation 'closePullRequest' requires --allow-pr"
+        priority: 50
+        condition: "allow_pr_operations == false"
+
+      - method: POST
+        path_pattern: "^/graphql$"
+        body_jsonpath: "query"
+        body_pattern: "\\baddPullRequestReviewComment\\s*\\("
+        action: deny
+        reason: "GraphQL mutation 'addPullRequestReviewComment' requires --allow-pr"
+        priority: 50
+        condition: "allow_pr_operations == false"
+
+      # ── Conditional PR REST operations (priority 50) ───────────
+
+      - method: POST
+        path_pattern: "^/repos/[^/]+/[^/]+/pulls$"
+        action: deny
+        reason: "PR operations blocked by sandbox policy. Use --allow-pr flag to enable."
+        priority: 50
+        condition: "allow_pr_operations == false"
+
+      - method: POST
+        path_pattern: "^/repos/[^/]+/[^/]+/pulls/\\d+/comments$"
+        action: deny
+        reason: "PR operations blocked by sandbox policy. Use --allow-pr flag to enable."
+        priority: 50
+        condition: "allow_pr_operations == false"
+
+      - method: PATCH
+        path_pattern: "^/repos/[^/]+/[^/]+/pulls/\\d+$"
+        action: deny
+        reason: "PR operations blocked by sandbox policy. Use --allow-pr flag to enable."
+        priority: 50
+        condition: "allow_pr_operations == false"
+
+      # ── Allowlist (priority 10) ────────────────────────────────
+
+      - method: GET
+        path_pattern: "^/repos/[^/]+/[^/]+$"
+        action: allow
+        priority: 10
+      - method: GET
+        path_pattern: "^/repos/[^/]+/[^/]+/.*"
+        action: allow
+        priority: 10
+      - method: GET
+        path_pattern: "^/repos/[^/]+/[^/]+/issues.*"
+        action: allow
+        priority: 10
+      - method: POST
+        path_pattern: "^/repos/[^/]+/[^/]+/issues$"
+        action: allow
+        priority: 10
+      - method: POST
+        path_pattern: "^/repos/[^/]+/[^/]+/issues/\\d+/comments$"
+        action: allow
+        priority: 10
+      - method: PATCH
+        path_pattern: "^/repos/[^/]+/[^/]+/issues/\\d+$"
+        action: allow
+        priority: 10
+      - method: GET
+        path_pattern: "^/repos/[^/]+/[^/]+/pulls.*"
+        action: allow
+        priority: 10
+      - method: GET
+        path_pattern: "^/repos/[^/]+/[^/]+/commits.*"
+        action: allow
+        priority: 10
+      - method: GET
+        path_pattern: "^/repos/[^/]+/[^/]+/branches.*"
+        action: allow
+        priority: 10
+      - method: GET
+        path_pattern: "^/repos/[^/]+/[^/]+/git/.*"
+        action: allow
+        priority: 10
+      - method: POST
+        path_pattern: "^/repos/[^/]+/[^/]+/git/blobs$"
+        action: allow
+        priority: 10
+      - method: POST
+        path_pattern: "^/repos/[^/]+/[^/]+/git/trees$"
+        action: allow
+        priority: 10
+      - method: POST
+        path_pattern: "^/repos/[^/]+/[^/]+/git/commits$"
+        action: allow
+        priority: 10
+      - method: POST
+        path_pattern: "^/repos/[^/]+/[^/]+/git/tags$"
+        action: allow
+        priority: 10
+      - method: GET
+        path_pattern: "^/repos/[^/]+/[^/]+/contents/.*"
+        action: allow
+        priority: 10
+      - method: PUT
+        path_pattern: "^/repos/[^/]+/[^/]+/contents/.*"
+        action: allow
+        priority: 10
+      - method: GET
+        path_pattern: "^/repos/[^/]+/[^/]+/releases.*"
+        action: allow
+        priority: 10
+      - method: POST
+        path_pattern: "^/repos/[^/]+/[^/]+/releases$"
+        action: allow
+        priority: 10
+      - method: PATCH
+        path_pattern: "^/repos/[^/]+/[^/]+/releases/\\d+$"
+        action: allow
+        priority: 10
+      - method: POST
+        path_pattern: "^/repos/[^/]+/[^/]+/releases/\\d+/assets.*"
+        action: allow
+        priority: 10
+      - method: GET
+        path_pattern: "^/repos/[^/]+/[^/]+/labels.*"
+        action: allow
+        priority: 10
+      - method: POST
+        path_pattern: "^/repos/[^/]+/[^/]+/labels$"
+        action: allow
+        priority: 10
+      - method: GET
+        path_pattern: "^/repos/[^/]+/[^/]+/milestones.*"
+        action: allow
+        priority: 10
+      - method: POST
+        path_pattern: "^/repos/[^/]+/[^/]+/milestones$"
+        action: allow
+        priority: 10
+      - method: GET
+        path_pattern: "^/repos/[^/]+/[^/]+/actions/runs.*"
+        action: allow
+        priority: 10
+      - method: GET
+        path_pattern: "^/repos/[^/]+/[^/]+/actions/workflows.*"
+        action: allow
+        priority: 10
+      - method: GET
+        path_pattern: "^/repos/[^/]+/[^/]+/actions/jobs.*"
+        action: allow
+        priority: 10
+      - method: GET
+        path_pattern: "^/repos/[^/]+/[^/]+/actions/artifacts.*"
+        action: allow
+        priority: 10
+      - method: GET
+        path_pattern: "^/user$"
+        action: allow
+        priority: 10
+      - method: GET
+        path_pattern: "^/user/.*"
+        action: allow
+        priority: 10
+      - method: GET
+        path_pattern: "^/users/[^/]+$"
+        action: allow
+        priority: 10
+      - method: GET
+        path_pattern: "^/users/[^/]+/.*"
+        action: allow
+        priority: 10
+      - method: GET
+        path_pattern: "^/search/.*"
+        action: allow
+        priority: 10
+      - method: GET
+        path_pattern: "^/orgs/[^/]+$"
+        action: allow
+        priority: 10
+      - method: GET
+        path_pattern: "^/orgs/[^/]+/.*"
+        action: allow
+        priority: 10
+      - method: GET
+        path_pattern: "^/rate_limit$"
+        action: allow
+        priority: 10
+      - method: GET
+        path_pattern: "^/gists.*"
+        action: allow
+        priority: 10
+      - method: POST
+        path_pattern: "^/gists$"
+        action: allow
+        priority: 10
+      - method: PATCH
+        path_pattern: "^/gists/[^/]+$"
+        action: allow
+        priority: 10
+      - method: GET
+        path_pattern: "^/notifications.*"
+        action: allow
+        priority: 10
+      - method: PATCH
+        path_pattern: "^/notifications.*"
+        action: allow
+        priority: 10
+      - method: PUT
+        path_pattern: "^/notifications.*"
+        action: allow
+        priority: 10
+      - method: GET
+        path_pattern: "^/user/starred.*"
+        action: allow
+        priority: 10
+      - method: PUT
+        path_pattern: "^/user/starred/.*"
+        action: allow
+        priority: 10
+      - method: DELETE
+        path_pattern: "^/user/starred/.*"
+        action: allow
+        priority: 10
+      - method: GET
+        path_pattern: "^/repos/[^/]+/[^/]+/stargazers.*"
+        action: allow
+        priority: 10
+      - method: GET
+        path_pattern: "^/repos/[^/]+/[^/]+/subscribers.*"
+        action: allow
+        priority: 10
+      - method: GET
+        path_pattern: "^/repos/[^/]+/[^/]+/check-runs.*"
+        action: allow
+        priority: 10
+      - method: GET
+        path_pattern: "^/repos/[^/]+/[^/]+/check-suites.*"
+        action: allow
+        priority: 10
+      - method: POST
+        path_pattern: "^/repos/[^/]+/[^/]+/check-runs$"
+        action: allow
+        priority: 10
+      - method: PATCH
+        path_pattern: "^/repos/[^/]+/[^/]+/check-runs/\\d+$"
+        action: allow
+        priority: 10
+      - method: GET
+        path_pattern: "^/repos/[^/]+/[^/]+/statuses/.*"
+        action: allow
+        priority: 10
+      - method: POST
+        path_pattern: "^/repos/[^/]+/[^/]+/statuses/.*"
+        action: allow
+        priority: 10
+      - method: GET
+        path_pattern: "^/repos/[^/]+/[^/]+/commits/[^/]+/status$"
+        action: allow
+        priority: 10
+      - method: POST
+        path_pattern: "^/graphql$"
+        action: allow
+        priority: 10
+      - method: POST
+        path_pattern: "^/repos/[^/]+/[^/]+/pulls/\\d+/reviews$"
+        action: allow
+        priority: 10
+
+      # Conditional PR allow-rules (only active when allow_pr_operations == true)
+      - method: POST
+        path_pattern: "^/repos/[^/]+/[^/]+/pulls$"
+        action: allow
+        priority: 5
+        condition: "allow_pr_operations == true"
+      - method: POST
+        path_pattern: "^/repos/[^/]+/[^/]+/pulls/\\d+/comments$"
+        action: allow
+        priority: 5
+        condition: "allow_pr_operations == true"
+      - method: PATCH
+        path_pattern: "^/repos/[^/]+/[^/]+/pulls/\\d+$"
+        action: allow
+        priority: 5
+        condition: "allow_pr_operations == true"

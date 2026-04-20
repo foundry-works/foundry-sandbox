@@ -2,7 +2,7 @@
 
 **Last updated:** 2026-04-20
 **Branch:** sbx
-**Status:** Phase 0, 1, 2 **COMPLETE**. Phase 3 steps 3.0–3.3 **COMPLETE** (~67k lines removed). §5.1 Wrapper Integrity **SHIPPED**. §5.2 Migration **SHIPPED**. §5.3 Observability **SHIPPED**. §5.4 User-Defined Credential Injection **SHIPPED**. §5.5–5.8 **IN PROGRESS**.
+**Status:** Phase 0, 1, 2 **COMPLETE**. Phase 3 steps 3.0–3.3 **COMPLETE** (~67k lines removed). §5.1 Wrapper Integrity **SHIPPED**. §5.2 Migration **SHIPPED**. §5.3 Observability **SHIPPED**. §5.4 User-Defined Credential Injection **SHIPPED**. §5.5 Deep Policy Sidecar **SHIPPED**. §5.6–5.8 **IN PROGRESS**.
 
 ---
 
@@ -75,7 +75,7 @@ This means several risks the analysis flagged as hypothetical are now live and m
 | GitHub API blocklist (merges, releases, workflows) | `foundry-git-safety` |
 | **Wrapper persistence against agent removal** | **Shipped — §5.1** |
 | **User-defined credential injection (Tavily, Perplexity, …)** | **Shipped — §5.4** |
-| **Deep method/path/body policy (general, not just GitHub)** | **Not yet built — §5.5** |
+| **Deep method/path/body policy (general, not just GitHub)** | **Shipped — §5.5** |
 | **Existing-user migration path** | **Not yet built — §5.2** |
 | **Observability (health, metrics, decision logs)** | **Not yet built — §5.3** |
 
@@ -107,16 +107,11 @@ Reverse-proxy routes on the foundry-git-safety Flask server. `config/user-servic
 
 **Remaining:** Test with real service endpoints (manual, pre-release validation).
 
-### 5.5 Deep Policy Sidecar — **MEDIUM** (was Phase 4)
+### 5.5 Deep Policy Sidecar — **MEDIUM** — **SHIPPED**
 
-`sbx policy` is domain/IP only. Foundry's GitHub filter is the one surviving method/path/body rule set — generalize it so any service can have request-shape policies.
+`sbx policy` is domain/IP only. Foundry's GitHub filter is the one surviving method/path/body rule set — generalized into a YAML-driven request inspector so any service can have request-shape policies. Flask Blueprint on main server with per-sandbox rate limiting (reuses existing `RateLimiter`), per-service circuit breaker (3-state), and simple dot-notation body inspection. GitHub rules become a bundled default YAML file (`bundled://github-default`). Off by default; enabled via `foundry.yaml` or `--deep-policy` flag. ADR-011 documents the decision. 174 tests (46 engine + 8 proxy + 120 GitHub parity).
 
-**Deliverables:**
-- Promote `foundry-git-safety/github_filter.py` into a general request-inspecting HTTP proxy.
-- YAML rule format: `{host, method, path_pattern, body_jsonpath, action}`.
-- Per-container rate limiting (existing code removed with proxy, can be reimplemented on the sidecar).
-- Circuit breaker / fail-closed behavior.
-- Document when to enable this layer (most users won't need it).
+**Remaining:** Threat model documentation (deferred to ops runbook), performance measurements (folded into §5.6).
 
 ### 5.6 Chaos, Security Audit, Performance — **MEDIUM**
 

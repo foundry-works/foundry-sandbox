@@ -132,6 +132,7 @@ def create_git_api(
     rate_limiter: RateLimiter | None = None,
     data_dir: str | None = None,
     repo_root_resolver=None,
+    config=None,
 ) -> Flask:
     """Create the git API Flask application.
 
@@ -141,6 +142,7 @@ def create_git_api(
         rate_limiter: Rate limiter instance.
         data_dir: Directory for sandbox metadata JSON files.
         repo_root_resolver: Callable(sandbox_id, metadata) -> repo_root path.
+        config: Optional FoundryConfig for deep policy registration.
     """
     app = Flask(__name__)
     app.config["MAX_CONTENT_LENGTH"] = MAX_REQUEST_BODY
@@ -370,6 +372,32 @@ def create_git_api(
             logger.info("Registered %d user service proxy routes", len(entries))
     except Exception as exc:
         logger.debug("User services proxy not loaded: %s", exc)
+
+    # Register deep policy proxy blueprint (if configured)
+    try:
+        from .config import load_foundry_config
+        from .deep_policy_engine import CircuitBreaker, load_policy_sets
+        from .deep_policy_proxy import create_deep_policy_blueprint
+
+        cfg = config or load_foundry_config()
+        deep_cfg = cfg.git_safety.deep_policy
+        if deep_cfg and deep_cfg.enabled:
+            policy_sets, dp_services = load_policy_sets(deep_cfg)
+            if policy_sets:
+                cb = CircuitBreaker(
+                    threshold=deep_cfg.circuit_breaker_threshold,
+                    recovery_seconds=deep_cfg.circuit_breaker_recovery_seconds,
+                )
+                dp_bp = create_deep_policy_blueprint(
+                    policy_sets, dp_services, limiter, cb,
+                )
+                app.register_blueprint(dp_bp)
+                logger.info(
+                    "Registered deep policy proxy for %d services",
+                    len(policy_sets),
+                )
+    except Exception as exc:
+        logger.debug("Deep policy proxy not loaded: %s", exc)
 
     @app.errorhandler(404)
     def not_found(e):

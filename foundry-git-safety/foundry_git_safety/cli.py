@@ -35,12 +35,15 @@ def main() -> None:
 @click.option("--foreground", is_flag=True, help="Run in foreground (no daemon)")
 @click.option("--port", default=None, type=int, help="Override server port")
 @click.option("--pid-file", default=_DEFAULT_PID_FILE, help="PID file path")
-def start(config_path: str | None, foreground: bool, port: int | None, pid_file: str) -> None:
+@click.option("--deep-policy", is_flag=True, help="Enable deep policy sidecar")
+def start(config_path: str | None, foreground: bool, port: int | None, pid_file: str, deep_policy: bool) -> None:
     """Start the git safety server."""
     from .config import load_foundry_config
     from .logging_config import setup_logging
 
     cfg = load_foundry_config(config_path)
+    if deep_policy:
+        cfg.git_safety.deep_policy.enabled = True
     setup_logging()
 
     server_port = port or cfg.git_safety.server.port
@@ -59,7 +62,7 @@ def start(config_path: str | None, foreground: bool, port: int | None, pid_file:
 def _run_server(host: str, port: int, data_dir: str, cfg) -> None:
     from .server import create_git_api, run_tcp_server
 
-    app = create_git_api(data_dir=data_dir)
+    app = create_git_api(data_dir=data_dir, config=cfg)
     run_tcp_server(app, host=host, port=port)
 
 

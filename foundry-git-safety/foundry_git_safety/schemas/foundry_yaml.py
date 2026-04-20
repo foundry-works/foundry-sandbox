@@ -135,6 +135,57 @@ class ObservabilityConfig(BaseModel):
         return v
 
 
+class DeepPolicyRule(BaseModel):
+    """A single request-shape policy rule."""
+
+    host: str = ""
+    method: str = "*"
+    path_pattern: str
+    body_jsonpath: str = ""
+    body_value: str = ""
+    body_pattern: str = ""
+    action: Literal["allow", "deny"]
+    reason: str = ""
+    priority: int = 0
+    condition: str = ""
+
+
+class DeepPolicyServiceConfig(BaseModel):
+    """Deep policy configuration for a specific upstream service."""
+
+    slug: str
+    host: str
+    scheme: str = "https"
+    port: int = 0
+    rules: List[DeepPolicyRule] = Field(default_factory=list)
+    default_action: Literal["allow", "deny"] = "deny"
+    policy_file: str = ""
+
+    @field_validator("port")
+    @classmethod
+    def validate_port(cls, v: int) -> int:
+        if v < 0 or v > 65535:
+            raise ValueError(f"Port must be 0-65535, got {v}")
+        return v
+
+
+class DeepPolicyConfig(BaseModel):
+    """Deep policy sidecar configuration."""
+
+    enabled: bool = False
+    services: List[DeepPolicyServiceConfig] = Field(default_factory=list)
+    policy_file: str = ""
+    circuit_breaker_threshold: int = 5
+    circuit_breaker_recovery_seconds: int = 30
+
+    @field_validator("circuit_breaker_threshold", "circuit_breaker_recovery_seconds")
+    @classmethod
+    def validate_positive(cls, v: int) -> int:
+        if v < 1:
+            raise ValueError(f"Must be positive, got {v}")
+        return v
+
+
 class GitSafetyConfig(BaseModel):
     """Top-level git_safety section of foundry.yaml."""
 
@@ -151,6 +202,7 @@ class GitSafetyConfig(BaseModel):
     github_api: GitHubAPIConfig = Field(default_factory=GitHubAPIConfig)
     rate_limits: RateLimitsConfig = Field(default_factory=RateLimitsConfig)
     observability: ObservabilityConfig = Field(default_factory=ObservabilityConfig)
+    deep_policy: DeepPolicyConfig = Field(default_factory=DeepPolicyConfig)
 
 
 class UserServiceEntry(BaseModel):
