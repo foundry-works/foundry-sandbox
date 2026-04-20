@@ -93,15 +93,11 @@ The single largest live security gap. An agent with sudo can `rm /usr/local/bin/
 - Deny-list approach on `sbx exec` usage by non-foundry callers — document the residual risk.
 - Surface wrapper status in `cast info` and `cast list`.
 
-### 5.2 Migration Path for Existing 0.20.x Users — **HIGH**
+### 5.2 Migration Path for Existing 0.20.x Users — **HIGH** — **SHIPPED**
 
-No supported upgrade path exists today. Users on `main` have docker-compose-based sandboxes and cannot take a `sbx` release without manual intervention.
+`cast migrate-to-sbx` and `cast migrate-from-sbx` commands with automatic metadata conversion, credential migration, preset translation, snapshot/rollback, and dry-run mode. ADR-009 documents the decision against dual-mode operation. 56 unit + CLI tests passing.
 
-**Deliverables:**
-- `cast migrate-to-sbx` command: snapshot `~/.sandboxes/`, migrate host credentials into `sbx secret set -g`, translate presets, print rollback.
-- Breaking-changes doc with concrete workarounds.
-- Rollback procedure: documented steps to revert to last 0.20.x release.
-- Tested dual-mode operation during transition (optional; decide whether worth the complexity).
+**Remaining:** End-to-end test on a real 0.20.x installation (manual, pre-release validation).
 
 ### 5.3 Observability — **HIGH**
 

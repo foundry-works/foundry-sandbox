@@ -12,6 +12,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **sbx CLI wrapper** (`foundry_sandbox/sbx.py`) — wraps all Docker `sbx` subprocess calls (create, run, stop, rm, ls, exec, secret, policy, template, diagnose)
 - **Git safety integration bridge** (`foundry_sandbox/git_safety.py`) — manages foundry-git-safety server lifecycle, HMAC secret provisioning, sandbox registration, and git wrapper injection
 - **sbx sandbox creation** (`foundry_sandbox/commands/new_sbx.py`) — 9-step setup: bare repo, worktree, sbx create, git safety server, HMAC, wrapper injection, metadata
+- **`cast migrate-to-sbx` command** — migrates 0.20.x docker-compose state (metadata, presets, credentials) to sbx backend; creates snapshot for rollback; supports `--plan` dry run
+- **`cast migrate-from-sbx` command** — rolls back to 0.20.x state from a migration snapshot
+- **Migration guide** (`docs/migration/0.20-to-0.21.md`) — breaking changes, credential mapping, and rollback procedure
 - **`--agent` flag** for `cast new` — select agent type: claude, codex, copilot, gemini, kiro, opencode, shell (default: claude)
 - **`--name` flag** for `cast new` — override auto-generated sandbox name
 - **`--save-as` flag** for `cast new` — save configuration as named preset

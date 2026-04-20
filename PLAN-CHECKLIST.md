@@ -74,22 +74,22 @@ All checkboxes from the prior checklist remain done. Package lives at
 
 ### §5.2 Migration Path for Existing 0.20.x Users — **HIGH**
 
-- [ ] `cast migrate-to-sbx` command
-  - [ ] Snapshot `~/.sandboxes/` to timestamped backup directory
-  - [ ] Enumerate existing compose-based sandboxes; emit plan before acting
-  - [ ] Translate host credentials → `sbx secret set -g` (anthropic, github, openai, …)
-  - [ ] Translate `CastNewPreset` JSON presets to new field set; flag dropped fields
-  - [ ] Dry-run mode (`--plan`) prints actions without executing
-- [ ] Rollback procedure
-  - [ ] Documented steps: `pip install foundry-sandbox==0.20.x && cast migrate-from-sbx`
-  - [ ] `cast migrate-from-sbx` restores snapshot directory
+- [x] `cast migrate-to-sbx` command
+  - [x] Snapshot `~/.sandboxes/` to timestamped backup directory
+  - [x] Enumerate existing compose-based sandboxes; emit plan before acting
+  - [x] Translate host credentials → `sbx secret set -g` (anthropic, github, openai, …)
+  - [x] Translate `CastNewPreset` JSON presets to new field set; flag dropped fields
+  - [x] Dry-run mode (`--plan`) prints actions without executing
+- [x] Rollback procedure
+  - [x] Documented steps: `pip install foundry-sandbox==0.20.x && cast migrate-from-sbx`
+  - [x] `cast migrate-from-sbx` restores snapshot directory
   - [ ] Tested on at least one real 0.20.x installation
-- [ ] Breaking-changes document
-  - [ ] `docs/migration/0.20-to-0.21.md` — removed flags, changed paths, gone providers
-  - [ ] Linked from CHANGELOG.md
-- [ ] Scope decision: dual-mode operation
-  - [ ] ADR captures decision (yes/no) and rationale
-  - [ ] If yes: define transition window and flag semantics
+- [x] Breaking-changes document
+  - [x] `docs/migration/0.20-to-0.21.md` — removed flags, changed paths, gone providers
+  - [x] Linked from CHANGELOG.md
+- [x] Scope decision: dual-mode operation
+  - [x] ADR captures decision (yes/no) and rationale
+  - [x] Decision: NO dual-mode (ADR-009)
 
 ### §5.3 Observability — **HIGH**
 
