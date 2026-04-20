@@ -197,15 +197,15 @@ All checkboxes from the prior checklist remain done. Package lives at
   - [x] Multiple concurrent sandboxes
   - [x] Published in `docs/operations.md`
 
-### §5.7 `sbx` Version Pinning and Drift Detection — **LOW**
+### §5.7 `sbx` Version Pinning and Drift Detection — **LOW** — **SHIPPED**
 
-- [ ] Pin tested-good `sbx` version in `foundry_sandbox/sbx.py`
-  - [ ] Constant for min/max-supported version
-  - [ ] `find_sbx_binary()` enforces version check; clear error on drift
-- [ ] Weekly CI drift job
-  - [ ] Runs `sbx --version` against latest release
-  - [ ] Opens GitHub issue if it moves outside supported range
-- [ ] Create `docs/sbx-compatibility.md` with tested-against matrix
+- [x] Pin tested-good `sbx` version in `foundry_sandbox/sbx.py`
+  - [x] Constant for min/max-supported version
+  - [x] `find_sbx_binary()` enforces version check; clear error on drift
+- [x] Weekly CI drift job
+  - [x] Runs `sbx --version` against latest release
+  - [x] Opens GitHub issue if it moves outside supported range
+- [x] Create `docs/sbx-compatibility.md` with tested-against matrix
 
 ### §5.8 Deferred / Nice-to-Have
 

@@ -31,6 +31,14 @@ TIMEOUT_SBX_SECRET: int = 15
 
 
 # ============================================================================
+# Version Pinning
+# ============================================================================
+
+SBX_MIN_VERSION = "0.26.0"  # minimum supported (tested on 0.26.1)
+SBX_MAX_VERSION = "0.29.0"  # exclusive upper bound
+
+
+# ============================================================================
 # Internal Helpers
 # ============================================================================
 
@@ -81,6 +89,78 @@ def find_sbx_binary() -> str | None:
         Path to sbx binary, or None if not found.
     """
     return shutil.which("sbx")
+
+
+def get_sbx_version() -> str | None:
+    """Query the installed sbx CLI version.
+
+    Returns:
+        Version string (e.g. "0.26.1") or None on error.
+    """
+    if not shutil.which("sbx"):
+        return None
+    try:
+        result = subprocess.run(
+            ["sbx", "--version"],
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+        # Output is like "sbx 0.26.1\n" or just "0.26.1\n"
+        raw = result.stdout.strip().split("\n")[0]
+        # Strip any prefix like "sbx " or "sbx version "
+        for prefix in ("sbx version ", "sbx "):
+            if raw.lower().startswith(prefix):
+                raw = raw[len(prefix):]
+                break
+        return raw
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+
+
+def check_sbx_version() -> None:
+    """Verify installed sbx version is within the supported range.
+
+    Raises:
+        SystemExit: If version is outside [SBX_MIN_VERSION, SBX_MAX_VERSION).
+    """
+    version_str = get_sbx_version()
+    if version_str is None:
+        # sbx not installed — let sbx_check_available handle that
+        return
+
+    from foundry_sandbox.version_check import _parse_version
+
+    try:
+        parsed = _parse_version(version_str)
+    except (ValueError, TypeError):
+        log_warn(f"Could not parse sbx version: {version_str!r}")
+        return
+
+    if not parsed:
+        log_warn(f"Could not parse sbx version: {version_str!r}")
+        return
+
+    min_parsed = _parse_version(SBX_MIN_VERSION)
+    max_parsed = _parse_version(SBX_MAX_VERSION)
+
+    if parsed < min_parsed:
+        print(
+            f"Error: sbx version {version_str} is too old.\n"
+            f"  Supported range: >= {SBX_MIN_VERSION} and < {SBX_MAX_VERSION}\n"
+            f"  Upgrade: https://github.com/docker/sbx-releases",
+            file=sys.stderr,
+        )
+        raise SystemExit(1)
+
+    if parsed >= max_parsed:
+        print(
+            f"Error: sbx version {version_str} has not been tested with foundry-sandbox.\n"
+            f"  Supported range: >= {SBX_MIN_VERSION} and < {SBX_MAX_VERSION}\n"
+            f"  Pin to an older version or update the supported range in foundry_sandbox/sbx.py.",
+            file=sys.stderr,
+        )
+        raise SystemExit(1)
 
 
 # ============================================================================
@@ -429,10 +509,10 @@ def sbx_is_installed() -> bool:
 
 
 def sbx_check_available() -> None:
-    """Verify sbx is installed, exit with error if not.
+    """Verify sbx is installed and at a supported version.
 
     Raises:
-        SystemExit: If sbx is not installed.
+        SystemExit: If sbx is not installed or version is out of range.
     """
     if not sbx_is_installed():
         print(
@@ -443,3 +523,4 @@ def sbx_check_available() -> None:
             file=sys.stderr,
         )
         raise SystemExit(1)
+    check_sbx_version()

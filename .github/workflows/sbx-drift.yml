@@ -1,0 +1,100 @@
+name: sbx Version Drift Check
+
+on:
+  schedule:
+    - cron: '0 7 * * 1'  # Weekly Monday 07:00 UTC
+  workflow_dispatch:
+
+jobs:
+  drift-check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install foundry-sandbox (for version_check module)
+        run: pip install -e .
+
+      - name: Download latest sbx release
+        run: |
+          curl -fsSL https://github.com/docker/sbx-releases/releases/latest/download/sbx-linux-amd64 -o /usr/local/bin/sbx
+          chmod +x /usr/local/bin/sbx
+
+      - name: Check sbx version against supported range
+        id: version-check
+        run: |
+          python3 -c "
+          import subprocess, sys
+          from foundry_sandbox.version_check import _parse_version
+          from foundry_sandbox.sbx import SBX_MIN_VERSION, SBX_MAX_VERSION
+
+          result = subprocess.run(['sbx', '--version'], capture_output=True, text=True, timeout=10)
+          raw = result.stdout.strip().split('\n')[0]
+          for prefix in ('sbx version ', 'sbx '):
+              if raw.lower().startswith(prefix):
+                  raw = raw[len(prefix):]
+                  break
+          version = raw
+
+          parsed = _parse_version(version)
+          min_v = _parse_version(SBX_MIN_VERSION)
+          max_v = _parse_version(SBX_MAX_VERSION)
+
+          print(f'Installed: {version}')
+          print(f'Supported: >= {SBX_MIN_VERSION} and < {SBX_MAX_VERSION}')
+
+          if parsed < min_v:
+              print(f'DRIFT: {version} is below minimum {SBX_MIN_VERSION}')
+              with open('drift-status.txt', 'w') as f:
+                  f.write(f'below-min\n{version}')
+              sys.exit(0)  # Don't fail — let the issue step handle it
+          elif parsed >= max_v:
+              print(f'DRIFT: {version} is at or above maximum {SBX_MAX_VERSION}')
+              with open('drift-status.txt', 'w') as f:
+                  f.write(f'above-max\n{version}')
+              sys.exit(0)
+          else:
+              print('OK: version is within supported range')
+              with open('drift-status.txt', 'w') as f:
+                  f.write('ok')
+          "
+
+      - name: Open drift issue if needed
+        if: hashFiles('drift-status.txt') != ''
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          status=$(head -1 drift-status.txt)
+          if [[ "$status" == "ok" ]]; then
+            echo "No drift detected."
+            exit 0
+          fi
+
+          version=$(tail -1 drift-status.txt)
+          label="sbx-drift"
+
+          # Check for existing open issue with this label
+          existing=$(gh issue list --label "$label" --state open --json number --jq '.[0].number' 2>/dev/null || echo "")
+          if [[ -n "$existing" ]]; then
+            echo "Open drift issue #$existing already exists. Updating."
+            gh issue comment "$existing" --body "Weekly check: sbx ${version} is still outside supported range (>= ${SBX_MIN_VERSION}, < ${SBX_MAX_VERSION}). Checked on $(date -u +%Y-%m-%d)."
+            exit 0
+          fi
+
+          gh issue create \
+            --title "sbx version drift: ${version} outside supported range" \
+            --label "$label" \
+            --body "Weekly drift check detected that sbx \`${version}\` is outside the supported range (>= \`${SBX_MIN_VERSION}\` and < \`${SBX_MAX_VERSION}\`).
+
+          **Action required:**
+          1. Test foundry-sandbox with the new sbx version
+          2. Update \`SBX_MIN_VERSION\`/\`SBX_MAX_VERSION\` in \`foundry_sandbox/sbx.py\` if compatible
+          3. Update \`docs/sbx-compatibility.md\` tested-against matrix
+          4. Close this issue
+
+          Checked on $(date -u +%Y-%m-%d)."

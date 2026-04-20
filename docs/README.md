@@ -36,6 +36,7 @@ claude
 | [Configuration](configuration.md) | API keys, git safety settings, network policy |
 | [Architecture](architecture.md) | Technical design and diagrams |
 | [Operations](operations.md) | Operational procedures and runbook |
+| [sbx Compatibility](sbx-compatibility.md) | Supported sbx versions, tested-against matrix, drift detection |
 | [Observability](observability.md) | Metrics, logging, and alerting |
 
 ### Security

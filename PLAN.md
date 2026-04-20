@@ -2,7 +2,7 @@
 
 **Last updated:** 2026-04-20
 **Branch:** sbx
-**Status:** Phase 0, 1, 2 **COMPLETE**. Phase 3 steps 3.0–3.3 **COMPLETE** (~67k lines removed). §5.1 Wrapper Integrity **SHIPPED**. §5.2 Migration **SHIPPED**. §5.3 Observability **SHIPPED**. §5.4 User-Defined Credential Injection **SHIPPED**. §5.5 Deep Policy Sidecar **SHIPPED**. §5.6 Chaos, Security Audit, Performance **SHIPPED**. §5.7–5.8 **IN PROGRESS**.
+**Status:** Phase 0, 1, 2 **COMPLETE**. Phase 3 steps 3.0–3.3 **COMPLETE** (~67k lines removed). §5.1 Wrapper Integrity **SHIPPED**. §5.2 Migration **SHIPPED**. §5.3 Observability **SHIPPED**. §5.4 User-Defined Credential Injection **SHIPPED**. §5.5 Deep Policy Sidecar **SHIPPED**. §5.6 Chaos, Security Audit, Performance **SHIPPED**. §5.7 sbx Version Pinning **SHIPPED**. §5.8 **IN PROGRESS**.
 
 ---
 
@@ -124,14 +124,9 @@ Unit tests pass; negative-path validation complete.
 
 **Remaining:** External security review (manual, recommended before Gate B). Full-stack benchmark results on live sbx (manual, pre-release validation).
 
-### 5.7 `sbx` Version Pinning and Drift Detection — **LOW**
+### 5.7 `sbx` Version Pinning and Drift Detection — **LOW** — **SHIPPED**
 
-Analysis §7.9 and U23 flag experimental churn. No automated defense today.
-
-**Deliverables:**
-- Pin a known-good `sbx` version in `foundry_sandbox/sbx.py`; fail loudly if the installed binary differs by more than a minor version.
-- CI job that runs weekly, invokes `sbx version`, and posts drift to an issue.
-- Document the tested-against-matrix in `docs/sbx-compatibility.md` (new file).
+`SBX_MIN_VERSION`/`SBX_MAX_VERSION` constants in `foundry_sandbox/sbx.py` with `get_sbx_version()` and `check_sbx_version()` functions. Every `cast` command enforces the range via `sbx_check_available()`. Weekly CI drift job (`.github/workflows/sbx-drift.yml`) downloads latest sbx, compares against range, opens a deduplicated GitHub issue on drift. `docs/sbx-compatibility.md` documents the tested-against matrix and expansion process. 12 unit tests.
 
 ### 5.8 Nice-to-Have (Defer Unless Needed)
 

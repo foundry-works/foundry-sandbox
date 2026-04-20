@@ -15,7 +15,9 @@ from foundry_sandbox.sbx import (
     TIMEOUT_SBX_QUERY,
     TIMEOUT_SBX_SECRET,
     VALID_NETWORK_PROFILES,
+    check_sbx_version,
     find_sbx_binary,
+    get_sbx_version,
     sbx_check_available,
     sbx_create,
     sbx_diagnose,
@@ -77,12 +79,83 @@ class TestSbxIsInstalled:
 class TestSbxCheckAvailable:
     def test_available(self):
         with patch("foundry_sandbox.sbx.shutil.which", return_value="/usr/local/bin/sbx"):
-            sbx_check_available()  # should not raise
+            with patch("foundry_sandbox.sbx.check_sbx_version"):
+                sbx_check_available()  # should not raise
 
     def test_not_available(self):
         with patch("foundry_sandbox.sbx.shutil.which", return_value=None):
             with pytest.raises(SystemExit):
                 sbx_check_available()
+
+
+# ============================================================================
+# get_sbx_version / check_sbx_version
+# ============================================================================
+
+
+class TestGetSbxVersion:
+    def test_success(self):
+        mock_result = MagicMock()
+        mock_result.stdout = "sbx 0.26.1\n"
+        with patch("foundry_sandbox.sbx.shutil.which", return_value="/usr/local/bin/sbx"):
+            with patch("foundry_sandbox.sbx.subprocess.run", return_value=mock_result):
+                assert get_sbx_version() == "0.26.1"
+
+    def test_bare_version(self):
+        mock_result = MagicMock()
+        mock_result.stdout = "0.27.0\n"
+        with patch("foundry_sandbox.sbx.shutil.which", return_value="/usr/local/bin/sbx"):
+            with patch("foundry_sandbox.sbx.subprocess.run", return_value=mock_result):
+                assert get_sbx_version() == "0.27.0"
+
+    def test_no_binary(self):
+        with patch("foundry_sandbox.sbx.shutil.which", return_value=None):
+            assert get_sbx_version() is None
+
+    def test_timeout(self):
+        with patch("foundry_sandbox.sbx.shutil.which", return_value="/usr/local/bin/sbx"):
+            with patch("foundry_sandbox.sbx.subprocess.run", side_effect=subprocess.TimeoutExpired("sbx", 5)):
+                assert get_sbx_version() is None
+
+    def test_os_error(self):
+        with patch("foundry_sandbox.sbx.shutil.which", return_value="/usr/local/bin/sbx"):
+            with patch("foundry_sandbox.sbx.subprocess.run", side_effect=OSError("not found")):
+                assert get_sbx_version() is None
+
+
+class TestCheckSbxVersion:
+    def test_version_in_range(self):
+        with patch("foundry_sandbox.sbx.get_sbx_version", return_value="0.26.1"):
+            check_sbx_version()  # should not raise
+
+    def test_version_at_min(self):
+        with patch("foundry_sandbox.sbx.get_sbx_version", return_value="0.26.0"):
+            check_sbx_version()  # boundary — should pass
+
+    def test_version_below_min(self):
+        with patch("foundry_sandbox.sbx.get_sbx_version", return_value="0.25.0"):
+            with pytest.raises(SystemExit):
+                check_sbx_version()
+
+    def test_version_at_max(self):
+        with patch("foundry_sandbox.sbx.get_sbx_version", return_value="0.29.0"):
+            with pytest.raises(SystemExit):
+                check_sbx_version()
+
+    def test_version_above_max(self):
+        with patch("foundry_sandbox.sbx.get_sbx_version", return_value="0.30.0"):
+            with pytest.raises(SystemExit):
+                check_sbx_version()
+
+    def test_version_none(self):
+        with patch("foundry_sandbox.sbx.get_sbx_version", return_value=None):
+            check_sbx_version()  # no sbx — skip silently
+
+    def test_version_parse_garbage(self):
+        with patch("foundry_sandbox.sbx.get_sbx_version", return_value="unknown"):
+            with patch("foundry_sandbox.sbx.log_warn") as mock_warn:
+                check_sbx_version()  # warn but don't block
+                mock_warn.assert_called_once()
 
 
 # ============================================================================

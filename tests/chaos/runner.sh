@@ -66,9 +66,13 @@ if ! command -v sbx &>/dev/null; then
 fi
 
 if ! foundry-git-safety status &>/dev/null 2>&1; then
-    echo "ERROR: foundry-git-safety server is not running." >&2
-    echo "Start it with: foundry-git-safety start" >&2
-    exit 1
+    # Fallback: check if the HTTP endpoint is responding
+    if ! curl -sf http://localhost:8083/health &>/dev/null; then
+        echo "ERROR: foundry-git-safety server is not running." >&2
+        echo "Start it with: foundry-git-safety start" >&2
+        exit 1
+    fi
+    info "Note: PID file missing but server responding on :8083 (foreground mode)"
 fi
 
 info "Chaos test runner starting"
