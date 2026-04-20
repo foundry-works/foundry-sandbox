@@ -47,6 +47,8 @@ class NewDefaults:
     wd: str
     pip_requirements: str
     allow_pr: bool
+    template: str
+    template_managed: bool
 
 
 def _apply_saved_new_defaults(
@@ -63,6 +65,8 @@ def _apply_saved_new_defaults(
     wd: str,
     pip_requirements: str,
     allow_pr: bool,
+    template: str,
+    template_managed: bool = False,
 ) -> NewDefaults:
     """Apply saved/preset values for parameters not explicitly set by the user."""
     data = saved or {}
@@ -76,6 +80,9 @@ def _apply_saved_new_defaults(
     raw_copies = data.get("copies", copies)
     resolved_copies: tuple[str, ...] = copies if "copies" in explicit_params else tuple(str(v) for v in raw_copies) if isinstance(raw_copies, (list, tuple)) else copies
 
+    resolved_template = template if "template" in explicit_params else str(data.get("template", template))
+    resolved_template_managed = template_managed if "template" in explicit_params else bool(data.get("template_managed", template_managed))
+
     return NewDefaults(
         repo=repo if "repo" in explicit_params else str(data.get("repo", repo)),
         branch=branch if "branch" in explicit_params else str(data.get("branch", branch)),
@@ -87,6 +94,8 @@ def _apply_saved_new_defaults(
         wd=wd if "wd" in explicit_params else str(data.get("working_dir", wd)),
         pip_requirements=pip_requirements if "pip_requirements" in explicit_params else str(data.get("pip_requirements", pip_requirements)),
         allow_pr=allow_pr if "allow_pr" in explicit_params else bool(data.get("allow_pr", allow_pr)),
+        template=resolved_template,
+        template_managed=resolved_template_managed,
     )
 
 
@@ -119,6 +128,8 @@ def _load_and_apply_defaults(
         wd=str(kwargs.get("wd", "")),
         pip_requirements=str(kwargs.get("pip_requirements", "")),
         allow_pr=bool(kwargs.get("allow_pr", False)),
+        template=str(kwargs.get("template", "foundry-git-wrapper:latest")),
+        template_managed=bool(kwargs.get("template_managed", False)),
     )
 
 
@@ -174,6 +185,7 @@ def new(
     explicit_param_names = {
         "repo", "branch", "from_branch", "copies", "agent",
         "with_opencode", "with_zai", "wd", "pip_requirements", "allow_pr",
+        "template",
     }
     explicit_params = {
         name for name in explicit_param_names
@@ -181,6 +193,7 @@ def new(
     }
 
     # Handle --last / --preset flags
+    effective_template_managed = False
     if last or preset:
         if last:
             saved_data = load_last_cast_new()
@@ -202,6 +215,8 @@ def new(
             wd=wd,
             pip_requirements=pip_requirements,
             allow_pr=allow_pr,
+            template=template,
+            template_managed=False,
         )
         repo = _defaults.repo
         branch = _defaults.branch
@@ -213,6 +228,8 @@ def new(
         wd = _defaults.wd
         pip_requirements = _defaults.pip_requirements
         allow_pr = _defaults.allow_pr
+        template = _defaults.template
+        effective_template_managed = _defaults.template_managed
 
     # Resolve repo input
     if not repo:
@@ -370,6 +387,8 @@ def new(
         enable_opencode=with_opencode,
         enable_zai=with_zai,
         copies=list(copies),
+        template=template,
+        template_managed=effective_template_managed,
     )
     save_last_attach(name)
 
@@ -386,6 +405,8 @@ def new(
             enable_opencode=with_opencode,
             enable_zai=with_zai,
             copies=list(copies),
+            template=template,
+            template_managed=effective_template_managed,
         )
 
     # Success message

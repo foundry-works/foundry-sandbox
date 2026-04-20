@@ -334,6 +334,8 @@ def _write_cast_new_json(
     enable_opencode: bool = False,
     enable_zai: bool = False,
     copies: list[str] | None = None,
+    template: str = "",
+    template_managed: bool = False,
 ) -> str:
     """Write cast-new JSON to a file.
 
@@ -352,6 +354,8 @@ def _write_cast_new_json(
         enable_opencode=enable_opencode,
         enable_zai=enable_zai,
         copies=copies or [],
+        template=template,
+        template_managed=template_managed,
     )
 
     timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
@@ -385,6 +389,8 @@ def save_last_cast_new(
     enable_opencode: bool = False,
     enable_zai: bool = False,
     copies: list[str] | None = None,
+    template: str = "",
+    template_managed: bool = False,
 ) -> str:
     """Save the most recent cast-new command.
 
@@ -397,7 +403,7 @@ def save_last_cast_new(
         working_dir=working_dir, pip_requirements=pip_requirements,
         allow_pr=allow_pr, network_profile=network_profile,
         enable_opencode=enable_opencode, enable_zai=enable_zai,
-        copies=copies,
+        copies=copies, template=template, template_managed=template_managed,
     )
 
 
@@ -415,6 +421,8 @@ def save_cast_preset(
     enable_opencode: bool = False,
     enable_zai: bool = False,
     copies: list[str] | None = None,
+    template: str = "",
+    template_managed: bool = False,
 ) -> None:
     """Save a named cast-new preset."""
     ensure_dir(path_presets_dir())
@@ -424,7 +432,7 @@ def save_cast_preset(
         working_dir=working_dir, pip_requirements=pip_requirements,
         allow_pr=allow_pr, network_profile=network_profile,
         enable_opencode=enable_opencode, enable_zai=enable_zai,
-        copies=copies,
+        copies=copies, template=template, template_managed=template_managed,
     )
 
 
@@ -455,6 +463,8 @@ def _load_cast_new_json(path: str | Path) -> dict[str, Any] | None:
             "enable_opencode": args.get("enable_opencode", False),
             "enable_zai": args.get("enable_zai", False),
             "copies": args.get("copies", []),
+            "template": args.get("template", ""),
+            "template_managed": args.get("template_managed", False),
         }
     result["command_line"] = data.get("command_line", "")
     return result

@@ -129,6 +129,21 @@ class TestSbxSandboxMetadata:
         assert meta.user_services == {}
         assert meta.wrapper_checksum == ""
         assert meta.wrapper_last_verified == ""
+        assert meta.template_managed is False
+
+    def test_template_managed_roundtrip(self):
+        meta = SbxSandboxMetadata(
+            sbx_name="test",
+            agent="claude",
+            repo_url="u",
+            branch="b",
+            template="preset-my-setup:latest",
+            template_managed=True,
+        )
+        data = meta.model_dump()
+        restored = SbxSandboxMetadata(**data)
+        assert restored.template == "preset-my-setup:latest"
+        assert restored.template_managed is True
 
 
 # ---------------------------------------------------------------------------
@@ -184,6 +199,19 @@ class TestCastNewPreset:
         assert dump["enable_zai"] is False
         assert dump["network_profile"] == "balanced"
         assert dump["agent"] == "claude"
+        assert dump["template"] == ""
+        assert dump["template_managed"] is False
+
+    def test_template_fields_roundtrip(self):
+        preset = CastNewPreset(
+            repo="org/repo",
+            template="preset-my-setup:latest",
+            template_managed=True,
+        )
+        data = preset.model_dump()
+        restored = CastNewPreset(**data)
+        assert restored.template == "preset-my-setup:latest"
+        assert restored.template_managed is True
 
     def test_missing_repo_raises_validation_error(self):
         with pytest.raises(ValidationError):

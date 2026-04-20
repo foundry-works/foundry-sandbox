@@ -6,6 +6,7 @@ subcommands for managing saved cast-new presets.
 
 from __future__ import annotations
 
+import re
 import sys
 
 import click
@@ -13,9 +14,13 @@ import click
 from foundry_sandbox.state import (
     delete_cast_preset,
     list_cast_presets,
+    load_cast_preset,
+    load_sandbox_metadata,
+    save_cast_preset,
     show_cast_preset,
 )
-from foundry_sandbox.utils import log_error
+from foundry_sandbox.sbx import sbx_is_running, sbx_sandbox_exists, sbx_template_rm, sbx_template_save
+from foundry_sandbox.utils import log_error, log_warn
 
 
 def _validate_preset_name(name: str) -> None:
@@ -23,6 +28,24 @@ def _validate_preset_name(name: str) -> None:
     if not name or "/" in name or "\\" in name or ".." in name or name.startswith("."):
         click.echo(f"Error: Invalid preset name: {name}", err=True)
         sys.exit(1)
+
+
+def _managed_tag_for_preset(preset_name: str) -> str:
+    """Derive a safe sbx template tag from a preset name.
+
+    Normalizes the name by replacing non-alphanumeric chars with hyphens,
+    then prepends 'preset-' and appends ':latest'.
+
+    Raises ValueError if the resulting tag is empty or starts/ends with
+    a hyphen/dot (invalid Docker tag).
+    """
+    normalized = re.sub(r"[^a-zA-Z0-9._-]", "-", preset_name)
+    tag = f"preset-{normalized}:latest"
+    # Validate the image name portion (before ':')
+    image_name = tag.split(":")[0]
+    if not image_name or image_name[-1] in ".-" or len(image_name) < 2:
+        raise ValueError(f"Cannot derive a valid template tag from preset name: {preset_name!r}")
+    return tag
 
 
 def _list_presets() -> None:
@@ -69,37 +92,128 @@ def show(name: str) -> None:
     click.echo(result)
 
 
-@preset.command("delete")
+@preset.command("save")
 @click.argument("name")
-def delete(name: str) -> None:
-    """Delete a preset."""
+@click.option("--sandbox", "sandbox_name", default=None, help="Sandbox to snapshot (auto-detected from CWD if omitted).")
+def save(name: str, sandbox_name: str | None) -> None:
+    """Save a preset from a running sandbox (includes filesystem snapshot)."""
     _validate_preset_name(name)
+
+    # Resolve sandbox name
+    if sandbox_name is None:
+        from foundry_sandbox.commands._helpers import auto_detect_sandbox
+        sandbox_name = auto_detect_sandbox()
+        if sandbox_name is None:
+            log_error("Cannot determine sandbox name. Use --sandbox <name> or run from a worktree directory.")
+            sys.exit(1)
+
+    # Validate sandbox exists and is running
+    if not sbx_sandbox_exists(sandbox_name):
+        log_error(f"Sandbox not found: {sandbox_name}")
+        sys.exit(1)
+    if not sbx_is_running(sandbox_name):
+        log_error(f"Sandbox is not running: {sandbox_name}")
+        sys.exit(1)
+
+    # Load metadata
+    metadata = load_sandbox_metadata(sandbox_name)
+    if metadata is None:
+        log_error(f"No metadata for sandbox: {sandbox_name}")
+        sys.exit(1)
+
+    # Derive managed tag
+    try:
+        managed_tag = _managed_tag_for_preset(name)
+    except ValueError as exc:
+        log_error(str(exc))
+        sys.exit(1)
+
+    # Snapshot the sandbox into a managed template
+    result = sbx_template_save(sandbox_name, managed_tag)
+    if result.returncode != 0:
+        log_error(f"Failed to save template: {result.stderr.strip()}")
+        sys.exit(1)
+
+    # Save preset with metadata-derived args and managed template ref
+    save_cast_preset(
+        name,
+        repo=metadata.get("repo_url", ""),
+        agent=metadata.get("agent", "claude"),
+        branch=metadata.get("branch", ""),
+        from_branch=metadata.get("from_branch", ""),
+        working_dir=metadata.get("working_dir", ""),
+        pip_requirements=metadata.get("pip_requirements", ""),
+        allow_pr=metadata.get("allow_pr", False),
+        network_profile=metadata.get("network_profile", "balanced"),
+        enable_opencode=metadata.get("enable_opencode", False),
+        enable_zai=metadata.get("enable_zai", False),
+        copies=metadata.get("copies", []),
+        template=managed_tag,
+        template_managed=True,
+    )
+    click.echo(f"Saved preset '{name}' with template '{managed_tag}'")
+
+
+def _delete_with_cleanup(name: str) -> None:
+    """Delete a preset and clean up managed templates if appropriate."""
+    _validate_preset_name(name)
+
+    # Load preset metadata before deleting
+    preset_data = load_cast_preset(name)
+    if preset_data is None:
+        log_error(f"Preset not found: {name}")
+        sys.exit(1)
+
+    template_tag = preset_data.get("template", "")
+    is_managed = preset_data.get("template_managed", False)
+
+    # Delete the preset JSON
     deleted = delete_cast_preset(name)
     if not deleted:
         log_error(f"Preset not found: {name}")
         sys.exit(1)
+
     click.echo(f"Deleted preset: {name}")
+
+    # Clean up managed template if no other preset references it
+    if is_managed and template_tag:
+        _cleanup_managed_template(template_tag)
+
+
+def _cleanup_managed_template(template_tag: str) -> None:
+    """Remove a managed template if no remaining presets reference it."""
+    remaining_names = list_cast_presets()
+    for other_name in remaining_names:
+        other_data = load_cast_preset(other_name)
+        if other_data and other_data.get("template") == template_tag:
+            return  # Still referenced
+
+    try:
+        result = sbx_template_rm(template_tag)
+        if result.returncode == 0:
+            log_warn(f"Removed managed template: {template_tag}")
+        else:
+            log_warn(f"Failed to remove managed template {template_tag}: {result.stderr.strip()}")
+    except Exception as exc:
+        log_warn(f"Failed to remove managed template {template_tag}: {exc}")
+
+
+@preset.command("delete")
+@click.argument("name")
+def delete(name: str) -> None:
+    """Delete a preset."""
+    _delete_with_cleanup(name)
 
 
 @preset.command("rm", hidden=True)
 @click.argument("name")
 def rm(name: str) -> None:
     """Delete a preset (alias for delete)."""
-    _validate_preset_name(name)
-    deleted = delete_cast_preset(name)
-    if not deleted:
-        log_error(f"Preset not found: {name}")
-        sys.exit(1)
-    click.echo(f"Deleted preset: {name}")
+    _delete_with_cleanup(name)
 
 
 @preset.command("remove", hidden=True)
 @click.argument("name")
 def remove(name: str) -> None:
     """Delete a preset (alias for delete)."""
-    _validate_preset_name(name)
-    deleted = delete_cast_preset(name)
-    if not deleted:
-        log_error(f"Preset not found: {name}")
-        sys.exit(1)
-    click.echo(f"Deleted preset: {name}")
+    _delete_with_cleanup(name)

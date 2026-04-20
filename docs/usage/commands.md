@@ -379,6 +379,7 @@ Manage saved presets for `cast new`.
 ```
 cast preset list
 cast preset show <name>
+cast preset save <name> [--sandbox <sandbox-name>]
 cast preset delete <name>
 ```
 
@@ -388,13 +389,40 @@ cast preset delete <name>
 |---------|-------------|
 | `list` | List all saved presets |
 | `show <name>` | Show preset details (JSON) |
-| `delete <name>` | Delete a preset |
+| `save <name>` | Save a preset with a filesystem snapshot from a running sandbox |
+| `delete <name>` | Delete a preset (cleans up managed templates if last reference) |
+
+### cast preset save
+
+Creates a preset from a running sandbox. The sandbox's runtime state is captured as an sbx template snapshot, so recreating the sandbox via `cast new --preset <name>` restores both the CLI flags and the filesystem state.
+
+If `--sandbox` is omitted, the sandbox is auto-detected from the current working directory (must be inside a worktree).
+
+The operation is all-or-nothing: if the template snapshot fails, no preset is written.
+
+### cast new --save-as vs. cast preset save
+
+| Feature | `cast new --save-as` | `cast preset save` |
+|---------|---------------------|-------------------|
+| Saves CLI flags | Yes | Yes |
+| Snapshots runtime state | No | Yes |
+| Creates sbx template | No | Yes |
+| Auto-cleanup on delete | No | Yes (if last reference) |
+
+Use `--save-as` for quick CLI-flag presets. Use `preset save` when you want to preserve installed packages, config changes, or other runtime modifications.
 
 ### Examples
 
 ```bash
-# Save a preset when creating a sandbox
+# Save a preset when creating a sandbox (CLI flags only)
 cast new owner/repo feature --wd packages/app --save-as myproject
+
+# Save a preset with runtime snapshot from a running sandbox
+cast preset save mysetup --sandbox my-sandbox
+
+# Save from inside a worktree (auto-detects sandbox)
+cd ~/worktrees/my-sandbox
+cast preset save mysetup
 
 # List all presets
 cast preset list
@@ -402,7 +430,7 @@ cast preset list
 # Show preset details
 cast preset show myproject
 
-# Use a preset
+# Use a preset (restores CLI flags + template if managed)
 cast new --preset myproject
 
 # Delete a preset
@@ -412,6 +440,8 @@ cast preset delete myproject
 ### Notes
 
 Presets are stored in `~/.sandboxes/presets/` as JSON files. The last `cast new` command is stored in `~/.sandboxes/.last-cast-new.json` for the `--last` flag.
+
+Managed templates (created by `cast preset save`) are tagged `preset-<name>:latest`. When a preset with a managed template is deleted, the template is removed only if no other preset references it. Non-managed templates are never auto-deleted.
 
 ---
 

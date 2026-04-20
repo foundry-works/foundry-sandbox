@@ -67,6 +67,9 @@ class SbxSandboxMetadata(BaseModel):
     wrapper_last_verified: str = ""
     """ISO 8601 UTC timestamp of last successful integrity verification."""
 
+    template_managed: bool = False
+    """True if the template was created by cast preset save and eligible for auto-cleanup."""
+
 
 class CastNewPreset(BaseModel):
     """Structured representation of cast-new preset arguments."""
@@ -103,3 +106,9 @@ class CastNewPreset(BaseModel):
 
     copies: list[str] = Field(default_factory=list)
     """List of copy specifications (host:container)."""
+
+    template: str = ""
+    """Template tag to use when recreating from this preset."""
+
+    template_managed: bool = False
+    """True if the template was created by cast preset save and eligible for auto-cleanup."""

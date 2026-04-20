@@ -356,7 +356,7 @@ Sandboxes can send data to allowed services (GitHub, AI APIs). A compromised san
 The agent has root access inside the microVM and can remove `/usr/local/bin/git`, falling back to the unrestricted `/usr/bin/git`.
 
 **Mitigations:**
-1. Build the wrapper into a custom sbx template (`sbx template save`) so it persists across resets
+1. Build the wrapper into a custom sbx template (`cast preset save` or `sbx template save`) so it persists across resets
 2. Monitor wrapper presence and re-inject if removed
 3. Accepted as documented risk in the threat model
 

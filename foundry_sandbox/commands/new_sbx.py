@@ -99,10 +99,13 @@ def new_sbx_setup(
     log_section("Sandbox")
     use_template = template if template and template.lower() != "none" else None
     if use_template:
-        log_info("Ensuring foundry template is available...")
-        if not ensure_foundry_template():
-            log_warn("Template build failed; falling back to runtime injection")
-            use_template = None
+        if use_template == FOUNDRY_TEMPLATE_TAG:
+            log_info("Ensuring foundry template is available...")
+            if not ensure_foundry_template():
+                log_warn("Template build failed; falling back to runtime injection")
+                use_template = None
+        else:
+            log_info(f"Using template: {use_template}")
     log_info(f"Creating sbx sandbox: {name}")
     try:
         sbx_create(

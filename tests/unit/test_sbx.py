@@ -35,6 +35,7 @@ from foundry_sandbox.sbx import (
     sbx_secret_set,
     sbx_stop,
     sbx_template_load,
+    sbx_template_rm,
     sbx_template_save,
 )
 
@@ -486,6 +487,15 @@ class TestSbxTemplate:
         sbx_template_load("my-template")
         mock_run.assert_called_once_with(
             ["template", "load", "my-template"],
+            timeout=TIMEOUT_SBX_LIFECYCLE,
+        )
+
+    @patch("foundry_sandbox.sbx._run_sbx")
+    def test_rm(self, mock_run):
+        mock_run.return_value = _mock_completed()
+        sbx_template_rm("my-template")
+        mock_run.assert_called_once_with(
+            ["template", "rm", "my-template"],
             timeout=TIMEOUT_SBX_LIFECYCLE,
         )
 

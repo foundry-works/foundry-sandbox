@@ -1,186 +1,309 @@
-# foundry-sandbox on Docker `sbx` — Plan
+# Plan: Native sbx Template Integration for Presets
 
 **Last updated:** 2026-04-20
 **Branch:** sbx
-**Status:** Phase 0, 1, 2 **COMPLETE**. Phase 3 steps 3.0–3.3 **COMPLETE** (~67k lines removed). §5.1 Wrapper Integrity **SHIPPED**. §5.2 Migration **SHIPPED**. §5.3 Observability **SHIPPED**. §5.4 User-Defined Credential Injection **SHIPPED**. §5.5 Deep Policy Sidecar **SHIPPED**. §5.6 Chaos, Security Audit, Performance **SHIPPED**. §5.7 sbx Version Pinning **SHIPPED**. §5.8 **IN PROGRESS**.
+**Status:** Implementation planning
 
 ---
 
 ## 1. Objective
 
-Rebase foundry-sandbox (`cast`) on Docker's native `sbx` microVM backend, delegating microVM lifecycle, network policy, secret storage, credential injection, and worktree management to `sbx`. Extend `sbx` with the security features it doesn't provide: git operation mediation, branch isolation, push/commit guardrails, GitHub API filtering, and — as follow-on work — a deep method/path/body policy layer and wrapper-integrity enforcement.
+Unify the preset system (CLI argument snapshots) with the sbx template system (filesystem image snapshots) so that a preset can restore both:
 
-The full rationale, architectural trade-offs, and risk register live in `sbx-analysis.md`. This document tracks **what remains to ship** on top of that analysis.
+- how `cast new` was invoked
+- which sandbox image/template should be used to recreate the runtime state
 
----
+This should cover installed packages, modified sandbox config, and the baked-in wrapper state when the preset points at a managed snapshot template.
 
-## 2. Current Architecture (already shipped on this branch)
+## 2. Current State
 
+### Presets (CLI argument snapshots)
+
+- `CastNewPreset` in `foundry_sandbox/models.py` stores repo, agent, branch, working_dir, pip_requirements, etc.
+- `save_cast_preset()` and `load_cast_preset()` in `foundry_sandbox/state.py` persist preset JSON under `~/.sandboxes/presets/`
+- `save_last_cast_new()` and `load_last_cast_new()` use the same JSON shape for `cast new --last`
+- `cast preset list/show/delete` live in `foundry_sandbox/commands/preset.py`
+- `cast new --preset <name>` reuses saved args
+- `cast new --save-as <name>` saves the resolved creation args after sandbox setup completes
+
+### Templates (filesystem snapshots)
+
+- `sbx_template_save(name, tag)` in `foundry_sandbox/sbx.py` runs `sbx template save`
+- `sbx_template_load(tag)` exists
+- `FOUNDRY_TEMPLATE_TAG = "foundry-git-wrapper:latest"` is the built-in template
+- `ensure_foundry_template()` builds/checks that built-in template
+- `cast new --template <tag>` passes a template tag into sandbox creation
+- `SbxSandboxMetadata.template` already records which template tag was used
+
+### Current Gaps
+
+1. Presets do not store any template information, so `cast new --preset` can only recreate CLI flags.
+2. `cast new` treats `--template` as always-present because Click supplies a default, which means preset-provided template values currently have no clean precedence path.
+3. `new_sbx_setup()` assumes any non-empty template should go through `ensure_foundry_template()`, which is only correct for `foundry-git-wrapper:latest`, not arbitrary snapshot tags.
+4. Preset names are only validated for path safety today; that is not enough to safely derive sbx template tags like `preset-<name>:latest`.
+5. There is no ownership/cleanup model for automatically removing preset-managed snapshot templates.
+
+## 3. Implementation Plan
+
+### Phase 1: Extend the shared data model
+
+**Modified: `foundry_sandbox/models.py`**
+
+Add template metadata to the shared models:
+
+- `CastNewPreset.template: str = ""`
+- `CastNewPreset.template_managed: bool = False`
+- `SbxSandboxMetadata.template_managed: bool = False`
+
+Rationale:
+
+- `template` is the image tag to reuse on `cast new --preset` or `cast new --last`
+- `template_managed` distinguishes preset-owned snapshot templates from user-supplied/custom tags, which is required for safe cleanup
+
+**Modified: `foundry_sandbox/state.py`**
+
+Update:
+
+- `_write_cast_new_json()`
+- `save_last_cast_new()`
+- `save_cast_preset()`
+- `_load_cast_new_json()`
+
+to persist/load `template` and `template_managed`.
+
+This is intentionally shared by both preset JSON and `.last-cast-new.json`, so `--last` gains the same template-awareness as `--preset`.
+
+Backward compatibility: missing fields in existing JSON should default to `""` and `False`.
+
+### Phase 2: Add safe managed-tag helpers and sbx delete support
+
+**Modified: `foundry_sandbox/commands/preset.py` or shared helper module**
+
+Add a helper that derives a safe managed snapshot tag from the preset name, e.g.:
+
+- input preset name: `my setup`
+- managed tag: `preset-my-setup:latest`
+
+The helper should normalize or reject characters that are legal for preset filenames but unsafe/awkward for sbx template tags.
+
+**Modified: `foundry_sandbox/sbx.py`**
+
+Add:
+
+- `sbx_template_rm(tag)` wrapper for `sbx template rm <tag>`
+
+This keeps preset cleanup inside the same sbx abstraction layer as save/load/list.
+
+### Phase 3: Add `cast preset save`
+
+**Modified: `foundry_sandbox/commands/preset.py`**
+
+Add a new command:
+
+```bash
+cast preset save <name> [--sandbox <sandbox-name>]
 ```
-┌──────────────────────────────────────────────────────────────────────┐
-│  Foundry Additive Layer                                              │
-│                                                                      │
-│  foundry-git-safety (standalone Python package, 727 tests)           │
-│    • HMAC-authed HTTP server mediating git operations                │
-│    • Branch isolation + ref output filtering                         │
-│    • Protected branches, push file restrictions, commit validation   │
-│    • GitHub API filter (method/path/body blocklist)                  │
-│    • YAML config (foundry.yaml) + workspace auto-discovery           │
-│                                                                      │
-│  cast CLI (thin sbx wrapper)                                         │
-│    • foundry_sandbox/sbx.py — 20 wrappers over sbx subcommands       │
-│    • foundry_sandbox/git_safety.py — server + wrapper injection      │
-│    • commands/{new,start,stop,destroy,attach,list,...} delegate      │
-│      lifecycle to sbx and configure the safety layer                 │
-├──────────────────────────────────────────────────────────────────────┤
-│  Docker `sbx` (v0.26.1+)                                             │
-│    • MicroVM lifecycle (hypervisor-level isolation)                  │
-│    • Network policy (domain/IP allow/deny, balanced profile)         │
-│    • Secret storage + network-level credential injection             │
-│    • Git worktree creation (--branch)                                │
-│    • Templates, diagnostics, resource limits, TUI                    │
-├──────────────────────────────────────────────────────────────────────┤
-│  Hypervisor: macOS virtualization.framework / Windows Hyper-V /      │
-│              Linux KVM (confirmed on sbx v0.26.1, Fedora 43)         │
-└──────────────────────────────────────────────────────────────────────┘
-```
 
-**Deleted in this branch:** entire `unified-proxy/` (credential injector, API gateways, policy engine, DNS filter, rate limiter, circuit breaker, container registry), docker-compose generation, network management, and the original in-package git_api / branch_isolation / git_policies / github-api-filter modules (now living in `foundry-git-safety/`).
+Behavior:
 
----
+1. Validate the preset name.
+2. Resolve sandbox name:
+   - use `--sandbox` if provided
+   - otherwise auto-detect from CWD using `commands._helpers.auto_detect_sandbox()`
+3. Validate sandbox exists and is currently running (`sbx_sandbox_exists`, `sbx_is_running`).
+4. Load sandbox metadata (`load_sandbox_metadata`) for repo/branch/agent/working_dir/pip_requirements/etc.
+5. Generate a managed tag via the Phase 2 helper.
+6. Run `sbx_template_save(sandbox_name, managed_tag)`.
+7. On success, write the preset with:
+   - metadata-derived CLI args
+   - `template=<managed_tag>`
+   - `template_managed=True`
 
-## 3. Deviation from `sbx-analysis.md` — and why
+Decision: `cast preset save` is all-or-nothing. If template snapshotting fails, the command should fail and leave the preset untouched. The existing `cast new --save-as` path already covers CLI-only preset saving.
 
-`sbx-analysis.md` §10 recommended **Option E (Wait and Watch)** with Option C preparation, citing experimental status and CLI divergence risk. This branch has executed **Option A (full rearchitecture)** instead.
+There is no separate `cast preset snapshot` alias in this design; `cast preset save` is the snapshotting command.
 
-Rationale for proceeding now, despite the analysis's caution:
-- Phase 0 validation passed on Linux KVM (kernel 6.12.44 vs host 6.17.8).
-- `foundry-git-safety` is already runnable standalone, so rollback is a clean revert to `main`.
-- The code-reduction win (~67k lines removed) is realized immediately.
-- Experimental-status risk is mitigated by version-pinning `sbx` (see §6.6 below).
+### Phase 4: Use preset/last template values during `cast new`
 
-This means several risks the analysis flagged as hypothetical are now live and must be addressed by the remaining work in §5.
+**Modified: `foundry_sandbox/commands/new.py`**
 
----
+Extend the saved-default plumbing so `cast new --preset` and `cast new --last` can carry:
 
-## 4. What `sbx` Handles vs. What Foundry Must Keep Extending
+- `template`
+- `template_managed`
 
-| Capability | Provider |
-|------------|----------|
-| MicroVM lifecycle, network policy, secrets | `sbx` |
-| Credential injection (9 providers, HTTP header) | `sbx` host-side proxy |
-| Git worktree creation | `sbx --branch` |
-| Git operation mediation (protected branches, push restrictions, commit validation) | `foundry-git-safety` |
-| Branch visibility isolation / ref output filter | `foundry-git-safety` |
-| GitHub API blocklist (merges, releases, workflows) | `foundry-git-safety` |
-| **Wrapper persistence against agent removal** | **Shipped — §5.1** |
-| **User-defined credential injection (Tavily, Perplexity, …)** | **Shipped — §5.4** |
-| **Deep method/path/body policy (general, not just GitHub)** | **Shipped — §5.5** |
-| **Existing-user migration path** | **Not yet built — §5.2** |
-| **Observability (health, metrics, decision logs)** | **Not yet built — §5.3** |
+Concrete changes:
 
----
+- Add these fields to `NewDefaults`
+- Teach `_apply_saved_new_defaults()` and `_load_and_apply_defaults()` to pass them through
+- Track `template` in the explicit-parameter precedence logic
 
-## 5. Remaining Work (in priority order)
+Important precedence rule:
 
-### 5.1 Wrapper Integrity Enforcement — **HIGH** — **SHIPPED**
+- if `--template` was explicitly passed on the command line, it wins
+- otherwise, a preset/last-file template should override the Click default
 
-SHA-256 checksum-based wrapper verification, host-side watchdog daemon, and CLI surfacing. Template bake (pre-existing), checksum functions in `git_safety.py`, `WrapperWatchdog` daemon thread in `watchdog.py`, `cast watchdog` command, `--watchdog` flag on `cast start`, wrapper status in `cast status` and drift marker in `cast list`. 52 unit tests across 4 test files. `docs/security/wrapper-integrity.md` documents model and residual risk.
+Without this change, the current Click default (`foundry-git-wrapper:latest`) masks preset templates.
 
-**Remaining:** Integration tests on a live sbx environment (manual, pre-release validation).
+Also write the effective `template` and `template_managed` values into sandbox metadata during creation so later flows (`cast preset save`, `cast new --save-as`) can preserve the right semantics.
 
-### 5.2 Migration Path for Existing 0.20.x Users — **HIGH** — **SHIPPED**
+### Phase 5: Fix template handling inside `new_sbx_setup()`
 
-`cast migrate-to-sbx` and `cast migrate-from-sbx` commands with automatic metadata conversion, credential migration, preset translation, snapshot/rollback, and dry-run mode. ADR-009 documents the decision against dual-mode operation. 56 unit + CLI tests passing.
+**Modified: `foundry_sandbox/commands/new_sbx.py`**
 
-**Remaining:** End-to-end test on a real 0.20.x installation (manual, pre-release validation).
+Split built-in-template behavior from arbitrary-template behavior:
 
-### 5.3 Observability — **HIGH** — **SHIPPED**
+- If template is empty or `"none"`, create without a template and fall back to runtime injection.
+- If template equals `FOUNDRY_TEMPLATE_TAG`, keep the current `ensure_foundry_template()` behavior.
+- If template is any other non-empty tag, pass it directly to `sbx_create()` without calling `ensure_foundry_template()`.
 
-`/health` (enhanced with config validity + uptime), `/ready` (workspace/config/secret-store checks), and `/metrics` (Prometheus format with operation counters, latency histograms, policy-decision counters) endpoints on foundry-git-safety server. Structured JSON Lines decision log with size-based rotation at `~/.foundry/logs/decisions.jsonl`. `cast diagnose` command gathering sbx diagnostics, git-safety health/readiness, and recent decision log entries with secret redaction. Prometheus alert rule templates in `docs/observability/alerts.yaml`.
+Failure behavior:
 
-**Remaining:** Runbook addendum to `docs/operations.md`.
+- Missing or broken custom/managed templates should surface as setup errors.
+- Silent fallback to runtime injection is only acceptable for the built-in foundry template path when template build/check fails.
 
-### 5.4 User-Defined Credential Injection — **MEDIUM** — **SHIPPED**
+### Phase 6: Clarify `cast new --save-as`
 
-Reverse-proxy routes on the foundry-git-safety Flask server. `config/user-services.yaml` declares services with domain, header, format. Sandbox talks HTTP to `host.docker.internal:8083/proxy/<slug>/...`, proxy reads API key from host env, adds header, forwards HTTPS to upstream. No MITM, no custom CA. Integrated with `cast new` (env var injection), `cast refresh-credentials` (secret push), and `migration.py` (credential map). 30 unit tests (15 config + 15 proxy). ADR-010 documents the decision.
+**Modified: `foundry_sandbox/commands/new.py`**
 
-**Remaining:** Test with real service endpoints (manual, pre-release validation).
+`cast new --save-as` remains CLI-oriented preset saving. It does **not** call `sbx template save`.
 
-### 5.5 Deep Policy Sidecar — **MEDIUM** — **SHIPPED**
+However, because it runs after creation succeeds, it should persist the effective:
 
-`sbx policy` is domain/IP only. Foundry's GitHub filter is the one surviving method/path/body rule set — generalized into a YAML-driven request inspector so any service can have request-shape policies. Flask Blueprint on main server with per-sandbox rate limiting (reuses existing `RateLimiter`), per-service circuit breaker (3-state), and simple dot-notation body inspection. GitHub rules become a bundled default YAML file (`bundled://github-default`). Off by default; enabled via `foundry.yaml` or `--deep-policy` flag. ADR-011 documents the decision. 174 tests (46 engine + 8 proxy + 120 GitHub parity).
+- `template`
+- `template_managed`
 
-**Remaining:** Threat model documentation (deferred to ops runbook), performance measurements (folded into §5.6).
+that were actually used to create the sandbox.
 
-### 5.6 Chaos, Security Audit, Performance — **MEDIUM** — **SHIPPED**
+Implications:
 
-Unit tests pass; negative-path validation complete.
+- `--save-as` can preserve a reference to an existing template
+- `--save-as` does not create a fresh runtime snapshot
+- runtime snapshot creation remains the responsibility of `cast preset save`
 
-**Deliverables:**
-- Chaos tests: 14 unit-level simulations (thread safety, concurrent access, fault injection) + 4 shell modules for live sbx testing. 57 automated tests total.
-- Security audit: HMAC rotation tested (10 tests), credential leak audit (7 tests), privilege escalation review (8 tests), wrapper injection privilege review documented. Findings in `docs/security/audit-5.6.md`.
-- Performance baselines: microbenchmarks for HMAC, nonce, rate limiter, metrics, decision log, server throughput (8 tests). Benchmark scripts for full-stack latency measurement. Published in `docs/operations.md`.
+### Phase 7: Safe cleanup on preset delete
 
-**Remaining:** External security review (manual, recommended before Gate B). Full-stack benchmark results on live sbx (manual, pre-release validation).
+**Modified: `foundry_sandbox/commands/preset.py`**
 
-### 5.7 `sbx` Version Pinning and Drift Detection — **LOW** — **SHIPPED**
+Change `cast preset delete` to:
 
-`SBX_MIN_VERSION`/`SBX_MAX_VERSION` constants in `foundry_sandbox/sbx.py` with `get_sbx_version()` and `check_sbx_version()` functions. Every `cast` command enforces the range via `sbx_check_available()`. Weekly CI drift job (`.github/workflows/sbx-drift.yml`) downloads latest sbx, compares against range, opens a deduplicated GitHub issue on drift. `docs/sbx-compatibility.md` documents the tested-against matrix and expansion process. 12 unit tests.
+1. Load the preset before deleting it.
+2. Delete the preset JSON.
+3. If `template_managed` is `True`, scan remaining presets for the same `template` tag.
+4. Only when no remaining preset references that managed tag, attempt `sbx_template_rm(tag)`.
 
-### 5.8 Nice-to-Have (Defer Unless Needed)
+Rules:
 
-- DNS-level filtering (was in old proxy; unclear if achievable inside microVM network stack).
-- Native `sbx template` integration for presets (currently presets are JSON CLI-arg snapshots).
-- Docker Desktop plugin parity (track `docker sandbox` CLI convergence per U27).
+- Non-managed templates are never deleted automatically.
+- Template cleanup is best-effort; failure should warn but not block preset deletion.
+- Hidden aliases (`rm`, `remove`) should reuse the same cleanup path.
 
----
+### Phase 8: Tests
 
-## 6. Risks (updated from analysis §11)
+Use a mix of existing test modules and new targeted command tests.
 
-| Risk | Status | Mitigation |
-|------|--------|------------|
-| Experimental `sbx` churn breaks CLI | **Live** | §5.7 version pin + drift check |
-| Agent removes git wrapper | **Shipped** | §5.1 checksum watchdog + template bake |
-| `sbx reset` destroys injected binaries | **Shipped** | §5.1 template-bake + watchdog re-inject |
-| CLI divergence (`docker sandbox` vs `sbx`) | **Live** | Target standalone `sbx` only; §5.7 surfaces breakage fast |
-| Existing users have no upgrade path | **Live** | §5.2 blocks any release |
-| Git-safety server is unobservable | **Shipped** | §5.3 shipped |
-| User-defined providers not supported | **Shipped** | §5.4 reverse proxy |
-| Docker deprecates `sbx` | Low likelihood | foundry-git-safety already runs against any backend; fall back to current docker architecture via git revert |
-| Linux microVM docs still say "legacy container" | Docs-only | Phase 0 confirmed otherwise on sbx v0.26.1 |
+**Extend existing**
 
----
+- `tests/unit/test_models.py`
+  - defaults and serialization for `template` / `template_managed`
+- `tests/unit/test_state.py`
+  - preset save/load round-trip with template fields
+  - last-command save/load round-trip with template fields
+- `tests/unit/test_sbx.py`
+  - `sbx_template_rm()` wrapper
 
-## 7. Decision Gates
+**Add new**
 
-### Gate A — Cut a pre-release (0.21.0-rc)
-Requires: §5.2 (migration) **and** §5.3 (observability) shipped. Everything else can follow behind a feature flag or in follow-up releases.
+- `tests/unit/test_preset_command.py`
+  - `cast preset save` with explicit sandbox
+  - auto-detect sandbox from CWD
+  - failure when sandbox missing or stopped
+  - failure when `sbx_template_save` fails
+  - delete cleans up managed template only when last reference is removed
+  - delete does not remove non-managed templates
 
-### Gate B — Cut a stable release (0.21.0)
-Requires Gate A plus: §5.1 (wrapper integrity) shipped, §5.6 security audit signed off, one user has successfully migrated end-to-end.
+- `tests/unit/test_new_template_defaults.py`
+  - preset template overrides Click default when `--template` was not explicit
+  - explicit `--template` overrides preset/last template
+  - `--last` restores template/template_managed
+  - built-in template path still uses `ensure_foundry_template()`
+  - custom/managed template path does not call `ensure_foundry_template()`
 
-### Gate C — Deprecate `main` architecture
-Requires Gate B plus: 30 days of production use across ≥3 users without a critical regression.
+- `tests/unit/test_cli.py`
+  - help output updated for `cast preset save` if static help text is changed
 
-### Gate D — Enable §5.5 (deep policy sidecar) by default
-Requires: a concrete user request, and evidence Docker's domain-level policy is insufficient for that use case. Do not build speculatively.
+### Phase 9: Documentation
 
----
+**Modified: user-facing docs**
 
-## 8. What This Plan Explicitly Defers
+- `foundry_sandbox/commands/help_cmd.py`
+- `docs/usage/commands.md`
 
-- Phase 4's full deep policy engine at §5.5 depth — generalized method/path/body enforcement is scoped, but SSE streaming, per-provider gateways, and MITM for non-base-URL providers are out.
-- Docker Desktop integration (`docker sandbox` plugin) — monitor per U27, do not target.
-- DNS-level filtering — track as U28 in the questions doc; may be impossible inside `sbx`'s network stack.
-- Dual-mode operation during migration — decide during §5.2 scoping; likely not worth the complexity.
-- Re-adding rate limiting and circuit breaker — folded into §5.5 if we build the sidecar, dropped otherwise.
+Document:
 
----
+- `cast preset save`
+- the difference between `cast new --save-as` and `cast preset save`
+- template cleanup semantics for managed snapshot presets
 
-## 9. Links
+**Modified: architecture/security docs**
 
-- `sbx-analysis.md` — original architectural analysis and risk register
-- `PLAN-CHECKLIST.md` — actionable checklist mirroring this plan
-- `docs/adr/008-sbx-migration.md` — architectural decision record
-- `foundry-git-safety/README.md` — standalone package docs
+- `docs/architecture.md`
+- `docs/security/security-model.md`
+
+Update the template-persistence guidance so it references the new first-class preset snapshot flow, not only raw `sbx template save`.
+
+**Optional ADR**
+
+- `docs/adr/013-template-preset-integration.md`
+
+Decision record:
+
+- why presets now carry template identity
+- why `template_managed` exists
+- why `cast preset save` is all-or-nothing
+- why cleanup only happens for managed tags with no remaining references
+
+## 4. Key Files
+
+| File | Change |
+|------|--------|
+| `foundry_sandbox/models.py` | Add `template` / `template_managed` fields |
+| `foundry_sandbox/state.py` | Persist/load template metadata for presets and `--last` |
+| `foundry_sandbox/commands/preset.py` | Add `save` command and delete cleanup logic |
+| `foundry_sandbox/commands/new.py` | Add template precedence handling for preset/last/save-as |
+| `foundry_sandbox/commands/new_sbx.py` | Separate built-in template handling from custom tags |
+| `foundry_sandbox/sbx.py` | Add `sbx_template_rm()` |
+| `tests/unit/test_models.py` | Extend model coverage |
+| `tests/unit/test_state.py` | Extend preset/last state coverage |
+| `tests/unit/test_sbx.py` | Add `sbx_template_rm()` tests |
+| `tests/unit/test_preset_command.py` | New preset command tests |
+| `tests/unit/test_new_template_defaults.py` | New template precedence tests |
+| `docs/usage/commands.md` | Document new preset-save flow |
+| `docs/architecture.md` | Update template persistence guidance |
+| `docs/security/security-model.md` | Update wrapper/template mitigation guidance |
+
+## 5. Design Decisions
+
+- **Managed snapshot tag format:** `preset-<normalized-name>:latest`
+- **Managed-vs-custom distinction:** `template_managed=True` means the tag was created by `cast preset save` and is eligible for automated cleanup.
+- **`cast preset save` semantics:** all-or-nothing; no silent downgrade to CLI-only preset saving.
+- **`cast new --save-as` semantics:** remains CLI-only, but may reference an already-existing template; it never creates a new snapshot image.
+- **Deletion semantics:** only remove managed templates, and only when the deleted preset was the last remaining reference.
+- **No separate `cast preset snapshot` alias:** one canonical subcommand is enough.
+
+## 6. Verification
+
+1. `pytest tests/unit/test_models.py tests/unit/test_state.py tests/unit/test_sbx.py -v`
+2. `pytest tests/unit/test_preset_command.py tests/unit/test_new_template_defaults.py tests/unit/test_cli.py -v`
+3. `./scripts/ci-local.sh`
+4. Manual:
+   - create sandbox
+   - mutate runtime state inside sandbox
+   - `cast preset save mysetup --sandbox <name>`
+   - destroy sandbox
+   - `cast new --preset mysetup`
+   - verify runtime state is restored
+5. Manual cleanup:
+   - create two presets referencing the same managed template
+   - delete the first preset and verify template remains
+   - delete the last preset and verify template removal is attempted

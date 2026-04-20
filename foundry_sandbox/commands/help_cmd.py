@@ -20,6 +20,7 @@ Commands:
   repeat                                Alias for 'new --last'
   preset list                           List saved presets
   preset show <name>                    Show preset details
+  preset save <name> [--sandbox <name>] Save preset with filesystem snapshot
   preset delete <name>                  Delete a preset
   list [--json]                         List all sandboxes
   attach <name>                         Attach to a sandbox
@@ -54,6 +55,7 @@ Examples:
   cast new user/repo feat --wd packages/app       # monorepo subdirectory
   cast new user/repo feat --agent codex           # use Codex agent
   cast new user/repo feat --save-as myproject     # save as preset
+  cast preset save mysetup --sandbox my-sandbox   # save preset with snapshot
   cast new --preset myproject                     # use saved preset
   cast new --last                                 # repeat last command
   cast repeat                                     # same as above

@@ -485,6 +485,18 @@ def sbx_template_ls() -> list[str]:
         return []
 
 
+def sbx_template_rm(tag: str) -> subprocess.CompletedProcess[str]:
+    """Remove a saved template.
+
+    Args:
+        tag: Template tag to remove.
+
+    Returns:
+        CompletedProcess result.
+    """
+    return _run_sbx(["template", "rm", tag], timeout=TIMEOUT_SBX_LIFECYCLE)
+
+
 # ============================================================================
 # Diagnostics
 # ============================================================================

@@ -227,7 +227,7 @@ The git wrapper is installed into the sandbox during `cast new`:
 2. Environment variables (`SANDBOX_ID`, `WORKSPACE_DIR`, `GIT_API_HOST`, `GIT_API_PORT`, `GIT_HMAC_SECRET_FILE`) are written to `/etc/profile.d/foundry-git-safety.sh`
 3. The HMAC secret is placed at `.foundry/hmac-secret` in the workspace, which sbx file-syncs into the sandbox
 
-**Note:** The wrapper is a regular file that the agent can remove. For persistence across `sbx reset`, use `sbx template save` to bake the wrapper into a custom template. See [Security Model](security/security-model.md) for the full threat analysis.
+**Note:** The wrapper is a regular file that the agent can remove. For persistence across `sbx reset`, use `cast preset save` to snapshot the full sandbox state (including the wrapper) into a managed template, or use `sbx template save` directly for a raw template. See [Security Model](security/security-model.md) for the full threat analysis.
 
 ## Host State Layout
 
@@ -275,7 +275,9 @@ Each sandbox has a `metadata.json` recording its configuration:
   "from_branch": "main",
   "network_profile": "balanced",
   "git_safety_enabled": true,
-  "allow_pr": false
+  "allow_pr": false,
+  "template": "foundry-git-wrapper:latest",
+  "template_managed": false
 }
 ```
 
