@@ -345,6 +345,27 @@ class TestCastNewHistory:
         result = load_last_cast_new()
         assert result["agent"] == "claude"
 
+    def test_template_roundtrip(self, sandbox_home):
+        """Template and template_managed survive last-cast-new save/load."""
+        save_last_cast_new(
+            repo="org/repo",
+            branch="main",
+            template="preset-mysetup:latest",
+            template_managed=True,
+        )
+        result = load_last_cast_new()
+        assert result is not None
+        assert result["template"] == "preset-mysetup:latest"
+        assert result["template_managed"] is True
+
+    def test_template_defaults_when_absent(self, sandbox_home):
+        """Missing template fields default to empty string / False on load."""
+        save_last_cast_new(repo="org/repo", branch="main")
+        result = load_last_cast_new()
+        assert result is not None
+        assert result["template"] == ""
+        assert result["template_managed"] is False
+
 
 class TestCastPresets:
     """Tests for preset CRUD operations."""
@@ -413,6 +434,40 @@ class TestCastPresets:
             )
             result = load_cast_preset(f"agent-{agent}")
             assert result["agent"] == agent
+
+    def test_template_roundtrip(self, sandbox_home):
+        """Template and template_managed survive preset save/load."""
+        save_cast_preset(
+            "with-template",
+            repo="org/repo",
+            template="preset-with-template:latest",
+            template_managed=True,
+        )
+        result = load_cast_preset("with-template")
+        assert result is not None
+        assert result["template"] == "preset-with-template:latest"
+        assert result["template_managed"] is True
+
+    def test_template_defaults_when_absent(self, sandbox_home):
+        """Missing template fields default to empty string / False on load."""
+        save_cast_preset("no-template", repo="org/repo")
+        result = load_cast_preset("no-template")
+        assert result is not None
+        assert result["template"] == ""
+        assert result["template_managed"] is False
+
+    def test_unmanaged_template_preserved(self, sandbox_home):
+        """A user-supplied non-managed template tag is saved with template_managed=False."""
+        save_cast_preset(
+            "custom-tag",
+            repo="org/repo",
+            template="user-custom:v1",
+            template_managed=False,
+        )
+        result = load_cast_preset("custom-tag")
+        assert result is not None
+        assert result["template"] == "user-custom:v1"
+        assert result["template_managed"] is False
 
 
 # ============================================================================

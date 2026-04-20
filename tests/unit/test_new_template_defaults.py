@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-from unittest.mock import patch
-
 from foundry_sandbox.commands.new import NewDefaults, _apply_saved_new_defaults
 
 

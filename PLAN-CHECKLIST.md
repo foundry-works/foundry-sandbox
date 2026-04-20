@@ -1,4 +1,4 @@
-# Template-Preset Integration — Checklist
+# sbx Hardening — Checklist
 
 **Last updated:** 2026-04-20
 **Companion to:** `PLAN.md`
@@ -7,103 +7,91 @@ Legend: `[x]` done, `[ ]` todo
 
 ---
 
-## Phase 1: Extend shared models and state
+## Phase 1: Shrink the tamper window (H1)
 
-- [x] Add `template: str = ""` to `CastNewPreset` in `foundry_sandbox/models.py`
-- [x] Add `template_managed: bool = False` to `CastNewPreset`
-- [x] Add `template_managed: bool = False` to `SbxSandboxMetadata`
-- [x] Update `_write_cast_new_json()` in `foundry_sandbox/state.py` to persist both fields
-- [x] Update `save_cast_preset()` to accept both fields
-- [x] Update `save_last_cast_new()` to accept both fields
-- [x] Update `_load_cast_new_json()` to load both fields with backward-compatible defaults
+- [ ] Change `WrapperWatchdog.__init__` default `poll_interval` from `30.0` to `10.0` in `foundry_sandbox/watchdog.py`
+- [ ] Update `start_watchdog()` default `poll_interval` to match
+- [ ] Update `--interval` default and help text in `foundry_sandbox/commands/watchdog_cmd.py`
+- [ ] Update any docs referencing the 30 s interval
 
-## Phase 2: Managed-tag helpers and sbx delete support
+## Phase 2: Rotate HMAC on re-injection (H2)
 
-- [x] Add helper to derive a safe managed snapshot tag from preset name
-- [x] Normalize or reject preset names that cannot map cleanly to sbx template tags
-- [x] Add `sbx_template_rm()` to `foundry_sandbox/sbx.py`
+- [ ] In `WrapperWatchdog._reinject_wrapper`, generate a fresh HMAC before re-injection
+- [ ] Write the new HMAC to the worktree via `write_hmac_secret_to_worktree`
+- [ ] Write the new HMAC to the server via `write_hmac_secret_for_server`
+- [ ] Resolve worktree path from sandbox metadata (bare repo + branch)
+- [ ] Confirm `write_hmac_secret_for_server` uses replace semantics (no append)
+- [ ] Fail-closed: if HMAC write fails, skip re-injection rather than leaving worktree/server desynced
 
-## Phase 3: Add `cast preset save`
+## Phase 3: Tamper event observability (H3)
 
-- [x] Add `save` subcommand to `foundry_sandbox/commands/preset.py`
-- [x] Accept optional `--sandbox <name>` argument
-- [x] Auto-detect sandbox from CWD when `--sandbox` is omitted
-- [x] Validate sandbox exists
-- [x] Validate sandbox is running
-- [x] Load sandbox metadata for preset fields
-- [x] Call `sbx_template_save(sandbox_name, managed_tag)`
-- [x] Save preset with `template=<managed_tag>` and `template_managed=True`
-- [x] Fail without writing/updating the preset if template snapshotting fails
-- [x] Do not add a separate `snapshot` alias
+- [ ] Define `wrapper_tamper` event schema (sandbox, expected_sha256, actual_sha256, action, timestamp)
+- [ ] Add a decision-log write helper (or HTTP endpoint) in `foundry-git-safety/foundry_git_safety/decision_log.py`
+- [ ] Emit event from `WrapperWatchdog._reinject_wrapper` on success path
+- [ ] Emit event with `action="reinject_failed"` on failure path
+- [ ] Suppress event when checksum matches (no-op polls stay silent)
+- [ ] Surface recent events in `cast diagnose` text output
+- [ ] Surface recent events in `cast diagnose --json`
+- [ ] Add alert rule in `docs/observability/alerts.yaml` (rate > 0 over 5 min)
+- [ ] Document the event schema in `docs/observability.md`
 
-## Phase 4: Apply template defaults during `cast new`
+## Phase 4: sbx CLI identity probe (H5)
 
-- [x] Add `template` and `template_managed` to `NewDefaults`
-- [x] Teach `_apply_saved_new_defaults()` to carry both fields
-- [x] Treat `template` as an explicit CLI parameter only when `--template` was actually passed
-- [x] Allow preset/last template to override the Click default when `--template` was not explicit
-- [x] Keep explicit `--template` higher priority than preset/last data
-- [x] Propagate effective `template` / `template_managed` into sandbox metadata
+- [ ] In `sbx_check_available()`, resolve the realpath of the `sbx` binary
+- [ ] Reject paths under `~/.docker/cli-plugins/`
+- [ ] Reject paths under `/Applications/Docker.app/Contents/Resources/cli-plugins/`
+- [ ] Reject Windows Docker Desktop plugin paths
+- [ ] Run a standalone-only probe (e.g. `sbx template ls --help`); require exit 0
+- [ ] Print actionable error pointing at `brew install docker/tap/sbx` / `winget install Docker.sbx`
+- [ ] `SystemExit(1)` on probe failure
 
-## Phase 5: Fix `new_sbx_setup()` template behavior
+## Phase 5: Kernel-separation assertion (H7)
 
-- [x] Only call `ensure_foundry_template()` for `FOUNDRY_TEMPLATE_TAG`
-- [x] Pass custom/managed template tags directly to `sbx_create()`
-- [x] Keep `"none"` / empty template path as no-template creation
-- [ ] Surface missing custom/managed template as setup failure
-- [x] Keep runtime-injection fallback only for built-in foundry-template failures
+- [ ] Capture host kernel via `uname -r` in `cast diagnose`
+- [ ] For each running sandbox, run `sbx_exec(name, ["uname", "-r"])` with a short timeout
+- [ ] Per-sandbox status: `ok` if kernels differ, `warn` if equal
+- [ ] Include `isolation` section in `cast diagnose --json`
+- [ ] Include one-line per-sandbox summary in text output
+- [ ] Per-sandbox failure (e.g. sandbox stopped) does not fail the overall diagnose run
+- [ ] Document the assertion in `docs/security/security-model.md`
 
-## Phase 6: Clarify `cast new --save-as`
+## Phase 6: Tests
 
-- [x] Keep `cast new --save-as` CLI-only; do not call `sbx template save`
-- [x] Persist the effective `template` value used for creation
-- [x] Persist the effective `template_managed` value used for creation
-- [x] Document that `--save-as` references an existing template but does not create a new snapshot
+- [ ] `tests/unit/test_watchdog.py` — default interval is 10.0
+- [ ] `tests/unit/test_watchdog.py` — HMAC writers called before `inject_git_wrapper` on re-injection
+- [ ] `tests/unit/test_watchdog.py` — consecutive tamper events produce different HMAC values
+- [ ] `tests/unit/test_watchdog.py` — `wrapper_tamper` event emitted exactly once per mismatch
+- [ ] `tests/unit/test_watchdog.py` — no event emitted on matching checksum
+- [ ] `tests/unit/test_sbx_identity.py` — Docker Desktop plugin path rejected
+- [ ] `tests/unit/test_sbx_identity.py` — standalone path accepted when probe passes
+- [ ] `tests/unit/test_sbx_identity.py` — unknown path + failing probe rejected
+- [ ] `tests/unit/test_diagnose_isolation.py` — different kernels → status `ok`
+- [ ] `tests/unit/test_diagnose_isolation.py` — equal kernels → status `warn` in JSON and text
+- [ ] `tests/unit/test_diagnose_isolation.py` — sbx_exec failure per sandbox does not abort diagnose
 
-## Phase 7: Safe cleanup on preset delete
+## Phase 7: Documentation
 
-- [x] Load preset metadata before deleting preset JSON
-- [x] After deletion, scan remaining presets for references to the same template tag
-- [x] Only attempt `sbx_template_rm(tag)` when deleted preset had `template_managed=True` and no references remain
-- [x] Never auto-delete non-managed templates
-- [x] Warn on template cleanup failure without blocking preset deletion
-- [x] Reuse same cleanup path for `delete`, `rm`, and `remove`
+- [ ] `CHANGELOG.md` — "Added" entry for H1, H2, H3, H5, H7
+- [ ] `docs/security/security-model.md` — Wrapper Integrity section updated for HMAC rotation + tamper observability
+- [ ] `docs/security/security-model.md` — MicroVM Isolation section updated for kernel-separation check
+- [ ] `docs/security/wrapper-integrity.md` — document the rotation invariant
+- [ ] `docs/observability.md` — `wrapper_tamper` event schema
+- [ ] `docs/observability/alerts.yaml` — new alert rule
+- [ ] New ADR `docs/adr/014-tamper-observability.md`
 
-## Phase 8: Tests
+## Deferred
 
-- [x] Extend `tests/unit/test_models.py` for `template` / `template_managed`
-- [ ] Extend `tests/unit/test_state.py` for preset round-trip with template fields
-- [ ] Extend `tests/unit/test_state.py` for `--last` round-trip with template fields
-- [x] Extend `tests/unit/test_sbx.py` for `sbx_template_rm()`
-- [x] Add `tests/unit/test_preset_command.py` for `cast preset save`
-- [x] Test auto-detect sandbox behavior in `cast preset save`
-- [x] Test save failure when sandbox missing or stopped
-- [x] Test save failure when `sbx_template_save` fails
-- [x] Test delete cleans up managed template only when last reference is removed
-- [x] Test delete leaves non-managed templates alone
-- [x] Add `tests/unit/test_new_template_defaults.py` for preset/last template precedence
-- [x] Test explicit `--template` override over preset/last data
-- [ ] Test built-in template path still calls `ensure_foundry_template()`
-- [ ] Test custom/managed template path skips `ensure_foundry_template()`
-- [ ] Update `tests/unit/test_cli.py` if static help text changes
-
-## Phase 9: Documentation
-
-- [x] Update `foundry_sandbox/commands/help_cmd.py` for `cast preset save`
-- [x] Update `docs/usage/commands.md` with `cast preset save`
-- [x] Document the difference between `cast new --save-as` and `cast preset save`
-- [x] Document managed-template cleanup behavior
-- [x] Update `docs/architecture.md` template guidance
-- [x] Update `docs/security/security-model.md` template/wrapper mitigation guidance
-- [x] Add optional ADR `docs/adr/013-template-preset-integration.md`
+- [ ] H4 — in-VM capability check at wrapper startup (weak on its own; revisit if H1–H3 prove insufficient)
+- [ ] H6 — record sbx binary path/version in `SbxSandboxMetadata` at creation (revisit if mid-session CLI swaps become a real signal)
 
 ---
 
 ## Verification
 
-- [ ] `pytest tests/unit/test_models.py tests/unit/test_state.py tests/unit/test_sbx.py -v` passes
-- [ ] `pytest tests/unit/test_preset_command.py tests/unit/test_new_template_defaults.py tests/unit/test_cli.py -v` passes
-- [ ] `./scripts/ci-local.sh` passes
-- [ ] Manual: create -> mutate runtime -> `cast preset save` -> destroy -> `cast new --preset` -> verify restored state
-- [ ] Manual: delete one of multiple presets sharing a managed template -> template remains
-- [ ] Manual: delete last preset referencing a managed template -> template removal attempted
+- [ ] `pytest tests/unit/test_watchdog.py tests/unit/test_sbx_identity.py tests/unit/test_diagnose_isolation.py -v` passes
+- [ ] `pytest tests/unit/ -q` passes
+- [ ] `./scripts/ci-local.sh` passes (Ruff / Mypy / Shellcheck / Unit tests)
+- [ ] Manual: sandbox wrapper tamper → re-injected within 10 s and HMAC rotated
+- [ ] Manual: `cast diagnose` surfaces the `wrapper_tamper` event with new checksum
+- [ ] Manual: symlinked plugin `sbx` → `cast new` refuses with actionable error
+- [ ] Manual: `cast diagnose --json` reports `isolation.sandboxes[*].status == "ok"` on macOS and Linux

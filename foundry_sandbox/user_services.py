@@ -38,7 +38,7 @@ def load_user_services(path: str | Path | None = None) -> list[dict[str, Any]]:
 
     Returns list of service dicts, or empty list if no config found.
     """
-    from foundry_git_safety.schemas.foundry_yaml import UserServicesConfig  # type: ignore[import-untyped]
+    from foundry_git_safety.schemas.foundry_yaml import UserServicesConfig  # type: ignore[import-not-found,import-untyped,unused-ignore]
 
     if path is None:
         env_path = os.environ.get("FOUNDRY_USER_SERVICES_PATH")

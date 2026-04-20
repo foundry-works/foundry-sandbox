@@ -9,7 +9,6 @@ from click.testing import CliRunner
 
 from foundry_sandbox.commands.preset import (
     _managed_tag_for_preset,
-    _validate_preset_name,
     preset,
 )
 

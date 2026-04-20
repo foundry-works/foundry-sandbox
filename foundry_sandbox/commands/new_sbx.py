@@ -24,7 +24,13 @@ from foundry_sandbox.git_safety import (
 )
 from foundry_sandbox.git_worktree import create_worktree
 from foundry_sandbox.paths import ensure_dir
-from foundry_sandbox.sbx import sbx_check_available, sbx_create, sbx_exec, sbx_rm
+from foundry_sandbox.sbx import (
+    sbx_check_available,
+    sbx_create,
+    sbx_exec,
+    sbx_rm,
+    sbx_template_ls,
+)
 from foundry_sandbox.state import write_sandbox_metadata
 from foundry_sandbox.utils import log_info, log_section, log_warn
 from foundry_sandbox.paths import strip_github_url
@@ -106,6 +112,14 @@ def new_sbx_setup(
                 use_template = None
         else:
             log_info(f"Using template: {use_template}")
+            # Custom/managed templates must exist — no silent fallback.
+            templates = sbx_template_ls()
+            if not any(use_template in t for t in templates):
+                raise SetupError(
+                    f"Template '{use_template}' not found in sbx. "
+                    f"Run `sbx template ls` to see available tags, or recreate "
+                    f"it via `cast preset save` / `sbx template save`."
+                )
     log_info(f"Creating sbx sandbox: {name}")
     try:
         sbx_create(
