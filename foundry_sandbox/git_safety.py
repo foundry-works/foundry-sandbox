@@ -314,6 +314,67 @@ def verify_git_wrapper(sandbox_name: str) -> bool:
         return False
 
 
+def compute_wrapper_checksum() -> str:
+    """Compute the SHA-256 checksum of the local wrapper script.
+
+    Returns:
+        Hex digest string.
+
+    Raises:
+        FileNotFoundError: If the wrapper script does not exist.
+    """
+    import hashlib
+
+    if not _WRAPPER_SCRIPT.exists():
+        raise FileNotFoundError(f"Git wrapper script not found: {_WRAPPER_SCRIPT}")
+    return hashlib.sha256(_WRAPPER_SCRIPT.read_bytes()).hexdigest()
+
+
+def read_wrapper_checksum_from_sandbox(sandbox_name: str) -> str | None:
+    """Read the SHA-256 checksum of the wrapper installed in a sandbox.
+
+    Args:
+        sandbox_name: Sandbox name as known to sbx.
+
+    Returns:
+        Hex digest string, or None if the file is missing or unreadable.
+    """
+    from foundry_sandbox.sbx import sbx_exec
+
+    try:
+        result = sbx_exec(
+            sandbox_name,
+            ["sha256sum", "/usr/local/bin/git"],
+            quiet=True,
+        )
+        if result.returncode != 0:
+            return None
+        parts = result.stdout.strip().split()
+        return parts[0] if parts else None
+    except Exception:
+        return None
+
+
+def verify_wrapper_integrity(
+    sandbox_name: str,
+    *,
+    expected_checksum: str = "",
+) -> tuple[bool, str]:
+    """Verify the git wrapper's integrity via SHA-256 checksum.
+
+    Args:
+        sandbox_name: Sandbox name as known to sbx.
+        expected_checksum: Expected hex digest. If empty, computed from
+            the local wrapper script.
+
+    Returns:
+        Tuple of (is_ok, actual_checksum).
+    """
+    expected = expected_checksum or compute_wrapper_checksum()
+    actual = read_wrapper_checksum_from_sandbox(sandbox_name) or ""
+    return (actual == expected, actual)
+
+
 # ============================================================================
 # Template Management
 # ============================================================================

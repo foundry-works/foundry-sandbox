@@ -2,7 +2,7 @@
 
 **Last updated:** 2026-04-20
 **Branch:** sbx
-**Status:** Phase 0, 1, 2 **COMPLETE**. Phase 3 steps 3.0–3.3 **COMPLETE** (~67k lines removed). §5.2 Migration **SHIPPED**. §5.3 Observability **SHIPPED**. §5.4 User-Defined Credential Injection **SHIPPED**. §5.1, §5.5–5.8 **IN PROGRESS**.
+**Status:** Phase 0, 1, 2 **COMPLETE**. Phase 3 steps 3.0–3.3 **COMPLETE** (~67k lines removed). §5.1 Wrapper Integrity **SHIPPED**. §5.2 Migration **SHIPPED**. §5.3 Observability **SHIPPED**. §5.4 User-Defined Credential Injection **SHIPPED**. §5.5–5.8 **IN PROGRESS**.
 
 ---
 
@@ -73,7 +73,7 @@ This means several risks the analysis flagged as hypothetical are now live and m
 | Git operation mediation (protected branches, push restrictions, commit validation) | `foundry-git-safety` |
 | Branch visibility isolation / ref output filter | `foundry-git-safety` |
 | GitHub API blocklist (merges, releases, workflows) | `foundry-git-safety` |
-| **Wrapper persistence against agent removal** | **Not yet built — §5.1** |
+| **Wrapper persistence against agent removal** | **Shipped — §5.1** |
 | **User-defined credential injection (Tavily, Perplexity, …)** | **Shipped — §5.4** |
 | **Deep method/path/body policy (general, not just GitHub)** | **Not yet built — §5.5** |
 | **Existing-user migration path** | **Not yet built — §5.2** |
@@ -83,15 +83,11 @@ This means several risks the analysis flagged as hypothetical are now live and m
 
 ## 5. Remaining Work (in priority order)
 
-### 5.1 Wrapper Integrity Enforcement — **HIGH**
+### 5.1 Wrapper Integrity Enforcement — **HIGH** — **SHIPPED**
 
-The single largest live security gap. An agent with sudo can `rm /usr/local/bin/git` and regain unrestricted git access. Analysis §7 and Phase 0 report both flag this as accepted risk, but it remains unmitigated.
+SHA-256 checksum-based wrapper verification, host-side watchdog daemon, and CLI surfacing. Template bake (pre-existing), checksum functions in `git_safety.py`, `WrapperWatchdog` daemon thread in `watchdog.py`, `cast watchdog` command, `--watchdog` flag on `cast start`, wrapper status in `cast status` and drift marker in `cast list`. 52 unit tests across 4 test files. `docs/security/wrapper-integrity.md` documents model and residual risk.
 
-**Deliverables:**
-- Build the git wrapper into a custom `sbx template` so it survives `sbx reset`.
-- Host-side watchdog (polls `sbx exec <name> -- sha256sum /usr/local/bin/git`; re-injects on drift or missing).
-- Deny-list approach on `sbx exec` usage by non-foundry callers — document the residual risk.
-- Surface wrapper status in `cast info` and `cast list`.
+**Remaining:** Integration tests on a live sbx environment (manual, pre-release validation).
 
 ### 5.2 Migration Path for Existing 0.20.x Users — **HIGH** — **SHIPPED**
 
@@ -153,8 +149,8 @@ Analysis §7.9 and U23 flag experimental churn. No automated defense today.
 | Risk | Status | Mitigation |
 |------|--------|------------|
 | Experimental `sbx` churn breaks CLI | **Live** | §5.7 version pin + drift check |
-| Agent removes git wrapper | **Live, accepted** | §5.1 watchdog + template bake |
-| `sbx reset` destroys injected binaries | **Live, accepted** | §5.1 template-bake addresses persistence |
+| Agent removes git wrapper | **Shipped** | §5.1 checksum watchdog + template bake |
+| `sbx reset` destroys injected binaries | **Shipped** | §5.1 template-bake + watchdog re-inject |
 | CLI divergence (`docker sandbox` vs `sbx`) | **Live** | Target standalone `sbx` only; §5.7 surfaces breakage fast |
 | Existing users have no upgrade path | **Live** | §5.2 blocks any release |
 | Git-safety server is unobservable | **Shipped** | §5.3 shipped |

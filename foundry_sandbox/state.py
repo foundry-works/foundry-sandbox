@@ -97,6 +97,8 @@ def write_sandbox_metadata(
     copies: list[str] | None = None,
     template: str = "",
     user_services: dict[str, str] | None = None,
+    wrapper_checksum: str = "",
+    wrapper_last_verified: str = "",
 ) -> None:
     """Write sandbox metadata to a JSON file.
 
@@ -117,6 +119,8 @@ def write_sandbox_metadata(
         enable_zai: Whether to enable ZAI.
         copies: List of copy specs.
         template: Template tag used for sandbox creation.
+        wrapper_checksum: SHA-256 hex digest of the expected wrapper.
+        wrapper_last_verified: ISO 8601 UTC timestamp of last verification.
     """
     model = SbxSandboxMetadata(
         sbx_name=sbx_name,
@@ -135,6 +139,8 @@ def write_sandbox_metadata(
         copies=copies or [],
         template=template,
         user_services=user_services or {},
+        wrapper_checksum=wrapper_checksum,
+        wrapper_last_verified=wrapper_last_verified,
     )
     data = model.model_dump()
 

@@ -95,6 +95,20 @@ class TestSbxSandboxMetadata:
         restored = SbxSandboxMetadata.model_validate_json(json_str)
         assert restored == meta
 
+    def test_wrapper_checksum_roundtrip(self):
+        meta = SbxSandboxMetadata(
+            sbx_name="test",
+            agent="claude",
+            repo_url="u",
+            branch="b",
+            wrapper_checksum="abc123def456",
+            wrapper_last_verified="2026-04-20T12:00:00Z",
+        )
+        data = meta.model_dump()
+        restored = SbxSandboxMetadata(**data)
+        assert restored.wrapper_checksum == "abc123def456"
+        assert restored.wrapper_last_verified == "2026-04-20T12:00:00Z"
+
     def test_defaults(self):
         meta = SbxSandboxMetadata(
             sbx_name="test",
@@ -112,6 +126,9 @@ class TestSbxSandboxMetadata:
         assert meta.enable_opencode is False
         assert meta.enable_zai is False
         assert meta.copies == []
+        assert meta.user_services == {}
+        assert meta.wrapper_checksum == ""
+        assert meta.wrapper_last_verified == ""
 
 
 # ---------------------------------------------------------------------------

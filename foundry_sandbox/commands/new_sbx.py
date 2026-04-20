@@ -12,6 +12,7 @@ from pathlib import Path
 from foundry_sandbox.git import ensure_bare_repo
 from foundry_sandbox.git_safety import (
     FOUNDRY_TEMPLATE_TAG,
+    compute_wrapper_checksum,
     ensure_foundry_template,
     generate_hmac_secret,
     git_safety_server_is_running,
@@ -146,6 +147,12 @@ def new_sbx_setup(
     except Exception as exc:
         log_warn(f"Git wrapper injection failed: {exc}")
 
+    wrapper_checksum = ""
+    try:
+        wrapper_checksum = compute_wrapper_checksum()
+    except FileNotFoundError:
+        pass
+
     # ------------------------------------------------------------------
     # 7.5. Inject user service environment overrides
     # ------------------------------------------------------------------
@@ -219,6 +226,7 @@ def new_sbx_setup(
         copies=copies,
         template=use_template or "",
         user_services=user_service_overrides,
+        wrapper_checksum=wrapper_checksum,
     )
 
 

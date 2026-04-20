@@ -45,6 +45,8 @@ def _collect_single_sandbox(name: str) -> dict[str, str] | None:
             sb["git_safety"] = str(metadata.get("git_safety_enabled", False))
             sb["allow_pr"] = str(metadata.get("allow_pr", False))
             sb["copies"] = str(metadata.get("copies", []))
+            sb["wrapper_checksum"] = metadata.get("wrapper_checksum", "")
+            sb["wrapper_last_verified"] = metadata.get("wrapper_last_verified", "")
             return sb
     return None
 
@@ -100,3 +102,10 @@ def status(name: str | None, json_output: bool) -> None:
     if info.get("repo"):
         click.echo(format_kv("Repo", info["repo"]))
     click.echo(format_kv("Git safety", str(info.get("git_safety", False))))
+
+    wrapper_checksum = info.get("wrapper_checksum", "")
+    if wrapper_checksum:
+        click.echo(format_kv("Wrapper checksum", wrapper_checksum[:16] + "..."))
+    wrapper_verified = info.get("wrapper_last_verified", "")
+    if wrapper_verified:
+        click.echo(format_kv("Wrapper last verified", wrapper_verified))

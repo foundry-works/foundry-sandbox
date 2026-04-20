@@ -9,14 +9,17 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from foundry_sandbox.git_safety import (
+    compute_wrapper_checksum,
     generate_hmac_secret,
     git_safety_server_is_running,
     git_safety_server_start,
     git_safety_server_stop,
     inject_git_wrapper,
+    read_wrapper_checksum_from_sandbox,
     register_sandbox_with_git_safety,
     unregister_sandbox_from_git_safety,
     verify_git_wrapper,
+    verify_wrapper_integrity,
     write_hmac_secret_for_server,
     write_hmac_secret_to_worktree,
 )
@@ -284,3 +287,87 @@ class TestVerifyGitWrapper:
     @patch("foundry_sandbox.sbx.sbx_exec", side_effect=Exception("fail"))
     def test_exception(self, mock_exec):
         assert verify_git_wrapper("test") is False
+
+
+# ============================================================================
+# Checksum Functions
+# ============================================================================
+
+
+class TestComputeWrapperChecksum:
+    def test_computes_sha256(self, tmp_path, monkeypatch):
+        script = tmp_path / "git-wrapper-sbx.sh"
+        script.write_text("#!/bin/bash\necho hello\n")
+        monkeypatch.setattr("foundry_sandbox.git_safety._WRAPPER_SCRIPT", script)
+        checksum = compute_wrapper_checksum()
+        assert len(checksum) == 64
+        assert all(c in "0123456789abcdef" for c in checksum)
+
+    def test_deterministic(self, tmp_path, monkeypatch):
+        script = tmp_path / "git-wrapper-sbx.sh"
+        script.write_text("#!/bin/bash\necho hello\n")
+        monkeypatch.setattr("foundry_sandbox.git_safety._WRAPPER_SCRIPT", script)
+        assert compute_wrapper_checksum() == compute_wrapper_checksum()
+
+    def test_raises_file_not_found(self, tmp_path, monkeypatch):
+        missing = tmp_path / "nonexistent.sh"
+        monkeypatch.setattr("foundry_sandbox.git_safety._WRAPPER_SCRIPT", missing)
+        with pytest.raises(FileNotFoundError):
+            compute_wrapper_checksum()
+
+
+class TestReadWrapperChecksumFromSandbox:
+    @patch("foundry_sandbox.sbx.sbx_exec")
+    def test_parses_sha256sum_output(self, mock_exec):
+        mock_exec.return_value = _mock_completed(
+            stdout="abcdef1234567890" * 4 + "  /usr/local/bin/git\n",
+        )
+        result = read_wrapper_checksum_from_sandbox("test")
+        assert result == "abcdef1234567890" * 4
+
+    @patch("foundry_sandbox.sbx.sbx_exec")
+    def test_returns_none_on_failure(self, mock_exec):
+        mock_exec.return_value = _mock_completed(returncode=1)
+        assert read_wrapper_checksum_from_sandbox("test") is None
+
+    @patch("foundry_sandbox.sbx.sbx_exec", side_effect=Exception("fail"))
+    def test_returns_none_on_exception(self, mock_exec):
+        assert read_wrapper_checksum_from_sandbox("test") is None
+
+
+class TestVerifyWrapperIntegrity:
+    @patch("foundry_sandbox.git_safety.read_wrapper_checksum_from_sandbox")
+    @patch("foundry_sandbox.git_safety.compute_wrapper_checksum")
+    def test_match(self, mock_compute, mock_read):
+        mock_compute.return_value = "abc123"
+        mock_read.return_value = "abc123"
+        ok, actual = verify_wrapper_integrity("test")
+        assert ok is True
+        assert actual == "abc123"
+
+    @patch("foundry_sandbox.git_safety.read_wrapper_checksum_from_sandbox")
+    @patch("foundry_sandbox.git_safety.compute_wrapper_checksum")
+    def test_mismatch(self, mock_compute, mock_read):
+        mock_compute.return_value = "abc123"
+        mock_read.return_value = "def456"
+        ok, actual = verify_wrapper_integrity("test")
+        assert ok is False
+        assert actual == "def456"
+
+    @patch("foundry_sandbox.git_safety.read_wrapper_checksum_from_sandbox")
+    def test_with_explicit_expected(self, mock_read):
+        mock_read.return_value = "explicit_checksum"
+        ok, actual = verify_wrapper_integrity(
+            "test", expected_checksum="explicit_checksum",
+        )
+        assert ok is True
+        assert actual == "explicit_checksum"
+
+    @patch("foundry_sandbox.git_safety.read_wrapper_checksum_from_sandbox")
+    @patch("foundry_sandbox.git_safety.compute_wrapper_checksum")
+    def test_missing_in_sandbox(self, mock_compute, mock_read):
+        mock_compute.return_value = "abc"
+        mock_read.return_value = None
+        ok, actual = verify_wrapper_integrity("test")
+        assert ok is False
+        assert actual == ""

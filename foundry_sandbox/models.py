@@ -61,6 +61,12 @@ class SbxSandboxMetadata(BaseModel):
     user_services: dict[str, str] = Field(default_factory=dict)
     """Maps env var name to proxy URL for user-defined services."""
 
+    wrapper_checksum: str = ""
+    """SHA-256 hex digest of the expected git wrapper script."""
+
+    wrapper_last_verified: str = ""
+    """ISO 8601 UTC timestamp of last successful integrity verification."""
+
 
 class CastNewPreset(BaseModel):
     """Structured representation of cast-new preset arguments."""

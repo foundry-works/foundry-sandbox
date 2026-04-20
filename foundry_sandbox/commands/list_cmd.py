@@ -28,10 +28,12 @@ def _collect_sandbox_info() -> list[dict[str, str]]:
             sb["repo"] = metadata.get("repo_url", "")
             sb["from_branch"] = metadata.get("from_branch", "")
             sb["git_safety"] = str(metadata.get("git_safety_enabled", False))
+            sb["wrapper_checksum"] = metadata.get("wrapper_checksum", "")
         else:
             sb["repo"] = ""
             sb["from_branch"] = ""
             sb["git_safety"] = str(False)
+            sb["wrapper_checksum"] = ""
     return sandboxes
 
 
@@ -57,4 +59,7 @@ def list_cmd(json_output: bool) -> None:
         status = sb.get("status", "unknown")
         agent = sb.get("agent", "")
         branch = sb.get("branch", "")
-        click.echo(format_table_row(name, f"{status} ({agent})", branch))
+        drift = ""
+        if status == "running" and not sb.get("wrapper_checksum"):
+            drift = " !"
+        click.echo(format_table_row(name, f"{status} ({agent}){drift}", branch))

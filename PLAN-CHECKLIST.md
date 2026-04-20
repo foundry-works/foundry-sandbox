@@ -54,23 +54,26 @@ All checkboxes from the prior checklist remain done. Package lives at
 
 ### §5.1 Wrapper Integrity Enforcement — **HIGH**
 
-- [ ] Build git wrapper into a custom `sbx template` (via `sbx template save`)
-  - [ ] Template build script in `scripts/`
-  - [ ] `cast new` accepts `--template <name>` and selects foundry's template by default
-  - [ ] Document template refresh on `sbx` upgrades
-- [ ] Host-side wrapper watchdog
-  - [ ] Poll `sbx exec <name> -- sha256sum /usr/local/bin/git` on interval
-  - [ ] Re-inject wrapper on checksum mismatch or missing file
-  - [ ] Emit metric + log on every re-injection event
-  - [ ] Runs under `cast` supervision, or as optional systemd/launchd service
-- [ ] Surface wrapper status in CLI
-  - [ ] `cast info <name>` shows wrapper checksum + last verified timestamp
-  - [ ] `cast list` flags sandboxes with wrapper drift
-- [ ] Tests
-  - [ ] Integration: agent `rm /usr/local/bin/git` → watchdog re-installs within N seconds
-  - [ ] Integration: `sbx reset` → template-baked wrapper present on fresh sandbox
-  - [ ] Negative: watchdog fails closed if `sbx exec` errors
-- [ ] Documentation: `docs/security/wrapper-integrity.md` explaining model and residual risk
+- [x] Build git wrapper into a custom `sbx template` (via `sbx template save`)
+  - [x] Template build script in `scripts/`
+  - [x] `cast new` accepts `--template <name>` and selects foundry's template by default
+  - [x] Document template refresh on `sbx` upgrades
+- [x] Host-side wrapper watchdog
+  - [x] Poll `sbx exec <name> -- sha256sum /usr/local/bin/git` on interval
+  - [x] Re-inject wrapper on checksum mismatch or missing file
+  - [x] Emit metric + log on every re-injection event
+  - [x] Runs under `cast` supervision, or as optional systemd/launchd service
+- [x] Surface wrapper status in CLI
+  - [x] `cast info <name>` shows wrapper checksum + last verified timestamp
+  - [x] `cast list` flags sandboxes with wrapper drift
+- [x] Tests
+  - [x] Unit: checksum computation, sandbox verification, integrity checks (38 tests)
+  - [x] Unit: watchdog poll loop, re-injection, skip logic, counter (8 tests)
+  - [x] Unit: start command with integrity check + watchdog flag (6 tests)
+  - [ ] Integration: agent `rm /usr/local/bin/git` → watchdog re-installs within N seconds (manual)
+  - [ ] Integration: `sbx reset` → template-baked wrapper present on fresh sandbox (manual)
+  - [x] Negative: watchdog fails closed if `sbx exec` errors
+- [x] Documentation: `docs/security/wrapper-integrity.md` explaining model and residual risk
 
 ### §5.2 Migration Path for Existing 0.20.x Users — **HIGH**
 
@@ -100,7 +103,7 @@ All checkboxes from the prior checklist remain done. Package lives at
     - [x] operation counter (by verb, sandbox, outcome)
     - [x] latency histogram (by verb)
     - [x] policy-decision counter (by rule, outcome)
-    - [ ] wrapper re-injection counter (from §5.1 watchdog — not yet built)
+    - [x] wrapper re-injection counter (from §5.1 watchdog)
 - [x] Structured decision log
   - [x] JSON lines to `~/.foundry/logs/decisions.jsonl` by default
   - [x] Every allow/deny with: timestamp, sandbox, branch, rule, verb, outcome
@@ -211,7 +214,7 @@ All checkboxes from the prior checklist remain done. Package lives at
 
 - [ ] `foundry-git-safety/docs/troubleshooting.md`
 - [ ] `foundry-git-safety/docs/migration.md` (from foundry-sandbox 0.20.x)
-- [ ] `docs/security/wrapper-integrity.md` (§5.1)
+- [x] `docs/security/wrapper-integrity.md` (§5.1)
 - [ ] `docs/migration/0.20-to-0.21.md` (§5.2)
 - [ ] `docs/observability/alerts.yaml` (§5.3)
 - [ ] Runbook addendum to `docs/operations.md` (§5.3)

@@ -52,6 +52,7 @@ _LAZY_COMMANDS: dict[str, tuple[str, str]] = {
     "start": ("foundry_sandbox.commands.start", "start"),
     "status": ("foundry_sandbox.commands.status", "status"),
     "stop": ("foundry_sandbox.commands.stop", "stop"),
+    "watchdog": ("foundry_sandbox.commands.watchdog_cmd", "watchdog_cmd"),
 }
 
 
