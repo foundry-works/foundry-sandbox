@@ -38,7 +38,8 @@ class TestDiagnoseCommand:
 
         runner = CliRunner()
         with patch("foundry_sandbox.commands.diagnose._collect_sbx_diagnose") as mock_sbx, \
-             patch("foundry_sandbox.commands.diagnose._collect_git_safety_health") as mock_health:
+             patch("foundry_sandbox.commands.diagnose._collect_git_safety_health") as mock_health, \
+             patch("foundry_sandbox.commands.diagnose._collect_isolation", return_value={"host_kernel": "", "sandboxes": []}):
             mock_sbx.return_value = {"output": "sbx ok"}
             mock_health.return_value = {"reachable": False, "error": "not running"}
 
@@ -56,7 +57,8 @@ class TestDiagnoseCommand:
         runner = CliRunner()
         with patch("foundry_sandbox.commands.diagnose._collect_sbx_diagnose") as mock_sbx, \
              patch("foundry_sandbox.commands.diagnose._collect_git_safety_health") as mock_health, \
-             patch("foundry_sandbox.commands.diagnose._collect_git_safety_readiness") as mock_ready:
+             patch("foundry_sandbox.commands.diagnose._collect_git_safety_readiness") as mock_ready, \
+             patch("foundry_sandbox.commands.diagnose._collect_isolation", return_value={"host_kernel": "", "sandboxes": []}):
             mock_sbx.return_value = {"output": "sbx ok"}
             mock_health.return_value = {"status": "ok", "config_valid": True, "uptime_seconds": 42}
             mock_ready.return_value = {"ready": True, "checks": {"workspace": {"ok": True, "detail": "ok"}}}
@@ -73,7 +75,8 @@ class TestDiagnoseCommand:
         runner = CliRunner()
         with patch("foundry_sandbox.commands.diagnose._collect_sbx_diagnose") as mock_sbx, \
              patch("foundry_sandbox.commands.diagnose._collect_git_safety_health") as mock_health, \
-             patch("foundry_sandbox.commands.diagnose._collect_git_safety_readiness") as mock_ready:
+             patch("foundry_sandbox.commands.diagnose._collect_git_safety_readiness") as mock_ready, \
+             patch("foundry_sandbox.commands.diagnose._collect_isolation", return_value={"host_kernel": "", "sandboxes": []}):
             mock_sbx.return_value = {"error": "sbx not found"}
             mock_health.return_value = {"reachable": False, "error": "Connection refused"}
             mock_ready.return_value = {"ready": False, "error": "Connection refused"}
