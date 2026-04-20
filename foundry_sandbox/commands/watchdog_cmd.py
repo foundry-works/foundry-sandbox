@@ -11,9 +11,9 @@ import click
 @click.command("watchdog")
 @click.option(
     "--interval",
-    default=30.0,
+    default=10.0,
     show_default=True,
-    help="Poll interval in seconds",
+    help="Poll interval in seconds (default tightened from 30s to reduce tamper window)",
 )
 def watchdog_cmd(interval: float) -> None:
     """Run the wrapper integrity watchdog."""

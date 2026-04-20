@@ -106,6 +106,62 @@ def _collect_decision_log(n: int = 50) -> dict[str, Any]:
     return {"count": len(entries), "entries": entries}
 
 
+def _collect_tamper_events(n: int = 20) -> list[dict[str, Any]]:
+    """Collect recent wrapper_tamper events from the decision log."""
+    log_dir = os.environ.get(
+        "GIT_SAFETY_DECISION_LOG_DIR",
+        os.path.expanduser("~/.foundry/logs"),
+    )
+    log_path = Path(log_dir) / "decisions.jsonl"
+    events: list[dict[str, Any]] = []
+    if not log_path.exists():
+        return events
+    try:
+        with open(log_path) as f:
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    entry = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                if entry.get("verb") == "wrapper_tamper":
+                    events.append(entry)
+    except OSError:
+        pass
+    return events[-n:]
+
+
+def _collect_isolation() -> dict[str, Any]:
+    """Check kernel separation between host and running sandboxes."""
+    from foundry_sandbox.sbx import sbx_exec, sbx_is_running, sbx_ls
+
+    # Host kernel
+    try:
+        host_result = subprocess.run(
+            ["uname", "-r"], capture_output=True, text=True, timeout=5,
+        )
+        host_kernel = host_result.stdout.strip() if host_result.returncode == 0 else ""
+    except (OSError, subprocess.TimeoutExpired):
+        host_kernel = ""
+
+    sandboxes: list[dict[str, str]] = []
+    for sb in sbx_ls():
+        name = sb.get("name", "")
+        if not name or not sbx_is_running(name):
+            continue
+        try:
+            result = sbx_exec(name, ["uname", "-r"], quiet=True)
+            kernel = result.stdout.strip() if result.returncode == 0 else ""
+        except Exception:
+            kernel = ""
+        status = "ok" if kernel and kernel != host_kernel else "warn"
+        sandboxes.append({"name": name, "kernel": kernel, "status": status})
+
+    return {"host_kernel": host_kernel, "sandboxes": sandboxes}
+
+
 @click.command()
 @click.option("--json", "json_output", is_flag=True, help="Output as JSON")
 def diagnose(json_output: bool) -> None:
@@ -118,6 +174,8 @@ def diagnose(json_output: bool) -> None:
             "readiness": _collect_git_safety_readiness(),
         },
         "decision_log": _collect_decision_log(),
+        "tamper_events": _collect_tamper_events(),
+        "isolation": _collect_isolation(),
     }
 
     if json_output:
@@ -170,3 +228,28 @@ def diagnose(json_output: bool) -> None:
         sandbox = entry.get("sandbox", "?")
         rule = entry.get("rule", "")
         click.echo(f"  [{ts}] {outcome} {verb} sandbox={sandbox} rule={rule}")
+
+    click.echo("\n=== Wrapper Tamper Events ===")
+    tamper_events = data["tamper_events"]
+    if not tamper_events:
+        click.echo("  No wrapper tamper events recorded.")
+    else:
+        click.echo(f"  Recent events: {len(tamper_events)}")
+        for evt in tamper_events[-10:]:
+            ts = evt.get("timestamp", "?")
+            sb = evt.get("sandbox", "?")
+            action = evt.get("outcome", "?")
+            expected = str(evt.get("expected_sha256", ""))[:12]
+            actual = str(evt.get("actual_sha256", ""))[:12]
+            click.echo(
+                f"  [{ts}] {sb}: {action} "
+                f"(expected={expected}... actual={actual}...)"
+            )
+
+    click.echo("\n=== Kernel Isolation ===")
+    isolation = data["isolation"]
+    host_k = isolation["host_kernel"]
+    click.echo(f"  Host kernel: {host_k or 'unknown'}")
+    for sb in isolation["sandboxes"]:
+        marker = sb["status"].upper()
+        click.echo(f"  {sb['name']}: [{marker}] kernel={sb['kernel'] or 'unreachable'}")

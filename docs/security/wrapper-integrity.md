@@ -32,7 +32,7 @@ The git wrapper script (`/usr/local/bin/git` inside each sandbox) mediates all g
 
 ### Continuous Monitoring (`cast watchdog`)
 
-A daemon thread polls all running sandboxes at a configurable interval (default 30s):
+A daemon thread polls all running sandboxes at a configurable interval (default 10s):
 
 1. Computes the expected checksum once per cycle.
 2. For each running sandbox with `git_safety_enabled`, verifies the installed wrapper.
@@ -59,7 +59,7 @@ cast watchdog --interval 60
 
 The watchdog closes the window between tampering and detection, but does not eliminate it:
 
-- **Race window:** Up to one poll interval (default 30s) may pass before re-injection.
+- **Race window:** Up to one poll interval (default 10s) may pass before re-injection.
 - **`sbx exec` access:** A sophisticated agent could also interfere with `sbx exec` calls from the host. This is documented as an accepted risk in the security model.
 - **Root inside VM:** Full root access inside the microVM cannot be restricted by foundry — this is a property of the `sbx` runtime. The wrapper is a best-effort mediation layer, not a mandatory access control.
 

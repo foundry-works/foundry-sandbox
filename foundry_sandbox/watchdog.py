@@ -20,7 +20,7 @@ class WrapperWatchdog:
     def __init__(
         self,
         *,
-        poll_interval: float = 30.0,
+        poll_interval: float = 10.0,
     ) -> None:
         self._poll_interval = poll_interval
         self._stop_event = threading.Event()
@@ -82,14 +82,16 @@ class WrapperWatchdog:
                 continue
 
             try:
-                is_ok, _actual = verify_wrapper_integrity(
+                is_ok, actual_sha = verify_wrapper_integrity(
                     name, expected_checksum=expected_checksum,
                 )
             except Exception:
                 continue
 
             if not is_ok:
-                self._reinject_wrapper(name, metadata, expected_checksum)
+                self._reinject_wrapper(
+                    name, metadata, expected_checksum, actual_sha,
+                )
             else:
                 now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
                 try:
@@ -98,15 +100,46 @@ class WrapperWatchdog:
                     pass
 
     def _reinject_wrapper(
-        self, name: str, metadata: dict[str, object], expected_checksum: str,
+        self,
+        name: str,
+        metadata: dict[str, object],
+        expected_checksum: str,
+        actual_checksum: str,
     ) -> None:
-        from foundry_sandbox.git_safety import inject_git_wrapper
+        from foundry_sandbox.git_safety import (
+            emit_wrapper_tamper_event,
+            generate_hmac_secret,
+            inject_git_wrapper,
+            write_hmac_secret_for_server,
+            write_hmac_secret_to_worktree,
+        )
+        from foundry_sandbox.paths import path_worktree
         from foundry_sandbox.state import patch_sandbox_metadata
 
         global _reinjection_count
 
         sandbox_id = str(metadata.get("sbx_name", name))
         workspace_dir = str(metadata.get("workspace_dir", "/workspace"))
+
+        # Rotate HMAC before re-injection so any captured old secret is dead.
+        try:
+            new_secret = generate_hmac_secret()
+            worktree_path = path_worktree(name)
+            write_hmac_secret_to_worktree(worktree_path, new_secret)
+            write_hmac_secret_for_server(sandbox_id, new_secret)
+        except Exception as exc:
+            log_warn(
+                f"Watchdog: HMAC rotation failed for '{name}', "
+                f"skipping re-injection: {exc}"
+            )
+            emit_wrapper_tamper_event(
+                sandbox=name,
+                expected_sha256=expected_checksum,
+                actual_sha256=actual_checksum,
+                action="reinject_failed",
+            )
+            return
+
         try:
             inject_git_wrapper(
                 name, sandbox_id=sandbox_id, workspace_dir=workspace_dir,
@@ -122,8 +155,20 @@ class WrapperWatchdog:
                 f"Watchdog: re-injected git wrapper in '{name}' "
                 f"(checksum={expected_checksum[:12]}...)"
             )
+            emit_wrapper_tamper_event(
+                sandbox=name,
+                expected_sha256=expected_checksum,
+                actual_sha256=actual_checksum,
+                action="reinjected",
+            )
         except Exception as exc:
             log_debug(f"Watchdog: re-injection failed for '{name}': {exc}")
+            emit_wrapper_tamper_event(
+                sandbox=name,
+                expected_sha256=expected_checksum,
+                actual_sha256=actual_checksum,
+                action="reinject_failed",
+            )
 
 
 def get_reinjection_count() -> int:
@@ -134,7 +179,7 @@ def get_reinjection_count() -> int:
 _singleton: WrapperWatchdog | None = None
 
 
-def start_watchdog(*, poll_interval: float = 30.0) -> WrapperWatchdog:
+def start_watchdog(*, poll_interval: float = 10.0) -> WrapperWatchdog:
     """Start the global watchdog singleton."""
     global _singleton
     if _singleton is None:

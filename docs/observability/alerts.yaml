@@ -57,3 +57,14 @@ groups:
         annotations:
           summary: "Git safety server config is invalid"
           runbook: "docs/operations.md#config-invalid"
+
+      - alert: WrapperTamperDetected
+        expr: |
+          increase(git_safety_operations_total{verb="wrapper_tamper"}[5m]) > 0
+        for: 0m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Git wrapper tampering detected"
+          description: "A wrapper_tamper event was emitted — wrapper checksum mismatch detected in at least one sandbox."
+          runbook: "docs/operations.md#wrapper-tamper-detected"

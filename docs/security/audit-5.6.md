@@ -52,9 +52,9 @@
 
 - The microVM boundary prevents sandbox-side wrapper replacement without root inside the VM
 - If the agent (running as root inside the VM) replaces `/usr/local/bin/git`:
-  - The watchdog daemon (host-side) detects the change within ~30 seconds and re-injects
+  - The watchdog daemon (host-side) detects the change within ~10 seconds and re-injects
   - The wrapper is baked into the sbx template, surviving `sbx reset`
-- **Accepted risk:** 30-second window where a malicious wrapper could bypass git safety
+- **Accepted risk:** ~10-second window where a malicious wrapper could bypass git safety
 
 ### `sbx exec -u root` Access
 
@@ -100,7 +100,7 @@
 |--------|---------|------|---------------|
 | **Credential leak via HTTP responses** | Responses never contain HMAC secrets or API keys; metrics/health endpoints verified | `test_credential_leak_audit.py` | None found |
 | **Credential leak via logs** | Decision log entries exclude all secrets; audit log truncates output | `test_decision_log_contains_no_secrets` | None found |
-| **Wrapper replacement** | Template baking + watchdog polling every 30s | `test_wrapper_integrity` in watchdog tests | 30s window before re-injection |
+| **Wrapper replacement** | Template baking + watchdog polling every 10s | `test_wrapper_integrity` in watchdog tests | ~10s window before re-injection |
 | **Replay attack** | Nonce uniqueness + clock window + HMAC signature | `test_hmac_rotation.py` replay tests | None found |
 | **Man-in-the-middle** | sbx network policy + HTTP-only inside VM | Red-team network tests | None found |
 | **Privilege escalation via args** | Deny-by-default command allowlist; shell metacharacters blocked | `test_privilege_escalation.py` | None found |

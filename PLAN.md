@@ -23,7 +23,7 @@ The recommended hardening subset is **H1, H2, H3, H5, H7** (see Section 5 for de
 
 ### Wrapper integrity (U20)
 
-- `foundry_sandbox/watchdog.py` runs a daemon thread that polls every **30 s** and re-injects the git wrapper on checksum mismatch (`WrapperWatchdog._poll_all_sandboxes`).
+- `foundry_sandbox/watchdog.py` runs a daemon thread that polls every **10 s** and re-injects the git wrapper on checksum mismatch (`WrapperWatchdog._poll_all_sandboxes`).
 - HMAC secret is generated **once** at sandbox creation (`commands/new_sbx.py:131-133`) and written to `{workspace}/.foundry/hmac-secret` + the foundry-git-safety `SecretStore`. It is never rotated.
 - Re-injection emits a single `log_warn` line (`watchdog.py:121`). Nothing enters the decision log, so `cast diagnose` and `docs/observability/alerts.yaml` do not see tamper events.
 

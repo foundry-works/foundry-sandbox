@@ -470,3 +470,38 @@ def git_safety_readiness(port: int = 8083) -> dict[str, object] | None:
             return data
     except Exception as exc:
         return {"ready": False, "error": str(exc)}
+
+
+# ============================================================================
+# Tamper Event Emission
+# ============================================================================
+
+
+def emit_wrapper_tamper_event(
+    *,
+    sandbox: str,
+    expected_sha256: str,
+    actual_sha256: str,
+    action: str,
+) -> None:
+    """Write a wrapper_tamper event to the decision log.
+
+    Args:
+        sandbox: Sandbox name.
+        expected_sha256: Expected wrapper checksum.
+        actual_sha256: Checksum found in the sandbox.
+        action: "reinjected" or "reinject_failed".
+    """
+    try:
+        from foundry_git_safety.decision_log import write_decision
+
+        write_decision(
+            sandbox=sandbox,
+            rule="wrapper_integrity",
+            verb="wrapper_tamper",
+            outcome=action,
+            expected_sha256=expected_sha256,
+            actual_sha256=actual_sha256,
+        )
+    except Exception:
+        pass

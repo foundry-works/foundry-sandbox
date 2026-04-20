@@ -9,51 +9,51 @@ Legend: `[x]` done, `[ ]` todo
 
 ## Phase 1: Shrink the tamper window (H1)
 
-- [ ] Change `WrapperWatchdog.__init__` default `poll_interval` from `30.0` to `10.0` in `foundry_sandbox/watchdog.py`
-- [ ] Update `start_watchdog()` default `poll_interval` to match
-- [ ] Update `--interval` default and help text in `foundry_sandbox/commands/watchdog_cmd.py`
-- [ ] Update any docs referencing the 30 s interval
+- [x] Change `WrapperWatchdog.__init__` default `poll_interval` from `30.0` to `10.0` in `foundry_sandbox/watchdog.py`
+- [x] Update `start_watchdog()` default `poll_interval` to match
+- [x] Update `--interval` default and help text in `foundry_sandbox/commands/watchdog_cmd.py`
+- [x] Update any docs referencing the 30 s interval
 
 ## Phase 2: Rotate HMAC on re-injection (H2)
 
-- [ ] In `WrapperWatchdog._reinject_wrapper`, generate a fresh HMAC before re-injection
-- [ ] Write the new HMAC to the worktree via `write_hmac_secret_to_worktree`
-- [ ] Write the new HMAC to the server via `write_hmac_secret_for_server`
-- [ ] Resolve worktree path from sandbox metadata (bare repo + branch)
-- [ ] Confirm `write_hmac_secret_for_server` uses replace semantics (no append)
-- [ ] Fail-closed: if HMAC write fails, skip re-injection rather than leaving worktree/server desynced
+- [x] In `WrapperWatchdog._reinject_wrapper`, generate a fresh HMAC before re-injection
+- [x] Write the new HMAC to the worktree via `write_hmac_secret_to_worktree`
+- [x] Write the new HMAC to the server via `write_hmac_secret_for_server`
+- [x] Resolve worktree path from sandbox metadata (bare repo + branch)
+- [x] Confirm `write_hmac_secret_for_server` uses replace semantics (no append)
+- [x] Fail-closed: if HMAC write fails, skip re-injection rather than leaving worktree/server desynced
 
 ## Phase 3: Tamper event observability (H3)
 
-- [ ] Define `wrapper_tamper` event schema (sandbox, expected_sha256, actual_sha256, action, timestamp)
-- [ ] Add a decision-log write helper (or HTTP endpoint) in `foundry-git-safety/foundry_git_safety/decision_log.py`
-- [ ] Emit event from `WrapperWatchdog._reinject_wrapper` on success path
-- [ ] Emit event with `action="reinject_failed"` on failure path
-- [ ] Suppress event when checksum matches (no-op polls stay silent)
-- [ ] Surface recent events in `cast diagnose` text output
-- [ ] Surface recent events in `cast diagnose --json`
-- [ ] Add alert rule in `docs/observability/alerts.yaml` (rate > 0 over 5 min)
-- [ ] Document the event schema in `docs/observability.md`
+- [x] Define `wrapper_tamper` event schema (sandbox, expected_sha256, actual_sha256, action, timestamp)
+- [x] Add a decision-log write helper (or HTTP endpoint) in `foundry-git-safety/foundry_git_safety/decision_log.py`
+- [x] Emit event from `WrapperWatchdog._reinject_wrapper` on success path
+- [x] Emit event with `action="reinject_failed"` on failure path
+- [x] Suppress event when checksum matches (no-op polls stay silent)
+- [x] Surface recent events in `cast diagnose` text output
+- [x] Surface recent events in `cast diagnose --json`
+- [x] Add alert rule in `docs/observability/alerts.yaml` (rate > 0 over 5 min)
+- [x] Document the event schema in `docs/observability.md`
 
 ## Phase 4: sbx CLI identity probe (H5)
 
-- [ ] In `sbx_check_available()`, resolve the realpath of the `sbx` binary
-- [ ] Reject paths under `~/.docker/cli-plugins/`
-- [ ] Reject paths under `/Applications/Docker.app/Contents/Resources/cli-plugins/`
-- [ ] Reject Windows Docker Desktop plugin paths
-- [ ] Run a standalone-only probe (e.g. `sbx template ls --help`); require exit 0
-- [ ] Print actionable error pointing at `brew install docker/tap/sbx` / `winget install Docker.sbx`
-- [ ] `SystemExit(1)` on probe failure
+- [x] In `sbx_check_available()`, resolve the realpath of the `sbx` binary
+- [x] Reject paths under `~/.docker/cli-plugins/`
+- [x] Reject paths under `/Applications/Docker.app/Contents/Resources/cli-plugins/`
+- [x] Reject Windows Docker Desktop plugin paths
+- [x] Run a standalone-only probe (e.g. `sbx template ls --help`); require exit 0
+- [x] Print actionable error pointing at `brew install docker/tap/sbx` / `winget install Docker.sbx`
+- [x] `SystemExit(1)` on probe failure
 
 ## Phase 5: Kernel-separation assertion (H7)
 
-- [ ] Capture host kernel via `uname -r` in `cast diagnose`
-- [ ] For each running sandbox, run `sbx_exec(name, ["uname", "-r"])` with a short timeout
-- [ ] Per-sandbox status: `ok` if kernels differ, `warn` if equal
-- [ ] Include `isolation` section in `cast diagnose --json`
-- [ ] Include one-line per-sandbox summary in text output
-- [ ] Per-sandbox failure (e.g. sandbox stopped) does not fail the overall diagnose run
-- [ ] Document the assertion in `docs/security/security-model.md`
+- [x] Capture host kernel via `uname -r` in `cast diagnose`
+- [x] For each running sandbox, run `sbx_exec(name, ["uname", "-r"])` with a short timeout
+- [x] Per-sandbox status: `ok` if kernels differ, `warn` if equal
+- [x] Include `isolation` section in `cast diagnose --json`
+- [x] Include one-line per-sandbox summary in text output
+- [x] Per-sandbox failure (e.g. sandbox stopped) does not fail the overall diagnose run
+- [x] Document the assertion in `docs/security/security-model.md`
 
 ## Phase 6: Tests
 

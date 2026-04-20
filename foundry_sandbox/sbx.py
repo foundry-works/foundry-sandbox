@@ -10,6 +10,7 @@ No Click or Pydantic imports at module level.
 from __future__ import annotations
 
 import json
+import os
 import shutil
 import subprocess
 import sys
@@ -18,6 +19,24 @@ from typing import Any, cast
 
 from foundry_sandbox.constants import get_sandbox_verbose
 from foundry_sandbox.utils import log_warn
+
+
+# ============================================================================
+# Docker Desktop plugin detection
+# ============================================================================
+
+_DOCKER_PLUGIN_DIR_PATTERNS: list[str] = [
+    os.path.expanduser("~/.docker/cli-plugins"),
+    "/Applications/Docker.app/Contents/Resources/cli-plugins",
+    "C:\\Program Files\\Docker\\Docker\\resources\\cli-plugins",
+]
+
+_STANDALONE_INSTALL_HINT = (
+    "Install standalone sbx:\n"
+    "  macOS:  brew install docker/tap/sbx\n"
+    "  Windows: winget install Docker.sbx\n"
+    "  Linux:  Download from https://github.com/docker/sbx-releases"
+)
 
 
 # ============================================================================
@@ -520,11 +539,42 @@ def sbx_is_installed() -> bool:
     return find_sbx_binary() is not None
 
 
+def _resolve_sbx_binary() -> str | None:
+    """Resolve the real path of the sbx binary."""
+    raw = shutil.which("sbx")
+    if raw is None:
+        return None
+    return os.path.realpath(raw)
+
+
+def _is_docker_plugin_path(binary_path: str) -> bool:
+    """Check if the binary path is inside a Docker Desktop plugin directory."""
+    normalized = os.path.normpath(binary_path).replace("\\", "/")
+    for pattern in _DOCKER_PLUGIN_DIR_PATTERNS:
+        prefix = os.path.normpath(pattern).replace("\\", "/") + "/"
+        if normalized.startswith(prefix):
+            return True
+    return False
+
+
+def _run_standalone_probe() -> bool:
+    """Run a low-cost standalone-only probe (sbx template ls --help)."""
+    try:
+        result = subprocess.run(
+            ["sbx", "template", "ls", "--help"],
+            capture_output=True, text=True, timeout=5,
+        )
+        return result.returncode == 0
+    except (OSError, subprocess.TimeoutExpired):
+        return False
+
+
 def sbx_check_available() -> None:
-    """Verify sbx is installed and at a supported version.
+    """Verify sbx is installed, at a supported version, and is the standalone CLI.
 
     Raises:
-        SystemExit: If sbx is not installed or version is out of range.
+        SystemExit: If sbx is not installed, version is out of range,
+            or the binary is Docker Desktop's plugin shim.
     """
     if not sbx_is_installed():
         print(
@@ -536,3 +586,22 @@ def sbx_check_available() -> None:
         )
         raise SystemExit(1)
     check_sbx_version()
+
+    # Reject Docker Desktop's docker sandbox plugin shim.
+    binary_path = _resolve_sbx_binary()
+    if binary_path and _is_docker_plugin_path(binary_path):
+        print(
+            "Error: Detected Docker Desktop's 'docker sandbox' plugin instead "
+            f"of standalone sbx (binary at {binary_path}). {_STANDALONE_INSTALL_HINT}",
+            file=sys.stderr,
+        )
+        raise SystemExit(1)
+
+    # Probe: verify the binary actually behaves like the standalone CLI.
+    if not _run_standalone_probe():
+        print(
+            "Error: sbx binary failed standalone probe (`sbx template ls --help`). "
+            f"This may be Docker Desktop's 'docker sandbox' plugin. {_STANDALONE_INSTALL_HINT}",
+            file=sys.stderr,
+        )
+        raise SystemExit(1)

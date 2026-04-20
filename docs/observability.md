@@ -84,6 +84,7 @@ Each request is assigned a `request_id` for end-to-end tracing. The ID is genera
 | Rate limit low | `git_safety_rate_limit_remaining < 10` | Warning | Few tokens remaining for 2m |
 | High latency | `p95 git operation duration > 2s` | Warning | Sustained for 5m |
 | HMAC auth failures | `rate(git_safety_requests_total{decision="error"}[5m]) > 5` | Critical | Auth errors sustained for 5m |
+| Wrapper tamper detected | any `wrapper_tamper` event in decision log | Critical | Tamper event within 5 min |
 
 For debugging procedures, see [Operations: Troubleshooting](operations.md#troubleshooting).
 
@@ -139,6 +140,44 @@ The git wrapper script inside sandboxes logs to stderr. View via:
 
 ```bash
 sbx exec <name> -- bash -c 'git --version 2>&1'
+```
+
+## Wrapper Tamper Events
+
+The watchdog emits a structured event to the decision log on every wrapper checksum mismatch:
+
+```json
+{
+  "timestamp": "2026-04-20T12:34:56.789000+00:00",
+  "sandbox": "repo-feature-branch",
+  "rule": "wrapper_integrity",
+  "verb": "wrapper_tamper",
+  "outcome": "reinjected",
+  "expected_sha256": "abc123...",
+  "actual_sha256": "def456..."
+}
+```
+
+### Event Fields
+
+| Field | Description |
+|-------|-------------|
+| `timestamp` | ISO 8601 UTC timestamp |
+| `sandbox` | Sandbox name |
+| `rule` | Always `wrapper_integrity` |
+| `verb` | Always `wrapper_tamper` |
+| `outcome` | `reinjected` (success) or `reinject_failed` (failure) |
+| `expected_sha256` | Expected wrapper checksum |
+| `actual_sha256` | Checksum found in the sandbox |
+
+### Querying
+
+```bash
+# Recent tamper events from the decision log
+cast diagnose
+
+# Filter the JSONL log directly
+grep 'wrapper_tamper' ~/.foundry/logs/decisions.jsonl | jq .
 ```
 
 ## See Also

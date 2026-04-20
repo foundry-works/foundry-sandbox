@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 from pathlib import Path
 from unittest.mock import MagicMock, patch
@@ -15,6 +16,9 @@ from foundry_sandbox.sbx import (
     TIMEOUT_SBX_QUERY,
     TIMEOUT_SBX_SECRET,
     VALID_NETWORK_PROFILES,
+    _is_docker_plugin_path,
+    _resolve_sbx_binary,
+    _run_standalone_probe,
     check_sbx_version,
     find_sbx_binary,
     get_sbx_version,
@@ -80,8 +84,10 @@ class TestSbxIsInstalled:
 class TestSbxCheckAvailable:
     def test_available(self):
         with patch("foundry_sandbox.sbx.shutil.which", return_value="/usr/local/bin/sbx"):
-            with patch("foundry_sandbox.sbx.check_sbx_version"):
-                sbx_check_available()  # should not raise
+            with patch("foundry_sandbox.sbx.os.path.realpath", return_value="/usr/local/bin/sbx"):
+                with patch("foundry_sandbox.sbx.check_sbx_version"):
+                    with patch("foundry_sandbox.sbx._run_standalone_probe", return_value=True):
+                        sbx_check_available()  # should not raise
 
     def test_not_available(self):
         with patch("foundry_sandbox.sbx.shutil.which", return_value=None):
@@ -542,3 +548,89 @@ class TestSbxDiagnose:
         result = sbx_diagnose()
         assert result.stdout == "All checks passed"
         mock_run.assert_called_once_with(["diagnose"], timeout=TIMEOUT_SBX_QUERY)
+
+
+# ============================================================================
+# sbx identity probe (H5)
+# ============================================================================
+
+
+class TestIsDockerPluginPath:
+    def test_docker_cli_plugins_rejected(self):
+        assert _is_docker_plugin_path(
+            os.path.expanduser("~/.docker/cli-plugins/sbx")
+        )
+
+    def test_macos_app_bundle_rejected(self):
+        assert _is_docker_plugin_path(
+            "/Applications/Docker.app/Contents/Resources/cli-plugins/sbx"
+        )
+
+    def test_windows_path_rejected(self):
+        assert _is_docker_plugin_path(
+            "C:\\Program Files\\Docker\\Docker\\resources\\cli-plugins\\sbx"
+        )
+
+    def test_standalone_path_accepted(self):
+        assert not _is_docker_plugin_path("/usr/local/bin/sbx")
+
+    def test_homebrew_path_accepted(self):
+        assert not _is_docker_plugin_path("/opt/homebrew/bin/sbx")
+
+
+class TestResolveSbxBinary:
+    def test_resolves_realpath(self):
+        with patch("foundry_sandbox.sbx.shutil.which", return_value="/usr/local/bin/sbx"):
+            with patch("foundry_sandbox.sbx.os.path.realpath", return_value="/opt/sbx/bin/sbx"):
+                assert _resolve_sbx_binary() == "/opt/sbx/bin/sbx"
+
+    def test_none_when_not_found(self):
+        with patch("foundry_sandbox.sbx.shutil.which", return_value=None):
+            assert _resolve_sbx_binary() is None
+
+
+class TestRunStandaloneProbe:
+    def test_success(self):
+        with patch("foundry_sandbox.sbx.subprocess.run") as mock_run:
+            mock_run.return_value = _mock_completed(returncode=0)
+            assert _run_standalone_probe() is True
+
+    def test_failure(self):
+        with patch("foundry_sandbox.sbx.subprocess.run") as mock_run:
+            mock_run.return_value = _mock_completed(returncode=1)
+            assert _run_standalone_probe() is False
+
+    def test_timeout(self):
+        with patch("foundry_sandbox.sbx.subprocess.run", side_effect=subprocess.TimeoutExpired("sbx", 5)):
+            assert _run_standalone_probe() is False
+
+    def test_os_error(self):
+        with patch("foundry_sandbox.sbx.subprocess.run", side_effect=OSError("not found")):
+            assert _run_standalone_probe() is False
+
+
+class TestSbxCheckAvailableIdentity:
+    """Test the identity probe integration in sbx_check_available."""
+
+    def test_plugin_path_rejected(self):
+        plugin_path = os.path.expanduser("~/.docker/cli-plugins/sbx")
+        with patch("foundry_sandbox.sbx.shutil.which", return_value=plugin_path):
+            with patch("foundry_sandbox.sbx.os.path.realpath", return_value=plugin_path):
+                with patch("foundry_sandbox.sbx.check_sbx_version"):
+                    with pytest.raises(SystemExit):
+                        sbx_check_available()
+
+    def test_standalone_accepted_when_probe_passes(self):
+        with patch("foundry_sandbox.sbx.shutil.which", return_value="/usr/local/bin/sbx"):
+            with patch("foundry_sandbox.sbx.os.path.realpath", return_value="/usr/local/bin/sbx"):
+                with patch("foundry_sandbox.sbx.check_sbx_version"):
+                    with patch("foundry_sandbox.sbx._run_standalone_probe", return_value=True):
+                        sbx_check_available()  # should not raise
+
+    def test_unknown_path_rejected_when_probe_fails(self):
+        with patch("foundry_sandbox.sbx.shutil.which", return_value="/opt/custom/bin/sbx"):
+            with patch("foundry_sandbox.sbx.os.path.realpath", return_value="/opt/custom/bin/sbx"):
+                with patch("foundry_sandbox.sbx.check_sbx_version"):
+                    with patch("foundry_sandbox.sbx._run_standalone_probe", return_value=False):
+                        with pytest.raises(SystemExit):
+                            sbx_check_available()

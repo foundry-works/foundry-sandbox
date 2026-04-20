@@ -120,6 +120,8 @@ This is not about defending against intentional attacks. It's about providing sa
 
 **Bypass:** Requires a VM escape vulnerability (kernel-level exploit), which is significantly harder than container escape.
 
+**Kernel-separation assertion:** `cast diagnose` verifies that each running sandbox has a different kernel from the host by comparing `uname -r` on both sides. If the kernels are identical, the sandbox may have fallen back to container mode (no kernel isolation), and the diagnose output reports a `WARN` status. Sandboxes with different kernels report `OK`. Per-sandbox failures (e.g., sandbox stopped) do not fail the overall diagnose run.
+
 ---
 
 ### Network Policy
