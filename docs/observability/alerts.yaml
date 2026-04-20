@@ -1,0 +1,59 @@
+# Prometheus alert rules for foundry-git-safety
+#
+# Deploy alongside a Prometheus scrape config targeting the git safety
+# server's /metrics endpoint (default http://127.0.0.1:8083/metrics).
+
+groups:
+  - name: git_safety.rules
+    rules:
+      - alert: GitSafetyServerDown
+        expr: up{job="git-safety"} == 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Git safety server is down"
+          runbook: "docs/operations.md#git-safety-server-down"
+
+      - alert: HighDenialRate
+        expr: rate(git_safety_policy_decisions_total{outcome="deny"}[5m]) > 10
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High rate of denied git operations"
+          description: "More than 10 denials per second over 5 minutes"
+          runbook: "docs/operations.md#high-denial-rate"
+
+      - alert: HighLatency
+        expr: |
+          histogram_quantile(0.95,
+            rate(git_safety_request_duration_seconds_bucket[5m])
+          ) > 2
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Git operations taking longer than 2s at p95"
+          description: "95th percentile latency exceeds 2 seconds"
+          runbook: "docs/operations.md#high-latency"
+
+      - alert: HMACAuthFailures
+        expr: rate(git_safety_operations_total{outcome="error"}[5m]) > 5
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Sustained HMAC authentication failures"
+          description: "More than 5 auth errors per second over 5 minutes"
+          runbook: "docs/operations.md#hmac-auth-failures"
+
+      - alert: ConfigInvalid
+        expr: |
+          git_safety_health_status{status="degraded"} == 1
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Git safety server config is invalid"
+          runbook: "docs/operations.md#config-invalid"

@@ -39,6 +39,7 @@ _LAZY_COMMANDS: dict[str, tuple[str, str]] = {
     "config": ("foundry_sandbox.commands.config", "config"),
     "destroy": ("foundry_sandbox.commands.destroy", "destroy"),
     "destroy-all": ("foundry_sandbox.commands.destroy_all", "destroy_all"),
+    "diagnose": ("foundry_sandbox.commands.diagnose", "diagnose"),
     "help": ("foundry_sandbox.commands.help_cmd", "help_cmd"),
     "info": ("foundry_sandbox.commands.info", "info"),
     "list": ("foundry_sandbox.commands.list_cmd", "list_cmd"),

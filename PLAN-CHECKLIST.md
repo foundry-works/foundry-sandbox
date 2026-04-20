@@ -91,30 +91,30 @@ All checkboxes from the prior checklist remain done. Package lives at
   - [x] ADR captures decision (yes/no) and rationale
   - [x] Decision: NO dual-mode (ADR-009)
 
-### §5.3 Observability — **HIGH**
+### §5.3 Observability — **HIGH** — **SHIPPED**
 
-- [ ] `foundry-git-safety` server endpoints
-  - [ ] `GET /health` — liveness + config validity
-  - [ ] `GET /ready` — dependencies reachable (workspace, config, secret store)
-  - [ ] `GET /metrics` — Prometheus format
-    - [ ] operation counter (by verb, sandbox, outcome)
-    - [ ] latency histogram (by verb)
-    - [ ] policy-decision counter (by rule, outcome)
-    - [ ] wrapper re-injection counter (from §5.1 watchdog)
-- [ ] Structured decision log
-  - [ ] JSON lines to `~/.foundry/logs/decisions.jsonl` by default
-  - [ ] Every allow/deny with: timestamp, sandbox, branch, rule, verb, outcome
-  - [ ] Rotation policy (size-based)
-- [ ] Alert-rule templates
-  - [ ] `docs/observability/alerts.yaml` with Prometheus alert rules
-  - [ ] Documented severity and response for each
+- [x] `foundry-git-safety` server endpoints
+  - [x] `GET /health` — liveness + config validity + uptime
+  - [x] `GET /ready` — dependencies reachable (workspace, config, secret store)
+  - [x] `GET /metrics` — Prometheus format
+    - [x] operation counter (by verb, sandbox, outcome)
+    - [x] latency histogram (by verb)
+    - [x] policy-decision counter (by rule, outcome)
+    - [ ] wrapper re-injection counter (from §5.1 watchdog — not yet built)
+- [x] Structured decision log
+  - [x] JSON lines to `~/.foundry/logs/decisions.jsonl` by default
+  - [x] Every allow/deny with: timestamp, sandbox, branch, rule, verb, outcome
+  - [x] Rotation policy (size-based, 10MB, 5 backups)
+- [x] Alert-rule templates
+  - [x] `docs/observability/alerts.yaml` with Prometheus alert rules
+  - [x] Documented severity and response for each
+- [x] `cast diagnose` command
+  - [x] Gathers `sbx diagnose` output + git-safety health + readiness + decision log
+  - [x] Outputs JSON or human-readable
+  - [x] Redacts secrets before emitting
 - [ ] Runbook
   - [ ] `docs/operations.md` addendum: common failure modes and diagnostic steps
-  - [ ] How to collect a support bundle (`cast diagnose` idea)
-- [ ] `cast diagnose` command
-  - [ ] Gathers `sbx diagnose` output + git-safety health + logs
-  - [ ] Outputs JSON or human-readable
-  - [ ] Redacts secrets before emitting
+  - [ ] How to collect a support bundle (`cast diagnose`)
 
 ### §5.4 User-Defined Credential Injection — **MEDIUM**
 

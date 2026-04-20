@@ -110,6 +110,7 @@ def create_git_api(
     """
     app = Flask(__name__)
     app.config["MAX_CONTENT_LENGTH"] = MAX_REQUEST_BODY
+    app._start_time = time.time()
 
     flask_request_middleware(app)
 
@@ -152,6 +153,13 @@ def create_git_api(
         finally:
             _in_flight_count.decrement()
 
+    def _record_outcome(verb: str, sandbox_id: str, outcome: str) -> None:
+        from .metrics import registry
+        registry.inc_counter(
+            "git_safety_operations_total",
+            {"verb": verb, "sandbox": sandbox_id, "outcome": outcome},
+        )
+
     def _git_exec_inner(clock_window: float, client_ip: str) -> Response:
 
         # Pre-auth IP throttle
@@ -167,12 +175,14 @@ def create_git_api(
         nonce: str = request.headers.get("X-Request-Nonce", "")
 
         if not all([sandbox_id, signature, timestamp, nonce]):
+            _record_outcome("unknown", sandbox_id or "unknown", "error")
             return _make_error("Missing authentication headers", 401)
 
         # Clock window validation
         try:
             req_time = float(timestamp)
         except (ValueError, TypeError):
+            _record_outcome("unknown", sandbox_id, "error")
             return _make_error("Invalid timestamp", 401)
 
         now = time.time()
@@ -182,11 +192,13 @@ def create_git_api(
                 sandbox_id,
                 abs(now - req_time),
             )
+            _record_outcome("unknown", sandbox_id, "error")
             return _make_error("Request timestamp outside clock window", 401)
 
         # Get sandbox secret
         secret = secrets.get_secret(sandbox_id)
         if secret is None:
+            _record_outcome("unknown", sandbox_id, "error")
             return _make_error("Unknown sandbox or missing secret", 401)
 
         # Verify HMAC signature
@@ -201,32 +213,44 @@ def create_git_api(
             secret=secret,
         ):
             logger.warning("Invalid HMAC signature for sandbox %s", sandbox_id)
+            _record_outcome("unknown", sandbox_id, "error")
             return _make_error("Invalid signature", 401)
 
         # Nonce replay protection
         if not nonces.check_and_store(sandbox_id, nonce):
             logger.warning("Replayed nonce for sandbox %s: %s", sandbox_id, nonce)
+            _record_outcome("unknown", sandbox_id, "error")
             return _make_error("Replayed request (duplicate nonce)", 401)
 
         # Per-sandbox rate limit
         allowed, retry = limiter.check_sandbox_rate(sandbox_id)
         if not allowed:
+            _record_outcome("unknown", sandbox_id, "error")
             return _make_rate_limited(retry)
 
         # Global rate limit
         allowed, retry = limiter.check_global_rate()
         if not allowed:
+            _record_outcome("unknown", sandbox_id, "error")
             return _make_rate_limited(retry)
 
         # Parse and validate request body
         try:
             raw = json.loads(body)
         except (json.JSONDecodeError, UnicodeDecodeError):
+            _record_outcome("unknown", sandbox_id, "error")
             return _make_error("Invalid JSON body", 400)
 
         req, err = validate_request(raw)
-        if err:
-            return _make_error(err.reason, 400)
+        if err or req is None:
+            _record_outcome("unknown", sandbox_id, "error")
+            return _make_error(err.reason if err else "Invalid request", 400)
+
+        # Store verb for histogram labels
+        from flask import g
+        if req.args:
+            g.git_verb = req.args[0] if req.args[0] != "git" else (req.args[1] if len(req.args) > 1 else "unknown")
+        verb = getattr(g, "git_verb", "unknown")
 
         # Resolve metadata and repo root
         metadata = _load_sandbox_metadata(sandbox_id, resolved_data_dir)
@@ -235,13 +259,69 @@ def create_git_api(
         # Execute git command
         response, err = execute_git(req, repo_root, metadata)
         if err:
+            _record_outcome(verb, sandbox_id, "deny")
             return _make_error(err.reason, 422)
 
+        _record_outcome(verb, sandbox_id, "allow")
         return jsonify(response.to_dict())
 
     @app.route("/health", methods=["GET"])
     def health():
-        return jsonify({"status": "ok"})
+        from .config import load_foundry_config
+
+        config_valid = True
+        config_error = None
+        try:
+            load_foundry_config()
+        except Exception as exc:
+            config_valid = False
+            config_error = str(exc)
+
+        status = "ok" if config_valid else "degraded"
+        return jsonify({
+            "status": status,
+            "config_valid": config_valid,
+            "config_error": config_error,
+            "uptime_seconds": round(time.time() - app._start_time, 2),
+        })
+
+    def _check_workspace(data_dir: str) -> dict:
+        if not os.path.isdir(data_dir):
+            return {"ok": False, "detail": f"Data directory missing: {data_dir}"}
+        if not os.access(data_dir, os.W_OK):
+            return {"ok": False, "detail": f"Data directory not writable: {data_dir}"}
+        return {"ok": True, "detail": "Data directory accessible"}
+
+    def _check_config() -> dict:
+        try:
+            from .config import load_foundry_config
+            load_foundry_config()
+            return {"ok": True, "detail": "Configuration valid"}
+        except Exception as exc:
+            return {"ok": False, "detail": str(exc)}
+
+    def _check_secret_store(store: SecretStore) -> dict:
+        secrets_path = getattr(store, "_secrets_dir", None)
+        if secrets_path and not os.path.isdir(secrets_path):
+            return {"ok": False, "detail": f"Secrets directory missing: {secrets_path}"}
+        return {"ok": True, "detail": "Secret store available"}
+
+    @app.route("/ready", methods=["GET"])
+    def ready():
+        checks = {
+            "workspace": _check_workspace(resolved_data_dir),
+            "config": _check_config(),
+            "secret_store": _check_secret_store(secrets),
+        }
+        all_ok = all(c["ok"] for c in checks.values())
+        status = 200 if all_ok else 503
+        return jsonify({"ready": all_ok, "checks": checks}), status
+
+    @app.route("/metrics", methods=["GET"])
+    def metrics():
+        from .metrics import registry as metrics_registry
+        content = metrics_registry.render_prometheus()
+        return Response(content, content_type="text/plain; version=0.0.4; charset=utf-8")
 
     @app.errorhandler(404)
     def not_found(e):

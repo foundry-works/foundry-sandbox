@@ -154,6 +154,30 @@ def audit_log(
     log_fn = audit_logger.warning if decision == "deny" else audit_logger.info
     log_fn("git.%s", event, extra=entry)
 
+    # Record metrics for policy decisions
+    if matched_rule:
+        from .metrics import registry
+        registry.inc_counter(
+            "git_safety_policy_decisions_total",
+            {"rule": matched_rule, "outcome": decision},
+        )
+
+    # Write to structured decision log
+    from .decision_log import write_decision
+    branch = extra.get("branch", "")
+    if not branch and sandbox_id:
+        branch = ""
+    write_decision(
+        sandbox=sandbox_id or "",
+        branch=branch,
+        rule=matched_rule or "",
+        verb=action,
+        outcome=decision,
+        event=event,
+        request_id=request_id,
+        reason=reason or "",
+    )
+
 
 # ---------------------------------------------------------------------------
 # Concurrency Control

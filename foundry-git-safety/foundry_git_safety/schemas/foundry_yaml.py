@@ -116,6 +116,22 @@ class RateLimitsConfig(BaseModel):
         return v
 
 
+class ObservabilityConfig(BaseModel):
+    """Observability configuration for health, metrics, and decision logging."""
+
+    decision_log_dir: str = ""
+    decision_log_max_bytes: int = 10 * 1024 * 1024
+    decision_log_backup_count: int = 5
+    metrics_enabled: bool = True
+
+    @field_validator("decision_log_max_bytes", "decision_log_backup_count")
+    @classmethod
+    def validate_positive(cls, v: int) -> int:
+        if v < 1:
+            raise ValueError(f"Must be positive, got {v}")
+        return v
+
+
 class GitSafetyConfig(BaseModel):
     """Top-level git_safety section of foundry.yaml."""
 
@@ -131,6 +147,7 @@ class GitSafetyConfig(BaseModel):
     )
     github_api: GitHubAPIConfig = Field(default_factory=GitHubAPIConfig)
     rate_limits: RateLimitsConfig = Field(default_factory=RateLimitsConfig)
+    observability: ObservabilityConfig = Field(default_factory=ObservabilityConfig)
 
 
 class FoundryConfig(BaseModel):

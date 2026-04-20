@@ -416,6 +416,20 @@ def flask_request_middleware(app):
         if hasattr(g, "request_start_time"):
             duration_ms = (time.time() - g.request_start_time) * 1000
 
+        # Record latency histogram for git operations
+        if (
+            request.path == "/git/exec"
+            and hasattr(g, "request_start_time")
+        ):
+            from .metrics import registry
+            duration_s = time.time() - g.request_start_time
+            verb = getattr(g, "git_verb", "unknown")
+            registry.observe_histogram(
+                "git_safety_request_duration_seconds",
+                duration_s,
+                {"verb": verb},
+            )
+
         # Log request completion
         logger.info(
             f"{request.method} {request.path} -> {response.status_code}",

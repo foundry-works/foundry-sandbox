@@ -2,7 +2,7 @@
 
 **Last updated:** 2026-04-20
 **Branch:** sbx
-**Status:** Phase 0, 1, 2 **COMPLETE**. Phase 3 steps 3.0–3.3 **COMPLETE** (~67k lines removed). Phase 3.4–3.5, Observability, and Security Extensions **IN PROGRESS**.
+**Status:** Phase 0, 1, 2 **COMPLETE**. Phase 3 steps 3.0–3.3 **COMPLETE** (~67k lines removed). §5.2 Migration **SHIPPED**. §5.3 Observability **SHIPPED**. §5.1, §5.4–5.8 **IN PROGRESS**.
 
 ---
 
@@ -99,17 +99,11 @@ The single largest live security gap. An agent with sudo can `rm /usr/local/bin/
 
 **Remaining:** End-to-end test on a real 0.20.x installation (manual, pre-release validation).
 
-### 5.3 Observability — **HIGH**
+### 5.3 Observability — **HIGH** — **SHIPPED**
 
-Git safety server is currently a black box — no way to detect failures or enforcement decisions in production.
+`/health` (enhanced with config validity + uptime), `/ready` (workspace/config/secret-store checks), and `/metrics` (Prometheus format with operation counters, latency histograms, policy-decision counters) endpoints on foundry-git-safety server. Structured JSON Lines decision log with size-based rotation at `~/.foundry/logs/decisions.jsonl`. `cast diagnose` command gathering sbx diagnostics, git-safety health/readiness, and recent decision log entries with secret redaction. Prometheus alert rule templates in `docs/observability/alerts.yaml`.
 
-**Deliverables:**
-- `/health` endpoint on foundry-git-safety server.
-- `/metrics` Prometheus endpoint (operation counts, latency, policy outcomes).
-- Structured JSON decision log (every allow/deny with reason, branch, sandbox).
-- Wrapper-injection failure tracking.
-- One alert rule per fail-closed code path.
-- Runbook for common failure modes.
+**Remaining:** Runbook addendum to `docs/operations.md`.
 
 ### 5.4 User-Defined Credential Injection — **MEDIUM**
 
@@ -166,7 +160,7 @@ Analysis §7.9 and U23 flag experimental churn. No automated defense today.
 | `sbx reset` destroys injected binaries | **Live, accepted** | §5.1 template-bake addresses persistence |
 | CLI divergence (`docker sandbox` vs `sbx`) | **Live** | Target standalone `sbx` only; §5.7 surfaces breakage fast |
 | Existing users have no upgrade path | **Live** | §5.2 blocks any release |
-| Git-safety server is unobservable | **Live** | §5.3 |
+| Git-safety server is unobservable | **Shipped** | §5.3 shipped |
 | User-defined providers not supported | **Live, regression vs 0.20.x** | §5.4 |
 | Docker deprecates `sbx` | Low likelihood | foundry-git-safety already runs against any backend; fall back to current docker architecture via git revert |
 | Linux microVM docs still say "legacy container" | Docs-only | Phase 0 confirmed otherwise on sbx v0.26.1 |

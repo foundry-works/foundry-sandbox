@@ -370,3 +370,42 @@ def _find_build_script() -> Path | None:
     """Locate the template build script relative to this package."""
     script = Path(__file__).parent.parent / "scripts" / "build-foundry-template.sh"
     return script if script.exists() else None
+
+
+# ============================================================================
+# Diagnostics Bridge
+# ============================================================================
+
+
+def git_safety_server_health() -> dict[str, object] | None:
+    """Query the git safety server's health endpoint.
+
+    Returns:
+        Dict with health info, or None if the server is unreachable.
+    """
+    try:
+        import urllib.request
+
+        req = urllib.request.Request("http://127.0.0.1:8083/health")
+        with urllib.request.urlopen(req, timeout=3) as resp:
+            data: dict[str, object] = json.loads(resp.read())
+            return data
+    except Exception as exc:
+        return {"reachable": False, "error": str(exc)}
+
+
+def git_safety_readiness(port: int = 8083) -> dict[str, object] | None:
+    """Query the git safety server's readiness endpoint.
+
+    Returns:
+        Dict with readiness info, or None if the server is unreachable.
+    """
+    try:
+        import urllib.request
+
+        req = urllib.request.Request(f"http://127.0.0.1:{port}/ready")
+        with urllib.request.urlopen(req, timeout=3) as resp:
+            data: dict[str, object] = json.loads(resp.read())
+            return data
+    except Exception as exc:
+        return {"ready": False, "error": str(exc)}
