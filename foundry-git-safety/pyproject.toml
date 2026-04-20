@@ -66,6 +66,7 @@ addopts = "--import-mode=importlib --timeout=120"
 markers = [
     "slow: marks tests as slow/integration-heavy",
     "security: marks security-focused tests",
+    "chaos: marks chaos/fault-injection tests",
 ]
 
 [tool.mypy]

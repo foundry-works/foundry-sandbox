@@ -71,6 +71,7 @@ norecursedirs = ["__pycache__", ".git", ".hypothesis"]
 markers = [
     "slow: marks tests as slow/integration-heavy",
     "security: marks security-focused tests",
+    "chaos: marks chaos/fault-injection tests",
     "orchestration: marks docker orchestration/lifecycle tests",
 ]
 

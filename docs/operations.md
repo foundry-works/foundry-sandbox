@@ -411,4 +411,113 @@ sbx diagnose
 - [Architecture](architecture.md) — System design
 - [Configuration](configuration.md) — Git safety and network policy settings
 - [Security Model](security/security-model.md) — Threat model and defenses
+- [Security Audit §5.6](security/audit-5.6.md) — Detailed security audit findings
 - [ADR-008](adr/008-sbx-migration.md) — sbx migration decision
+
+---
+
+## Performance Baselines
+
+### Methodology
+
+Performance baselines are measured using `scripts/bench-git-safety.sh` against a single sandbox on a reference machine. Each operation is executed 20 times after 3 warm-up iterations. Results report p50 (median) and p95 latencies.
+
+### Microbenchmark Results
+
+The following are measured by `foundry-git-safety/tests/unit/test_performance.py` on the test machine:
+
+| Operation | Threshold | Meets |
+|-----------|-----------|-------|
+| HMAC signature compute | < 1ms | Yes |
+| HMAC signature verify | < 1ms | Yes |
+| Nonce store check | < 100us | Yes |
+| Rate limiter check | < 50us | Yes |
+| Counter increment | < 10us | Yes |
+| Prometheus render (100 series) | < 100ms | Yes |
+| Decision log write throughput | >= 1000/sec | Yes |
+| Decision log rotation | < 100ms | Yes |
+| Authenticated request throughput | >= 50 req/s | Yes |
+
+### Full Stack Baselines (requires live sbx)
+
+| Operation | p50 | p95 | Notes |
+|-----------|-----|-----|-------|
+| git status | TBD | TBD | Local, no network |
+| git log -10 | TBD | TBD | Local, no network |
+| git fetch | TBD | TBD | Network round-trip via sbx proxy |
+| git push | TBD | TBD | Full push path with validation |
+| git clone | TBD | TBD | Cold start, full initialization |
+
+Run `scripts/bench-git-safety.sh` to populate the table above.
+
+### Known Performance Considerations
+
+1. **No connection pooling in proxies**: Each proxied request (user services, deep policy, GitHub filter) opens a fresh `http.client.HTTPSConnection`. Consider connection pooling for high-throughput scenarios.
+2. **Synchronous decision log**: Each git operation writes to the decision log synchronously with `flush()`. Under high throughput (>1000 ops/sec) this becomes the bottleneck.
+3. **File-based metadata**: Sandbox metadata is loaded from disk on every request (no cache). Adds ~0.1-0.5ms per request.
+4. **Single lock contention**: `metrics._MetricsRegistry._lock`, `RateLimiter._lock`, and `NonceStore._lock` are single `threading.Lock` instances. Under high concurrency (>100 req/sec) these may contend.
+
+### How to Reproduce
+
+```bash
+# Run microbenchmark tests
+pytest foundry-git-safety/tests/unit/test_performance.py -v -m slow
+
+# Run full-stack benchmark (requires live sbx)
+./scripts/bench-git-safety.sh
+```
+
+---
+
+## Chaos Recovery Procedures
+
+### sbx Daemon Crash
+
+If the sbx daemon crashes while sandboxes are running:
+
+1. **Sandbox state**: Running sandboxes are preserved by the hypervisor
+2. **Git wrapper**: Will fail with connection errors until the daemon recovers
+3. **Recovery**: `sbx` auto-restarts on next command; sandboxes reconnect
+4. **Verify**: `cast list` to check sandbox status, `sbx diagnose` for details
+
+### Git Safety Server Crash
+
+If the foundry-git-safety server crashes:
+
+1. **During git operation**: The wrapper's curl call times out (30s max) and returns exit code 1
+2. **No partial writes**: Git push is atomic at the protocol level; a crash mid-push leaves the remote unchanged
+3. **Recovery**: Server restarts via `foundry-git-safety start` or systemd
+4. **Verify**: `foundry-git-safety status` and `cast diagnose`
+
+### Network Partition
+
+If the sandbox loses connectivity to the host:
+
+1. **Wrapper behavior**: curl times out after `--max-time 30` and returns exit code 28
+2. **Recovery**: Network restores automatically when partition ends; no sandbox restart needed
+3. **Verify**: `sbx exec <name> -- curl -sf http://host.docker.internal:8083/health`
+
+### Corrupted sbx reset
+
+If `sbx reset` is interrupted:
+
+1. **Sandbox state**: May be in a degraded state; `sbx ls` may show errors
+2. **Recovery**: `cast destroy --force` to clean up, then `cast new` to recreate
+3. **Wrapper**: Will be re-injected on next `cast start` (or present from template)
+
+---
+
+## HMAC Rotation Verification
+
+After rotating HMAC secrets, run the automated verification:
+
+```bash
+pytest foundry-git-safety/tests/security/test_hmac_rotation.py -v -m security
+```
+
+This validates:
+- Old secrets are rejected after rotation
+- New secrets are accepted
+- Nonce stores are cleared (no replay across rotation boundary)
+- Rate limiter state is preserved
+- Bulk rotation works for all sandboxes

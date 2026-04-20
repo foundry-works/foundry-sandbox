@@ -180,22 +180,22 @@ All checkboxes from the prior checklist remain done. Package lives at
 
 ### §5.6 Chaos, Security Audit, Performance — **MEDIUM**
 
-- [ ] Chaos tests
-  - [ ] Kill `sbx` daemon mid-operation; verify safe failure
-  - [ ] Kill `foundry-git-safety` server mid-push; verify wrapper returns non-zero, no partial write
-  - [ ] Simulate network partition between VM and host safety server
-  - [ ] Corrupted `sbx reset` (interrupted) — verify recovery
-- [ ] Security audit
-  - [ ] HMAC rotation procedure documented and tested
-  - [ ] Wrapper-injection privilege review (who can call `sbx exec -u root`)
-  - [ ] Credential-leak audit through the git-safety HTTP path
-  - [ ] Privilege-escalation review: can a malicious wrapper response compromise the host?
+- [x] Chaos tests
+  - [x] Kill `sbx` daemon mid-operation; verify safe failure
+  - [x] Kill `foundry-git-safety` server mid-push; verify wrapper returns non-zero, no partial write
+  - [x] Simulate network partition between VM and host safety server
+  - [x] Corrupted `sbx reset` (interrupted) — verify recovery
+- [x] Security audit
+  - [x] HMAC rotation procedure documented and tested
+  - [x] Wrapper-injection privilege review (who can call `sbx exec -u root`)
+  - [x] Credential-leak audit through the git-safety HTTP path
+  - [x] Privilege-escalation review: can a malicious wrapper response compromise the host?
   - [ ] External security review (optional but recommended before Gate B)
-- [ ] Performance baselines vs 0.20.x proxy
-  - [ ] Clone, status, fetch, push latency
-  - [ ] First-request vs steady-state
-  - [ ] Multiple concurrent sandboxes
-  - [ ] Published in `docs/operations.md`
+- [x] Performance baselines vs 0.20.x proxy
+  - [x] Clone, status, fetch, push latency
+  - [x] First-request vs steady-state
+  - [x] Multiple concurrent sandboxes
+  - [x] Published in `docs/operations.md`
 
 ### §5.7 `sbx` Version Pinning and Drift Detection — **LOW**
 

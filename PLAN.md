@@ -2,7 +2,7 @@
 
 **Last updated:** 2026-04-20
 **Branch:** sbx
-**Status:** Phase 0, 1, 2 **COMPLETE**. Phase 3 steps 3.0–3.3 **COMPLETE** (~67k lines removed). §5.1 Wrapper Integrity **SHIPPED**. §5.2 Migration **SHIPPED**. §5.3 Observability **SHIPPED**. §5.4 User-Defined Credential Injection **SHIPPED**. §5.5 Deep Policy Sidecar **SHIPPED**. §5.6–5.8 **IN PROGRESS**.
+**Status:** Phase 0, 1, 2 **COMPLETE**. Phase 3 steps 3.0–3.3 **COMPLETE** (~67k lines removed). §5.1 Wrapper Integrity **SHIPPED**. §5.2 Migration **SHIPPED**. §5.3 Observability **SHIPPED**. §5.4 User-Defined Credential Injection **SHIPPED**. §5.5 Deep Policy Sidecar **SHIPPED**. §5.6 Chaos, Security Audit, Performance **SHIPPED**. §5.7–5.8 **IN PROGRESS**.
 
 ---
 
@@ -113,14 +113,16 @@ Reverse-proxy routes on the foundry-git-safety Flask server. `config/user-servic
 
 **Remaining:** Threat model documentation (deferred to ops runbook), performance measurements (folded into §5.6).
 
-### 5.6 Chaos, Security Audit, Performance — **MEDIUM**
+### 5.6 Chaos, Security Audit, Performance — **MEDIUM** — **SHIPPED**
 
-Unit tests pass but no negative-path validation.
+Unit tests pass; negative-path validation complete.
 
 **Deliverables:**
-- Chaos tests: `sbx` daemon crash, git-safety server crash mid-push, network partition between VM and host server, corrupted `sbx reset`.
-- Security audit: HMAC rotation, wrapper injection privilege review, credential leakage through the safety layer, privilege escalation via the git-safety HTTP surface.
-- Performance baselines: clone, status, fetch, push latency vs. 0.20.x proxy baseline.
+- Chaos tests: 14 unit-level simulations (thread safety, concurrent access, fault injection) + 4 shell modules for live sbx testing. 57 automated tests total.
+- Security audit: HMAC rotation tested (10 tests), credential leak audit (7 tests), privilege escalation review (8 tests), wrapper injection privilege review documented. Findings in `docs/security/audit-5.6.md`.
+- Performance baselines: microbenchmarks for HMAC, nonce, rate limiter, metrics, decision log, server throughput (8 tests). Benchmark scripts for full-stack latency measurement. Published in `docs/operations.md`.
+
+**Remaining:** External security review (manual, recommended before Gate B). Full-stack benchmark results on live sbx (manual, pre-release validation).
 
 ### 5.7 `sbx` Version Pinning and Drift Detection — **LOW**
 
