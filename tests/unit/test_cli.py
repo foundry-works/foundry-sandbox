@@ -95,6 +95,12 @@ class TestUnknownCommandValidation:
         result = runner.invoke(cli, ["destory"])  # typo of 'destroy'
         assert result.exit_code != 0
 
+    def test_build_command_removed(self, runner: click.testing.CliRunner) -> None:
+        """'cast build' was removed in the sbx migration — must not resolve."""
+        result = runner.invoke(cli, ["build"])
+        assert result.exit_code != 0
+        assert "Unknown command" in result.output
+
     def test_all_commands_registered_no_shell_fallback(self) -> None:
         required = {
             "new", "list", "attach", "start", "stop", "destroy",

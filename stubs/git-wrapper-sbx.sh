@@ -197,6 +197,22 @@ to_request_cwd() {
 
 CWD=$(resolve_cwd "$@")
 
+# Fail closed: if WORKSPACE_DIR is not set but we detect a .foundry directory,
+# the env vars were not sourced properly — refuse to fall through to real git.
+if [[ -z "$WORKSPACE_DIR" ]]; then
+    _check_dir="$CWD"
+    while [[ "$_check_dir" != "/" ]]; do
+        if [[ -d "$_check_dir/.foundry" ]]; then
+            echo "error: git wrapper: WORKSPACE_DIR not set but foundry workspace detected at $_check_dir" >&2
+            echo "error: ensure /etc/profile.d/foundry-git-safety.sh is sourced" >&2
+            exit 1
+        fi
+        _check_dir="$(dirname "$_check_dir")"
+    done
+    # Not in a foundry workspace — safe to fall through
+    exec "$REAL_GIT" "$@"
+fi
+
 if ! is_workspace_path "$CWD"; then
     exec "$REAL_GIT" "$@"
 fi

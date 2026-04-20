@@ -105,6 +105,7 @@ class TestSbxSandboxMetadata:
         assert meta.from_branch == ""
         assert meta.network_profile == "balanced"
         assert meta.git_safety_enabled is True
+        assert meta.workspace_dir == "/workspace"
         assert meta.working_dir == ""
         assert meta.pip_requirements == ""
         assert meta.allow_pr is False

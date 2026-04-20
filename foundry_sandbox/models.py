@@ -34,6 +34,9 @@ class SbxSandboxMetadata(BaseModel):
     git_safety_enabled: bool = True
     """Whether git safety server is active for this sandbox."""
 
+    workspace_dir: str = "/workspace"
+    """Workspace mount path inside the sandbox container."""
+
     working_dir: str = ""
     """Working directory relative path."""
 

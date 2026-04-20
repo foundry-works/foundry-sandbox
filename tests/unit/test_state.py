@@ -330,6 +330,21 @@ class TestCastNewHistory:
         assert "command_line" in result
         assert "org/repo" in result["command_line"]
 
+    def test_agent_roundtrip(self, sandbox_home):
+        """Agent selection survives save/load cycle."""
+        save_last_cast_new(
+            repo="org/repo",
+            agent="codex",
+            branch="main",
+        )
+        result = load_last_cast_new()
+        assert result["agent"] == "codex"
+
+    def test_agent_default_is_claude(self, sandbox_home):
+        save_last_cast_new(repo="org/repo")
+        result = load_last_cast_new()
+        assert result["agent"] == "claude"
+
 
 class TestCastPresets:
     """Tests for preset CRUD operations."""
@@ -375,6 +390,29 @@ class TestCastPresets:
 
     def test_show_nonexistent(self, sandbox_home):
         assert show_cast_preset("nope") is None
+
+    def test_agent_roundtrip(self, sandbox_home):
+        """Agent selection survives preset save/load cycle."""
+        save_cast_preset(
+            "agent-test",
+            repo="org/repo",
+            agent="codex",
+            branch="main",
+        )
+        result = load_cast_preset("agent-test")
+        assert result is not None
+        assert result["agent"] == "codex"
+
+    def test_agent_roundtrip_non_claude(self, sandbox_home):
+        """Non-default agents (gemini, kiro, etc.) are preserved."""
+        for agent in ("codex", "gemini", "kiro", "copilot"):
+            save_cast_preset(
+                f"agent-{agent}",
+                repo="org/repo",
+                agent=agent,
+            )
+            result = load_cast_preset(f"agent-{agent}")
+            assert result["agent"] == agent
 
 
 # ============================================================================

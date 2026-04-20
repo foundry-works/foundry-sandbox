@@ -26,23 +26,20 @@ BLUE='\033[0;34m'
 NC='\033[0m'
 
 # Options
-BUILD_IMAGE=true
-NO_CACHE=""
-WITHOUT_OPENCODE=""
 
 # Parse arguments
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --no-build)
-            BUILD_IMAGE=false
+            # Accepted for backwards compatibility but no longer needed
             shift
             ;;
         --no-cache)
-            NO_CACHE="--no-cache"
+            # Accepted for backwards compatibility but no longer needed
             shift
             ;;
         --without-opencode)
-            WITHOUT_OPENCODE="--without-opencode"
+            # Accepted for backwards compatibility but no longer needed
             shift
             ;;
         --dir)
@@ -512,27 +509,6 @@ add_to_shell_rc "$COMPLETION_LINE" "tab completion"
 
 echo ""
 
-# Build Docker image
-if [[ "$BUILD_IMAGE" == true ]]; then
-    echo -e "${BLUE}Building Docker image...${NC}"
-    echo "  This may take a few minutes on first run."
-    echo ""
-
-    cd "$INSTALL_DIR"
-    if cast build $NO_CACHE $WITHOUT_OPENCODE; then
-        echo ""
-        echo -e "${GREEN}Docker image built successfully.${NC}"
-    else
-        echo ""
-        echo -e "${YELLOW}Warning: Docker build failed.${NC}"
-        echo "  You can retry later with: cast build"
-    fi
-else
-    echo -e "${YELLOW}Skipping Docker build (--no-build).${NC}"
-    echo "  Run 'cast build' when ready."
-fi
-
-echo ""
 echo -e "${GREEN}Installation complete!${NC}"
 echo ""
 echo "To get started:"

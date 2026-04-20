@@ -67,8 +67,9 @@ def start(name: str) -> None:
     # Verify git wrapper is installed; re-inject if missing
     if not verify_git_wrapper(name):
         sandbox_id = metadata.get("sbx_name", name)
+        workspace_dir = metadata.get("workspace_dir", "/workspace")
         try:
-            inject_git_wrapper(name, sandbox_id=sandbox_id)
+            inject_git_wrapper(name, sandbox_id=sandbox_id, workspace_dir=workspace_dir)
         except Exception as exc:
             log_warn(f"Failed to inject git wrapper: {exc}")
 

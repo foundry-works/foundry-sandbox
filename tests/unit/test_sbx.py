@@ -308,6 +308,21 @@ class TestSbxExecStreaming:
         cmd = mock_popen.call_args[0][0]
         assert cmd == ["sbx", "exec", "test", "-u", "root", "--", "bash"]
 
+    @patch("foundry_sandbox.sbx.subprocess.Popen")
+    def test_interactive(self, mock_popen):
+        mock_popen.return_value = MagicMock()
+        sbx_exec_streaming("test", ["bash", "-l"], interactive=True)
+        cmd = mock_popen.call_args[0][0]
+        assert cmd == ["sbx", "exec", "test", "-it", "--", "bash", "-l"]
+
+    @patch("foundry_sandbox.sbx.subprocess.Popen")
+    def test_interactive_with_user(self, mock_popen):
+        mock_popen.return_value = MagicMock()
+        sbx_exec_streaming("test", ["bash"], interactive=True, user="root")
+        cmd = mock_popen.call_args[0][0]
+        assert "-it" in cmd
+        assert "-u" in cmd
+
 
 # ============================================================================
 # sbx_secret_set
@@ -405,6 +420,36 @@ class TestSbxTemplate:
 # ============================================================================
 # sbx_diagnose
 # ============================================================================
+
+
+class TestRunSbxInternal:
+    """Test _run_sbx passes correct kwargs to subprocess.run."""
+
+    @patch("foundry_sandbox.sbx.subprocess.run")
+    def test_text_mode_enabled(self, mock_run):
+        mock_run.return_value = _mock_completed()
+        from foundry_sandbox.sbx import _run_sbx
+        _run_sbx(["ls"])
+        _, kwargs = mock_run.call_args
+        assert kwargs["text"] is True
+
+    @patch("foundry_sandbox.sbx.subprocess.run")
+    def test_string_input_works(self, mock_run):
+        mock_run.return_value = _mock_completed()
+        from foundry_sandbox.sbx import _run_sbx
+        _run_sbx(["secret", "set", "anthropic"], input="sk-test-key")
+        _, kwargs = mock_run.call_args
+        assert kwargs["text"] is True
+        assert kwargs["input"] == "sk-test-key"
+
+    @patch("foundry_sandbox.sbx.subprocess.run")
+    def test_no_input_still_text(self, mock_run):
+        mock_run.return_value = _mock_completed()
+        from foundry_sandbox.sbx import _run_sbx
+        _run_sbx(["ls"])
+        _, kwargs = mock_run.call_args
+        assert kwargs["text"] is True
+        assert "input" not in kwargs
 
 
 class TestSbxDiagnose:

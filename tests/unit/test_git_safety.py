@@ -232,6 +232,7 @@ class TestInjectGitWrapper:
         inject_git_wrapper(
             "test-sandbox",
             sandbox_id="sbx-1",
+            workspace_dir="/workspace",
         )
 
         # Should call sbx_exec 4 times: tee git, chmod git, tee env, chmod env
@@ -242,7 +243,26 @@ class TestInjectGitWrapper:
     def test_wrapper_not_found(self, mock_wrapper_path, mock_exec):
         mock_wrapper_path.exists.return_value = False
         with pytest.raises(FileNotFoundError):
-            inject_git_wrapper("test", sandbox_id="sbx-1")
+            inject_git_wrapper("test", sandbox_id="sbx-1", workspace_dir="/workspace")
+
+    @patch("foundry_sandbox.sbx.sbx_exec")
+    @patch("foundry_sandbox.git_safety._WRAPPER_SCRIPT")
+    def test_env_script_uses_workspace_dir(self, mock_wrapper_path, mock_exec):
+        mock_wrapper_path.exists.return_value = True
+        mock_wrapper_path.read_text.return_value = "#!/bin/bash\nwrapper"
+        mock_exec.return_value = _mock_completed()
+
+        inject_git_wrapper(
+            "test-sandbox",
+            sandbox_id="sbx-1",
+            workspace_dir="/custom/path",
+        )
+
+        # Find the sbx_exec call that writes the env script
+        env_call = mock_exec.call_args_list[2]  # third call is tee env script
+        env_call_input = env_call[1]["input"]
+        assert "WORKSPACE_DIR=/custom/path" in env_call_input
+        assert 'GIT_HMAC_SECRET_FILE="/custom/path/.foundry/hmac-secret"' in env_call_input
 
 
 class TestVerifyGitWrapper:

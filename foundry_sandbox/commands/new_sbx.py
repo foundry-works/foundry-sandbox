@@ -131,7 +131,7 @@ def new_sbx_setup(
     # ------------------------------------------------------------------
     log_info("Injecting git wrapper...")
     try:
-        inject_git_wrapper(name, sandbox_id=name)
+        inject_git_wrapper(name, sandbox_id=name, workspace_dir="/workspace")
     except Exception as exc:
         log_warn(f"Git wrapper injection failed: {exc}")
 
@@ -171,6 +171,7 @@ def new_sbx_setup(
         branch=branch,
         from_branch=from_branch,
         git_safety_enabled=True,
+        workspace_dir="/workspace",
         working_dir=wd,
         pip_requirements=pip_requirements,
         allow_pr=allow_pr,

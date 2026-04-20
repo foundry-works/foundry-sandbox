@@ -88,6 +88,7 @@ def write_sandbox_metadata(
     from_branch: str = "",
     network_profile: str = "balanced",
     git_safety_enabled: bool = True,
+    workspace_dir: str = "/workspace",
     working_dir: str = "",
     pip_requirements: str = "",
     allow_pr: bool = False,
@@ -106,6 +107,7 @@ def write_sandbox_metadata(
         from_branch: Base branch for PR creation.
         network_profile: Network policy profile.
         git_safety_enabled: Whether git safety server is active.
+        workspace_dir: Workspace mount path inside sandbox.
         working_dir: Working directory path.
         pip_requirements: Path to requirements file.
         allow_pr: Whether to allow PR creation.
@@ -121,6 +123,7 @@ def write_sandbox_metadata(
         from_branch=from_branch,
         network_profile=network_profile,
         git_safety_enabled=git_safety_enabled,
+        workspace_dir=workspace_dir,
         working_dir=working_dir,
         pip_requirements=pip_requirements,
         allow_pr=allow_pr,

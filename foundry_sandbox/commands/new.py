@@ -357,6 +357,7 @@ def new(
     # Save state
     save_last_cast_new(
         repo=repo_url,
+        agent=agent,
         branch=branch,
         from_branch=from_branch or "",
         working_dir=wd or "",
@@ -372,6 +373,7 @@ def new(
         save_cast_preset(
             preset_name=save_as,
             repo=repo_url,
+            agent=agent,
             branch=branch,
             from_branch=from_branch or "",
             working_dir=wd or "",

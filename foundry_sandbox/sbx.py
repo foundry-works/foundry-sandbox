@@ -59,7 +59,7 @@ def _run_sbx(
     if get_sandbox_verbose():
         print(f"+ {' '.join(cmd)}", file=sys.stderr)
 
-    kwargs: dict[str, Any] = {"check": check}
+    kwargs: dict[str, Any] = {"check": check, "text": True}
     if timeout is not None:
         kwargs["timeout"] = timeout
     if quiet:
@@ -238,6 +238,7 @@ def sbx_exec_streaming(
     cmd: list[str],
     *,
     user: str | None = None,
+    interactive: bool = False,
 ) -> subprocess.Popen[str]:
     """Execute a command with streaming I/O (for interactive use).
 
@@ -245,11 +246,14 @@ def sbx_exec_streaming(
         name: Sandbox name.
         cmd: Command and arguments to execute.
         user: Optional user (e.g. 'root').
+        interactive: If True, allocate a pseudo-TTY (-it flag).
 
     Returns:
         Popen process with inherited stdio.
     """
     args = ["sbx", "exec", name]
+    if interactive:
+        args.append("-it")
     if user:
         args.extend(["-u", user])
     args.append("--")

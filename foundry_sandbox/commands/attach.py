@@ -113,12 +113,16 @@ def _handle_ide_options(
 
 
 def _sbx_attach(name: str, working_dir: str) -> None:
-    """Attach to sandbox via sbx exec streaming."""
+    """Attach to sandbox via sbx exec streaming.
+
+    Uses a login shell (-l) to ensure /etc/profile.d scripts are sourced,
+    which is required for git safety environment variables to be available.
+    """
     if working_dir:
-        shell_cmd = ["bash", "-c", f"cd {working_dir} && exec bash"]
+        shell_cmd = ["bash", "-lc", f"cd {working_dir} && exec bash -l"]
     else:
-        shell_cmd = ["bash"]
-    proc = sbx_exec_streaming(name, shell_cmd)
+        shell_cmd = ["bash", "-l"]
+    proc = sbx_exec_streaming(name, shell_cmd, interactive=True)
     proc.wait()
 
 

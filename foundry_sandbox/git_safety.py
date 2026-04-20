@@ -228,7 +228,7 @@ def inject_git_wrapper(
     sandbox_name: str,
     *,
     sandbox_id: str,
-    workspace_dir: str = "/workspace",
+    workspace_dir: str,
     git_api_host: str = "host.docker.internal",
     git_api_port: int = 8083,
 ) -> None:
