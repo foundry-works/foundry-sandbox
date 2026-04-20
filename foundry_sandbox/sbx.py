@@ -94,6 +94,7 @@ def sbx_create(
     path: str | Path,
     *,
     branch: str | None = None,
+    template: str | None = None,
 ) -> subprocess.CompletedProcess[str]:
     """Create a new sandbox.
 
@@ -102,6 +103,7 @@ def sbx_create(
         agent: Agent type (claude, codex, copilot, gemini, kiro, opencode, shell).
         path: Workspace path on host.
         branch: Optional branch name for git worktree.
+        template: Optional template tag (e.g. 'foundry-git-wrapper:latest').
 
     Returns:
         CompletedProcess result.
@@ -109,6 +111,8 @@ def sbx_create(
     args = ["create", "--name", name]
     if branch:
         args.extend(["--branch", branch])
+    if template:
+        args.extend(["--template", template])
     args.extend([agent, str(path)])
     return _run_sbx(args, timeout=TIMEOUT_SBX_LIFECYCLE)
 
@@ -378,6 +382,27 @@ def sbx_template_load(tag: str) -> subprocess.CompletedProcess[str]:
         CompletedProcess result.
     """
     return _run_sbx(["template", "load", tag], timeout=TIMEOUT_SBX_LIFECYCLE)
+
+
+def sbx_template_ls() -> list[str]:
+    """List available template tags.
+
+    Returns:
+        List of template tag strings. Empty list on error.
+    """
+    try:
+        result = _run_sbx(
+            ["template", "ls"], timeout=TIMEOUT_SBX_QUERY, check=False
+        )
+        if result.returncode != 0:
+            return []
+        return [
+            line.strip()
+            for line in result.stdout.strip().splitlines()
+            if line.strip()
+        ]
+    except subprocess.TimeoutExpired:
+        return []
 
 
 # ============================================================================

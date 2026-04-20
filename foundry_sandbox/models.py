@@ -55,6 +55,9 @@ class SbxSandboxMetadata(BaseModel):
     copies: list[str] = Field(default_factory=list)
     """List of copy specifications (host:container)."""
 
+    template: str = ""
+    """Template tag used to create the sandbox (empty = no template)."""
+
 
 class CastNewPreset(BaseModel):
     """Structured representation of cast-new preset arguments."""

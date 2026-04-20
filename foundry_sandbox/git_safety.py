@@ -12,6 +12,7 @@ import json
 import os
 import secrets as _secrets
 import subprocess
+import sys
 from pathlib import Path
 
 # Default paths matching foundry-git-safety defaults
@@ -311,3 +312,61 @@ def verify_git_wrapper(sandbox_name: str) -> bool:
         return result.returncode == 0 and "/usr/local/bin/git" in result.stdout
     except Exception:
         return False
+
+
+# ============================================================================
+# Template Management
+# ============================================================================
+
+
+FOUNDRY_TEMPLATE_TAG = "foundry-git-wrapper:latest"
+
+
+def ensure_foundry_template() -> bool:
+    """Ensure the foundry git-wrapper template exists, building it if needed.
+
+    Checks if the template exists via ``sbx template ls``, and runs the
+    build script if it does not.  Also triggers a rebuild when the stored
+    digest is stale (i.e. ``sbx`` was upgraded).
+
+    Returns:
+        True if the template is available (pre-existing or freshly built).
+    """
+    from foundry_sandbox.sbx import sbx_template_ls
+
+    templates = sbx_template_ls()
+    if any(FOUNDRY_TEMPLATE_TAG in t for t in templates):
+        # Template exists — check staleness
+        build_script = _find_build_script()
+        if build_script:
+            subprocess.run(
+                [str(build_script), "--check-staleness"],
+                check=False,
+                timeout=120,
+            )
+        return True
+
+    build_script = _find_build_script()
+    if not build_script:
+        return False
+
+    print(f"Template {FOUNDRY_TEMPLATE_TAG} not found. Building...")
+    result = subprocess.run(
+        [str(build_script)],
+        check=False,
+        timeout=300,
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode != 0:
+        print(f"Template build failed:\n{result.stderr}", file=sys.stderr)
+        return False
+    if result.stdout.strip():
+        print(result.stdout.strip())
+    return True
+
+
+def _find_build_script() -> Path | None:
+    """Locate the template build script relative to this package."""
+    script = Path(__file__).parent.parent / "scripts" / "build-foundry-template.sh"
+    return script if script.exists() else None

@@ -95,6 +95,7 @@ def write_sandbox_metadata(
     enable_opencode: bool = False,
     enable_zai: bool = False,
     copies: list[str] | None = None,
+    template: str = "",
 ) -> None:
     """Write sandbox metadata to a JSON file.
 
@@ -114,6 +115,7 @@ def write_sandbox_metadata(
         enable_opencode: Whether to enable OpenCode.
         enable_zai: Whether to enable ZAI.
         copies: List of copy specs.
+        template: Template tag used for sandbox creation.
     """
     model = SbxSandboxMetadata(
         sbx_name=sbx_name,
@@ -130,6 +132,7 @@ def write_sandbox_metadata(
         enable_opencode=enable_opencode,
         enable_zai=enable_zai,
         copies=copies or [],
+        template=template,
     )
     data = model.model_dump()
 

@@ -143,6 +143,8 @@ def _load_and_apply_defaults(
 @click.option("--save-as", metavar="NAME", help="Save configuration as named preset")
 @click.option("--skip-key-check", is_flag=True, help="Skip API key validation")
 @click.option("--name", "name_override", metavar="NAME", help="Override auto-generated sandbox name")
+@click.option("--template", "template", default="foundry-git-wrapper:latest", show_default=True,
+              help="Template tag for sandbox creation. Use 'none' to disable.")
 @click.pass_context
 def new(
     ctx: click.Context,
@@ -161,6 +163,7 @@ def new(
     save_as: str,
     skip_key_check: bool,
     name_override: str,
+    template: str,
 ) -> None:
     """Create a new sandbox with sbx."""
 
@@ -340,6 +343,7 @@ def new(
             with_opencode=with_opencode,
             with_zai=with_zai,
             wd=wd or "",
+            template=template,
         )
     except SetupError as exc:
         log_error(str(exc))

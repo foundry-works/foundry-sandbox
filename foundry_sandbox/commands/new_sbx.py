@@ -11,6 +11,8 @@ from pathlib import Path
 
 from foundry_sandbox.git import ensure_bare_repo
 from foundry_sandbox.git_safety import (
+    FOUNDRY_TEMPLATE_TAG,
+    ensure_foundry_template,
     generate_hmac_secret,
     git_safety_server_is_running,
     git_safety_server_start,
@@ -55,6 +57,7 @@ def new_sbx_setup(
     with_opencode: bool,
     with_zai: bool,
     wd: str,
+    template: str | None = FOUNDRY_TEMPLATE_TAG,
 ) -> None:
     """Create a new sbx-based sandbox.
 
@@ -62,10 +65,10 @@ def new_sbx_setup(
     1. Check sbx available
     2. Clone/fetch bare repo
     3. Create worktree
-    4. Create sbx sandbox
+    4. Ensure template + create sbx sandbox
     5. Start git safety server if needed
     6. Generate HMAC secret and register with git safety
-    7. Inject git wrapper
+    7. Inject git wrapper env vars
     8. Copy files, install pip requirements
     9. Write metadata
     """
@@ -90,12 +93,20 @@ def new_sbx_setup(
         raise SetupError(f"Worktree creation failed: {worktree_path}")
 
     # ------------------------------------------------------------------
-    # 4. Create sbx sandbox
+    # 4. Ensure template exists, then create sbx sandbox
     # ------------------------------------------------------------------
     log_section("Sandbox")
+    use_template = template if template and template.lower() != "none" else None
+    if use_template:
+        log_info("Ensuring foundry template is available...")
+        if not ensure_foundry_template():
+            log_warn("Template build failed; falling back to runtime injection")
+            use_template = None
     log_info(f"Creating sbx sandbox: {name}")
     try:
-        sbx_create(name, agent, str(worktree_path), branch=branch)
+        sbx_create(
+            name, agent, str(worktree_path), branch=branch, template=use_template
+        )
     except Exception as exc:
         raise SetupError(f"sbx create failed: {exc}") from exc
 
@@ -178,6 +189,7 @@ def new_sbx_setup(
         enable_opencode=with_opencode,
         enable_zai=with_zai,
         copies=copies,
+        template=use_template or "",
     )
 
 
