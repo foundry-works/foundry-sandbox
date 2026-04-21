@@ -94,27 +94,38 @@ def generate_hmac_secret() -> str:
     return _secrets.token_hex(32)
 
 
-def write_hmac_secret_to_worktree(
-    worktree_path: str | Path,
+def write_hmac_secret_to_sandbox(
+    sandbox_name: str,
     secret: str,
 ) -> Path:
-    """Write an HMAC secret file into the worktree's .foundry directory.
+    """Write an HMAC secret file for the wrapper inside the sandbox.
 
-    The wrapper script discovers this file at {WORKSPACE_DIR}/.foundry/hmac-secret.
+    The secret is written to /run/foundry/hmac-secret — a tmpfs location
+    outside any VCS tree.  The wrapper script reads it from there.
 
     Args:
-        worktree_path: Host-side worktree directory.
+        sandbox_name: Sandbox name (used only for logging context).
         secret: HMAC secret value.
 
     Returns:
-        Path to the written secret file.
+        Path to the written secret file (container-absolute).
     """
-    foundry_dir = Path(worktree_path) / ".foundry"
-    foundry_dir.mkdir(parents=True, exist_ok=True)
-    secret_path = foundry_dir / "hmac-secret"
-    secret_path.write_text(secret)
-    secret_path.chmod(0o600)
-    return secret_path
+    from foundry_sandbox.sbx import sbx_exec
+
+    secret_dir = "/run/foundry"
+    sbx_exec(
+        sandbox_name,
+        ["mkdir", "-p", secret_dir],
+        user="root",
+        quiet=True,
+    )
+    sbx_exec(
+        sandbox_name,
+        ["sh", "-c", f"printf '%s' '{secret}' > /run/foundry/hmac-secret && chmod 600 /run/foundry/hmac-secret"],
+        user="root",
+        quiet=True,
+    )
+    return Path("/run/foundry/hmac-secret")
 
 
 def write_hmac_secret_for_server(
@@ -281,7 +292,7 @@ def inject_git_wrapper(
         f"export WORKSPACE_DIR={workspace_dir}\n"
         f"export GIT_API_HOST={git_api_host}\n"
         f"export GIT_API_PORT={git_api_port}\n"
-        f'export GIT_HMAC_SECRET_FILE="{workspace_dir}/.foundry/hmac-secret"\n'
+        f'export GIT_HMAC_SECRET_FILE="/run/foundry/hmac-secret"\n'
     )
     sbx_exec(
         sandbox_name,

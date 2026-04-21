@@ -157,6 +157,17 @@ def create_git_api(
     limiter = rate_limiter or RateLimiter()
     resolved_data_dir = data_dir or DEFAULT_DATA_DIR
 
+    # Configure decision-log writer from config if available.
+    if config is not None:
+        obs = config.git_safety.observability
+        if obs.decision_log_dir:
+            from .decision_log import configure_decision_log
+            configure_decision_log(
+                log_dir=obs.decision_log_dir,
+                max_bytes=obs.decision_log_max_bytes,
+                backup_count=obs.decision_log_backup_count,
+            )
+
     # Import here to avoid circular imports
     from .command_validation import validate_request
     from .operations import execute_git
@@ -327,11 +338,15 @@ def create_git_api(
             config_valid = False
             config_error = str(exc)
 
-        status = "ok" if config_valid else "degraded"
+        # Decision-log status
+        log_check = _check_decision_log()
+
+        status = "ok" if config_valid and log_check["ok"] else "degraded"
         return jsonify({
             "status": status,
             "config_valid": config_valid,
             "config_error": config_error,
+            "logging": log_check,
             "uptime_seconds": round(time.time() - app._start_time, 2),
         })
 
@@ -356,16 +371,33 @@ def create_git_api(
             return {"ok": False, "detail": f"Secrets directory missing: {secrets_path}"}
         return {"ok": True, "detail": "Secret store available"}
 
+    def _check_decision_log() -> dict:
+        from .decision_log import get_decision_log_writer
+
+        try:
+            writer = get_decision_log_writer()
+            log_dir = str(writer._log_dir)
+            test_entry = {"_health_check": True, "ts": time.time()}
+            writer.write(test_entry)
+            return {"ok": True, "detail": f"Decision log writable at {log_dir}"}
+        except Exception as exc:
+            return {"ok": False, "detail": f"Decision log write failed: {exc}"}
+
     @app.route("/ready", methods=["GET"])
     def ready():
-        checks = {
+        fatal_checks = {
             "workspace": _check_workspace(resolved_data_dir),
             "config": _check_config(),
             "secret_store": _check_secret_store(secrets),
         }
-        all_ok = all(c["ok"] for c in checks.values())
-        status = 200 if all_ok else 503
-        return jsonify({"ready": all_ok, "checks": checks}), status
+        # Decision log is non-fatal: degraded logging should not trigger
+        # orchestration restarts.
+        log_check = {"decision_log": _check_decision_log()}
+
+        all_fatal_ok = all(c["ok"] for c in fatal_checks.values())
+        checks = {**fatal_checks, **log_check}
+        status = 200 if all_fatal_ok else 503
+        return jsonify({"ready": all_fatal_ok, "checks": checks}), status
 
     @app.route("/metrics", methods=["GET"])
     def metrics():

@@ -5,7 +5,11 @@ from pathlib import Path
 
 import pytest
 
-from foundry_git_safety.decision_log import DecisionLogWriter, write_decision
+from foundry_git_safety.decision_log import (
+    DecisionLogWriter,
+    configure_decision_log,
+    write_decision,
+)
 
 
 @pytest.fixture
@@ -96,3 +100,51 @@ class TestWriteDecision:
         assert entry["outcome"] == "deny"
         assert entry["verb"] == "push"
         assert "timestamp" in entry
+
+
+class TestConfigureDecisionLog:
+    def test_configure_creates_writer_at_new_path(self, tmp_path, monkeypatch):
+        from foundry_git_safety import decision_log
+
+        monkeypatch.setattr(decision_log, "_writer", None)
+        new_dir = str(tmp_path / "custom-logs")
+        writer = configure_decision_log(log_dir=new_dir)
+        writer.write({"test": "configured"})
+        assert (Path(new_dir) / "decisions.jsonl").exists()
+        writer.close()
+
+    def test_configure_replaces_existing_writer(self, tmp_path, monkeypatch):
+        from foundry_git_safety import decision_log
+
+        monkeypatch.setattr(decision_log, "_writer", None)
+        dir_a = str(tmp_path / "logs-a")
+        dir_b = str(tmp_path / "logs-b")
+
+        w = configure_decision_log(log_dir=dir_a)
+        w.write({"loc": "a"})
+        configure_decision_log(log_dir=dir_b)
+        write_decision(sandbox="sbx", rule="test", verb="push", outcome="allow")
+
+        assert (Path(dir_a) / "decisions.jsonl").exists()
+        assert (Path(dir_b) / "decisions.jsonl").exists()
+        # Only the initial write in dir_a
+        lines_a = (Path(dir_a) / "decisions.jsonl").read_text().strip().split("\n")
+        assert len(lines_a) == 1
+        # The new write went to dir_b
+        lines_b = (Path(dir_b) / "decisions.jsonl").read_text().strip().split("\n")
+        assert len(lines_b) == 1
+
+        # Clean up singleton
+        decision_log._writer.close()
+        monkeypatch.setattr(decision_log, "_writer", None)
+
+    def test_same_path_is_noop(self, tmp_path, monkeypatch):
+        from foundry_git_safety import decision_log
+
+        monkeypatch.setattr(decision_log, "_writer", None)
+        log_dir = str(tmp_path / "logs")
+        w1 = configure_decision_log(log_dir=log_dir)
+        w2 = configure_decision_log(log_dir=log_dir)
+        assert w1 is w2
+        w1.close()
+        monkeypatch.setattr(decision_log, "_writer", None)

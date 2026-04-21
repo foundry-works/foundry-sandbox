@@ -23,7 +23,7 @@ from foundry_sandbox.git_safety import (
     verify_git_wrapper,
     verify_wrapper_integrity,
     write_hmac_secret_for_server,
-    write_hmac_secret_to_worktree,
+    write_hmac_secret_to_sandbox,
 )
 
 
@@ -115,28 +115,19 @@ class TestGenerateHmacSecret:
         assert a != b
 
 
-class TestWriteHmacSecretToWorktree:
-    def test_creates_file(self, tmp_path):
-        worktree = tmp_path / "worktree"
-        worktree.mkdir()
-        secret_path = write_hmac_secret_to_worktree(worktree, "my-secret")
-        assert secret_path.exists()
-        assert secret_path.read_text() == "my-secret"
-        assert secret_path.name == "hmac-secret"
-        assert str(secret_path.parent).endswith("/.foundry")
-
-    def test_creates_foundry_dir(self, tmp_path):
-        worktree = tmp_path / "worktree"
-        worktree.mkdir()
-        write_hmac_secret_to_worktree(worktree, "secret")
-        assert (worktree / ".foundry").is_dir()
-
-    def test_permissions(self, tmp_path):
-        worktree = tmp_path / "worktree"
-        worktree.mkdir()
-        secret_path = write_hmac_secret_to_worktree(worktree, "secret")
-        mode = secret_path.stat().st_mode & 0o777
-        assert mode == 0o600
+class TestWriteHmacSecretToSandbox:
+    @patch("foundry_sandbox.sbx.sbx_exec")
+    def test_creates_dir_and_writes_secret(self, mock_exec):
+        mock_exec.return_value = _mock_completed()
+        secret_path = write_hmac_secret_to_sandbox("test-sandbox", "my-secret")
+        assert str(secret_path) == "/run/foundry/hmac-secret"
+        assert mock_exec.call_count == 2
+        # First call: mkdir
+        mkdir_call = mock_exec.call_args_list[0]
+        assert "mkdir" in str(mkdir_call)
+        # Second call: write secret
+        write_call = mock_exec.call_args_list[1]
+        assert "hmac-secret" in str(write_call)
 
 
 class TestWriteHmacSecretForServer:
@@ -290,7 +281,7 @@ class TestInjectGitWrapper:
         env_call = mock_exec.call_args_list[2]  # third call is tee env script
         env_call_input = env_call[1]["input"]
         assert "WORKSPACE_DIR=/custom/path" in env_call_input
-        assert 'GIT_HMAC_SECRET_FILE="/custom/path/.foundry/hmac-secret"' in env_call_input
+        assert 'GIT_HMAC_SECRET_FILE="/run/foundry/hmac-secret"' in env_call_input
 
 
 class TestVerifyGitWrapper:

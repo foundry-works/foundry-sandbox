@@ -111,9 +111,8 @@ class WrapperWatchdog:
             generate_hmac_secret,
             inject_git_wrapper,
             write_hmac_secret_for_server,
-            write_hmac_secret_to_worktree,
+            write_hmac_secret_to_sandbox,
         )
-        from foundry_sandbox.paths import path_worktree
         from foundry_sandbox.state import patch_sandbox_metadata
 
         global _reinjection_count
@@ -124,8 +123,7 @@ class WrapperWatchdog:
         # Rotate HMAC before re-injection so any captured old secret is dead.
         try:
             new_secret = generate_hmac_secret()
-            worktree_path = path_worktree(name)
-            write_hmac_secret_to_worktree(worktree_path, new_secret)
+            write_hmac_secret_to_sandbox(name, new_secret)
             write_hmac_secret_for_server(sandbox_id, new_secret)
         except Exception as exc:
             log_warn(

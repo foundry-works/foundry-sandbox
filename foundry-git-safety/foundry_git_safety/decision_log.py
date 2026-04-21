@@ -114,6 +114,32 @@ def get_decision_log_writer() -> DecisionLogWriter:
         return _writer
 
 
+def configure_decision_log(
+    log_dir: str,
+    max_bytes: int = 10 * 1024 * 1024,
+    backup_count: int = 5,
+) -> DecisionLogWriter:
+    """Reconfigure the decision-log singleton with a new directory.
+
+    Closes any existing writer and creates a new one pointing at the
+    given path.  Call this from ``create_git_api()`` when config is
+    available so that ``audit_log()`` writes to the configured location.
+    """
+    global _writer
+    with _writer_lock:
+        if _writer is not None:
+            old_dir = str(_writer._log_dir)
+            if old_dir == log_dir:
+                return _writer
+            _writer.close()
+        _writer = DecisionLogWriter(
+            log_dir=log_dir,
+            max_bytes=max_bytes,
+            backup_count=backup_count,
+        )
+        return _writer
+
+
 def write_decision(
     *,
     sandbox: str,

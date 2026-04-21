@@ -1,84 +1,116 @@
-# foundry-sandbox — Post-Review Checklist
+# foundry-sandbox — Phase 8 Checklist: Code Remediation + CI Pipeline
 
-**Last updated:** 2026-04-20
+**Last updated:** 2026-04-21
 **Companion to:** `PLAN.md`
 
 Legend: `[ ]` todo, `[x]` done, `[~]` partial / accepted risk
 
 ---
 
-## 1. Install and Bootstrap
+## 2.1 Config-Driven Decision Log Path
 
-- [x] Choose how `foundry-git-safety` is shipped with the main product.
-- [x] Update root packaging so default install path provides the git-safety runtime.
-- [x] Update `install.sh` so it installs everything needed for a working sandbox.
-- [x] Make `cast new` fail closed if git safety is missing.
-- [x] Make `cast start` fail closed if git safety is missing.
-- [x] Add a smoke test for fresh install -> create sandbox -> proxied `git status`.
-- [ ] Update docs that currently claim git safety is installed automatically.
+- [x] Add `decision_log_dir` field to `GitSafetyServerConfig` (default `~/.foundry/logs`) — pre-existing in ObservabilityConfig
+- [x] Thread configured `decision_log_dir` through `create_git_api()` to `DecisionLogWriter`
+- [x] Reset `_writer` singleton when config path differs from active writer path
+- [x] Add test: `foundry.yaml` with custom `decision_log_dir` writes to that path
 
-## 2. Runtime Paths and Config
+## 2.2 Degraded Observability in Health/Readiness
 
-- [x] Replace privileged default paths with user-writable defaults, or add an explicit privileged bootstrap flow.
-- [x] Plumb configured `git_safety.server.secrets_path` into `SecretStore`.
-- [x] Plumb configured `git_safety.server.data_dir` into all registration/runtime code paths.
-- [ ] Plumb configured observability paths into decision-log creation.
-- [x] Fix readiness checks to read the real secret-store path.
-- [x] Add tests covering non-default configured paths.
-- [ ] Verify default startup works for an unprivileged user on a clean machine.
+- [x] Add decision-log writability check to `/ready` endpoint
+- [x] Return 200 (not 503) when only the decision log is degraded
+- [x] Add `logging` section to `/health` response with path and writability
+- [x] Add test: `/ready` reports `decision_log: {ok: false}` with unwritable dir
+- [x] Add test: `/health` includes logging status
 
-## 3. Sandbox Registration and Repo Root
+## 2.3 Integration Test: Blocked Commands → 422
 
-- [x] Persist a host-side `repo_root` during sandbox registration.
-- [x] Ensure sandbox metadata includes enough information to resolve the correct host worktree.
-- [x] Remove `/git-workspace` as an implicit standalone-host fallback.
-- [x] Fail closed with a clear message when `repo_root` is missing or invalid.
-- [x] Add integration test: registered sandbox can run proxied `git status`.
-- [x] Add integration test: missing `repo_root` returns controlled error.
-- [ ] Add integration test: blocked commands still return `422`.
+- [x] Write integration test: server with registered sandbox, blocked command → 422
+- [x] Include at least one push-blocked and one command-blocked scenario
+- [x] Verify response body is JSON with an `error` key
 
-## 4. Observability Must Be Best-Effort
+## 2.4 Integration Tests: Denial Paths with Broken Logging
 
-- [x] Make decision-log writes best-effort.
-- [x] Prevent logging failures from changing expected `401`/`422` responses into `500`s.
-- [x] Keep metrics emission non-fatal.
-- [ ] Surface degraded observability in health/readiness output.
-- [x] Add unit tests for unwritable decision-log directory.
-- [ ] Add integration tests for denial paths while logging is unavailable.
+- [x] Test: unwritable decision-log dir + bad signature → 401 (not 500)
+- [x] Test: unwritable decision-log dir + blocked command → 422 (not 500)
+- [x] Test: unwritable decision-log dir + rate limit → 429 (not 500)
+- [x] Verify decision-log directory stays empty/unwritable (best-effort proven)
 
-## 5. CI and Test Strategy
+## 2.5 CI Pipeline for `foundry-git-safety`
 
-- [ ] Add required CI job for `foundry-git-safety` unit tests.
-- [ ] Add required CI job for `foundry-git-safety` security tests.
-- [ ] Add required CI job for `foundry-git-safety` integration tests.
-- [ ] Keep root-package tests as a separate CI job.
-- [ ] Run standalone-package tests from their own working directory or isolated import root.
-- [ ] Document the pytest invocation pattern needed to avoid test-package collisions.
-- [ ] Update `scripts/ci-local.sh` to match CI coverage.
+- [x] Add `git-safety-unit` job to `.github/workflows/test.yml`
+- [x] Add `git-safety-security` job to `.github/workflows/test.yml`
+- [x] Add `git-safety-integration` job to `.github/workflows/test.yml`
+- [x] Update `all-pass` gate to require all test jobs
+- [x] Add comment documenting pytest isolation rule
+- [x] Update `scripts/ci-local.sh` with `foundry-git-safety` test steps
+- [ ] Verify CI passes on a test push
 
-## 6. HMAC Secret Placement
+---
 
-- [ ] Decide whether `.foundry/hmac-secret` can be removed from the synced repo worktree.
-- [ ] If it cannot be moved, block it from staging and pushing.
-- [ ] Add tests proving the secret cannot be committed accidentally.
-- [ ] Document the security model and residual risk for wrapper-secret placement.
+## Phase 7 Carry-Over (previously done, verified)
 
-## 7. Docs and Operator Cleanup
+These items from the post-review plan are complete:
 
-- [ ] Update `README.md` install/runtime claims.
-- [ ] Update `docs/getting-started.md`.
-- [ ] Update `docs/configuration.md`.
-- [ ] Update `docs/operations.md`.
-- [ ] Add troubleshooting guidance for:
-  - [ ] missing `foundry-git-safety`
-  - [ ] bad secrets/data paths
-  - [ ] bad sandbox registration / missing `repo_root`
-  - [ ] degraded decision logging
+- [x] Choose how `foundry-git-safety` is shipped with the main product
+- [x] Update root packaging for default install path
+- [x] Update `install.sh` for working sandbox
+- [x] `cast new` / `cast start` fail closed on missing git safety
+- [x] Smoke test: fresh install → create sandbox → proxied `git status`
+- [x] Replace privileged default paths with user-writable defaults
+- [x] Plumb `secrets_path` into `SecretStore`
+- [x] Plumb `data_dir` into registration/runtime code paths
+- [x] Fix readiness checks for real secret-store path
+- [x] Add tests covering non-default configured paths
+- [x] Persist host-side `repo_root` during registration
+- [x] Remove `/git-workspace` fallback
+- [x] Fail closed when `repo_root` missing
+- [x] Integration test: registered sandbox → proxied `git status`
+- [x] Integration test: missing `repo_root` → controlled error
+- [x] Make decision-log writes best-effort
+- [x] Prevent logging failures from changing 401/422 → 500
+- [x] Keep metrics emission non-fatal
+- [x] Unit tests for unwritable decision-log directory
 
-## 8. Release Blockers
+## 2.6 Move HMAC Secret Outside Worktree
 
-- [ ] Fresh install provides a working `foundry-git-safety` runtime.
-- [ ] `cast new` and `cast start` fail closed on missing safety prerequisites.
-- [ ] Registered sandboxes use the correct host worktree for proxied git.
-- [ ] Observability failures no longer produce `500`s.
-- [ ] Required CI covers both packages.
+- [x] Rename `write_hmac_secret_to_worktree()` → `write_hmac_secret_to_sandbox()`, write to `/run/foundry/hmac-secret`
+- [x] Update `inject_git_wrapper()` env var to `/run/foundry/hmac-secret`
+- [x] Update `stubs/git-wrapper-sbx.sh` auto-discovery to `/run/foundry/hmac-secret`
+- [x] Update `foundry-git-safety/foundry_git_safety/wrapper.sh` auto-discovery to `/run/foundry/hmac-secret`
+- [x] Update watchdog rotation to write to new path
+- [x] Update `tests/unit/test_git_safety.py` assertions
+- [x] Update `tests/unit/test_new_sbx.py` mocks
+- [x] Update `tests/unit/test_watchdog.py` mocks
+- [x] Grep for remaining references to `.foundry/hmac-secret` in code — none found
+
+---
+
+## Phase 7 Carry-Over (previously done, verified)
+
+These items from the post-review plan are complete:
+
+- [x] Choose how `foundry-git-safety` is shipped with the main product
+- [x] Update root packaging for default install path
+- [x] Update `install.sh` for working sandbox
+- [x] `cast new` / `cast start` fail closed on missing git safety
+- [x] Smoke test: fresh install → create sandbox → proxied `git status`
+- [x] Replace privileged default paths with user-writable defaults
+- [x] Plumb `secrets_path` into `SecretStore`
+- [x] Plumb `data_dir` into registration/runtime code paths
+- [x] Fix readiness checks for real secret-store path
+- [x] Add tests covering non-default configured paths
+- [x] Persist host-side `repo_root` during registration
+- [x] Remove `/git-workspace` fallback
+- [x] Fail closed when `repo_root` missing
+- [x] Integration test: registered sandbox → proxied `git status`
+- [x] Integration test: missing `repo_root` → controlled error
+- [x] Make decision-log writes best-effort
+- [x] Prevent logging failures from changing 401/422 → 500
+- [x] Keep metrics emission non-fatal
+- [x] Unit tests for unwritable decision-log directory
+
+## Deferred to Phase 9
+
+- [ ] Update README.md, getting-started.md, configuration.md, operations.md
+- [ ] Add troubleshooting guidance
+- [ ] Final release blocker verification

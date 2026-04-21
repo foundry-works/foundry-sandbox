@@ -48,9 +48,8 @@ class TestWrapperWatchdogPoll:
     @patch("foundry_sandbox.state.patch_sandbox_metadata")
     @patch("foundry_sandbox.git_safety.inject_git_wrapper")
     @patch("foundry_sandbox.git_safety.write_hmac_secret_for_server")
-    @patch("foundry_sandbox.git_safety.write_hmac_secret_to_worktree")
+    @patch("foundry_sandbox.git_safety.write_hmac_secret_to_sandbox")
     @patch("foundry_sandbox.git_safety.generate_hmac_secret", return_value="s1")
-    @patch("foundry_sandbox.paths.path_worktree", return_value="/tmp/wt")
     @patch("foundry_sandbox.git_safety.verify_wrapper_integrity", return_value=(False, "def456"))
     @patch("foundry_sandbox.git_safety.compute_wrapper_checksum", return_value="abc123")
     @patch("foundry_sandbox.state.load_sandbox_metadata")
@@ -58,7 +57,7 @@ class TestWrapperWatchdogPoll:
     @patch("foundry_sandbox.sbx.sbx_ls")
     def test_reinjects_on_mismatch(
         self, mock_ls, mock_running, mock_meta, mock_checksum,
-        mock_verify, mock_worktree, mock_gen_hmac,
+        mock_verify, mock_gen_hmac,
         mock_write_wt, mock_write_srv, mock_inject, mock_patch, mock_emit,
     ):
         mock_ls.return_value = [{"name": "sb1", "status": "running"}]
@@ -125,9 +124,8 @@ class TestWrapperWatchdogReinjectionCount:
     @patch("foundry_sandbox.state.patch_sandbox_metadata")
     @patch("foundry_sandbox.git_safety.inject_git_wrapper")
     @patch("foundry_sandbox.git_safety.write_hmac_secret_for_server")
-    @patch("foundry_sandbox.git_safety.write_hmac_secret_to_worktree")
+    @patch("foundry_sandbox.git_safety.write_hmac_secret_to_sandbox")
     @patch("foundry_sandbox.git_safety.generate_hmac_secret", return_value="s1")
-    @patch("foundry_sandbox.paths.path_worktree", return_value="/tmp/wt")
     @patch("foundry_sandbox.git_safety.verify_wrapper_integrity", return_value=(False, "wrong"))
     @patch("foundry_sandbox.git_safety.compute_wrapper_checksum", return_value="abc123")
     @patch("foundry_sandbox.state.load_sandbox_metadata")
@@ -135,7 +133,7 @@ class TestWrapperWatchdogReinjectionCount:
     @patch("foundry_sandbox.sbx.sbx_ls")
     def test_counter_increments(
         self, mock_ls, mock_running, mock_meta, mock_checksum,
-        mock_verify, mock_worktree, mock_gen_hmac,
+        mock_verify, mock_gen_hmac,
         mock_write_wt, mock_write_srv, mock_inject, mock_patch, mock_emit,
     ):
         mock_ls.return_value = [
@@ -197,9 +195,8 @@ class TestHmacRotationOnReinjection:
     @patch("foundry_sandbox.state.patch_sandbox_metadata")
     @patch("foundry_sandbox.git_safety.inject_git_wrapper")
     @patch("foundry_sandbox.git_safety.write_hmac_secret_for_server")
-    @patch("foundry_sandbox.git_safety.write_hmac_secret_to_worktree")
+    @patch("foundry_sandbox.git_safety.write_hmac_secret_to_sandbox")
     @patch("foundry_sandbox.git_safety.generate_hmac_secret", return_value="new_secret_1")
-    @patch("foundry_sandbox.paths.path_worktree", return_value="/tmp/worktrees/sb1")
     @patch("foundry_sandbox.git_safety.verify_wrapper_integrity", return_value=(False, "wrong"))
     @patch("foundry_sandbox.git_safety.compute_wrapper_checksum", return_value="abc123")
     @patch("foundry_sandbox.state.load_sandbox_metadata")
@@ -207,7 +204,7 @@ class TestHmacRotationOnReinjection:
     @patch("foundry_sandbox.sbx.sbx_ls")
     def test_hmac_writers_called_before_inject(
         self, mock_ls, mock_running, mock_meta, mock_checksum,
-        mock_verify, mock_worktree, mock_gen_hmac,
+        mock_verify, mock_gen_hmac,
         mock_write_wt, mock_write_srv, mock_inject, mock_patch, mock_emit,
     ):
         mock_ls.return_value = [{"name": "sb1", "status": "running"}]
@@ -231,8 +228,7 @@ class TestHmacRotationOnReinjection:
     @patch("foundry_sandbox.state.patch_sandbox_metadata")
     @patch("foundry_sandbox.git_safety.inject_git_wrapper")
     @patch("foundry_sandbox.git_safety.write_hmac_secret_for_server")
-    @patch("foundry_sandbox.git_safety.write_hmac_secret_to_worktree")
-    @patch("foundry_sandbox.paths.path_worktree", return_value="/tmp/wt")
+    @patch("foundry_sandbox.git_safety.write_hmac_secret_to_sandbox")
     @patch("foundry_sandbox.git_safety.verify_wrapper_integrity", return_value=(False, "wrong"))
     @patch("foundry_sandbox.git_safety.compute_wrapper_checksum", return_value="abc123")
     @patch("foundry_sandbox.state.load_sandbox_metadata")
@@ -240,7 +236,7 @@ class TestHmacRotationOnReinjection:
     @patch("foundry_sandbox.sbx.sbx_ls")
     def test_consecutive_tamper_events_produce_different_secrets(
         self, mock_ls, mock_running, mock_meta, mock_checksum,
-        mock_verify, mock_worktree,
+        mock_verify,
         mock_write_wt, mock_write_srv,
         mock_inject, mock_patch, mock_emit,
     ):
@@ -271,9 +267,8 @@ class TestHmacRotationOnReinjection:
     @patch("foundry_sandbox.git_safety.emit_wrapper_tamper_event")
     @patch("foundry_sandbox.state.patch_sandbox_metadata")
     @patch("foundry_sandbox.git_safety.write_hmac_secret_for_server")
-    @patch("foundry_sandbox.git_safety.write_hmac_secret_to_worktree")
+    @patch("foundry_sandbox.git_safety.write_hmac_secret_to_sandbox")
     @patch("foundry_sandbox.git_safety.generate_hmac_secret", side_effect=OSError("disk full"))
-    @patch("foundry_sandbox.paths.path_worktree", return_value="/tmp/wt")
     @patch("foundry_sandbox.git_safety.verify_wrapper_integrity", return_value=(False, "wrong"))
     @patch("foundry_sandbox.git_safety.compute_wrapper_checksum", return_value="abc123")
     @patch("foundry_sandbox.state.load_sandbox_metadata")
@@ -281,7 +276,7 @@ class TestHmacRotationOnReinjection:
     @patch("foundry_sandbox.sbx.sbx_ls")
     def test_hmac_failure_skips_reinjection(
         self, mock_ls, mock_running, mock_meta, mock_checksum,
-        mock_verify, mock_worktree, mock_gen_hmac,
+        mock_verify, mock_gen_hmac,
         mock_write_wt, mock_write_srv, mock_patch, mock_emit,
     ):
         mock_ls.return_value = [{"name": "sb1", "status": "running"}]
@@ -311,9 +306,8 @@ class TestTamperEventEmission:
     @patch("foundry_sandbox.state.patch_sandbox_metadata")
     @patch("foundry_sandbox.git_safety.inject_git_wrapper")
     @patch("foundry_sandbox.git_safety.write_hmac_secret_for_server")
-    @patch("foundry_sandbox.git_safety.write_hmac_secret_to_worktree")
+    @patch("foundry_sandbox.git_safety.write_hmac_secret_to_sandbox")
     @patch("foundry_sandbox.git_safety.generate_hmac_secret", return_value="s1")
-    @patch("foundry_sandbox.paths.path_worktree", return_value="/tmp/wt")
     @patch("foundry_sandbox.git_safety.verify_wrapper_integrity", return_value=(False, "wrong"))
     @patch("foundry_sandbox.git_safety.compute_wrapper_checksum", return_value="abc123")
     @patch("foundry_sandbox.state.load_sandbox_metadata")
@@ -321,7 +315,7 @@ class TestTamperEventEmission:
     @patch("foundry_sandbox.sbx.sbx_ls")
     def test_event_emitted_once_per_mismatch(
         self, mock_ls, mock_running, mock_meta, mock_checksum,
-        mock_verify, mock_worktree, mock_gen_hmac,
+        mock_verify, mock_gen_hmac,
         mock_write_wt, mock_write_srv, mock_inject, mock_patch, mock_emit,
     ):
         mock_ls.return_value = [{"name": "sb1", "status": "running"}]

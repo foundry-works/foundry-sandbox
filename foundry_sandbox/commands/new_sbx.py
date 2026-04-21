@@ -19,7 +19,7 @@ from foundry_sandbox.git_safety import (
     git_safety_server_start,
     inject_git_wrapper,
     register_sandbox_with_git_safety,
-    write_hmac_secret_to_worktree,
+    write_hmac_secret_to_sandbox,
     write_hmac_secret_for_server,
 )
 from foundry_sandbox.git_worktree import create_worktree
@@ -155,7 +155,7 @@ def new_sbx_setup(
     # 6. Generate HMAC secret and register
     # ------------------------------------------------------------------
     hmac_secret = generate_hmac_secret()
-    write_hmac_secret_to_worktree(worktree_path, hmac_secret)
+    write_hmac_secret_to_sandbox(name, hmac_secret)
     write_hmac_secret_for_server(name, hmac_secret)
 
     repo_spec = strip_github_url(repo_url)

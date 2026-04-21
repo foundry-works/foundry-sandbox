@@ -98,7 +98,6 @@ class TestGitSafetyConfig:
         assert isinstance(cfg.file_restrictions, FileRestrictionsConfig)
 
     def test_custom_paths_override_defaults(self):
-        import os
         custom_secrets = "/tmp/custom-secrets"
         custom_data = "/tmp/custom-data"
         cfg = GitSafetyServerConfig(secrets_path=custom_secrets, data_dir=custom_data)

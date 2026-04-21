@@ -12,6 +12,7 @@ import pytest
 
 from foundry_git_safety.server import create_git_api
 from foundry_git_safety.auth import (
+    NonceStore,
     RateLimiter,
     SecretStore,
     compute_signature,
@@ -362,6 +363,7 @@ class TestGitExecEndpoint:
         sandbox_metadata_file("test-sandbox-1", {
             "sandbox_branch": "sandbox/test-integration",
             "from_branch": "main",
+            "repo_root": "/tmp/nonexistent",
         })
 
         body_bytes = json.dumps({"args": ["status", "--git-dir=/etc/shadow"]}).encode("utf-8")
@@ -412,5 +414,135 @@ class TestGitExecEndpoint:
         assert resp.status_code == 404
 
 
-if __name__ == "__main__":
-    pytest.main([__file__, "-v"])
+class TestDenialWithBrokenLogging:
+    """Verify auth/deny/rate-limit responses are unchanged when logging fails."""
+
+    @pytest.fixture
+    def broken_log_app(self, tmp_path, monkeypatch):
+        """Create an app whose decision log points at an unwritable directory."""
+        from foundry_git_safety import decision_log
+
+        monkeypatch.setattr(decision_log, "_writer", None)
+        monkeypatch.setenv("GIT_SAFETY_DECISION_LOG_DIR", "/proc/nonexistent/path")
+
+        secrets_dir = tmp_path / "secrets"
+        secrets_dir.mkdir()
+        (secrets_dir / "test-sandbox-1").write_bytes(b"test-secret-key-for-integration-test\n")
+
+        data_dir = tmp_path / "data"
+        sandboxes_dir = data_dir / "sandboxes"
+        sandboxes_dir.mkdir(parents=True)
+
+        app = create_git_api(
+            secret_store=SecretStore(secrets_path=str(secrets_dir)),
+            nonce_store=NonceStore(),
+            rate_limiter=RateLimiter(),
+            data_dir=str(data_dir),
+        )
+        yield app, data_dir, secrets_dir
+        monkeypatch.setattr(decision_log, "_writer", None)
+
+    def test_401_with_broken_log(self, broken_log_app):
+        """Auth failure returns 401 even when decision log is unwritable."""
+        app, data_dir, secrets_dir = broken_log_app
+        client = app.test_client()
+        resp = client.post(
+            "/git/exec",
+            data=json.dumps({"args": ["status"]}),
+            content_type="application/json",
+        )
+        assert resp.status_code == 401
+        data = json.loads(resp.data)
+        assert "Missing authentication headers" in data["error"]
+
+    def test_422_with_broken_log(self, broken_log_app):
+        """Blocked command returns 422 even when decision log is unwritable."""
+        app, data_dir, secrets_dir = broken_log_app
+        client = app.test_client()
+
+        sandbox_id = "test-sandbox-1"
+        # SecretStore strips the trailing \n, so sign without it
+        secret = b"test-secret-key-for-integration-test"
+
+        metadata = {
+            "sandbox_branch": "sandbox/test",
+            "from_branch": "main",
+            "repo_root": "/tmp/nonexistent",
+        }
+        (data_dir / "sandboxes" / f"{sandbox_id}.json").write_text(json.dumps(metadata))
+
+        body_bytes = json.dumps({"args": ["remote", "add", "origin", "https://evil.com"]}).encode()
+        ts = str(time.time())
+        nonce = uuid.uuid4().hex
+        sig = compute_signature("POST", "/git/exec", body_bytes, ts, nonce, secret)
+        resp = client.post(
+            "/git/exec",
+            data=body_bytes,
+            headers={
+                "X-Sandbox-Id": sandbox_id,
+                "X-Request-Timestamp": ts,
+                "X-Request-Nonce": nonce,
+                "X-Request-Signature": sig,
+            },
+            content_type="application/json",
+        )
+        assert resp.status_code == 422
+        data = json.loads(resp.data)
+        assert "error" in data
+
+    def test_429_with_broken_log(self, tmp_path, monkeypatch):
+        """Rate limit returns 429 even when decision log is unwritable."""
+        from foundry_git_safety import decision_log
+
+        monkeypatch.setattr(decision_log, "_writer", None)
+        monkeypatch.setenv("GIT_SAFETY_DECISION_LOG_DIR", "/proc/nonexistent/path")
+
+        secrets_dir = tmp_path / "secrets"
+        secrets_dir.mkdir()
+        (secrets_dir / "sbx-rl").write_bytes(b"rl-key\n")
+
+        rate_limiter = RateLimiter(ip_window=60, ip_max=2)
+        app = create_git_api(
+            secret_store=SecretStore(secrets_path=str(secrets_dir)),
+            rate_limiter=rate_limiter,
+            data_dir=str(tmp_path / "data"),
+        )
+        client = app.test_client()
+
+        body_bytes = json.dumps({"args": ["status"]}).encode()
+
+        # Exhaust IP throttle
+        for _ in range(3):
+            ts = str(time.time())
+            nonce = uuid.uuid4().hex
+            sig = compute_signature("POST", "/git/exec", body_bytes, ts, nonce, b"rl-key\n")
+            client.post(
+                "/git/exec",
+                data=body_bytes,
+                headers={
+                    "X-Sandbox-Id": "sbx-rl",
+                    "X-Request-Timestamp": ts,
+                    "X-Request-Nonce": nonce,
+                    "X-Request-Signature": sig,
+                },
+                content_type="application/json",
+            )
+
+        # 4th should be 429, not 500
+        ts = str(time.time())
+        nonce = uuid.uuid4().hex
+        sig = compute_signature("POST", "/git/exec", body_bytes, ts, nonce, b"rl-key\n")
+        resp = client.post(
+            "/git/exec",
+            data=body_bytes,
+            headers={
+                "X-Sandbox-Id": "sbx-rl",
+                "X-Request-Timestamp": ts,
+                "X-Request-Nonce": nonce,
+                "X-Request-Signature": sig,
+            },
+            content_type="application/json",
+        )
+        assert resp.status_code == 429
+
+        monkeypatch.setattr(decision_log, "_writer", None)

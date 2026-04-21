@@ -116,6 +116,27 @@ else
   skip_step "Unit tests" "pytest not found"
 fi
 
+# 5. foundry-git-safety unit tests
+if command -v pytest &>/dev/null; then
+  run_step "git-safety unit" bash -c 'cd foundry-git-safety && pip install -q -e ".[dev]" && pytest tests/unit/ -q --tb=short'
+else
+  skip_step "git-safety unit" "pytest not found"
+fi
+
+# 6. foundry-git-safety security tests
+if command -v pytest &>/dev/null; then
+  run_step "git-safety security" bash -c 'cd foundry-git-safety && pytest tests/security/ -q --tb=short'
+else
+  skip_step "git-safety security" "pytest not found"
+fi
+
+# 7. foundry-git-safety integration tests
+if command -v pytest &>/dev/null; then
+  run_step "git-safety integration" bash -c 'cd foundry-git-safety && pytest tests/integration/ -q --tb=short'
+else
+  skip_step "git-safety integration" "pytest not found"
+fi
+
 # -- done --
 print_summary
 

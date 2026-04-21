@@ -44,11 +44,10 @@ WORKSPACE_DIR="${WORKSPACE_DIR:-}"
 HMAC_SECRET_FILE="${GIT_HMAC_SECRET_FILE:-}"
 PROXY_TIMEOUT=30
 
-# Discover HMAC secret from workspace if not set
-if [[ -z "$HMAC_SECRET_FILE" && -n "$WORKSPACE_DIR" ]]; then
-    # Check for .foundry/hmac-secret in workspace
-    if [[ -f "${WORKSPACE_DIR}/.foundry/hmac-secret" ]]; then
-        HMAC_SECRET_FILE="${WORKSPACE_DIR}/.foundry/hmac-secret"
+# Discover HMAC secret if not set
+if [[ -z "$HMAC_SECRET_FILE" ]]; then
+    if [[ -f "/run/foundry/hmac-secret" ]]; then
+        HMAC_SECRET_FILE="/run/foundry/hmac-secret"
     fi
 fi
 
@@ -229,7 +228,7 @@ if [[ "$SANDBOX_ID" =~ [[:cntrl:]] ]]; then
 fi
 
 if [[ -z "$HMAC_SECRET_FILE" || ! -f "$HMAC_SECRET_FILE" ]]; then
-    echo "error: git wrapper: HMAC secret file not found (set GIT_HMAC_SECRET_FILE or place .foundry/hmac-secret in workspace)" >&2
+    echo "error: git wrapper: HMAC secret file not found (set GIT_HMAC_SECRET_FILE or check /run/foundry/hmac-secret)" >&2
     exit 1
 fi
 
