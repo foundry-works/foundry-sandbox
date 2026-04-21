@@ -108,57 +108,45 @@ check_git() {
     exit 1
 }
 
-check_docker() {
-    if command -v docker &>/dev/null; then
-        echo -e "  ${GREEN}✓${NC} docker"
-        return 0
-    fi
-    echo -e "  ${RED}✗${NC} docker (not found)"
-    echo ""
-    echo -e "${RED}Error: Docker is required but not installed.${NC}"
-    echo ""
-    if [[ "$(uname)" == "Darwin" ]]; then
-        echo "  Install Docker Desktop: https://docs.docker.com/desktop/install/mac-install/"
-        echo "  Or with Homebrew: brew install --cask docker"
-    else
-        echo "  Install Docker Engine: https://docs.docker.com/engine/install/"
-    fi
-    exit 1
-}
-
-install_tmux() {
-    if command -v tmux &>/dev/null; then
-        echo -e "  ${GREEN}✓${NC} tmux"
-        return 0
-    fi
-
-    echo -e "  Installing tmux..."
-    if [[ "$(uname)" == "Darwin" ]]; then
-        if command -v brew &>/dev/null; then
-            brew install tmux
-        else
-            echo -e "  ${RED}✗${NC} tmux (Homebrew required)"
-            echo -e "${RED}Error: Install Homebrew first, then run installer again.${NC}"
-            exit 1
-        fi
-    elif command -v apt-get &>/dev/null; then
-        sudo apt-get update &>/dev/null && sudo apt-get install -y tmux &>/dev/null
-    elif command -v dnf &>/dev/null; then
-        sudo dnf install -y tmux &>/dev/null
-    elif command -v yum &>/dev/null; then
-        sudo yum install -y tmux &>/dev/null
-    else
-        echo -e "  ${RED}✗${NC} tmux (unknown package manager)"
-        echo -e "${RED}Error: Install tmux manually and run installer again.${NC}"
+check_sbx() {
+    if ! command -v sbx &>/dev/null; then
+        echo -e "  ${RED}✗${NC} sbx (not found)"
+        echo ""
+        echo -e "${RED}Error: sbx CLI is required but not installed.${NC}"
+        echo ""
+        echo "  Install from: https://github.com/docker/sbx-releases"
         exit 1
     fi
 
-    if command -v tmux &>/dev/null; then
-        echo -e "  ${GREEN}✓${NC} tmux installed"
-    else
-        echo -e "  ${RED}✗${NC} tmux (installation failed)"
+    local sbx_version
+    sbx_version=$(sbx --version 2>/dev/null | head -1 | sed -E 's/^(sbx[ ]?(version[ ]?)?)//i' | tr -d '[:space:]')
+    if [[ -z "$sbx_version" ]]; then
+        echo -e "  ${YELLOW}⚠${NC} sbx (could not determine version)"
+        return 0
+    fi
+
+    # Supported range: >=0.26.0, <0.29.0 (must match foundry_sandbox/sbx.py constants)
+    local min_version="0.26.0"
+    local max_version="0.29.0"
+
+    # Simple version comparison using sort -V
+    if printf '%s\n' "$max_version" "$sbx_version" | sort -V -C 2>/dev/null; then
+        echo -e "  ${RED}✗${NC} sbx $sbx_version (untested; need >= $min_version and < $max_version)"
+        echo ""
+        echo -e "${RED}Error: sbx version $sbx_version has not been tested with foundry-sandbox.${NC}"
+        echo "  Pin to an older version or update the supported range."
         exit 1
     fi
+
+    if ! printf '%s\n' "$sbx_version" "$min_version" | sort -V -C 2>/dev/null; then
+        echo -e "  ${RED}✗${NC} sbx $sbx_version (too old; need >= $min_version and < $max_version)"
+        echo ""
+        echo -e "${RED}Error: sbx version $sbx_version is too old.${NC}"
+        echo "  Upgrade from: https://github.com/docker/sbx-releases"
+        exit 1
+    fi
+
+    echo -e "  ${GREEN}✓${NC} sbx $sbx_version"
 }
 
 install_gum() {
@@ -214,38 +202,8 @@ install_gum() {
 }
 
 check_git
-check_docker
-install_tmux
+check_sbx
 install_gum
-
-# Check Docker daemon (with timeout to avoid hanging)
-echo -ne "  Checking docker daemon..."
-timeout_docker_check() {
-    # Try gtimeout (macOS with coreutils), then timeout (Linux), then fallback
-    if command -v gtimeout &>/dev/null; then
-        gtimeout 15 docker info &>/dev/null
-    elif command -v timeout &>/dev/null; then
-        timeout 15 docker info &>/dev/null
-    else
-        # Fallback: run directly (may hang if daemon is truly stuck)
-        docker info &>/dev/null
-    fi
-}
-if ! timeout_docker_check; then
-    echo -e "\r  ${RED}✗${NC} docker daemon                    "
-    echo ""
-    echo -e "${RED}Error: Docker daemon is not responding.${NC}"
-    echo ""
-    echo "  Possible causes:"
-    echo "    - Docker Desktop is still starting up (wait for it to fully load)"
-    echo "    - Docker Desktop is not running (start it from Applications)"
-    echo "    - Docker daemon is unresponsive (try restarting Docker Desktop)"
-    echo ""
-    echo "  To verify, run: docker info"
-    echo ""
-    exit 1
-fi
-echo -e "\r  ${GREEN}✓${NC} docker daemon                    "
 
 echo ""
 
@@ -384,10 +342,6 @@ install_from_source() {
     local source_dir="$1"
     mkdir -p "$INSTALL_DIR"
     sync_local_repo "$source_dir" "$INSTALL_DIR"
-
-    # Touch stub files to force Docker Desktop file sync to notice changes
-    # This is needed because Docker Desktop may cache bind mount contents
-    find "$INSTALL_DIR/unified-proxy" -name 'stub-*.json' -exec touch {} \; 2>/dev/null || true
 }
 
 if [[ -d "$INSTALL_DIR" ]]; then

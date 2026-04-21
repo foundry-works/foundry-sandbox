@@ -91,15 +91,15 @@ Legend: `[ ]` todo, `[x]` done, `[~]` partial / accepted risk
 
 ## 3.7 Align Installer and Release Metadata
 
-- [ ] Remove stale tmux requirement from installer if no longer needed
-- [ ] Remove stale unified-proxy setup from installer
-- [ ] Replace generic Docker checks with sbx-era dependency checks
-- [ ] Validate `sbx` binary availability during install
-- [ ] Validate supported `sbx` version during install
-- [ ] Align package version with changelog release version
-- [ ] Update stale fallback `__version__` values
-- [ ] Bound `foundry-git-safety[server]` dependency with `~=` or explicit upper bound
-- [ ] Rebuild wheel and confirm artifact version
+- [x] Remove stale tmux requirement from installer if no longer needed
+- [x] Remove stale unified-proxy setup from installer
+- [x] Replace generic Docker checks with sbx-era dependency checks
+- [x] Validate `sbx` binary availability during install
+- [x] Validate supported `sbx` version during install
+- [x] Align package version with changelog release version
+- [x] Update stale fallback `__version__` values
+- [x] Bound `foundry-git-safety[server]` dependency with `~=` or explicit upper bound
+- [x] Rebuild wheel and confirm artifact version
 
 ## 3.8 Add Live Release Gates
 
