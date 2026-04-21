@@ -31,7 +31,7 @@ from .auth import (
     NonceStore,
     RateLimiter,
     SecretStore,
-    verify_signature,
+    authenticate_request,
 )
 from .logging_config import flask_request_middleware
 
@@ -220,77 +220,18 @@ def create_git_api(
 
     def _git_exec_inner(clock_window: float, client_ip: str) -> Response:
 
-        # Pre-auth IP throttle
-        allowed, retry = limiter.check_ip_throttle(client_ip)
-        if not allowed:
-            logger.warning("IP throttled: %s", client_ip)
-            return _make_rate_limited(retry)
-
-        # Extract auth headers
-        sandbox_id: str = request.headers.get("X-Sandbox-Id", "")
-        signature: str = request.headers.get("X-Request-Signature", "")
-        timestamp: str = request.headers.get("X-Request-Timestamp", "")
-        nonce: str = request.headers.get("X-Request-Nonce", "")
-
-        if not all([sandbox_id, signature, timestamp, nonce]):
+        sandbox_id, auth_error = authenticate_request(
+            request,
+            secret_store=secrets,
+            nonce_store=nonces,
+            rate_limiter=limiter,
+            clock_window=clock_window,
+        )
+        if auth_error is not None:
             _record_outcome("unknown", sandbox_id or "unknown", "error")
-            return _make_error("Missing authentication headers", 401)
+            return auth_error
 
-        # Clock window validation
-        try:
-            req_time = float(timestamp)
-        except (ValueError, TypeError):
-            _record_outcome("unknown", sandbox_id, "error")
-            return _make_error("Invalid timestamp", 401)
-
-        now = time.time()
-        if abs(now - req_time) > clock_window:
-            logger.warning(
-                "Clock skew for sandbox %s: delta=%.1fs",
-                sandbox_id,
-                abs(now - req_time),
-            )
-            _record_outcome("unknown", sandbox_id, "error")
-            return _make_error("Request timestamp outside clock window", 401)
-
-        # Get sandbox secret
-        secret = secrets.get_secret(sandbox_id)
-        if secret is None:
-            _record_outcome("unknown", sandbox_id, "error")
-            return _make_error("Unknown sandbox or missing secret", 401)
-
-        # Verify HMAC signature
         body = request.get_data()
-        if not verify_signature(
-            method=request.method,
-            path=request.path,
-            body=body,
-            timestamp=timestamp,
-            nonce=nonce,
-            provided_sig=signature,
-            secret=secret,
-        ):
-            logger.warning("Invalid HMAC signature for sandbox %s", sandbox_id)
-            _record_outcome("unknown", sandbox_id, "error")
-            return _make_error("Invalid signature", 401)
-
-        # Nonce replay protection
-        if not nonces.check_and_store(sandbox_id, nonce):
-            logger.warning("Replayed nonce for sandbox %s: %s", sandbox_id, nonce)
-            _record_outcome("unknown", sandbox_id, "error")
-            return _make_error("Replayed request (duplicate nonce)", 401)
-
-        # Per-sandbox rate limit
-        allowed, retry = limiter.check_sandbox_rate(sandbox_id)
-        if not allowed:
-            _record_outcome("unknown", sandbox_id, "error")
-            return _make_rate_limited(retry)
-
-        # Global rate limit
-        allowed, retry = limiter.check_global_rate()
-        if not allowed:
-            _record_outcome("unknown", sandbox_id, "error")
-            return _make_rate_limited(retry)
 
         # Parse and validate request body
         try:
@@ -418,7 +359,12 @@ def create_git_api(
         service_dicts = _load_user_services_config()
         if service_dicts:
             entries = [UserServiceEntry(**s) for s in service_dicts]
-            bp = create_user_services_blueprint(entries)
+            bp = create_user_services_blueprint(
+                entries,
+                secret_store=secrets,
+                nonce_store=nonces,
+                rate_limiter=limiter,
+            )
             app.register_blueprint(bp)
             logger.info("Registered %d user service proxy routes", len(entries))
     except Exception as exc:
@@ -440,7 +386,9 @@ def create_git_api(
                     recovery_seconds=deep_cfg.circuit_breaker_recovery_seconds,
                 )
                 dp_bp = create_deep_policy_blueprint(
-                    policy_sets, dp_services, limiter, cb,
+                    policy_sets, dp_services,
+                    secret_store=secrets, nonce_store=nonces,
+                    rate_limiter=limiter, circuit_breaker=cb,
                 )
                 app.register_blueprint(dp_bp)
                 logger.info(

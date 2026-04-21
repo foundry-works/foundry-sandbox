@@ -4,6 +4,9 @@ Extends the foundry-git-safety Flask server with /proxy/<service>/<path>
 routes. The sandbox talks HTTP to the proxy; the proxy reads the real API
 key from the host environment, adds the configured header, and forwards
 via HTTPS to the upstream service. No MITM, no custom CA.
+
+All proxy routes require HMAC authentication. Health endpoints remain
+unauthenticated.
 """
 
 from __future__ import annotations
@@ -22,6 +25,7 @@ except ImportError as exc:
         "Install with: pip install foundry-git-safety[server]"
     ) from exc
 
+from .auth import NonceStore, RateLimiter, SecretStore, authenticate_request
 from .schemas.foundry_yaml import UserServiceEntry
 
 logger = logging.getLogger(__name__)
@@ -41,8 +45,15 @@ def _slug(name: str) -> str:
 
 def create_user_services_blueprint(
     services: list[UserServiceEntry],
+    secret_store: SecretStore,
+    nonce_store: NonceStore,
+    rate_limiter: RateLimiter,
 ) -> Blueprint:
-    """Create a Flask Blueprint that reverse-proxies to declared services."""
+    """Create a Flask Blueprint that reverse-proxies to declared services.
+
+    All proxy routes require HMAC authentication. The health endpoint
+    remains unauthenticated.
+    """
     bp = Blueprint("user_services_proxy", __name__)
 
     slug_map: dict[str, UserServiceEntry] = {_slug(s.name): s for s in services}
@@ -64,6 +75,16 @@ def create_user_services_blueprint(
         "GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS",
     ])
     def proxy_request(service_slug: str, upstream_path: str):
+        # HMAC authentication
+        sandbox_id, auth_error = authenticate_request(
+            request,
+            secret_store=secret_store,
+            nonce_store=nonce_store,
+            rate_limiter=rate_limiter,
+        )
+        if auth_error is not None:
+            return auth_error
+
         svc = slug_map.get(service_slug)
         if svc is None:
             return jsonify({"error": f"Unknown service: {service_slug}"}), 404

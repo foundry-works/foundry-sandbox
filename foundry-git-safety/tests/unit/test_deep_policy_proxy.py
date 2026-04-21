@@ -2,17 +2,44 @@
 
 from __future__ import annotations
 
+import time
 from unittest.mock import MagicMock, patch
 
 import pytest
 
-from foundry_git_safety.auth import RateLimiter
+from foundry_git_safety.auth import (
+    NonceStore,
+    RateLimiter,
+    SecretStore,
+    compute_signature,
+)
 from foundry_git_safety.deep_policy_engine import CircuitBreaker, PolicySet
 from foundry_git_safety.deep_policy_proxy import create_deep_policy_blueprint
 from foundry_git_safety.schemas.foundry_yaml import (
     DeepPolicyRule,
     DeepPolicyServiceConfig,
 )
+
+
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
+_TEST_SANDBOX = "test-sandbox"
+_TEST_SECRET = b"test-secret-key-for-deep-policy-unit-tests-0123456\n"
+
+
+def _auth_headers(method: str, path: str, body: bytes = b"") -> dict[str, str]:
+    """Build valid HMAC auth headers for the test sandbox."""
+    ts = str(time.time())
+    nonce = f"unit-nonce-{time.time_ns()}"
+    sig = compute_signature(method, path, body, ts, nonce, _TEST_SECRET.rstrip(b"\n"))
+    return {
+        "X-Sandbox-Id": _TEST_SANDBOX,
+        "X-Request-Signature": sig,
+        "X-Request-Timestamp": ts,
+        "X-Request-Nonce": nonce,
+    }
 
 
 def _make_policy_set(
@@ -38,18 +65,52 @@ def _make_policy_set(
 
 
 @pytest.fixture
-def app_client():
+def secrets_dir(tmp_path):
+    d = tmp_path / "secrets"
+    d.mkdir()
+    (d / _TEST_SANDBOX).write_bytes(_TEST_SECRET)
+    return d
+
+
+@pytest.fixture
+def auth_stores(secrets_dir):
+    return (
+        SecretStore(secrets_path=str(secrets_dir)),
+        NonceStore(),
+        RateLimiter(),
+    )
+
+
+@pytest.fixture
+def app_client(auth_stores):
     """Create a Flask test client with a basic deep policy blueprint."""
     from foundry_git_safety.server import create_git_api
 
     policy_sets, services = _make_policy_set()
-    limiter = RateLimiter()
+    secret_store, nonce_store, rate_limiter = auth_stores
     cb = CircuitBreaker(threshold=5, recovery_seconds=30)
 
-    app = create_git_api(rate_limiter=limiter)
-    bp = create_deep_policy_blueprint(policy_sets, services, limiter, cb)
+    app = create_git_api(
+        secret_store=secret_store,
+        nonce_store=nonce_store,
+        rate_limiter=rate_limiter,
+    )
+    bp = create_deep_policy_blueprint(
+        policy_sets, services,
+        secret_store=secret_store, nonce_store=nonce_store,
+        rate_limiter=rate_limiter, circuit_breaker=cb,
+    )
     app.register_blueprint(bp)
     return app.test_client()
+
+
+def _signed_request(client, path, method="GET", body: bytes = b""):
+    """Make an HTTP request with valid auth headers."""
+    headers = _auth_headers(method, path, body)
+    http_method = getattr(client, method.lower())
+    if body:
+        return http_method(path, headers=headers, data=body)
+    return http_method(path, headers=headers)
 
 
 class TestProxyHealth:
@@ -63,9 +124,15 @@ class TestProxyHealth:
         assert data["services"][0]["circuit_breaker_state"] == "closed"
 
 
+class TestProxyAuth:
+    def test_no_auth_returns_401(self, app_client):
+        resp = app_client.get("/deep-policy/test-svc/v1/items")
+        assert resp.status_code == 401
+
+
 class TestProxyDeny:
     def test_blocked_request_returns_403(self, app_client):
-        resp = app_client.delete("/deep-policy/test-svc/v1/resource")
+        resp = _signed_request(client=app_client, path="/deep-policy/test-svc/v1/resource", method="DELETE")
         assert resp.status_code == 403
         data = resp.get_json()
         assert data["error"] == "BLOCKED"
@@ -84,69 +151,108 @@ class TestProxyAllow:
         mock_conn.getresponse.return_value = mock_response
         mock_conn_cls.return_value = mock_conn
 
-        resp = app_client.get("/deep-policy/test-svc/v1/items")
+        resp = _signed_request(client=app_client, path="/deep-policy/test-svc/v1/items")
         assert resp.status_code == 200
 
 
 class TestProxyUnknownService:
     def test_unknown_slug_returns_404(self, app_client):
-        resp = app_client.get("/deep-policy/nonexistent/path")
+        resp = _signed_request(client=app_client, path="/deep-policy/nonexistent/path")
         assert resp.status_code == 404
 
 
 class TestProxyCircuitBreaker:
-    def test_open_breaker_returns_503(self):
+    def test_open_breaker_returns_503(self, tmp_path):
         from foundry_git_safety.server import create_git_api
 
+        secrets_dir = tmp_path / "secrets"
+        secrets_dir.mkdir()
+        (secrets_dir / _TEST_SANDBOX).write_bytes(_TEST_SECRET)
+
+        secret_store = SecretStore(secrets_path=str(secrets_dir))
+        nonce_store = NonceStore()
+        rate_limiter = RateLimiter()
+
         policy_sets, services = _make_policy_set()
-        limiter = RateLimiter()
         cb = CircuitBreaker(threshold=1, recovery_seconds=60)
         cb.record_failure("test-svc")
         assert cb.is_open("test-svc")
 
-        app = create_git_api(rate_limiter=limiter)
-        bp = create_deep_policy_blueprint(policy_sets, services, limiter, cb)
+        app = create_git_api(
+            secret_store=secret_store,
+            nonce_store=nonce_store,
+            rate_limiter=rate_limiter,
+        )
+        bp = create_deep_policy_blueprint(
+            policy_sets, services,
+            secret_store=secret_store, nonce_store=nonce_store,
+            rate_limiter=rate_limiter, circuit_breaker=cb,
+        )
         app.register_blueprint(bp)
         client = app.test_client()
 
-        resp = app_client_get(client, "GET", "/deep-policy/test-svc/v1/items")
+        resp = _signed_request(client=client, path="/deep-policy/test-svc/v1/items")
         assert resp.status_code == 503
-
-
-def app_client_get(client, method, path):
-    if method == "GET":
-        return client.get(path)
-    return client.get(path)
 
 
 class TestProxyUpstreamFailure:
     @patch("foundry_git_safety.deep_policy_proxy.http.client.HTTPSConnection")
-    def test_connection_failure_returns_502(self, mock_conn_cls):
+    def test_connection_failure_returns_502(self, mock_conn_cls, tmp_path):
         from foundry_git_safety.server import create_git_api
 
+        secrets_dir = tmp_path / "secrets"
+        secrets_dir.mkdir()
+        (secrets_dir / _TEST_SANDBOX).write_bytes(_TEST_SECRET)
+
+        secret_store = SecretStore(secrets_path=str(secrets_dir))
+        nonce_store = NonceStore()
+        rate_limiter = RateLimiter()
+
         policy_sets, services = _make_policy_set()
-        limiter = RateLimiter()
         cb = CircuitBreaker(threshold=5, recovery_seconds=30)
 
-        app = create_git_api(rate_limiter=limiter)
-        bp = create_deep_policy_blueprint(policy_sets, services, limiter, cb)
+        app = create_git_api(
+            secret_store=secret_store,
+            nonce_store=nonce_store,
+            rate_limiter=rate_limiter,
+        )
+        bp = create_deep_policy_blueprint(
+            policy_sets, services,
+            secret_store=secret_store, nonce_store=nonce_store,
+            rate_limiter=rate_limiter, circuit_breaker=cb,
+        )
         app.register_blueprint(bp)
         client = app.test_client()
 
         mock_conn_cls.side_effect = Exception("connection failed")
-        resp = client.get("/deep-policy/test-svc/v1/items")
+        resp = _signed_request(client=client, path="/deep-policy/test-svc/v1/items")
         assert resp.status_code == 502
 
     @patch("foundry_git_safety.deep_policy_proxy.http.client.HTTPSConnection")
-    def test_upstream_5xx_records_circuit_breaker_failure(self, mock_conn_cls):
+    def test_upstream_5xx_records_circuit_breaker_failure(self, mock_conn_cls, tmp_path):
         from foundry_git_safety.server import create_git_api
 
+        secrets_dir = tmp_path / "secrets"
+        secrets_dir.mkdir()
+        (secrets_dir / _TEST_SANDBOX).write_bytes(_TEST_SECRET)
+
+        secret_store = SecretStore(secrets_path=str(secrets_dir))
+        nonce_store = NonceStore()
+        rate_limiter = RateLimiter()
+
         policy_sets, services = _make_policy_set()
-        limiter = RateLimiter()
         cb = CircuitBreaker(threshold=3, recovery_seconds=60)
 
-        app = create_git_api(rate_limiter=limiter)
-        bp = create_deep_policy_blueprint(policy_sets, services, limiter, cb)
+        app = create_git_api(
+            secret_store=secret_store,
+            nonce_store=nonce_store,
+            rate_limiter=rate_limiter,
+        )
+        bp = create_deep_policy_blueprint(
+            policy_sets, services,
+            secret_store=secret_store, nonce_store=nonce_store,
+            rate_limiter=rate_limiter, circuit_breaker=cb,
+        )
         app.register_blueprint(bp)
         client = app.test_client()
 
@@ -159,23 +265,39 @@ class TestProxyUpstreamFailure:
         mock_conn_cls.return_value = mock_conn
 
         for _ in range(3):
-            client.get("/deep-policy/test-svc/v1/items")
+            resp = _signed_request(client=client, path="/deep-policy/test-svc/v1/items")
+            assert resp.status_code == 503
 
         assert cb.get_state("test-svc") == "open"
 
 
 class TestProxyNoHost:
-    def test_missing_host_returns_502(self):
+    def test_missing_host_returns_502(self, tmp_path):
         from foundry_git_safety.server import create_git_api
 
+        secrets_dir = tmp_path / "secrets"
+        secrets_dir.mkdir()
+        (secrets_dir / _TEST_SANDBOX).write_bytes(_TEST_SECRET)
+
+        secret_store = SecretStore(secrets_path=str(secrets_dir))
+        nonce_store = NonceStore()
+        rate_limiter = RateLimiter()
+
         policy_sets, services = _make_policy_set(host="")
-        limiter = RateLimiter()
         cb = CircuitBreaker()
 
-        app = create_git_api(rate_limiter=limiter)
-        bp = create_deep_policy_blueprint(policy_sets, services, limiter, cb)
+        app = create_git_api(
+            secret_store=secret_store,
+            nonce_store=nonce_store,
+            rate_limiter=rate_limiter,
+        )
+        bp = create_deep_policy_blueprint(
+            policy_sets, services,
+            secret_store=secret_store, nonce_store=nonce_store,
+            rate_limiter=rate_limiter, circuit_breaker=cb,
+        )
         app.register_blueprint(bp)
         client = app.test_client()
 
-        resp = client.get("/deep-policy/test-svc/v1/items")
+        resp = _signed_request(client=client, path="/deep-policy/test-svc/v1/items")
         assert resp.status_code == 502

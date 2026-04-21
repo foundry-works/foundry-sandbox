@@ -316,3 +316,93 @@ def verify_signature(
         return False
     expected = compute_signature(method, path, body, timestamp, nonce, secret)
     return hmac.compare_digest(expected, provided_sig)
+
+
+def authenticate_request(
+    request,
+    *,
+    secret_store: SecretStore,
+    nonce_store: NonceStore,
+    rate_limiter: RateLimiter,
+    clock_window: float = CLOCK_WINDOW_SECONDS,
+) -> tuple[str | None, tuple | None]:
+    """Authenticate a Flask request using the standard 8-step HMAC flow.
+
+    Returns (sandbox_id, None) on success, or (None, error_tuple) on failure
+    where error_tuple is (jsonify_body, status_code).
+    """
+    import time as _time
+
+    from flask import jsonify
+
+    # 1. Pre-auth IP throttle
+    client_ip = request.remote_addr or "unknown"
+    allowed, retry = rate_limiter.check_ip_throttle(client_ip)
+    if not allowed:
+        logger.warning("IP throttled: %s", client_ip)
+        resp = jsonify({"error": "Rate limit exceeded"})
+        resp.headers["Retry-After"] = str(int(retry) + 1)
+        return None, (resp, 429)
+
+    # 2. Extract auth headers
+    sandbox_id: str = request.headers.get("X-Sandbox-Id", "")
+    signature: str = request.headers.get("X-Request-Signature", "")
+    timestamp: str = request.headers.get("X-Request-Timestamp", "")
+    nonce: str = request.headers.get("X-Request-Nonce", "")
+
+    if not all([sandbox_id, signature, timestamp, nonce]):
+        return None, (jsonify({"error": "Missing authentication headers"}), 401)
+
+    # 3. Clock window validation
+    try:
+        req_time = float(timestamp)
+    except (ValueError, TypeError):
+        return None, (jsonify({"error": "Invalid timestamp"}), 401)
+
+    now = _time.time()
+    if abs(now - req_time) > clock_window:
+        logger.warning(
+            "Clock skew for sandbox %s: delta=%.1fs",
+            sandbox_id, abs(now - req_time),
+        )
+        return None, (jsonify({"error": "Request timestamp outside clock window"}), 401)
+
+    # 4. Get sandbox secret
+    secret = secret_store.get_secret(sandbox_id)
+    if secret is None:
+        return None, (jsonify({"error": "Unknown sandbox or missing secret"}), 401)
+
+    # 5. Verify HMAC signature
+    body = request.get_data()
+    if not verify_signature(
+        method=request.method,
+        path=request.path,
+        body=body,
+        timestamp=timestamp,
+        nonce=nonce,
+        provided_sig=signature,
+        secret=secret,
+    ):
+        logger.warning("Invalid HMAC signature for sandbox %s", sandbox_id)
+        return None, (jsonify({"error": "Invalid signature"}), 401)
+
+    # 6. Nonce replay protection
+    if not nonce_store.check_and_store(sandbox_id, nonce):
+        logger.warning("Replayed nonce for sandbox %s: %s", sandbox_id, nonce)
+        return None, (jsonify({"error": "Replayed request (duplicate nonce)"}), 401)
+
+    # 7. Per-sandbox rate limit
+    allowed, retry = rate_limiter.check_sandbox_rate(sandbox_id)
+    if not allowed:
+        resp = jsonify({"error": "Rate limit exceeded"})
+        resp.headers["Retry-After"] = str(int(retry) + 1)
+        return None, (resp, 429)
+
+    # 8. Global rate limit
+    allowed, retry = rate_limiter.check_global_rate()
+    if not allowed:
+        resp = jsonify({"error": "Rate limit exceeded"})
+        resp.headers["Retry-After"] = str(int(retry) + 1)
+        return None, (resp, 429)
+
+    return sandbox_id, None

@@ -2,7 +2,8 @@
 
 Provides /deep-policy/<service_slug>/<path> routes that evaluate request-shape
 policies (method, path, body patterns) before forwarding to upstream services.
-Includes per-sandbox rate limiting and per-service circuit breaking.
+Includes HMAC authentication, per-sandbox rate limiting (via verified identity),
+and per-service circuit breaking.
 """
 
 from __future__ import annotations
@@ -18,7 +19,7 @@ except ImportError as exc:
         "Install with: pip install foundry-git-safety[server]"
     ) from exc
 
-from .auth import RateLimiter
+from .auth import NonceStore, RateLimiter, SecretStore, authenticate_request
 from .deep_policy_engine import CircuitBreaker, PolicySet
 from .schemas.foundry_yaml import DeepPolicyServiceConfig
 
@@ -36,10 +37,17 @@ _HOP_BY_HOP = frozenset({
 def create_deep_policy_blueprint(
     policy_sets: dict[str, PolicySet],
     services: dict[str, DeepPolicyServiceConfig],
+    secret_store: SecretStore,
+    nonce_store: NonceStore,
     rate_limiter: RateLimiter,
     circuit_breaker: CircuitBreaker,
 ) -> Blueprint:
-    """Create a Flask Blueprint that proxies with deep policy enforcement."""
+    """Create a Flask Blueprint that proxies with deep policy enforcement.
+
+    All proxy routes require HMAC authentication. Identity for rate limiting
+    is derived from the verified sandbox_id, not from caller-supplied headers.
+    The health endpoint remains unauthenticated.
+    """
     bp = Blueprint("deep_policy_proxy", __name__)
 
     @bp.route("/deep-policy/health", methods=["GET"])
@@ -60,17 +68,19 @@ def create_deep_policy_blueprint(
         methods=["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"],
     )
     def deep_policy_proxy(service_slug: str, upstream_path: str):
+        # HMAC authentication — verified sandbox identity
+        sandbox_id, auth_error = authenticate_request(
+            request,
+            secret_store=secret_store,
+            nonce_store=nonce_store,
+            rate_limiter=rate_limiter,
+        )
+        if auth_error is not None:
+            return auth_error
+
         ps = policy_sets.get(service_slug)
         if ps is None:
             return jsonify({"error": f"Unknown service: {service_slug}"}), 404
-
-        # Rate limiting — keyed by X-Sandbox-Id header
-        sandbox_id = request.headers.get("X-Sandbox-Id", "unknown")
-        allowed, retry_after = rate_limiter.check_sandbox_rate(sandbox_id)
-        if not allowed:
-            resp = jsonify({"error": "Rate limit exceeded"})
-            resp.headers["Retry-After"] = str(int(retry_after) + 1)
-            return resp, 429
 
         # Circuit breaker
         if circuit_breaker.is_open(service_slug):

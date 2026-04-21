@@ -181,6 +181,7 @@ class TestUserServicesProxyCredentialIsolation:
         """When proxy adds an auth header, the response must not echo it."""
         # This test verifies the proxy's response stripping logic.
         # The user_services_proxy strips hop-by-hop headers from upstream.
+        from foundry_git_safety.auth import NonceStore, RateLimiter, SecretStore
         from foundry_git_safety.user_services_proxy import create_user_services_blueprint
         from foundry_git_safety.schemas.foundry_yaml import UserServiceEntry
 
@@ -192,20 +193,29 @@ class TestUserServicesProxyCredentialIsolation:
             format="value",
         )
 
-        bp = create_user_services_blueprint([entry])
+        secret_store = SecretStore(secrets_path=str(tmp_path / "secrets"))
+        nonce_store = NonceStore()
+        rate_limiter = RateLimiter()
+
+        bp = create_user_services_blueprint(
+            [entry],
+            secret_store=secret_store,
+            nonce_store=nonce_store,
+            rate_limiter=rate_limiter,
+        )
         app = _make_app(tmp_path)
         app.register_blueprint(bp)
         client = app.test_client()
 
-        # Request to proxy — will fail (no upstream) but check error response
+        # Request to proxy — unauthenticated, will get 401
         resp = client.get("/proxy/test-service/v1/data")
-        # Should get a 502 (upstream unreachable) or 503, not the API key
         content = resp.data.decode()
         # The API key should never appear in any response
         assert "TEST_API_KEY_VALUE" not in content
 
     def test_proxy_error_does_not_leak_upstream_headers(self, tmp_path):
         """Upstream 403/500 responses must not include auth headers in error."""
+        from foundry_git_safety.auth import NonceStore, RateLimiter, SecretStore
         from foundry_git_safety.user_services_proxy import create_user_services_blueprint
         from foundry_git_safety.schemas.foundry_yaml import UserServiceEntry
 
@@ -217,7 +227,16 @@ class TestUserServicesProxyCredentialIsolation:
             format="bearer",
         )
 
-        bp = create_user_services_blueprint([entry])
+        secret_store = SecretStore(secrets_path=str(tmp_path / "secrets"))
+        nonce_store = NonceStore()
+        rate_limiter = RateLimiter()
+
+        bp = create_user_services_blueprint(
+            [entry],
+            secret_store=secret_store,
+            nonce_store=nonce_store,
+            rate_limiter=rate_limiter,
+        )
         app = _make_app(tmp_path)
         app.register_blueprint(bp)
         client = app.test_client()

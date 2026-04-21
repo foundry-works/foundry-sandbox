@@ -13,6 +13,8 @@ import os
 import secrets as _secrets
 import subprocess
 import sys
+from dataclasses import dataclass
+from datetime import datetime, timezone
 from pathlib import Path
 
 # Default paths for standalone host usage (user-writable).
@@ -259,6 +261,24 @@ def _wrapper_script_path() -> Path:
     return path
 
 
+def _proxy_sign_script_path() -> Path:
+    """Resolve the proxy signing helper from package resources.
+
+    Raises:
+        FileNotFoundError: If the script is not bundled in the package.
+    """
+    from importlib.resources import files
+
+    resource = files("foundry_sandbox.assets").joinpath("proxy-sign.sh")
+    path = Path(str(resource))
+    if not path.exists():
+        raise FileNotFoundError(
+            "Proxy signing script not found in package assets. "
+            "Reinstall with: pip install --force-reinstall foundry-sandbox"
+        )
+    return path
+
+
 def inject_git_wrapper(
     sandbox_name: str,
     *,
@@ -297,6 +317,23 @@ def inject_git_wrapper(
     sbx_exec(
         sandbox_name,
         ["chmod", "755", "/usr/local/bin/git"],
+        user="root",
+        quiet=True,
+    )
+
+    # Install proxy-sign helper
+    proxy_sign_src = _proxy_sign_script_path()
+    proxy_sign_content = proxy_sign_src.read_text()
+    sbx_exec(
+        sandbox_name,
+        ["tee", "/usr/local/bin/proxy-sign"],
+        user="root",
+        input=proxy_sign_content,
+        quiet=True,
+    )
+    sbx_exec(
+        sandbox_name,
+        ["chmod", "755", "/usr/local/bin/proxy-sign"],
         user="root",
         quiet=True,
     )
@@ -555,3 +592,179 @@ def emit_wrapper_tamper_event(
         )
     except Exception:
         pass
+
+
+# ============================================================================
+# Centralized Git-Safety Provisioning
+# ============================================================================
+
+
+@dataclass
+class ProvisioningResult:
+    """Structured result from git-safety provisioning or repair."""
+
+    success: bool
+    wrapper_checksum: str = ""
+    error: str = ""
+
+
+def provision_git_safety(
+    sandbox_name: str,
+    *,
+    sandbox_id: str | None = None,
+    workspace_dir: str = "/workspace",
+    branch: str = "",
+    repo_spec: str = "",
+    from_branch: str = "",
+    allow_pr: bool = False,
+    repo_root: str | None = None,
+) -> ProvisioningResult:
+    """Full git-safety provisioning for an sbx sandbox.
+
+    Performs HMAC secret generation, guest + server secret writes,
+    git-safety registration, wrapper injection, and checksum computation.
+
+    This is the ONLY function authorized to write ``git_safety_enabled=True``
+    to sandbox metadata.  Callers must not set that field directly.
+    """
+    from foundry_sandbox.state import patch_sandbox_metadata
+
+    sid = sandbox_id or sandbox_name
+
+    try:
+        hmac_secret = generate_hmac_secret()
+    except Exception as exc:
+        return ProvisioningResult(success=False, error=f"HMAC generation failed: {exc}")
+
+    try:
+        write_hmac_secret_to_sandbox(sandbox_name, hmac_secret)
+    except Exception as exc:
+        return ProvisioningResult(success=False, error=f"Guest HMAC write failed: {exc}")
+
+    try:
+        write_hmac_secret_for_server(sid, hmac_secret)
+    except Exception as exc:
+        return ProvisioningResult(success=False, error=f"Server HMAC write failed: {exc}")
+
+    if branch and repo_spec:
+        try:
+            register_sandbox_with_git_safety(
+                sid,
+                branch=branch,
+                repo_spec=repo_spec,
+                from_branch=from_branch,
+                allow_pr=allow_pr,
+                repo_root=repo_root,
+            )
+        except Exception as exc:
+            return ProvisioningResult(
+                success=False, error=f"Git-safety registration failed: {exc}",
+            )
+
+    try:
+        inject_git_wrapper(sandbox_name, sandbox_id=sid, workspace_dir=workspace_dir)
+    except Exception as exc:
+        return ProvisioningResult(
+            success=False, error=f"Wrapper injection failed: {exc}",
+        )
+
+    try:
+        wrapper_checksum = compute_wrapper_checksum()
+    except FileNotFoundError as exc:
+        return ProvisioningResult(
+            success=False,
+            error=f"Checksum computation failed: {exc}. "
+            "Reinstall foundry-sandbox.",
+        )
+
+    now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    patch_sandbox_metadata(
+        sandbox_name,
+        git_safety_enabled=True,
+        wrapper_checksum=wrapper_checksum,
+        wrapper_last_verified=now,
+    )
+
+    return ProvisioningResult(success=True, wrapper_checksum=wrapper_checksum)
+
+
+def repair_git_safety(
+    sandbox_name: str,
+    *,
+    sandbox_id: str | None = None,
+    workspace_dir: str = "/workspace",
+    expected_checksum: str = "",
+    rotate_hmac: bool = False,
+) -> ProvisioningResult:
+    """Repair git-safety wrapper in a running sandbox.
+
+    Re-injects the wrapper and updates the stored checksum.  Optionally
+    rotates the HMAC secret (used by the watchdog).
+
+    Does **not** set ``git_safety_enabled=True`` — that is reserved for
+    :func:`provision_git_safety`.
+    """
+    from foundry_sandbox.state import patch_sandbox_metadata
+
+    sid = sandbox_id or sandbox_name
+
+    if rotate_hmac:
+        try:
+            new_secret = generate_hmac_secret()
+            write_hmac_secret_to_sandbox(sandbox_name, new_secret)
+            write_hmac_secret_for_server(sid, new_secret)
+        except Exception as exc:
+            return ProvisioningResult(
+                success=False, error=f"HMAC rotation failed: {exc}",
+            )
+
+    try:
+        inject_git_wrapper(sandbox_name, sandbox_id=sid, workspace_dir=workspace_dir)
+    except Exception as exc:
+        return ProvisioningResult(
+            success=False, error=f"Wrapper re-injection failed: {exc}",
+        )
+
+    try:
+        wrapper_checksum = expected_checksum or compute_wrapper_checksum()
+    except FileNotFoundError:
+        wrapper_checksum = expected_checksum
+
+    now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    patch_sandbox_metadata(
+        sandbox_name,
+        wrapper_checksum=wrapper_checksum,
+        wrapper_last_verified=now,
+    )
+
+    return ProvisioningResult(success=True, wrapper_checksum=wrapper_checksum)
+
+
+# ============================================================================
+# Template Staleness Detection
+# ============================================================================
+
+
+def get_template_image_digest() -> str | None:
+    """Read the stored template-image-digest (the sbx version used to build)."""
+    digest_file = Path.home() / ".foundry" / "template-image-digest"
+    try:
+        return digest_file.read_text().strip() or None
+    except (FileNotFoundError, OSError):
+        return None
+
+
+def is_template_stale() -> bool:
+    """Return True if the current sbx version differs from the stored digest.
+
+    Indicates sandboxes built from the old template should be re-provisioned.
+    Returns False when the digest file is missing (no template was ever built
+    or the file was cleaned up).
+    """
+    from foundry_sandbox.sbx import get_sbx_version
+
+    stored = get_template_image_digest()
+    if stored is None:
+        return False
+    current = get_sbx_version() or ""
+    return stored != current

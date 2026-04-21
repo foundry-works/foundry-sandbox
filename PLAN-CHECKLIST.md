@@ -79,15 +79,15 @@ Legend: `[ ]` todo, `[x]` done, `[~]` partial / accepted risk
 
 ## 3.6 Harden Per-Sandbox Proxy Authorization
 
-- [ ] Add per-sandbox authorization to user-service proxy requests
-- [ ] Require HMAC or scoped capability token before injecting host service credentials
-- [ ] Bind service permissions to sandbox metadata or registration state
-- [ ] Stop trusting caller-supplied `X-Sandbox-Id` for deep-policy identity
-- [ ] Define and implement rejection path for unauthenticated callers (no shared `"unknown"` bucket)
-- [ ] Add test proving unauthorized sandbox cannot use a service credential
-- [ ] Add test proving one sandbox cannot spoof another sandbox's identity
-- [ ] Add test proving rate limits use verified sandbox identity
-- [ ] Add test proving unauthenticated callers are rejected on the documented path
+- [x] Add per-sandbox authorization to user-service proxy requests
+- [x] Require HMAC or scoped capability token before injecting host service credentials
+- [x] Bind service permissions to sandbox metadata or registration state
+- [x] Stop trusting caller-supplied `X-Sandbox-Id` for deep-policy identity
+- [x] Define and implement rejection path for unauthenticated callers (no shared `"unknown"` bucket)
+- [x] Add test proving unauthorized sandbox cannot use a service credential
+- [x] Add test proving one sandbox cannot spoof another sandbox's identity
+- [x] Add test proving rate limits use verified sandbox identity
+- [x] Add test proving unauthenticated callers are rejected on the documented path
 
 ## 3.7 Align Installer and Release Metadata
 

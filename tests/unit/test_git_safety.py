@@ -242,12 +242,14 @@ class TestUnregisterSandboxFromGitSafety:
 
 class TestInjectGitWrapper:
     @patch("foundry_sandbox.sbx.sbx_exec")
+    @patch("foundry_sandbox.git_safety._proxy_sign_script_path")
     @patch("foundry_sandbox.git_safety._wrapper_script_path")
-    def test_injects_wrapper(self, mock_wrapper_fn, mock_exec):
+    def test_injects_wrapper(self, mock_wrapper_fn, mock_proxy_sign_fn, mock_exec):
         mock_path = MagicMock()
         mock_path.exists.return_value = True
         mock_path.read_text.return_value = "#!/bin/bash\nwrapper"
         mock_wrapper_fn.return_value = mock_path
+        mock_proxy_sign_fn.return_value = mock_path
         mock_exec.return_value = _mock_completed()
 
         inject_git_wrapper(
@@ -256,8 +258,8 @@ class TestInjectGitWrapper:
             workspace_dir="/workspace",
         )
 
-        # Should call sbx_exec 4 times: tee git, chmod git, tee env, chmod env
-        assert mock_exec.call_count == 4
+        # 6 calls: tee git, chmod git, tee proxy-sign, chmod proxy-sign, tee env, chmod env
+        assert mock_exec.call_count == 6
 
     @patch("foundry_sandbox.sbx.sbx_exec")
     @patch("foundry_sandbox.git_safety._wrapper_script_path")
@@ -267,12 +269,14 @@ class TestInjectGitWrapper:
             inject_git_wrapper("test", sandbox_id="sbx-1", workspace_dir="/workspace")
 
     @patch("foundry_sandbox.sbx.sbx_exec")
+    @patch("foundry_sandbox.git_safety._proxy_sign_script_path")
     @patch("foundry_sandbox.git_safety._wrapper_script_path")
-    def test_env_script_uses_workspace_dir(self, mock_wrapper_fn, mock_exec):
+    def test_env_script_uses_workspace_dir(self, mock_wrapper_fn, mock_proxy_sign_fn, mock_exec):
         mock_path = MagicMock()
         mock_path.exists.return_value = True
         mock_path.read_text.return_value = "#!/bin/bash\nwrapper"
         mock_wrapper_fn.return_value = mock_path
+        mock_proxy_sign_fn.return_value = mock_path
         mock_exec.return_value = _mock_completed()
 
         inject_git_wrapper(
@@ -281,8 +285,8 @@ class TestInjectGitWrapper:
             workspace_dir="/custom/path",
         )
 
-        # Find the sbx_exec call that writes the env script
-        env_call = mock_exec.call_args_list[2]  # third call is tee env script
+        # Find the sbx_exec call that writes the env script (5th call, index 4)
+        env_call = mock_exec.call_args_list[4]
         env_call_input = env_call[1]["input"]
         assert "WORKSPACE_DIR=/custom/path" in env_call_input
         assert 'GIT_HMAC_SECRET_FILE="/run/foundry/hmac-secret"' in env_call_input
@@ -515,3 +519,258 @@ class TestWrapperScriptResolution:
 
         path = _wrapper_script_path()
         assert path.stat().st_size > 100
+
+
+# ============================================================================
+# Shared Provisioning Helpers
+# ============================================================================
+
+
+class TestProvisionGitSafety:
+    """Tests for the centralized provision_git_safety helper."""
+
+    @patch("foundry_sandbox.git_safety.compute_wrapper_checksum", return_value="sha256abc")
+    @patch("foundry_sandbox.git_safety.inject_git_wrapper")
+    @patch("foundry_sandbox.git_safety.register_sandbox_with_git_safety")
+    @patch("foundry_sandbox.git_safety.write_hmac_secret_for_server")
+    @patch("foundry_sandbox.git_safety.write_hmac_secret_to_sandbox")
+    @patch("foundry_sandbox.git_safety.generate_hmac_secret", return_value="a" * 64)
+    @patch("foundry_sandbox.state.patch_sandbox_metadata")
+    def test_full_provisioning_success(
+        self, mock_patch, mock_hmac, mock_write_guest, mock_write_host,
+        mock_register, mock_inject, mock_checksum,
+    ):
+        from foundry_sandbox.git_safety import provision_git_safety
+
+        result = provision_git_safety(
+            "test-sandbox",
+            sandbox_id="test-sandbox",
+            workspace_dir="/workspace",
+            branch="feature-x",
+            repo_spec="org/repo",
+            from_branch="main",
+            allow_pr=False,
+            repo_root="/path/to/worktree",
+        )
+
+        assert result.success is True
+        assert result.wrapper_checksum == "sha256abc"
+        assert result.error == ""
+        mock_hmac.assert_called_once()
+        mock_write_guest.assert_called_once_with("test-sandbox", "a" * 64)
+        mock_write_host.assert_called_once_with("test-sandbox", "a" * 64)
+        mock_register.assert_called_once()
+        mock_inject.assert_called_once()
+        # The helper writes git_safety_enabled=True
+        mock_patch.assert_called_once()
+        patch_kwargs = mock_patch.call_args[1]
+        assert patch_kwargs["git_safety_enabled"] is True
+        assert patch_kwargs["wrapper_checksum"] == "sha256abc"
+
+    @patch("foundry_sandbox.git_safety.generate_hmac_secret", side_effect=OSError("rng failed"))
+    def test_hmac_failure_returns_error(self, mock_hmac):
+        from foundry_sandbox.git_safety import provision_git_safety
+
+        result = provision_git_safety("test-sandbox", branch="main", repo_spec="org/repo")
+        assert result.success is False
+        assert "HMAC generation failed" in result.error
+
+    @patch("foundry_sandbox.git_safety.write_hmac_secret_to_sandbox", side_effect=OSError("sandbox not running"))
+    @patch("foundry_sandbox.git_safety.generate_hmac_secret", return_value="a" * 64)
+    def test_guest_write_failure_returns_error(self, mock_hmac, mock_write):
+        from foundry_sandbox.git_safety import provision_git_safety
+
+        result = provision_git_safety("test-sandbox", branch="main", repo_spec="org/repo")
+        assert result.success is False
+        assert "Guest HMAC write failed" in result.error
+
+    @patch("foundry_sandbox.git_safety.write_hmac_secret_for_server", side_effect=OSError("disk full"))
+    @patch("foundry_sandbox.git_safety.write_hmac_secret_to_sandbox")
+    @patch("foundry_sandbox.git_safety.generate_hmac_secret", return_value="a" * 64)
+    def test_server_write_failure_returns_error(self, mock_hmac, mock_guest, mock_host):
+        from foundry_sandbox.git_safety import provision_git_safety
+
+        result = provision_git_safety("test-sandbox", branch="main", repo_spec="org/repo")
+        assert result.success is False
+        assert "Server HMAC write failed" in result.error
+
+    @patch("foundry_sandbox.git_safety.register_sandbox_with_git_safety", side_effect=OSError("data dir missing"))
+    @patch("foundry_sandbox.git_safety.write_hmac_secret_for_server")
+    @patch("foundry_sandbox.git_safety.write_hmac_secret_to_sandbox")
+    @patch("foundry_sandbox.git_safety.generate_hmac_secret", return_value="a" * 64)
+    def test_registration_failure_returns_error(self, mock_hmac, mock_guest, mock_host, mock_register):
+        from foundry_sandbox.git_safety import provision_git_safety
+
+        result = provision_git_safety("test-sandbox", branch="main", repo_spec="org/repo")
+        assert result.success is False
+        assert "registration failed" in result.error
+
+    @patch("foundry_sandbox.git_safety.inject_git_wrapper", side_effect=OSError("inject failed"))
+    @patch("foundry_sandbox.git_safety.register_sandbox_with_git_safety")
+    @patch("foundry_sandbox.git_safety.write_hmac_secret_for_server")
+    @patch("foundry_sandbox.git_safety.write_hmac_secret_to_sandbox")
+    @patch("foundry_sandbox.git_safety.generate_hmac_secret", return_value="a" * 64)
+    def test_injection_failure_returns_error(self, mock_hmac, mock_guest, mock_host, mock_register, mock_inject):
+        from foundry_sandbox.git_safety import provision_git_safety
+
+        result = provision_git_safety("test-sandbox", branch="main", repo_spec="org/repo")
+        assert result.success is False
+        assert "Wrapper injection failed" in result.error
+
+    @patch("foundry_sandbox.git_safety.compute_wrapper_checksum", side_effect=FileNotFoundError("missing"))
+    @patch("foundry_sandbox.git_safety.inject_git_wrapper")
+    @patch("foundry_sandbox.git_safety.register_sandbox_with_git_safety")
+    @patch("foundry_sandbox.git_safety.write_hmac_secret_for_server")
+    @patch("foundry_sandbox.git_safety.write_hmac_secret_to_sandbox")
+    @patch("foundry_sandbox.git_safety.generate_hmac_secret", return_value="a" * 64)
+    def test_checksum_failure_returns_error(self, mock_hmac, mock_guest, mock_host, mock_register, mock_inject, mock_checksum):
+        from foundry_sandbox.git_safety import provision_git_safety
+
+        result = provision_git_safety("test-sandbox", branch="main", repo_spec="org/repo")
+        assert result.success is False
+        assert "Checksum computation failed" in result.error
+
+    @patch("foundry_sandbox.git_safety.compute_wrapper_checksum", return_value="sha256abc")
+    @patch("foundry_sandbox.git_safety.inject_git_wrapper")
+    @patch("foundry_sandbox.git_safety.write_hmac_secret_for_server")
+    @patch("foundry_sandbox.git_safety.write_hmac_secret_to_sandbox")
+    @patch("foundry_sandbox.git_safety.generate_hmac_secret", return_value="a" * 64)
+    @patch("foundry_sandbox.state.patch_sandbox_metadata")
+    def test_skips_registration_when_no_branch(
+        self, mock_patch, mock_hmac, mock_guest, mock_host, mock_inject, mock_checksum,
+    ):
+        from foundry_sandbox.git_safety import provision_git_safety
+
+        result = provision_git_safety(
+            "test-sandbox",
+            branch="",  # no branch → skip registration
+            repo_spec="org/repo",
+        )
+        assert result.success is True
+
+    @patch("foundry_sandbox.git_safety.compute_wrapper_checksum", return_value="sha256abc")
+    @patch("foundry_sandbox.git_safety.inject_git_wrapper")
+    @patch("foundry_sandbox.git_safety.write_hmac_secret_for_server")
+    @patch("foundry_sandbox.git_safety.write_hmac_secret_to_sandbox")
+    @patch("foundry_sandbox.git_safety.generate_hmac_secret", return_value="a" * 64)
+    @patch("foundry_sandbox.state.patch_sandbox_metadata")
+    def test_uses_sandbox_id_default(
+        self, mock_patch, mock_hmac, mock_guest, mock_host, mock_inject, mock_checksum,
+    ):
+        from foundry_sandbox.git_safety import provision_git_safety
+
+        # sandbox_id defaults to sandbox_name
+        result = provision_git_safety("my-sandbox", branch="main", repo_spec="org/repo")
+        assert result.success is True
+        mock_host.assert_called_once_with("my-sandbox", "a" * 64)
+
+
+class TestRepairGitSafety:
+    """Tests for the repair_git_safety helper."""
+
+    @patch("foundry_sandbox.state.patch_sandbox_metadata")
+    @patch("foundry_sandbox.git_safety.compute_wrapper_checksum", return_value="sha256new")
+    @patch("foundry_sandbox.git_safety.inject_git_wrapper")
+    def test_basic_repair_success(self, mock_inject, mock_checksum, mock_patch):
+        from foundry_sandbox.git_safety import repair_git_safety
+
+        result = repair_git_safety("test-sandbox", sandbox_id="test-sandbox")
+        assert result.success is True
+        assert result.wrapper_checksum == "sha256new"
+        mock_inject.assert_called_once()
+        # Repair does NOT set git_safety_enabled
+        patch_kwargs = mock_patch.call_args[1]
+        assert "git_safety_enabled" not in patch_kwargs
+
+    @patch("foundry_sandbox.state.patch_sandbox_metadata")
+    @patch("foundry_sandbox.git_safety.inject_git_wrapper", side_effect=OSError("inject failed"))
+    def test_repair_failure_returns_error(self, mock_inject, mock_patch):
+        from foundry_sandbox.git_safety import repair_git_safety
+
+        result = repair_git_safety("test-sandbox")
+        assert result.success is False
+        assert "re-injection failed" in result.error
+
+    @patch("foundry_sandbox.state.patch_sandbox_metadata")
+    @patch("foundry_sandbox.git_safety.inject_git_wrapper")
+    @patch("foundry_sandbox.git_safety.write_hmac_secret_for_server")
+    @patch("foundry_sandbox.git_safety.write_hmac_secret_to_sandbox")
+    @patch("foundry_sandbox.git_safety.generate_hmac_secret", return_value="new_secret")
+    @patch("foundry_sandbox.git_safety.compute_wrapper_checksum", return_value="sha256new")
+    def test_repair_with_hmac_rotation(self, mock_checksum, mock_hmac, mock_guest, mock_host, mock_inject, mock_patch):
+        from foundry_sandbox.git_safety import repair_git_safety
+
+        result = repair_git_safety(
+            "test-sandbox",
+            sandbox_id="test-sandbox",
+            rotate_hmac=True,
+        )
+        assert result.success is True
+        mock_hmac.assert_called_once()
+        mock_guest.assert_called_once()
+        mock_host.assert_called_once()
+
+    @patch("foundry_sandbox.git_safety.write_hmac_secret_to_sandbox", side_effect=OSError("sandbox not running"))
+    @patch("foundry_sandbox.git_safety.generate_hmac_secret", return_value="new_secret")
+    def test_repair_rotation_failure_returns_error(self, mock_hmac, mock_guest):
+        from foundry_sandbox.git_safety import repair_git_safety
+
+        result = repair_git_safety("test-sandbox", rotate_hmac=True)
+        assert result.success is False
+        assert "HMAC rotation failed" in result.error
+
+    @patch("foundry_sandbox.state.patch_sandbox_metadata")
+    @patch("foundry_sandbox.git_safety.inject_git_wrapper")
+    @patch("foundry_sandbox.git_safety.compute_wrapper_checksum", side_effect=FileNotFoundError("missing"))
+    def test_repair_uses_expected_checksum_on_compute_failure(self, mock_checksum, mock_inject, mock_patch):
+        from foundry_sandbox.git_safety import repair_git_safety
+
+        result = repair_git_safety(
+            "test-sandbox",
+            expected_checksum="provided_checksum",
+        )
+        assert result.success is True
+        assert result.wrapper_checksum == "provided_checksum"
+
+    @patch("foundry_sandbox.state.patch_sandbox_metadata")
+    @patch("foundry_sandbox.git_safety.inject_git_wrapper")
+    @patch("foundry_sandbox.git_safety.compute_wrapper_checksum", return_value="computed_checksum")
+    def test_repair_uses_computed_checksum_when_no_expected(self, mock_checksum, mock_inject, mock_patch):
+        from foundry_sandbox.git_safety import repair_git_safety
+
+        result = repair_git_safety("test-sandbox")
+        assert result.success is True
+        assert result.wrapper_checksum == "computed_checksum"
+
+
+class TestTemplateStaleness:
+    """Tests for template digest staleness detection."""
+
+    def test_stale_when_version_differs(self, tmp_path):
+        from foundry_sandbox.git_safety import is_template_stale
+
+        digest_file = tmp_path / ".foundry" / "template-image-digest"
+        digest_file.parent.mkdir(parents=True)
+        digest_file.write_text("0.5.0")
+
+        with patch("foundry_sandbox.git_safety.Path.home", return_value=tmp_path):
+            with patch("foundry_sandbox.sbx.get_sbx_version", return_value="0.6.0"):
+                assert is_template_stale() is True
+
+    def test_not_stale_when_version_matches(self, tmp_path):
+        from foundry_sandbox.git_safety import is_template_stale
+
+        digest_file = tmp_path / ".foundry" / "template-image-digest"
+        digest_file.parent.mkdir(parents=True)
+        digest_file.write_text("0.6.0")
+
+        with patch("foundry_sandbox.git_safety.Path.home", return_value=tmp_path):
+            with patch("foundry_sandbox.sbx.get_sbx_version", return_value="0.6.0"):
+                assert is_template_stale() is False
+
+    def test_not_stale_when_no_digest_file(self, tmp_path):
+        from foundry_sandbox.git_safety import is_template_stale
+
+        with patch("foundry_sandbox.git_safety.Path.home", return_value=tmp_path):
+            with patch("foundry_sandbox.sbx.get_sbx_version", return_value="0.6.0"):
+                assert is_template_stale() is False
