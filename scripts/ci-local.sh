@@ -149,7 +149,6 @@ if command -v python3 &>/dev/null; then
     # Build both wheels
     python3 -m build --outdir "$wheels_dir" . \
     && python3 -m build --outdir "$wheels_dir" foundry-git-safety/ \
-    # Install into clean venv
     && python3 -m venv "$venv_dir" \
     && source "$venv_dir/bin/activate" \
     && pip install -q "$wheels_dir"/foundry_git_safety-*.whl \

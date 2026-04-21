@@ -177,3 +177,7 @@ registry.register_counter(
     "git_safety_policy_decisions_total",
     "Policy decision counts by rule and outcome",
 )
+registry.register_counter(
+    "wrapper_tamper_events_total",
+    "Total wrapper tamper events detected",
+)

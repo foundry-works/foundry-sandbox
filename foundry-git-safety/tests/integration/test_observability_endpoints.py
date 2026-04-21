@@ -254,3 +254,112 @@ class TestDecisionLogHealthChecks:
         assert data["status"] == "degraded"
 
         monkeypatch.setattr(decision_log, "_writer", None)
+
+
+class TestTamperEventEndpoint:
+    """Tests for POST /tamper-event metric-only delivery."""
+
+    def test_counter_increments_on_valid_post(self, client):
+        registry.reset()
+        resp = client.post(
+            "/tamper-event",
+            data=json.dumps({
+                "sandbox": "sbx-1",
+                "action": "reinjected",
+                "expected_sha256": "abc123",
+                "actual_sha256": "def456",
+            }),
+            content_type="application/json",
+        )
+        assert resp.status_code == 200
+        data = resp.get_json()
+        assert data["recorded"] is True
+        assert data["log_written"] is True
+
+        # Counter visible on /metrics
+        metrics_resp = client.get("/metrics")
+        text = metrics_resp.data.decode()
+        assert "wrapper_tamper_events_total" in text
+
+    def test_counter_increments_with_degraded_log(self, tmp_path, monkeypatch):
+        """Counter must increment even when the decision log is unwritable."""
+        from foundry_git_safety import decision_log
+
+        monkeypatch.setattr(decision_log, "_writer", None)
+        monkeypatch.setenv("GIT_SAFETY_DECISION_LOG_DIR", "/proc/nonexistent/path")
+
+        data_dir = str(tmp_path / "data")
+        secrets_dir = str(tmp_path / "secrets")
+        os.makedirs(os.path.join(data_dir, "sandboxes"), exist_ok=True)
+        os.makedirs(secrets_dir, exist_ok=True)
+
+        registry.reset()
+
+        app = create_git_api(
+            secret_store=SecretStore(secrets_path=secrets_dir),
+            nonce_store=NonceStore(),
+            rate_limiter=RateLimiter(),
+            data_dir=data_dir,
+        )
+        client = app.test_client()
+
+        resp = client.post(
+            "/tamper-event",
+            data=json.dumps({
+                "sandbox": "sbx-degraded",
+                "action": "reinject_failed",
+                "expected_sha256": "aaa",
+                "actual_sha256": "bbb",
+            }),
+            content_type="application/json",
+        )
+        # 202 = counter incremented, log write failed
+        assert resp.status_code == 202
+        data = resp.get_json()
+        assert data["recorded"] is True
+        assert data["log_written"] is False
+
+        # Counter still visible on /metrics
+        metrics_resp = client.get("/metrics")
+        text = metrics_resp.data.decode()
+        assert "wrapper_tamper_events_total" in text
+        assert "sbx-degraded" in text
+
+        monkeypatch.setattr(decision_log, "_writer", None)
+
+    def test_rejects_missing_fields(self, client):
+        registry.reset()
+        resp = client.post(
+            "/tamper-event",
+            data=json.dumps({"sandbox": "sbx-1"}),
+            content_type="application/json",
+        )
+        assert resp.status_code == 400
+
+    def test_rejects_invalid_json(self, client):
+        registry.reset()
+        resp = client.post(
+            "/tamper-event",
+            data="not json",
+            content_type="text/plain",
+        )
+        assert resp.status_code == 400
+
+    def test_multiple_events_accumulate_counter(self, client):
+        registry.reset()
+        for i in range(3):
+            client.post(
+                "/tamper-event",
+                data=json.dumps({
+                    "sandbox": f"sbx-{i}",
+                    "action": "reinjected",
+                    "expected_sha256": "abc",
+                    "actual_sha256": "def",
+                }),
+                content_type="application/json",
+            )
+
+        metrics_resp = client.get("/metrics")
+        text = metrics_resp.data.decode()
+        # Three distinct label sets, each with count 1
+        assert text.count("wrapper_tamper_events_total{") == 3

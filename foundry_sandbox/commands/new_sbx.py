@@ -12,15 +12,10 @@ from pathlib import Path
 from foundry_sandbox.git import ensure_bare_repo
 from foundry_sandbox.git_safety import (
     FOUNDRY_TEMPLATE_TAG,
-    compute_wrapper_checksum,
     ensure_foundry_template,
-    generate_hmac_secret,
     git_safety_server_is_running,
     git_safety_server_start,
-    inject_git_wrapper,
-    register_sandbox_with_git_safety,
-    write_hmac_secret_to_sandbox,
-    write_hmac_secret_for_server,
+    provision_git_safety,
 )
 from foundry_sandbox.git_worktree import create_worktree
 from foundry_sandbox.paths import ensure_dir
@@ -152,42 +147,47 @@ def new_sbx_setup(
     log_info("Git safety server running.")
 
     # ------------------------------------------------------------------
-    # 6. Generate HMAC secret and register
+    # 6. Write initial metadata (git safety not yet provisioned)
     # ------------------------------------------------------------------
-    hmac_secret = generate_hmac_secret()
-    write_hmac_secret_to_sandbox(name, hmac_secret)
-    write_hmac_secret_for_server(name, hmac_secret)
-
-    repo_spec = strip_github_url(repo_url)
-    register_sandbox_with_git_safety(
+    ensure_dir(claude_config_path)
+    write_sandbox_metadata(
         name,
+        sbx_name=name,
+        agent=agent,
+        repo_url=repo_url,
+        branch=branch,
+        from_branch=from_branch,
+        git_safety_enabled=False,
+        workspace_dir="/workspace",
+        working_dir=wd,
+        pip_requirements=pip_requirements,
+        allow_pr=allow_pr,
+        enable_opencode=with_opencode,
+        enable_zai=with_zai,
+        copies=copies,
+        template=use_template or "",
+    )
+
+    # ------------------------------------------------------------------
+    # 7. Provision git safety (helper writes git_safety_enabled=True)
+    # ------------------------------------------------------------------
+    log_info("Provisioning git safety...")
+    repo_spec = strip_github_url(repo_url)
+    result = provision_git_safety(
+        name,
+        sandbox_id=name,
+        workspace_dir="/workspace",
         branch=branch,
         repo_spec=repo_spec,
         from_branch=from_branch,
         allow_pr=allow_pr,
         repo_root=str(worktree_path),
     )
-
-    # ------------------------------------------------------------------
-    # 7. Inject git wrapper
-    # ------------------------------------------------------------------
-    log_info("Injecting git wrapper...")
-    try:
-        inject_git_wrapper(name, sandbox_id=name, workspace_dir="/workspace")
-    except Exception as exc:
+    if not result.success:
         raise SetupError(
-            f"Git wrapper injection failed: {exc}. "
+            f"Git safety provisioning failed: {result.error}. "
             "Sandbox creation aborted — git safety cannot be enforced."
-        ) from exc
-
-    try:
-        wrapper_checksum = compute_wrapper_checksum()
-    except FileNotFoundError as exc:
-        raise SetupError(
-            f"Git wrapper checksum computation failed: {exc}. "
-            "The wrapper script is not bundled correctly. "
-            "Reinstall foundry-sandbox."
-        ) from exc
+        )
 
     # ------------------------------------------------------------------
     # 7.5. Inject user service environment overrides
@@ -242,28 +242,11 @@ def new_sbx_setup(
         _install_pip_requirements_sbx(name, pip_requirements)
 
     # ------------------------------------------------------------------
-    # 9. Write metadata
+    # 9. Final metadata patch (user services)
     # ------------------------------------------------------------------
-    ensure_dir(claude_config_path)
-    write_sandbox_metadata(
-        name,
-        sbx_name=name,
-        agent=agent,
-        repo_url=repo_url,
-        branch=branch,
-        from_branch=from_branch,
-        git_safety_enabled=True,
-        workspace_dir="/workspace",
-        working_dir=wd,
-        pip_requirements=pip_requirements,
-        allow_pr=allow_pr,
-        enable_opencode=with_opencode,
-        enable_zai=with_zai,
-        copies=copies,
-        template=use_template or "",
-        user_services=user_service_overrides,
-        wrapper_checksum=wrapper_checksum,
-    )
+    if user_service_overrides:
+        from foundry_sandbox.state import patch_sandbox_metadata
+        patch_sandbox_metadata(name, user_services=user_service_overrides)
 
 
 def rollback_new_sbx(

@@ -4,19 +4,17 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock, patch
 
+import pytest
 from click.testing import CliRunner
 
 from foundry_sandbox.commands.new import new
 from foundry_sandbox.commands.new_sbx import new_sbx_setup, rollback_new_sbx
+from foundry_sandbox.git_safety import ProvisioningResult
 
 
 class TestNewSbxSetup:
     @patch("foundry_sandbox.commands.new_sbx.write_sandbox_metadata")
-    @patch("foundry_sandbox.commands.new_sbx.inject_git_wrapper")
-    @patch("foundry_sandbox.commands.new_sbx.register_sandbox_with_git_safety")
-    @patch("foundry_sandbox.commands.new_sbx.write_hmac_secret_for_server")
-    @patch("foundry_sandbox.commands.new_sbx.write_hmac_secret_to_sandbox")
-    @patch("foundry_sandbox.commands.new_sbx.generate_hmac_secret", return_value="a" * 64)
+    @patch("foundry_sandbox.commands.new_sbx.provision_git_safety", return_value=ProvisioningResult(success=True, wrapper_checksum="abc123"))
     @patch("foundry_sandbox.commands.new_sbx.git_safety_server_is_running", return_value=True)
     @patch("foundry_sandbox.commands.new_sbx.ensure_foundry_template", return_value=True)
     @patch("foundry_sandbox.commands.new_sbx.sbx_create")
@@ -25,8 +23,7 @@ class TestNewSbxSetup:
     @patch("foundry_sandbox.commands.new_sbx.sbx_check_available")
     def test_full_setup(
         self, mock_check, mock_bare, mock_worktree, mock_create, mock_ensure,
-        mock_gs_running, mock_hmac, mock_write_hmac_wt, mock_write_hmac_srv,
-        mock_register, mock_inject, mock_metadata, tmp_path,
+        mock_gs_running, mock_provision, mock_metadata, tmp_path,
     ):
         from pathlib import Path
         mock_create.return_value = MagicMock(returncode=0)
@@ -55,8 +52,8 @@ class TestNewSbxSetup:
         assert call_args[0][0] == "test-sandbox"
         assert call_args[0][1] == "claude"
         assert call_args[1]["branch"] == "feature-x"
-        mock_register.assert_called_once()
-        mock_inject.assert_called_once()
+        # Shared helper was called
+        mock_provision.assert_called_once()
         mock_metadata.assert_called_once()
 
     @patch("foundry_sandbox.commands.new_sbx.ensure_foundry_template", return_value=True)
@@ -117,11 +114,7 @@ class TestTemplateValidation:
         )
 
     @patch("foundry_sandbox.commands.new_sbx.write_sandbox_metadata")
-    @patch("foundry_sandbox.commands.new_sbx.inject_git_wrapper")
-    @patch("foundry_sandbox.commands.new_sbx.register_sandbox_with_git_safety")
-    @patch("foundry_sandbox.commands.new_sbx.write_hmac_secret_for_server")
-    @patch("foundry_sandbox.commands.new_sbx.write_hmac_secret_to_sandbox")
-    @patch("foundry_sandbox.commands.new_sbx.generate_hmac_secret", return_value="a" * 64)
+    @patch("foundry_sandbox.commands.new_sbx.provision_git_safety", return_value=ProvisioningResult(success=True, wrapper_checksum="abc123"))
     @patch("foundry_sandbox.commands.new_sbx.git_safety_server_is_running", return_value=True)
     @patch("foundry_sandbox.commands.new_sbx.sbx_template_ls")
     @patch("foundry_sandbox.commands.new_sbx.ensure_foundry_template", return_value=True)
@@ -131,9 +124,8 @@ class TestTemplateValidation:
     @patch("foundry_sandbox.commands.new_sbx.sbx_check_available")
     def test_builtin_template_calls_ensure(
         self, mock_check, mock_bare, mock_worktree, mock_create,
-        mock_ensure, mock_ls, mock_gs_running, mock_hmac,
-        mock_write_hmac_wt, mock_write_hmac_srv, mock_register,
-        mock_inject, mock_metadata, tmp_path,
+        mock_ensure, mock_ls, mock_gs_running, mock_provision,
+        mock_metadata, tmp_path,
     ):
         """FOUNDRY_TEMPLATE_TAG goes through ensure_foundry_template()."""
         mock_create.return_value = MagicMock(returncode=0)
@@ -146,11 +138,7 @@ class TestTemplateValidation:
         mock_ls.assert_not_called()
 
     @patch("foundry_sandbox.commands.new_sbx.write_sandbox_metadata")
-    @patch("foundry_sandbox.commands.new_sbx.inject_git_wrapper")
-    @patch("foundry_sandbox.commands.new_sbx.register_sandbox_with_git_safety")
-    @patch("foundry_sandbox.commands.new_sbx.write_hmac_secret_for_server")
-    @patch("foundry_sandbox.commands.new_sbx.write_hmac_secret_to_sandbox")
-    @patch("foundry_sandbox.commands.new_sbx.generate_hmac_secret", return_value="a" * 64)
+    @patch("foundry_sandbox.commands.new_sbx.provision_git_safety", return_value=ProvisioningResult(success=True, wrapper_checksum="abc123"))
     @patch("foundry_sandbox.commands.new_sbx.git_safety_server_is_running", return_value=True)
     @patch("foundry_sandbox.commands.new_sbx.ensure_foundry_template")
     @patch(
@@ -163,9 +151,8 @@ class TestTemplateValidation:
     @patch("foundry_sandbox.commands.new_sbx.sbx_check_available")
     def test_custom_template_skips_ensure(
         self, mock_check, mock_bare, mock_worktree, mock_create,
-        mock_ls, mock_ensure, mock_gs_running, mock_hmac,
-        mock_write_hmac_wt, mock_write_hmac_srv, mock_register,
-        mock_inject, mock_metadata, tmp_path,
+        mock_ls, mock_ensure, mock_gs_running, mock_provision,
+        mock_metadata, tmp_path,
     ):
         """Custom/managed tags do not call ensure_foundry_template()."""
         mock_create.return_value = MagicMock(returncode=0)
@@ -223,6 +210,7 @@ class TestGitSafetyFailClosed:
             wd="",
         )
 
+    @patch("foundry_sandbox.commands.new_sbx.write_sandbox_metadata")
     @patch("foundry_sandbox.commands.new_sbx.sbx_create")
     @patch("foundry_sandbox.commands.new_sbx.create_worktree")
     @patch("foundry_sandbox.commands.new_sbx.ensure_bare_repo")
@@ -230,12 +218,13 @@ class TestGitSafetyFailClosed:
     @patch("foundry_sandbox.commands.new_sbx.git_safety_server_is_running", return_value=False)
     @patch("foundry_sandbox.commands.new_sbx.git_safety_server_start", side_effect=OSError("not found"))
     def test_fails_when_git_safety_not_installed(
-        self, mock_gs_start, mock_gs_running, mock_check, mock_bare, mock_worktree, mock_create, tmp_path,
+        self, mock_gs_start, mock_gs_running, mock_check, mock_bare, mock_worktree, mock_create, mock_metadata, tmp_path,
     ):
         from foundry_sandbox.commands.new_sbx import SetupError
         with pytest.raises(SetupError, match="not installed"):
             new_sbx_setup(**self._base_kwargs(tmp_path))
 
+    @patch("foundry_sandbox.commands.new_sbx.write_sandbox_metadata")
     @patch("foundry_sandbox.commands.new_sbx.sbx_create")
     @patch("foundry_sandbox.commands.new_sbx.create_worktree")
     @patch("foundry_sandbox.commands.new_sbx.ensure_bare_repo")
@@ -243,7 +232,7 @@ class TestGitSafetyFailClosed:
     @patch("foundry_sandbox.commands.new_sbx.git_safety_server_is_running", return_value=False)
     @patch("foundry_sandbox.commands.new_sbx.git_safety_server_start")
     def test_fails_when_server_unhealthy_after_start(
-        self, mock_gs_start, mock_gs_running, mock_check, mock_bare, mock_worktree, mock_create, tmp_path,
+        self, mock_gs_start, mock_gs_running, mock_check, mock_bare, mock_worktree, mock_create, mock_metadata, tmp_path,
     ):
         from foundry_sandbox.commands.new_sbx import SetupError
         # Server starts without error but is_running still returns False
@@ -251,21 +240,17 @@ class TestGitSafetyFailClosed:
         with pytest.raises(SetupError, match="did not become healthy"):
             new_sbx_setup(**self._base_kwargs(tmp_path))
 
-    @patch("foundry_sandbox.commands.new_sbx.register_sandbox_with_git_safety")
-    @patch("foundry_sandbox.commands.new_sbx.write_hmac_secret_for_server")
-    @patch("foundry_sandbox.commands.new_sbx.write_hmac_secret_to_sandbox")
-    @patch("foundry_sandbox.commands.new_sbx.generate_hmac_secret", return_value="a" * 64)
+    @patch("foundry_sandbox.commands.new_sbx.write_sandbox_metadata")
+    @patch("foundry_sandbox.commands.new_sbx.provision_git_safety", return_value=ProvisioningResult(success=False, error="Wrapper injection failed: OSError"))
     @patch("foundry_sandbox.commands.new_sbx.git_safety_server_is_running", return_value=True)
-    @patch("foundry_sandbox.commands.new_sbx.inject_git_wrapper", side_effect=OSError("inject failed"))
     @patch("foundry_sandbox.commands.new_sbx.ensure_foundry_template", return_value=True)
     @patch("foundry_sandbox.commands.new_sbx.sbx_create")
     @patch("foundry_sandbox.commands.new_sbx.create_worktree")
     @patch("foundry_sandbox.commands.new_sbx.ensure_bare_repo")
     @patch("foundry_sandbox.commands.new_sbx.sbx_check_available")
-    def test_fails_closed_on_injection_failure(
+    def test_fails_closed_on_provisioning_failure(
         self, mock_check, mock_bare, mock_worktree, mock_create,
-        mock_ensure, mock_inject, mock_gs_running, mock_hmac,
-        mock_write_wt, mock_write_srv, mock_register, tmp_path,
+        mock_ensure, mock_gs_running, mock_provision, mock_metadata, tmp_path,
     ):
         from pathlib import Path
 
@@ -274,7 +259,7 @@ class TestGitSafetyFailClosed:
         wt = MagicMock(spec=Path)
         wt.is_dir.return_value = True
         wt.__str__ = lambda s: str(tmp_path / "worktree")
-        with pytest.raises(SetupError, match="wrapper injection failed"):
+        with pytest.raises(SetupError, match="provisioning failed"):
             new_sbx_setup(
                 repo_url="https://github.com/org/repo",
                 bare_path=str(tmp_path / "bare"),
@@ -292,13 +277,9 @@ class TestGitSafetyFailClosed:
                 wd="",
             )
 
-    @patch("foundry_sandbox.commands.new_sbx.register_sandbox_with_git_safety")
-    @patch("foundry_sandbox.commands.new_sbx.write_hmac_secret_for_server")
-    @patch("foundry_sandbox.commands.new_sbx.write_hmac_secret_to_sandbox")
-    @patch("foundry_sandbox.commands.new_sbx.generate_hmac_secret", return_value="a" * 64)
+    @patch("foundry_sandbox.commands.new_sbx.write_sandbox_metadata")
+    @patch("foundry_sandbox.commands.new_sbx.provision_git_safety", return_value=ProvisioningResult(success=False, error="Checksum computation failed: FileNotFoundError"))
     @patch("foundry_sandbox.commands.new_sbx.git_safety_server_is_running", return_value=True)
-    @patch("foundry_sandbox.commands.new_sbx.compute_wrapper_checksum", side_effect=FileNotFoundError("missing"))
-    @patch("foundry_sandbox.commands.new_sbx.inject_git_wrapper")
     @patch("foundry_sandbox.commands.new_sbx.ensure_foundry_template", return_value=True)
     @patch("foundry_sandbox.commands.new_sbx.sbx_create")
     @patch("foundry_sandbox.commands.new_sbx.create_worktree")
@@ -306,8 +287,7 @@ class TestGitSafetyFailClosed:
     @patch("foundry_sandbox.commands.new_sbx.sbx_check_available")
     def test_fails_closed_on_checksum_failure(
         self, mock_check, mock_bare, mock_worktree, mock_create,
-        mock_ensure, mock_inject, mock_checksum, mock_gs_running, mock_hmac,
-        mock_write_wt, mock_write_srv, mock_register, tmp_path,
+        mock_ensure, mock_gs_running, mock_provision, mock_metadata, tmp_path,
     ):
         from pathlib import Path
 
@@ -316,7 +296,7 @@ class TestGitSafetyFailClosed:
         wt = MagicMock(spec=Path)
         wt.is_dir.return_value = True
         wt.__str__ = lambda s: str(tmp_path / "worktree")
-        with pytest.raises(SetupError, match="checksum computation failed"):
+        with pytest.raises(SetupError, match="provisioning failed"):
             new_sbx_setup(
                 repo_url="https://github.com/org/repo",
                 bare_path=str(tmp_path / "bare"),
@@ -333,6 +313,7 @@ class TestGitSafetyFailClosed:
                 with_zai=False,
                 wd="",
             )
+
     @patch("foundry_sandbox.commands.new_sbx.shutil.rmtree")
     @patch("foundry_sandbox.commands.new_sbx.sbx_rm")
     def test_rollback(self, mock_rm, mock_rmtree):
@@ -370,6 +351,3 @@ class TestNewCommand:
         runner = CliRunner()
         with patch("foundry_sandbox.commands.new.os.makedirs"):
             runner.invoke(new, ["org/repo", "feature-x"])
-
-
-import pytest

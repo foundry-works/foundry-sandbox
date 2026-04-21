@@ -94,7 +94,7 @@ class WrapperWatchdog:
 
             if not is_ok:
                 self._reinject_wrapper(
-                    name, metadata, expected_checksum, actual_sha,
+                    name, metadata, expected_checksum, str(actual_sha),
                 )
             else:
                 now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
@@ -112,46 +112,23 @@ class WrapperWatchdog:
     ) -> None:
         from foundry_sandbox.git_safety import (
             emit_wrapper_tamper_event,
-            generate_hmac_secret,
-            inject_git_wrapper,
-            write_hmac_secret_for_server,
-            write_hmac_secret_to_sandbox,
+            repair_git_safety,
         )
-        from foundry_sandbox.state import patch_sandbox_metadata
 
         global _reinjection_count
 
         sandbox_id = str(metadata.get("sbx_name", name))
         workspace_dir = str(metadata.get("workspace_dir", "/workspace"))
 
-        # Rotate HMAC before re-injection so any captured old secret is dead.
-        try:
-            new_secret = generate_hmac_secret()
-            write_hmac_secret_to_sandbox(name, new_secret)
-            write_hmac_secret_for_server(sandbox_id, new_secret)
-        except Exception as exc:
-            log_warn(
-                f"Watchdog: HMAC rotation failed for '{name}', "
-                f"skipping re-injection: {exc}"
-            )
-            emit_wrapper_tamper_event(
-                sandbox=name,
-                expected_sha256=expected_checksum,
-                actual_sha256=actual_checksum,
-                action="reinject_failed",
-            )
-            return
+        result = repair_git_safety(
+            name,
+            sandbox_id=sandbox_id,
+            workspace_dir=workspace_dir,
+            expected_checksum=expected_checksum,
+            rotate_hmac=True,
+        )
 
-        try:
-            inject_git_wrapper(
-                name, sandbox_id=sandbox_id, workspace_dir=workspace_dir,
-            )
-            now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
-            patch_sandbox_metadata(
-                name,
-                wrapper_checksum=expected_checksum,
-                wrapper_last_verified=now,
-            )
+        if result.success:
             _reinjection_count += 1
             log_warn(
                 f"Watchdog: re-injected git wrapper in '{name}' "
@@ -163,8 +140,8 @@ class WrapperWatchdog:
                 actual_sha256=actual_checksum,
                 action="reinjected",
             )
-        except Exception as exc:
-            log_debug(f"Watchdog: re-injection failed for '{name}': {exc}")
+        else:
+            log_debug(f"Watchdog: re-injection failed for '{name}': {result.error}")
             emit_wrapper_tamper_event(
                 sandbox=name,
                 expected_sha256=expected_checksum,

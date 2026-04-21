@@ -84,3 +84,91 @@ class TestDiagnoseCommand:
             result = runner.invoke(diagnose, [])
             assert result.exit_code == 0
             assert "unreachable" in result.output
+
+
+class TestTamperCounterDisplay:
+    """Tests for the tamper counter in diagnose output."""
+
+    def test_shows_server_counter_in_text_output(self):
+        from click.testing import CliRunner
+        from foundry_sandbox.commands.diagnose import diagnose
+
+        runner = CliRunner()
+        with patch("foundry_sandbox.commands.diagnose._collect_sbx_diagnose", return_value={"output": "ok"}), \
+             patch("foundry_sandbox.commands.diagnose._collect_git_safety_health", return_value={"status": "ok"}), \
+             patch("foundry_sandbox.commands.diagnose._collect_git_safety_readiness", return_value={"ready": True, "checks": {}}), \
+             patch("foundry_sandbox.commands.diagnose._collect_isolation", return_value={"host_kernel": "", "sandboxes": []}), \
+             patch("foundry_sandbox.commands.diagnose._collect_tamper_counter", return_value={"total": 5, "reachable": True}), \
+             patch("foundry_sandbox.commands.diagnose._collect_tamper_events", return_value=[]):
+            result = runner.invoke(diagnose, [])
+            assert result.exit_code == 0
+            assert "Server counter: 5 total" in result.output
+
+    def test_shows_unreachable_when_server_down(self):
+        from click.testing import CliRunner
+        from foundry_sandbox.commands.diagnose import diagnose
+
+        runner = CliRunner()
+        with patch("foundry_sandbox.commands.diagnose._collect_sbx_diagnose", return_value={"output": "ok"}), \
+             patch("foundry_sandbox.commands.diagnose._collect_git_safety_health", return_value={"status": "ok"}), \
+             patch("foundry_sandbox.commands.diagnose._collect_git_safety_readiness", return_value={"ready": True, "checks": {}}), \
+             patch("foundry_sandbox.commands.diagnose._collect_isolation", return_value={"host_kernel": "", "sandboxes": []}), \
+             patch("foundry_sandbox.commands.diagnose._collect_tamper_counter", return_value={"total": 0, "reachable": False}), \
+             patch("foundry_sandbox.commands.diagnose._collect_tamper_events", return_value=[]):
+            result = runner.invoke(diagnose, [])
+            assert result.exit_code == 0
+            assert "Server counter: unreachable" in result.output
+
+    def test_warns_on_degraded_log(self):
+        from click.testing import CliRunner
+        from foundry_sandbox.commands.diagnose import diagnose
+
+        runner = CliRunner()
+        with patch("foundry_sandbox.commands.diagnose._collect_sbx_diagnose", return_value={"output": "ok"}), \
+             patch("foundry_sandbox.commands.diagnose._collect_git_safety_health", return_value={"status": "ok"}), \
+             patch("foundry_sandbox.commands.diagnose._collect_git_safety_readiness", return_value={"ready": True, "checks": {}}), \
+             patch("foundry_sandbox.commands.diagnose._collect_isolation", return_value={"host_kernel": "", "sandboxes": []}), \
+             patch("foundry_sandbox.commands.diagnose._collect_tamper_counter", return_value={"total": 5, "reachable": True}), \
+             patch("foundry_sandbox.commands.diagnose._collect_tamper_events", return_value=[
+                 {"timestamp": "2026-01-01", "sandbox": "sbx-1", "outcome": "reinjected"},
+                 {"timestamp": "2026-01-02", "sandbox": "sbx-2", "outcome": "reinjected"},
+             ]):
+            result = runner.invoke(diagnose, [])
+            assert result.exit_code == 0
+            assert "WARNING" in result.output
+            assert "3 event(s) not in decision log" in result.output
+
+    def test_no_warning_when_counter_matches_log(self):
+        from click.testing import CliRunner
+        from foundry_sandbox.commands.diagnose import diagnose
+
+        runner = CliRunner()
+        with patch("foundry_sandbox.commands.diagnose._collect_sbx_diagnose", return_value={"output": "ok"}), \
+             patch("foundry_sandbox.commands.diagnose._collect_git_safety_health", return_value={"status": "ok"}), \
+             patch("foundry_sandbox.commands.diagnose._collect_git_safety_readiness", return_value={"ready": True, "checks": {}}), \
+             patch("foundry_sandbox.commands.diagnose._collect_isolation", return_value={"host_kernel": "", "sandboxes": []}), \
+             patch("foundry_sandbox.commands.diagnose._collect_tamper_counter", return_value={"total": 2, "reachable": True}), \
+             patch("foundry_sandbox.commands.diagnose._collect_tamper_events", return_value=[
+                 {"timestamp": "2026-01-01", "sandbox": "sbx-1", "outcome": "reinjected"},
+                 {"timestamp": "2026-01-02", "sandbox": "sbx-2", "outcome": "reinjected"},
+             ]):
+            result = runner.invoke(diagnose, [])
+            assert result.exit_code == 0
+            assert "WARNING" not in result.output
+
+    def test_tamper_counter_in_json_output(self):
+        from click.testing import CliRunner
+        from foundry_sandbox.commands.diagnose import diagnose
+
+        runner = CliRunner()
+        with patch("foundry_sandbox.commands.diagnose._collect_sbx_diagnose", return_value={"output": "ok"}), \
+             patch("foundry_sandbox.commands.diagnose._collect_git_safety_health", return_value={"status": "ok"}), \
+             patch("foundry_sandbox.commands.diagnose._collect_git_safety_readiness", return_value={"ready": True, "checks": {}}), \
+             patch("foundry_sandbox.commands.diagnose._collect_isolation", return_value={"host_kernel": "", "sandboxes": []}), \
+             patch("foundry_sandbox.commands.diagnose._collect_tamper_counter", return_value={"total": 3, "reachable": True}), \
+             patch("foundry_sandbox.commands.diagnose._collect_tamper_events", return_value=[]):
+            result = runner.invoke(diagnose, ["--json"])
+            assert result.exit_code == 0
+            data = json.loads(result.output)
+            assert data["tamper_counter"]["total"] == 3
+            assert data["tamper_counter"]["reachable"] is True

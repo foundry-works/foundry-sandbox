@@ -30,9 +30,9 @@ Legend: `[ ]` todo, `[x]` done, `[~]` partial / accepted risk
 - [x] Update migration docs for chosen contract
 - [x] Prevent ready-state metadata for non-existent sbx sandboxes (enforced by §3.3 helper)
 - [x] Define behavior for pre-existing 0.20.x worktrees (reparent, re-clone, or refuse)
-- [ ] If full migration: create sbx sandbox during migration via §3.3 helper
-- [ ] If full migration: preserve or attach workspace state
-- [ ] If full migration: provision wrapper, HMAC secrets, and git-safety registration via §3.3 helper
+- [~] If full migration: create sbx sandbox during migration via §3.3 helper
+- [~] If full migration: preserve or attach workspace state
+- [~] If full migration: provision wrapper, HMAC secrets, and git-safety registration via §3.3 helper
 - [x] If metadata-only: confirm §3.3 helper refuses to mark unprovisioned records as protected (no new "migrated" flag)
 - [x] Add migration smoke test for chosen behavior, including existing-worktree case
 
@@ -44,7 +44,7 @@ Legend: `[ ]` todo, `[x]` done, `[~]` partial / accepted risk
 - [x] Register sandbox with git-safety through shared function
 - [x] Create host HMAC secret through shared function
 - [x] Create guest HMAC secret through shared function
-- [ ] Verify sandbox connectivity to git-safety through shared function
+- [x] Verify sandbox connectivity to git-safety through shared function
 - [x] Helper is the only writer of `git_safety_enabled=True` in metadata
 - [x] Use shared provisioning from `cast new`
 - [x] Use shared provisioning from `cast start` repair path
@@ -123,35 +123,37 @@ Legend: `[ ]` todo, `[x]` done, `[~]` partial / accepted risk
 
 ## 3.9 Decide Tamper-Event Delivery Policy
 
-- [ ] Decide delivery contract (fatal / buffered / metric-only)
-- [ ] Remove bare `except Exception: pass` from `emit_wrapper_tamper_event`
-- [ ] Implement the chosen delivery mechanism
-- [ ] Surface tamper-event status in `cast diagnose` and/or `/metrics`
-- [ ] Add test: tamper event in sandbox with read-only decision-log directory is still observable
+- [x] Decide delivery contract (fatal / buffered / metric-only)
+- [x] Remove bare `except Exception: pass` from `emit_wrapper_tamper_event`
+- [x] Implement the chosen delivery mechanism
+- [x] Surface tamper-event status in `cast diagnose` and/or `/metrics`
+- [x] Add test: tamper event in sandbox with read-only decision-log directory is still observable
+
+**Resolution:** Metric-only approach. The watchdog POSTs tamper events to `POST /tamper-event` on the git-safety server, which always increments `wrapper_tamper_events_total` (Prometheus counter) and writes to the decision log best-effort (returns 202 if counter incremented but log write failed). On server unreachable, the watchdog falls back to a local counter + direct decision log write + WARNING log. `cast diagnose` surfaces the server counter alongside decision-log entries and flags when counter > log entries (degraded log indicator).
 
 ---
 
 ## Final Verification Gate
 
-- [ ] Root unit tests pass
-- [ ] `foundry-git-safety` unit tests pass
-- [ ] `foundry-git-safety` security tests pass
-- [ ] `foundry-git-safety` integration tests pass
-- [ ] Built wheels contain or can locate all runtime assets (named explicitly)
+- [x] Root unit tests pass
+- [x] `foundry-git-safety` unit tests pass
+- [x] `foundry-git-safety` security tests pass
+- [x] `foundry-git-safety` integration tests pass
+- [x] Built wheels contain or can locate all runtime assets (named explicitly)
 - [ ] Installed-wheel `cast new` provisions git safety successfully
 - [ ] Installed-wheel `cast new` fails closed on provisioning errors
 - [ ] Installed-wheel `cast start` fails closed when the wrapper stub is missing
 - [ ] Installed-wheel watchdog fails closed when the wrapper stub is missing
 - [ ] `cast start` cannot silently start an unprotected sandbox with protected metadata
-- [ ] Only the shared §3.3 helper writes `git_safety_enabled=True`
-- [ ] `cast migrate-to-sbx` behavior matches documented contract, including existing-worktree handling
-- [ ] Watchdog rotation invalidates old HMAC secrets without server restart
-- [ ] Rotation mechanism rejects unauthenticated callers
-- [ ] Proxy endpoints reject unauthenticated callers on a documented path
-- [ ] `X-Sandbox-Id` spoofing does not bypass rate limits
-- [ ] Tamper events are observable even with a degraded decision log
-- [ ] GitHub API protection is live-tested or removed from security claims
-- [ ] Installer validates sbx-era dependencies
-- [ ] Package metadata and changelog agree on version
-- [ ] `foundry-git-safety[server]` dependency range is bounded
-- [ ] `git diff --check main HEAD` is clean
+- [x] Only the shared §3.3 helper writes `git_safety_enabled=True`
+- [x] `cast migrate-to-sbx` behavior matches documented contract, including existing-worktree handling
+- [x] Watchdog rotation invalidates old HMAC secrets without server restart
+- [x] Rotation mechanism rejects unauthenticated callers
+- [x] Proxy endpoints reject unauthenticated callers on a documented path
+- [x] `X-Sandbox-Id` spoofing does not bypass rate limits
+- [x] Tamper events are observable even with a degraded decision log
+- [x] GitHub API protection is live-tested or removed from security claims
+- [x] Installer validates sbx-era dependencies
+- [x] Package metadata and changelog agree on version
+- [x] `foundry-git-safety[server]` dependency range is bounded
+- [x] `git diff --check main HEAD` is clean

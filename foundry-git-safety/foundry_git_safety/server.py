@@ -351,6 +351,63 @@ def create_git_api(
         content = metrics_registry.render_prometheus()
         return Response(content, content_type="text/plain; version=0.0.4; charset=utf-8")
 
+    @app.route("/tamper-event", methods=["POST"])
+    def tamper_event():
+        """Record a wrapper tamper event.
+
+        Always increments the Prometheus counter.  Writes to the decision
+        log on a best-effort basis — a degraded log does not prevent the
+        counter from being incremented.
+
+        No HMAC auth: localhost-only (server binds 127.0.0.1), and the
+        endpoint only records observability data.
+        """
+        from .metrics import registry as metrics_registry
+
+        try:
+            body = request.get_json(silent=True)
+        except Exception:
+            body = None
+
+        if not body or not isinstance(body, dict):
+            return _make_error("Invalid JSON body", 400)
+
+        sandbox = body.get("sandbox", "")
+        action = body.get("action", "")
+        expected_sha = body.get("expected_sha256", "")
+        actual_sha = body.get("actual_sha256", "")
+
+        if not sandbox or not action:
+            return _make_error("Missing required fields: sandbox, action", 400)
+
+        # Always increment the counter.
+        metrics_registry.inc_counter(
+            "wrapper_tamper_events_total",
+            {"sandbox": sandbox, "action": action},
+        )
+
+        # Best-effort decision log write.
+        log_ok = True
+        try:
+            from .decision_log import write_decision
+            write_decision(
+                sandbox=sandbox,
+                rule="wrapper_integrity",
+                verb="wrapper_tamper",
+                outcome=action,
+                expected_sha256=expected_sha,
+                actual_sha256=actual_sha,
+            )
+        except Exception as exc:
+            log_ok = False
+            logger.warning(
+                "Tamper-event decision log write failed for %s: %s",
+                sandbox, exc,
+            )
+
+        status = 200 if log_ok else 202
+        return jsonify({"recorded": True, "log_written": log_ok}), status
+
     # Register user services proxy blueprint (if configured)
     try:
         from .user_services_proxy import create_user_services_blueprint

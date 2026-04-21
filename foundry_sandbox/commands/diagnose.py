@@ -133,6 +133,29 @@ def _collect_tamper_events(n: int = 20) -> list[dict[str, Any]]:
     return events[-n:]
 
 
+def _collect_tamper_counter() -> dict[str, Any]:
+    """Collect the server-side tamper event counter from /metrics."""
+    import urllib.request
+
+    result: dict[str, Any] = {"total": 0, "reachable": False}
+    try:
+        req = urllib.request.Request("http://127.0.0.1:8083/metrics")
+        with urllib.request.urlopen(req, timeout=3) as resp:
+            text = resp.read().decode()
+        result["reachable"] = True
+        for line in text.splitlines():
+            if line.startswith("wrapper_tamper_events_total") and not line.startswith("#"):
+                parts = line.split()
+                if len(parts) >= 2:
+                    try:
+                        result["total"] += int(parts[-1])
+                    except ValueError:
+                        pass
+    except Exception:
+        pass
+    return result
+
+
 def _collect_isolation() -> dict[str, Any]:
     """Check kernel separation between host and running sandboxes."""
     from foundry_sandbox.sbx import sbx_exec, sbx_is_running, sbx_ls
@@ -175,6 +198,7 @@ def diagnose(json_output: bool) -> None:
         },
         "decision_log": _collect_decision_log(),
         "tamper_events": _collect_tamper_events(),
+        "tamper_counter": _collect_tamper_counter(),
         "isolation": _collect_isolation(),
     }
 
@@ -230,11 +254,26 @@ def diagnose(json_output: bool) -> None:
         click.echo(f"  [{ts}] {outcome} {verb} sandbox={sandbox} rule={rule}")
 
     click.echo("\n=== Wrapper Tamper Events ===")
+    tamper_counter = data["tamper_counter"]
     tamper_events = data["tamper_events"]
-    if not tamper_events:
+    server_total = tamper_counter.get("total", 0)
+    server_reachable = tamper_counter.get("reachable", False)
+
+    if server_reachable:
+        click.echo(f"  Server counter: {server_total} total")
+    else:
+        click.echo("  Server counter: unreachable")
+
+    if not tamper_events and server_total == 0:
         click.echo("  No wrapper tamper events recorded.")
     else:
-        click.echo(f"  Recent events: {len(tamper_events)}")
+        log_count = len(tamper_events)
+        click.echo(f"  Decision log entries: {log_count}")
+        if server_reachable and server_total > log_count:
+            click.echo(
+                f"  WARNING: {server_total - log_count} event(s) not in decision log"
+                " (degraded log)"
+            )
         for evt in tamper_events[-10:]:
             ts = evt.get("timestamp", "?")
             sb = evt.get("sandbox", "?")

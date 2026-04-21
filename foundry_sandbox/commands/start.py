@@ -17,16 +17,13 @@ import click
 from foundry_sandbox.git import ensure_bare_repo
 from foundry_sandbox.git_safety import (
     FOUNDRY_TEMPLATE_TAG,
-    compute_wrapper_checksum,
     ensure_foundry_template,
-    generate_hmac_secret,
     git_safety_server_is_running,
     git_safety_server_start,
-    inject_git_wrapper,
-    register_sandbox_with_git_safety,
+    is_template_stale,
+    provision_git_safety,
+    repair_git_safety,
     verify_wrapper_integrity,
-    write_hmac_secret_for_server,
-    write_hmac_secret_to_sandbox,
 )
 from foundry_sandbox.git_worktree import create_worktree
 from foundry_sandbox.paths import (
@@ -143,54 +140,28 @@ def _provision_migrated_sandbox(name: str, metadata: dict[str, Any]) -> None:
     # 4. Git safety server
     _ensure_git_safety_server()
 
-    # 5. HMAC provisioning
+    # 5. Provision git safety (helper writes git_safety_enabled=True)
     log_info("  Git Safety: provisioning")
-    hmac_secret = generate_hmac_secret()
-    write_hmac_secret_to_sandbox(name, hmac_secret)
-    write_hmac_secret_for_server(name, hmac_secret)
-
     repo_spec = strip_github_url(repo_url)
-    register_sandbox_with_git_safety(
+    result = provision_git_safety(
         name,
+        sandbox_id=name,
+        workspace_dir="/workspace",
         branch=branch,
         repo_spec=repo_spec,
         from_branch=from_branch,
         allow_pr=allow_pr,
         repo_root=str(worktree_path),
     )
-
-    # 6. Inject git wrapper
-    log_info("  Git wrapper: injecting")
-    try:
-        inject_git_wrapper(name, sandbox_id=name, workspace_dir="/workspace")
-    except Exception as exc:
+    if not result.success:
         click.echo(
-            f"Error: Git wrapper injection failed: {exc}. "
+            f"Error: Git safety provisioning failed: {result.error}. "
             "Sandbox created without git safety enforcement.",
             err=True,
         )
         sys.exit(1)
 
-    # 7. Compute checksum and mark as provisioned
-    try:
-        wrapper_checksum = compute_wrapper_checksum()
-    except FileNotFoundError as exc:
-        click.echo(
-            f"Error: Wrapper checksum computation failed: {exc}. "
-            "The wrapper script is not bundled correctly.",
-            err=True,
-        )
-        sys.exit(1)
-
-    now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
-    patch_sandbox_metadata(
-        name,
-        git_safety_enabled=True,
-        wrapper_checksum=wrapper_checksum,
-        wrapper_last_verified=now,
-    )
-
-    # 8. User service env injection
+    # 6. User service env injection
     try:
         from foundry_sandbox.user_services import get_proxy_env_overrides
 
@@ -214,7 +185,7 @@ def _provision_migrated_sandbox(name: str, metadata: dict[str, Any]) -> None:
     except Exception as exc:
         log_warn(f"User service env injection failed: {exc}")
 
-    # 9. Copy files
+    # 7. Copy files
     copies = metadata.get("copies", [])
     for copy_spec in copies:
         parts = copy_spec.split(":", 1)
@@ -282,29 +253,33 @@ def start(name: str, watchdog: bool) -> None:
 
     # Verify git wrapper integrity; re-inject on checksum mismatch or absence
     expected_checksum = metadata.get("wrapper_checksum", "")
-    try:
-        is_ok, _actual = verify_wrapper_integrity(
-            name, expected_checksum=expected_checksum,
-        )
-    except FileNotFoundError:
-        is_ok = False
+    needs_repair = False
+    if is_template_stale():
+        log_info("Template digest is stale — forcing re-provisioning of wrapper")
+        needs_repair = True
+    else:
+        try:
+            is_ok, _actual = verify_wrapper_integrity(
+                name, expected_checksum=expected_checksum,
+            )
+        except FileNotFoundError:
+            is_ok = False
+        needs_repair = not is_ok
 
-    if not is_ok:
+    if needs_repair:
         sandbox_id = metadata.get("sbx_name", name)
         workspace_dir = metadata.get("workspace_dir", "/workspace")
-        try:
-            inject_git_wrapper(name, sandbox_id=sandbox_id, workspace_dir=workspace_dir)
-            new_checksum = compute_wrapper_checksum()
-            now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
-            patch_sandbox_metadata(
-                name,
-                wrapper_checksum=new_checksum,
-                wrapper_last_verified=now,
-            )
+        result = repair_git_safety(
+            name,
+            sandbox_id=sandbox_id,
+            workspace_dir=workspace_dir,
+            expected_checksum=expected_checksum,
+        )
+        if result.success:
             log_info("Git wrapper re-injected (checksum mismatch)")
-        except Exception as exc:
+        else:
             click.echo(
-                f"Error: Git wrapper re-injection failed: {exc}. "
+                f"Error: Git wrapper re-injection failed: {result.error}. "
                 "Sandbox started without git safety enforcement.",
                 err=True,
             )

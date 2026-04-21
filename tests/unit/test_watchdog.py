@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from unittest.mock import patch
 
+from foundry_sandbox.git_safety import ProvisioningResult
 from foundry_sandbox.watchdog import (
     WrapperWatchdog,
     get_reinjection_count,
@@ -45,11 +46,7 @@ class TestWrapperWatchdogPoll:
     """Tests where _poll_all_sandboxes detects a mismatch and calls _reinject_wrapper."""
 
     @patch("foundry_sandbox.git_safety.emit_wrapper_tamper_event")
-    @patch("foundry_sandbox.state.patch_sandbox_metadata")
-    @patch("foundry_sandbox.git_safety.inject_git_wrapper")
-    @patch("foundry_sandbox.git_safety.write_hmac_secret_for_server")
-    @patch("foundry_sandbox.git_safety.write_hmac_secret_to_sandbox")
-    @patch("foundry_sandbox.git_safety.generate_hmac_secret", return_value="s1")
+    @patch("foundry_sandbox.git_safety.repair_git_safety", return_value=ProvisioningResult(success=True, wrapper_checksum="abc123"))
     @patch("foundry_sandbox.git_safety.verify_wrapper_integrity", return_value=(False, "def456"))
     @patch("foundry_sandbox.git_safety.compute_wrapper_checksum", return_value="abc123")
     @patch("foundry_sandbox.state.load_sandbox_metadata")
@@ -57,8 +54,7 @@ class TestWrapperWatchdogPoll:
     @patch("foundry_sandbox.sbx.sbx_ls")
     def test_reinjects_on_mismatch(
         self, mock_ls, mock_running, mock_meta, mock_checksum,
-        mock_verify, mock_gen_hmac,
-        mock_write_wt, mock_write_srv, mock_inject, mock_patch, mock_emit,
+        mock_verify, mock_repair, mock_emit,
     ):
         mock_ls.return_value = [{"name": "sb1", "status": "running"}]
         mock_meta.return_value = {
@@ -70,12 +66,13 @@ class TestWrapperWatchdogPoll:
         wd = WrapperWatchdog(poll_interval=999)
         wd._poll_all_sandboxes()
 
-        mock_inject.assert_called_once_with(
-            "sb1", sandbox_id="sb1", workspace_dir="/workspace",
+        mock_repair.assert_called_once_with(
+            "sb1",
+            sandbox_id="sb1",
+            workspace_dir="/workspace",
+            expected_checksum="abc123",
+            rotate_hmac=True,
         )
-        mock_patch.assert_called_once()
-        call_kwargs = mock_patch.call_args[1]
-        assert call_kwargs["wrapper_checksum"] == "abc123"
 
     @patch("foundry_sandbox.state.patch_sandbox_metadata")
     @patch("foundry_sandbox.git_safety.verify_wrapper_integrity", return_value=(True, "abc123"))
@@ -121,11 +118,7 @@ class TestWrapperWatchdogPoll:
 
 class TestWrapperWatchdogReinjectionCount:
     @patch("foundry_sandbox.git_safety.emit_wrapper_tamper_event")
-    @patch("foundry_sandbox.state.patch_sandbox_metadata")
-    @patch("foundry_sandbox.git_safety.inject_git_wrapper")
-    @patch("foundry_sandbox.git_safety.write_hmac_secret_for_server")
-    @patch("foundry_sandbox.git_safety.write_hmac_secret_to_sandbox")
-    @patch("foundry_sandbox.git_safety.generate_hmac_secret", return_value="s1")
+    @patch("foundry_sandbox.git_safety.repair_git_safety", return_value=ProvisioningResult(success=True, wrapper_checksum="abc123"))
     @patch("foundry_sandbox.git_safety.verify_wrapper_integrity", return_value=(False, "wrong"))
     @patch("foundry_sandbox.git_safety.compute_wrapper_checksum", return_value="abc123")
     @patch("foundry_sandbox.state.load_sandbox_metadata")
@@ -133,8 +126,7 @@ class TestWrapperWatchdogReinjectionCount:
     @patch("foundry_sandbox.sbx.sbx_ls")
     def test_counter_increments(
         self, mock_ls, mock_running, mock_meta, mock_checksum,
-        mock_verify, mock_gen_hmac,
-        mock_write_wt, mock_write_srv, mock_inject, mock_patch, mock_emit,
+        mock_verify, mock_repair, mock_emit,
     ):
         mock_ls.return_value = [
             {"name": "sb1", "status": "running"},
@@ -195,53 +187,44 @@ class TestDefaultInterval:
 
 class TestHmacRotationOnReinjection:
     @patch("foundry_sandbox.git_safety.emit_wrapper_tamper_event")
-    @patch("foundry_sandbox.state.patch_sandbox_metadata")
-    @patch("foundry_sandbox.git_safety.inject_git_wrapper")
-    @patch("foundry_sandbox.git_safety.write_hmac_secret_for_server")
-    @patch("foundry_sandbox.git_safety.write_hmac_secret_to_sandbox")
-    @patch("foundry_sandbox.git_safety.generate_hmac_secret", return_value="new_secret_1")
+    @patch("foundry_sandbox.git_safety.repair_git_safety")
     @patch("foundry_sandbox.git_safety.verify_wrapper_integrity", return_value=(False, "wrong"))
     @patch("foundry_sandbox.git_safety.compute_wrapper_checksum", return_value="abc123")
     @patch("foundry_sandbox.state.load_sandbox_metadata")
     @patch("foundry_sandbox.sbx.sbx_is_running", return_value=True)
     @patch("foundry_sandbox.sbx.sbx_ls")
-    def test_hmac_writers_called_before_inject(
+    def test_repair_called_with_rotate_hmac(
         self, mock_ls, mock_running, mock_meta, mock_checksum,
-        mock_verify, mock_gen_hmac,
-        mock_write_wt, mock_write_srv, mock_inject, mock_patch, mock_emit,
+        mock_verify, mock_repair, mock_emit,
     ):
         mock_ls.return_value = [{"name": "sb1", "status": "running"}]
         mock_meta.return_value = {
             "sbx_name": "sb1", "workspace_dir": "/workspace",
             "git_safety_enabled": True,
         }
-
-        # Track call order
-        call_order = []
-        mock_write_wt.side_effect = lambda *a, **kw: call_order.append("write_wt")
-        mock_write_srv.side_effect = lambda *a, **kw: call_order.append("write_srv")
-        mock_inject.side_effect = lambda *a, **kw: call_order.append("inject")
+        mock_repair.return_value = ProvisioningResult(success=True, wrapper_checksum="abc123")
 
         wd = WrapperWatchdog(poll_interval=999)
         wd._poll_all_sandboxes()
 
-        assert call_order == ["write_wt", "write_srv", "inject"]
+        mock_repair.assert_called_once_with(
+            "sb1",
+            sandbox_id="sb1",
+            workspace_dir="/workspace",
+            expected_checksum="abc123",
+            rotate_hmac=True,
+        )
 
     @patch("foundry_sandbox.git_safety.emit_wrapper_tamper_event")
-    @patch("foundry_sandbox.state.patch_sandbox_metadata")
-    @patch("foundry_sandbox.git_safety.inject_git_wrapper")
-    @patch("foundry_sandbox.git_safety.write_hmac_secret_for_server")
-    @patch("foundry_sandbox.git_safety.write_hmac_secret_to_sandbox")
+    @patch("foundry_sandbox.git_safety.repair_git_safety", return_value=ProvisioningResult(success=False, error="HMAC failed"))
     @patch("foundry_sandbox.git_safety.verify_wrapper_integrity", return_value=(False, "wrong"))
     @patch("foundry_sandbox.git_safety.compute_wrapper_checksum", return_value="abc123")
     @patch("foundry_sandbox.state.load_sandbox_metadata")
     @patch("foundry_sandbox.sbx.sbx_is_running", return_value=True)
     @patch("foundry_sandbox.sbx.sbx_ls")
-    def test_consecutive_tamper_events_produce_different_secrets(
+    def test_repair_failure_skips_counter_and_emits_failed(
         self, mock_ls, mock_running, mock_meta, mock_checksum,
-        mock_verify,
-        mock_write_wt, mock_write_srv,
-        mock_inject, mock_patch, mock_emit,
+        mock_verify, mock_repair, mock_emit,
     ):
         mock_ls.return_value = [{"name": "sb1", "status": "running"}]
         mock_meta.return_value = {
@@ -249,48 +232,11 @@ class TestHmacRotationOnReinjection:
             "git_safety_enabled": True,
         }
 
-        counter = {"n": 0}
-
-        def gen_secret():
-            n = counter["n"]
-            counter["n"] += 1
-            return f"secret_{n}"
-
-        with patch(
-            "foundry_sandbox.git_safety.generate_hmac_secret",
-            side_effect=gen_secret,
-        ):
-            wd = WrapperWatchdog(poll_interval=999)
-            wd._poll_all_sandboxes()
-            wd._poll_all_sandboxes()
-
-        # Two polls → two distinct HMAC values
-        assert counter["n"] == 2
-
-    @patch("foundry_sandbox.git_safety.emit_wrapper_tamper_event")
-    @patch("foundry_sandbox.state.patch_sandbox_metadata")
-    @patch("foundry_sandbox.git_safety.write_hmac_secret_for_server")
-    @patch("foundry_sandbox.git_safety.write_hmac_secret_to_sandbox")
-    @patch("foundry_sandbox.git_safety.generate_hmac_secret", side_effect=OSError("disk full"))
-    @patch("foundry_sandbox.git_safety.verify_wrapper_integrity", return_value=(False, "wrong"))
-    @patch("foundry_sandbox.git_safety.compute_wrapper_checksum", return_value="abc123")
-    @patch("foundry_sandbox.state.load_sandbox_metadata")
-    @patch("foundry_sandbox.sbx.sbx_is_running", return_value=True)
-    @patch("foundry_sandbox.sbx.sbx_ls")
-    def test_hmac_failure_skips_reinjection(
-        self, mock_ls, mock_running, mock_meta, mock_checksum,
-        mock_verify, mock_gen_hmac,
-        mock_write_wt, mock_write_srv, mock_patch, mock_emit,
-    ):
-        mock_ls.return_value = [{"name": "sb1", "status": "running"}]
-        mock_meta.return_value = {
-            "sbx_name": "sb1", "workspace_dir": "/workspace",
-            "git_safety_enabled": True,
-        }
-
+        before = get_reinjection_count()
         wd = WrapperWatchdog(poll_interval=999)
         wd._poll_all_sandboxes()
 
+        assert get_reinjection_count() == before  # no increment on failure
         mock_emit.assert_called_once_with(
             sandbox="sb1",
             expected_sha256="abc123",
@@ -306,11 +252,7 @@ class TestHmacRotationOnReinjection:
 
 class TestTamperEventEmission:
     @patch("foundry_sandbox.git_safety.emit_wrapper_tamper_event")
-    @patch("foundry_sandbox.state.patch_sandbox_metadata")
-    @patch("foundry_sandbox.git_safety.inject_git_wrapper")
-    @patch("foundry_sandbox.git_safety.write_hmac_secret_for_server")
-    @patch("foundry_sandbox.git_safety.write_hmac_secret_to_sandbox")
-    @patch("foundry_sandbox.git_safety.generate_hmac_secret", return_value="s1")
+    @patch("foundry_sandbox.git_safety.repair_git_safety", return_value=ProvisioningResult(success=True, wrapper_checksum="abc123"))
     @patch("foundry_sandbox.git_safety.verify_wrapper_integrity", return_value=(False, "wrong"))
     @patch("foundry_sandbox.git_safety.compute_wrapper_checksum", return_value="abc123")
     @patch("foundry_sandbox.state.load_sandbox_metadata")
@@ -318,8 +260,7 @@ class TestTamperEventEmission:
     @patch("foundry_sandbox.sbx.sbx_ls")
     def test_event_emitted_once_per_mismatch(
         self, mock_ls, mock_running, mock_meta, mock_checksum,
-        mock_verify, mock_gen_hmac,
-        mock_write_wt, mock_write_srv, mock_inject, mock_patch, mock_emit,
+        mock_verify, mock_repair, mock_emit,
     ):
         mock_ls.return_value = [{"name": "sb1", "status": "running"}]
         mock_meta.return_value = {

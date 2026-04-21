@@ -529,6 +529,7 @@ class TestWrapperScriptResolution:
 class TestProvisionGitSafety:
     """Tests for the centralized provision_git_safety helper."""
 
+    @patch("foundry_sandbox.git_safety._verify_sandbox_connectivity")
     @patch("foundry_sandbox.git_safety.compute_wrapper_checksum", return_value="sha256abc")
     @patch("foundry_sandbox.git_safety.inject_git_wrapper")
     @patch("foundry_sandbox.git_safety.register_sandbox_with_git_safety")
@@ -538,7 +539,7 @@ class TestProvisionGitSafety:
     @patch("foundry_sandbox.state.patch_sandbox_metadata")
     def test_full_provisioning_success(
         self, mock_patch, mock_hmac, mock_write_guest, mock_write_host,
-        mock_register, mock_inject, mock_checksum,
+        mock_register, mock_inject, mock_checksum, mock_connectivity,
     ):
         from foundry_sandbox.git_safety import provision_git_safety
 
@@ -630,6 +631,7 @@ class TestProvisionGitSafety:
         assert result.success is False
         assert "Checksum computation failed" in result.error
 
+    @patch("foundry_sandbox.git_safety._verify_sandbox_connectivity")
     @patch("foundry_sandbox.git_safety.compute_wrapper_checksum", return_value="sha256abc")
     @patch("foundry_sandbox.git_safety.inject_git_wrapper")
     @patch("foundry_sandbox.git_safety.write_hmac_secret_for_server")
@@ -637,7 +639,8 @@ class TestProvisionGitSafety:
     @patch("foundry_sandbox.git_safety.generate_hmac_secret", return_value="a" * 64)
     @patch("foundry_sandbox.state.patch_sandbox_metadata")
     def test_skips_registration_when_no_branch(
-        self, mock_patch, mock_hmac, mock_guest, mock_host, mock_inject, mock_checksum,
+        self, mock_patch, mock_hmac, mock_guest, mock_host, mock_inject,
+        mock_checksum, mock_connectivity,
     ):
         from foundry_sandbox.git_safety import provision_git_safety
 
@@ -648,6 +651,7 @@ class TestProvisionGitSafety:
         )
         assert result.success is True
 
+    @patch("foundry_sandbox.git_safety._verify_sandbox_connectivity")
     @patch("foundry_sandbox.git_safety.compute_wrapper_checksum", return_value="sha256abc")
     @patch("foundry_sandbox.git_safety.inject_git_wrapper")
     @patch("foundry_sandbox.git_safety.write_hmac_secret_for_server")
@@ -655,7 +659,8 @@ class TestProvisionGitSafety:
     @patch("foundry_sandbox.git_safety.generate_hmac_secret", return_value="a" * 64)
     @patch("foundry_sandbox.state.patch_sandbox_metadata")
     def test_uses_sandbox_id_default(
-        self, mock_patch, mock_hmac, mock_guest, mock_host, mock_inject, mock_checksum,
+        self, mock_patch, mock_hmac, mock_guest, mock_host, mock_inject,
+        mock_checksum, mock_connectivity,
     ):
         from foundry_sandbox.git_safety import provision_git_safety
 
@@ -663,6 +668,76 @@ class TestProvisionGitSafety:
         result = provision_git_safety("my-sandbox", branch="main", repo_spec="org/repo")
         assert result.success is True
         mock_host.assert_called_once_with("my-sandbox", "a" * 64)
+
+    @patch("foundry_sandbox.git_safety._verify_sandbox_connectivity", side_effect=RuntimeError("curl exited 7"))
+    @patch("foundry_sandbox.git_safety.compute_wrapper_checksum", return_value="sha256abc")
+    @patch("foundry_sandbox.git_safety.inject_git_wrapper")
+    @patch("foundry_sandbox.git_safety.register_sandbox_with_git_safety")
+    @patch("foundry_sandbox.git_safety.write_hmac_secret_for_server")
+    @patch("foundry_sandbox.git_safety.write_hmac_secret_to_sandbox")
+    @patch("foundry_sandbox.git_safety.generate_hmac_secret", return_value="a" * 64)
+    def test_connectivity_failure_returns_error(
+        self, mock_hmac, mock_guest, mock_host, mock_register,
+        mock_inject, mock_checksum, mock_connectivity,
+    ):
+        from foundry_sandbox.git_safety import provision_git_safety
+
+        result = provision_git_safety(
+            "test-sandbox", branch="main", repo_spec="org/repo",
+        )
+        assert result.success is False
+        assert "connectivity" in result.error
+
+
+class TestVerifySandboxConnectivity:
+    """Tests for the _verify_sandbox_connectivity helper."""
+
+    @patch("foundry_sandbox.sbx.sbx_exec")
+    def test_success_on_200(self, mock_exec):
+        from foundry_sandbox.git_safety import _verify_sandbox_connectivity
+
+        mock_exec.return_value = _mock_completed(stdout="200")
+        # Should not raise
+        _verify_sandbox_connectivity("test-sandbox")
+
+    @patch("foundry_sandbox.sbx.sbx_exec")
+    def test_success_on_2xx(self, mock_exec):
+        from foundry_sandbox.git_safety import _verify_sandbox_connectivity
+
+        mock_exec.return_value = _mock_completed(stdout="204")
+        _verify_sandbox_connectivity("test-sandbox")
+
+    @patch("foundry_sandbox.sbx.sbx_exec")
+    def test_raises_on_curl_failure(self, mock_exec):
+        from foundry_sandbox.git_safety import _verify_sandbox_connectivity
+
+        mock_exec.return_value = _mock_completed(returncode=7)
+        with pytest.raises(RuntimeError, match="curl exited 7"):
+            _verify_sandbox_connectivity("test-sandbox")
+
+    @patch("foundry_sandbox.sbx.sbx_exec")
+    def test_raises_on_non_2xx(self, mock_exec):
+        from foundry_sandbox.git_safety import _verify_sandbox_connectivity
+
+        mock_exec.return_value = _mock_completed(stdout="503")
+        with pytest.raises(RuntimeError, match="HTTP 503"):
+            _verify_sandbox_connectivity("test-sandbox")
+
+    @patch("foundry_sandbox.sbx.sbx_exec")
+    def test_uses_proxy_and_api_url(self, mock_exec):
+        from foundry_sandbox.git_safety import _verify_sandbox_connectivity
+
+        mock_exec.return_value = _mock_completed(stdout="200")
+        _verify_sandbox_connectivity(
+            "test-sandbox",
+            api_host="myhost",
+            api_port=9999,
+            proxy="http://myproxy:1234",
+        )
+        cmd = mock_exec.call_args[0][1]
+        assert "--proxy" in cmd
+        assert "http://myproxy:1234" in cmd
+        assert "http://myhost:9999/health" in cmd
 
 
 class TestRepairGitSafety:
@@ -774,3 +849,89 @@ class TestTemplateStaleness:
         with patch("foundry_sandbox.git_safety.Path.home", return_value=tmp_path):
             with patch("foundry_sandbox.sbx.get_sbx_version", return_value="0.6.0"):
                 assert is_template_stale() is False
+
+
+class TestEmitWrapperTamperEvent:
+    """Tests for metric-only tamper event delivery."""
+
+    @patch("urllib.request.urlopen")
+    def test_posts_to_server_endpoint(self, mock_urlopen):
+        import foundry_sandbox.git_safety as gs
+        from foundry_sandbox.git_safety import emit_wrapper_tamper_event
+
+        # Reset fallback counter
+        gs._tamper_event_fallback_count = 0
+
+        mock_resp = MagicMock()
+        mock_resp.status = 200
+        mock_resp.__enter__ = lambda s: s
+        mock_resp.__exit__ = MagicMock(return_value=False)
+        mock_urlopen.return_value = mock_resp
+
+        emit_wrapper_tamper_event(
+            sandbox="sbx-1",
+            expected_sha256="abc123",
+            actual_sha256="def456",
+            action="reinjected",
+        )
+
+        mock_urlopen.assert_called_once()
+        call_args = mock_urlopen.call_args
+        req = call_args[0][0]
+        assert req.full_url == "http://127.0.0.1:8083/tamper-event"
+        assert req.method == "POST"
+        assert gs._tamper_event_fallback_count == 0
+
+    @patch("foundry_sandbox.git_safety.log_warn")
+    @patch("foundry_git_safety.decision_log.write_decision")
+    @patch("urllib.request.urlopen", side_effect=OSError("Connection refused"))
+    def test_fallback_on_server_unreachable(self, mock_urlopen, mock_write, mock_warn):
+        import foundry_sandbox.git_safety as gs
+        from foundry_sandbox.git_safety import emit_wrapper_tamper_event
+
+        gs._tamper_event_fallback_count = 0
+
+        emit_wrapper_tamper_event(
+            sandbox="sbx-1",
+            expected_sha256="abc",
+            actual_sha256="def",
+            action="reinjected",
+        )
+
+        assert gs._tamper_event_fallback_count == 1
+        mock_write.assert_called_once()
+        # Should log warning about server unreachable
+        assert any("unreachable" in str(c) for c in mock_warn.call_args_list)
+
+    @patch("foundry_sandbox.git_safety.log_warn")
+    @patch("foundry_git_safety.decision_log.write_decision", side_effect=OSError("log dir missing"))
+    @patch("urllib.request.urlopen", side_effect=OSError("Connection refused"))
+    def test_both_channels_fail_still_increments_counter(self, mock_urlopen, mock_write, mock_warn):
+        import foundry_sandbox.git_safety as gs
+        from foundry_sandbox.git_safety import emit_wrapper_tamper_event
+
+        gs._tamper_event_fallback_count = 0
+
+        # Should not raise despite both channels failing
+        emit_wrapper_tamper_event(
+            sandbox="sbx-1",
+            expected_sha256="abc",
+            actual_sha256="def",
+            action="reinject_failed",
+        )
+
+        assert gs._tamper_event_fallback_count == 1
+        # Should log about both failures
+        warn_msgs = [str(c) for c in mock_warn.call_args_list]
+        assert any("unreachable" in m for m in warn_msgs)
+        assert any("fallback also failed" in m for m in warn_msgs)
+
+    def test_get_tamper_event_fallback_count(self):
+        import foundry_sandbox.git_safety as gs
+        from foundry_sandbox.git_safety import get_tamper_event_fallback_count
+
+        gs._tamper_event_fallback_count = 0
+        assert get_tamper_event_fallback_count() == 0
+        gs._tamper_event_fallback_count = 5
+        assert get_tamper_event_fallback_count() == 5
+        gs._tamper_event_fallback_count = 0

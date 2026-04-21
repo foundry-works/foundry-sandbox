@@ -17,6 +17,8 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 
+from foundry_sandbox.utils import log_warn
+
 # Default paths for standalone host usage (user-writable).
 # Container workloads override these via environment variables.
 _FOUNDRY_BASE = os.path.expanduser("~/.foundry")
@@ -564,6 +566,9 @@ def git_safety_readiness(port: int = 8083) -> dict[str, object] | None:
 # ============================================================================
 
 
+_tamper_event_fallback_count: int = 0
+
+
 def emit_wrapper_tamper_event(
     *,
     sandbox: str,
@@ -571,7 +576,12 @@ def emit_wrapper_tamper_event(
     actual_sha256: str,
     action: str,
 ) -> None:
-    """Write a wrapper_tamper event to the decision log.
+    """Record a wrapper tamper event via the git-safety server.
+
+    POSTs to the server's ``/tamper-event`` endpoint, which always
+    increments a Prometheus counter and writes to the decision log on a
+    best-effort basis.  Falls back to a local counter + direct decision
+    log write when the server is unreachable.
 
     Args:
         sandbox: Sandbox name.
@@ -579,6 +589,39 @@ def emit_wrapper_tamper_event(
         actual_sha256: Checksum found in the sandbox.
         action: "reinjected" or "reinject_failed".
     """
+    global _tamper_event_fallback_count
+
+    payload = json.dumps({
+        "sandbox": sandbox,
+        "expected_sha256": expected_sha256,
+        "actual_sha256": actual_sha256,
+        "action": action,
+    }).encode()
+
+    # Try the server endpoint first.
+    try:
+        import urllib.request
+
+        req = urllib.request.Request(
+            "http://127.0.0.1:8083/tamper-event",
+            data=payload,
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        with urllib.request.urlopen(req, timeout=3) as resp:
+            if resp.status in (200, 202):
+                return
+    except Exception:
+        pass
+
+    # Server unreachable — local fallback.
+    _tamper_event_fallback_count += 1
+    log_warn(
+        f"Tamper-event server unreachable; recording locally for "
+        f"sandbox={sandbox} action={action} "
+        f"(fallback_count={_tamper_event_fallback_count})"
+    )
+
     try:
         from foundry_git_safety.decision_log import write_decision  # type: ignore[import-untyped]
 
@@ -590,8 +633,57 @@ def emit_wrapper_tamper_event(
             expected_sha256=expected_sha256,
             actual_sha256=actual_sha256,
         )
-    except Exception:
-        pass
+    except Exception as exc:
+        log_warn(f"Tamper-event decision log fallback also failed: {exc}")
+
+
+def get_tamper_event_fallback_count() -> int:
+    """Return count of tamper events recorded via local fallback."""
+    return _tamper_event_fallback_count
+
+
+# ============================================================================
+# Sandbox Connectivity Verification
+# ============================================================================
+
+
+def _verify_sandbox_connectivity(
+    sandbox_name: str,
+    *,
+    api_host: str = "host.docker.internal",
+    api_port: int = 8083,
+    proxy: str = "http://gateway.docker.internal:3128",
+) -> None:
+    """Verify the sandbox can reach the git-safety server through the proxy.
+
+    Runs ``curl`` inside the sandbox to hit ``/health`` on the git-safety
+    server via the SBX HTTP proxy.  Raises on failure so the provisioning
+    caller knows the path is broken before claiming git safety is enabled.
+    """
+    from foundry_sandbox.sbx import sbx_exec
+
+    url = f"http://{api_host}:{api_port}/health"
+    result = sbx_exec(
+        sandbox_name,
+        [
+            "curl", "-s", "-o", "/dev/null", "-w", "%{http_code}",
+            "--max-time", "5", "--connect-timeout", "3",
+            "--proxy", proxy,
+            url,
+        ],
+        quiet=True,
+    )
+    if result.returncode != 0:
+        raise RuntimeError(
+            f"curl exited {result.returncode} — sandbox cannot reach "
+            f"git-safety server at {url} via proxy {proxy}"
+        )
+    code = result.stdout.strip()
+    if not code.startswith("2"):
+        raise RuntimeError(
+            f"git-safety /health returned HTTP {code} from sandbox "
+            f"(expected 2xx)"
+        )
 
 
 # ============================================================================
@@ -675,6 +767,14 @@ def provision_git_safety(
             success=False,
             error=f"Checksum computation failed: {exc}. "
             "Reinstall foundry-sandbox.",
+        )
+
+    try:
+        _verify_sandbox_connectivity(sandbox_name)
+    except Exception as exc:
+        return ProvisioningResult(
+            success=False,
+            error=f"Sandbox connectivity to git-safety server failed: {exc}",
         )
 
     now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
