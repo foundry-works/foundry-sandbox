@@ -71,7 +71,7 @@
 | Credential | Source | Storage |
 |------------|--------|---------|
 | HMAC secrets | `cast new` generates | Server: `/run/secrets/sandbox-hmac/{id}` (mode 0600) |
-| HMAC secrets | `cast new` generates | Client: `{worktree}/.foundry/hmac-secret` (mode 0600) |
+| HMAC secrets | `cast new` generates | Client: `/run/foundry/hmac-secret` (tmpfs, mode 0600) |
 | API keys | Host environment variables | User services proxy reads at request time |
 | Git tokens | `FOUNDRY_PROXY_GIT_TOKEN` | Subprocess env (not persisted) |
 

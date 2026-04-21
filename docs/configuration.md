@@ -203,7 +203,7 @@ The default configuration blocks CI/CD pipeline files and generates warnings for
 
 **Warned** (logged by default):
 - `package.json`, `pyproject.toml`, `requirements.txt`, `Gemfile`, `go.mod`, `Cargo.toml` — Dependency manifests
-- `Dockerfile`, `docker-compose*.yml` — Container definitions
+- `Dockerfile`, `docker-compose*.yml`, `*.sbx.toml` — Container and sbx definitions
 - `.env*` — Environment files
 
 ### Customization

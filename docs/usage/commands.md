@@ -10,9 +10,11 @@ Complete reference for all `cast` commands.
 
 **Presets:** [preset](#cast-preset)
 
-**Status & Info:** [list](#cast-list) | [status](#cast-status) | [info](#cast-info) | [config](#cast-config)
+**Status & Info:** [list](#cast-list) | [status](#cast-status) | [info](#cast-info) | [config](#cast-config) | [diagnose](#cast-diagnose)
 
-**Maintenance:** [refresh-credentials](#cast-refresh-credentials) | [help](#cast-help) | [git-mode](#cast-git-mode)
+**Maintenance:** [refresh-credentials](#cast-refresh-credentials) | [watchdog](#cast-watchdog) | [git-mode](#cast-git-mode) | [help](#cast-help)
+
+**Migration:** [migrate-to-sbx](#cast-migrate-to-sbx) | [migrate-from-sbx](#cast-migrate-from-sbx)
 
 **Reference:** [Environment Variables](#environment-variables)
 
@@ -56,9 +58,6 @@ cast new --preset <name>
 | `--with-zai` | Enable ZAI Claude alias (requires `ZHIPU_API_KEY`) |
 | `--skip-key-check` | Skip API key validation |
 | `--wd <path>` | Working directory within repo (relative path) |
-| `--with-ide[=name]` | Launch IDE (cursor, zed, code) then terminal |
-| `--ide-only[=name]` | Launch IDE only, skip terminal |
-| `--no-ide` | Skip IDE selection prompt |
 
 ### Examples
 
@@ -175,9 +174,6 @@ cast attach --last
 | Option | Description |
 |--------|-------------|
 | `--last` | Reattach to the last attached sandbox |
-| `--with-ide[=name]` | Launch IDE then terminal |
-| `--ide-only[=name]` | Launch IDE only, skip terminal |
-| `--no-ide` | Skip IDE prompt |
 
 ### Behavior
 
@@ -592,7 +588,83 @@ Checks
 
 ---
 
+## cast diagnose
+
+Collect diagnostic information for support and troubleshooting.
+
+### Synopsis
+
+```
+cast diagnose [--json]
+```
+
+### Options
+
+| Option | Description |
+|--------|-------------|
+| `--json` | Output structured JSON instead of human-readable text |
+
+### Output Sections
+
+| Section | What it collects |
+|---------|-----------------|
+| Versions | Python, sbx, and git versions |
+| sbx Diagnostics | sbx diagnostic output (secrets redacted) |
+| Git Safety Server | Health and readiness checks with per-check breakdown |
+| Decision Log | Last 10 entries from the JSONL decision log |
+| Wrapper Tamper Events | Recent wrapper integrity violations |
+| Kernel Isolation | Verifies sandbox kernels differ from host kernel |
+
+All output is automatically redacted: HMAC secrets, API keys (`sk-...`), and GitHub tokens (`ghp_...`) are masked. Each section degrades gracefully — a failing subsystem does not prevent other sections from being reported.
+
+### Examples
+
+```bash
+# Human-readable diagnostics
+cast diagnose
+
+# JSON output for scripting or bug reports
+cast diagnose --json
+```
+
+---
+
 ## Maintenance
+
+## cast watchdog
+
+Run the wrapper integrity watchdog as a long-lived foreground process. Periodically checks that the git wrapper inside each sandbox has not been tampered with.
+
+### Synopsis
+
+```
+cast watchdog [--interval SECONDS]
+```
+
+### Options
+
+| Option | Description |
+|--------|-------------|
+| `--interval` | Poll interval in seconds (default: 10) |
+
+### Behavior
+
+- Verifies sbx backend is available before starting
+- Runs integrity checks at the configured interval
+- Detects and logs wrapper tamper events to the decision log
+- Handles SIGINT and SIGTERM for clean shutdown
+
+### Examples
+
+```bash
+# Run with default 10-second interval
+cast watchdog
+
+# Custom interval
+cast watchdog --interval 30
+```
+
+---
 
 ## cast refresh-credentials
 
@@ -697,6 +769,96 @@ cast help
 cast help
 cast --help
 cast -h
+```
+
+---
+
+## Migration
+
+## cast migrate-to-sbx
+
+Migrate 0.20.x docker-compose state to the 0.21.x sbx (microVM) backend. Converts sandbox metadata, presets, and credentials.
+
+### Synopsis
+
+```
+cast migrate-to-sbx [options]
+```
+
+### Options
+
+| Option | Description |
+|--------|-------------|
+| `--plan` | Dry-run: show migration plan without making changes |
+| `-f`, `--force` | Skip confirmation prompts; override migration lock |
+| `--snapshot-dir <path>` | Override snapshot directory location |
+
+### Behavior
+
+1. Scans sandbox directories and classifies them (needs migration, already migrated, empty)
+2. Shows migration plan (or exits with `--plan`)
+3. Creates a full snapshot for rollback
+4. Pushes discovered credentials to sbx
+5. Converts each sandbox's metadata to the new schema
+6. Converts preset files to the new format
+
+A migration lock prevents conflicting runs. If interrupted, re-running warns about the lock (use `--force` to override).
+
+See the [Migration Guide](../migration/0.20-to-0.21.md) for detailed instructions.
+
+### Examples
+
+```bash
+# Preview what would be migrated
+cast migrate-to-sbx --plan
+
+# Run migration
+cast migrate-to-sbx
+
+# Skip confirmation
+cast migrate-to-sbx --force
+```
+
+---
+
+## cast migrate-from-sbx
+
+Roll back to 0.20.x state by restoring from the snapshot created by `migrate-to-sbx`.
+
+### Synopsis
+
+```
+cast migrate-from-sbx [options]
+```
+
+### Options
+
+| Option | Description |
+|--------|-------------|
+| `--snapshot-dir <path>` | Explicit snapshot path (auto-discovers latest if omitted) |
+| `-f`, `--force` | Skip confirmation prompt |
+
+### Behavior
+
+1. Locates the snapshot (explicit path or auto-discovery)
+2. Shows snapshot manifest (timestamp, sandbox count, preset count)
+3. Confirms with the user
+4. Restores state from snapshot
+5. Removes migration lock
+
+After rollback, downgrade the package: `pip install foundry-sandbox==0.20.15`
+
+### Examples
+
+```bash
+# Roll back using latest snapshot
+cast migrate-from-sbx
+
+# Roll back from a specific snapshot
+cast migrate-from-sbx --snapshot-dir ~/.sandboxes/.migration-snapshots/2026-04-20T120000
+
+# Skip confirmation
+cast migrate-from-sbx --force
 ```
 
 ---

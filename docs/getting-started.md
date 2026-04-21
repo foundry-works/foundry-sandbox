@@ -4,7 +4,7 @@ This guide walks you through installing Foundry Sandbox and creating your first 
 
 ## Prerequisites
 
-- **Docker sbx** — Sandbox runtime (microVM-based isolation)
+- **Docker sbx** — Sandbox runtime (microVM-based isolation). See [sbx Compatibility](sbx-compatibility.md) for supported versions.
 - **Git** - Version control
 - **Bash** - Shell (Linux/macOS default, WSL2 on Windows)
 - **Python** - 3.10+

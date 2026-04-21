@@ -1,12 +1,12 @@
 # foundry-sandbox
 
-Docker-based sandbox environment for running Claude Code with isolated credentials.
+MicroVM-based sandbox environment for running Claude Code with isolated credentials.
 
 ## Development
 
 - `foundry_sandbox/` - Python CLI package (`cast` entry point via pyproject.toml)
-- `unified-proxy/` - Credential isolation proxy (mitmproxy addons, git API)
-- `stubs/` - Stub files injected into sandboxes (CLAUDE.md, etc.)
+- `foundry-git-safety/` - Git safety server (policy engine, HMAC auth, branch isolation)
+- `stubs/` - Stub files injected into sandboxes (CLAUDE.md, git wrapper)
 - `tests/` - Test scripts including security red-team tests
 
 ## Pre-commit
@@ -42,7 +42,7 @@ Run `./scripts/ci-local.sh` before pushing to catch CI failures early.
 - **`--mode host`** — sets `core.worktree` to the real host path so IDE and shell tools work normally
 - **`--mode sandbox`** — sets `core.worktree` to `/git-workspace` (container path) for proxy-routed git operations
 
-The command validates paths, updates `.git/config.worktree`, and syncs the running proxy container immediately. The sandbox name is auto-detected if you run it from inside a worktree.
+The command validates paths, updates `.git/config.worktree`, and syncs the running sandbox immediately. The sandbox name is auto-detected if you run it from inside a worktree.
 
 ## Releasing
 

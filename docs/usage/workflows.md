@@ -40,7 +40,7 @@ gh pr create --title "Add login feature" --body "..."
 ### Clean Up
 
 ```bash
-# Exit sandbox (Ctrl+b, then d to detach tmux)
+# Exit sandbox
 exit
 
 # Destroy when done
@@ -129,73 +129,6 @@ cast attach repo-feature-auth
 
 ---
 
-## Using Custom Mounts
-
-Mount additional directories from your host into the sandbox.
-
-### Read-Only Data
-
-```bash
-# Mount models directory read-only
-cast new owner/repo feature --mount /path/to/models:/models:ro
-```
-
-### Shared Data Directory
-
-```bash
-# Mount writable data directory
-cast new owner/repo feature --mount /data/datasets:/datasets
-```
-
-### Multiple Mounts
-
-```bash
-cast new owner/repo feature \
-  --mount /data:/data \
-  --mount /models:/models:ro \
-  --mount ~/.aws:/home/ubuntu/.aws:ro
-```
-
----
-
-## Using File Copies
-
-Copy files into the container once at creation time. Useful for configs that shouldn't change.
-
-### Copy Configuration
-
-```bash
-cast new owner/repo feature --copy ~/configs/app.json:/workspace/config.json
-```
-
-### Copy Reference Data
-
-```bash
-cast new owner/repo feature --copy /path/to/fixtures:/test-data
-```
-
-### Mounts vs Copies
-
-| Use Mounts When | Use Copies When |
-|-----------------|-----------------|
-| Data changes frequently | Data is static |
-| Need real-time sync | Don't want host changes to affect sandbox |
-| Large datasets (avoid duplication) | Small files (configs, fixtures) |
-| Need write access back to host | Sandbox-specific modifications OK |
-
----
-
-## Installing SSH-Based Plugins
-
-Use SSH agent forwarding when you need Git-over-SSH (e.g., private repos).
-
-```bash
-# Enable SSH agent forwarding
-cast new owner/repo feature --with-ssh
-```
-
----
-
 ## Using Different AI Tools
 
 The sandbox comes with multiple AI coding assistants pre-installed.
@@ -234,7 +167,7 @@ opencode
 
 ### Setting API Keys
 
-Set API keys on your host before creating a sandbox — they are passed into containers automatically. See [Commands: Environment Variables](commands.md#environment-variables) for the full reference.
+Set API keys on your host before creating a sandbox — they are passed into the sandbox automatically. See [Commands: Environment Variables](commands.md#environment-variables) for the full reference.
 
 ---
 
@@ -284,7 +217,6 @@ cast new owner/repo debug-issue-123 production
 
 ```bash
 # Inside sandbox
-sudo apt-get install strace
 pip install debugpy
 ```
 
@@ -316,118 +248,7 @@ export GITHUB_TOKEN="ghp_..."
 cast new private-org/private-repo feature
 ```
 
-Public repos can be accessed without a token, but private repos and push operations require one.
-
-### SSH Access
-
-```bash
-# Forward your local SSH agent
-cast new owner/repo feature --with-ssh
-```
-
-### SSH Keys (Alternative)
-
-```bash
-# Mount SSH keys read-only
-cast new owner/repo feature --mount ~/.ssh:/home/ubuntu/.ssh:ro
-```
-
----
-
-## Network Isolation Workflow
-
-Control network access for sensitive work or offline development.
-
-### Restricted Network for Sensitive Code
-
-```bash
-# Only allow essential services (GitHub, AI APIs, research APIs)
-cast new owner/repo sensitive-feature --network=limited
-
-# Inside sandbox, test that restrictions work
-curl https://github.com  # works
-curl https://random-site.com  # blocked
-```
-
-### Completely Offline Development
-
-```bash
-# No network at all
-cast new owner/repo offline-work --network=none
-
-# Inside sandbox, everything is blocked
-curl https://anything.com  # fails
-```
-
-### Runtime Network Switching
-
-```bash
-# Start with limited network (default)
-cast new owner/repo feature --network=limited
-
-# Inside container, check current status
-sudo network-mode status
-
-# Switch to host-only for local testing
-sudo network-mode host-only
-```
-
-Note: To allow additional domains beyond the default whitelist, set `SANDBOX_ALLOWED_DOMAINS` on the host before creating the sandbox (runtime additions are disabled for security).
-
-### Host-Only for Local Services
-
-```bash
-# Allow only local network (for local databases, APIs)
-cast new owner/repo local-dev --network=host-only
-
-# Inside sandbox
-curl http://localhost:8080  # works (if service running on host)
-curl https://external.com   # blocked
-```
-
-### Custom Domain Whitelist
-
-```bash
-# Add extra domains to the limited mode whitelist
-export SANDBOX_ALLOWED_DOMAINS="internal-api.company.com,cache.myorg.net"
-cast new owner/repo feature --network=limited
-
-# These domains will be allowed in addition to defaults
-```
-
----
-
-## Advanced Plugin Configuration
-
-### OpenCode Foundry
-
-The [opencode-foundry](https://github.com/foundry-works/opencode-foundry) skills are automatically synced on sandbox start. By default, the repo is cloned to `~/.sandboxes/vendor/opencode-foundry`.
-
-```bash
-# Use a local checkout instead
-export SANDBOX_OPENCODE_FOUNDRY_PATH=~/dev/opencode-foundry
-
-# Or override the GitHub source
-export SANDBOX_OPENCODE_FOUNDRY_REPO=https://github.com/your-org/opencode-foundry.git
-export SANDBOX_OPENCODE_FOUNDRY_BRANCH=develop
-```
-
-Skills are synced into `~/.config/opencode/skills` and the OpenCode config is merged from `install/assets/opencode-global.json` without overwriting existing settings.
-
-### OpenCode Plugins
-
-For npm-based OpenCode plugins:
-
-```bash
-# Prefetch npm plugins on sandbox creation (downloads to ~/.cache/opencode)
-export SANDBOX_OPENCODE_PREFETCH_NPM_PLUGINS=1
-
-# Or disable npm plugins entirely (use only local plugins)
-export SANDBOX_OPENCODE_DISABLE_NPM_PLUGINS=1
-
-# Use a local plugin directory
-export SANDBOX_OPENCODE_PLUGIN_DIR=~/dev/opencode-plugins
-```
+Public repos can be accessed without a token, but private repos and push operations require one. Credentials are injected by sbx and never enter the sandbox.
 
 ---
 
@@ -456,23 +277,14 @@ cast list
 ```bash
 # Don't let sandboxes accumulate
 cast destroy old-sandbox --yes
-
-# Or prune orphaned configs
-cast prune -f
 ```
 
-### Debugging Issues
+### Diagnose Issues
 
 ```bash
-SANDBOX_DEBUG=1 cast list          # Debug logging
-SANDBOX_VERBOSE=1 cast start name  # Verbose output
-```
+# Collect diagnostic information for support
+cast diagnose
 
-### Network Whitelist
-
-Add custom domains to the limited network whitelist:
-
-```bash
-export SANDBOX_ALLOWED_DOMAINS="api.example.com,internal.corp.com"
-cast new owner/repo --network=limited
+# Run the wrapper integrity watchdog
+cast watchdog --interval 10
 ```

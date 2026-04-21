@@ -1,151 +1,147 @@
-# foundry-sandbox — Phase 8: Code Remediation + CI Pipeline
+# foundry-sandbox — Phase 9: Documentation Alignment
 
 **Last updated:** 2026-04-21
 **Branch:** `sbx`
-**Scope:** Finish remaining code items from §2–§4, build full CI pipeline (§5), move HMAC secret outside worktree (§6)
-**Deferred to Phase 9:** §7 (docs)
+**Scope:** Align all documentation with the sbx migration, close outdated references, add missing command docs, and prepare the CHANGELOG for the 0.21.0 release.
+**Prerequisite:** Phase 8 complete (all code items done; CI verification pending a test push).
 
 ---
 
 ## 1. Objective
 
-Close the remaining code and test gaps that block a shippable `foundry-git-safety` runtime, and put the standalone package under required CI so regressions are merge-blocking.
+Every doc page should accurately describe the current sbx-based architecture. No references to removed flags (`--mount`, `--network`, `--with-ssh`), removed commands (`cast prune`), or removed infrastructure (unified-proxy, Squid, mitmproxy, Docker compose) should remain in user-facing docs. The CHANGELOG should be versioned for release.
 
 ---
 
 ## 2. Workstreams
 
-### 2.1 Plumb configured observability paths into decision-log creation
+### 2.1 Rewrite root README.md
 
 Current state:
-- `DecisionLogWriter` reads from `GIT_SAFETY_DECISION_LOG_DIR` env var or defaults to `~/.foundry/logs`.
-- The `foundry.yaml` config schema has no observability/log-dir field for this.
-- The server's `create_git_api()` does not pass any log directory config to the decision log.
+- Still describes the docker-compose/unified-proxy architecture with a diagram showing Squid and mitmproxy.
+- References removed features: "Read-only filesystem", "Network allowlists" with Squid, "Volume mounts".
+- `pyproject.toml` description says "Docker-based sandbox environment".
 
 Required work:
-- Add a `decision_log_dir` field to `GitSafetyServerConfig` (default: `~/.foundry/logs`).
-- When `create_git_api()` is called with a config, initialize or reconfigure the `DecisionLogWriter` singleton with the configured path.
-- Reset the module-level `_writer` singleton if the configured path differs from the current one.
+- Replace the architecture diagram with an sbx-based flow: sandbox → sbx proxy → foundry-git-safety → external APIs.
+- Update the security layers table: microVM isolation, credential injection via sbx, git safety via foundry-git-safety, network policy via sbx.
+- Remove references to `--mount`, `--network`, volume mounts.
+- Update prerequisites: Docker sbx instead of Docker 20.10+, remove tmux requirement.
+- Update limitations: replace "Requires Docker" with "Requires Docker sbx".
+- Update `pyproject.toml` description from "Docker-based" to "microVM-based".
+- Update CLAUDE.md: remove `unified-proxy/` reference, update `stubs/` description.
 
 Exit criteria:
-- A `foundry.yaml` with `git_safety.server.decision_log_dir: /tmp/test-logs` causes decisions to be written there.
-- The `/health` endpoint reflects whether the decision log writer is functional.
+- README.md accurately describes sbx architecture with no docker-compose/unified-proxy references.
+- `pyproject.toml` description is current.
+- CLAUDE.md reflects actual directory structure.
 
-### 2.2 Surface degraded observability in health/readiness output
+### 2.2 Update docs/usage/workflows.md
 
 Current state:
-- `/health` checks config validity and returns `degraded` if config fails to load.
-- `/ready` checks workspace, config, and secret store — but not the decision log.
-- If the decision-log directory is unwritable, operations silently degrade with a `logger.debug`.
+- "Using Custom Mounts" section references `--mount` flag (removed).
+- "Installing SSH-Based Plugins" references `--with-ssh` (removed).
+- "Network Isolation Workflow" references `--network=limited`, `--network=none`, `--network=host-only`, `sudo network-mode`, `SANDBOX_ALLOWED_DOMAINS` (all removed).
+- "Tips and Best Practices" references `cast prune` (removed).
+- "Private Repositories" section references `--with-ssh` and `--mount` for SSH keys.
 
 Required work:
-- Add a decision-log check to `/ready`: attempt a test write and report failure as a non-fatal degradation.
-- Add a `logging` section to `/health` showing decision-log path and writability.
-- Keep the overall `/ready` status at 200 even if only logging is degraded (observability failures should not trigger orchestration restarts).
+- Remove the "Using Custom Mounts" section entirely.
+- Remove "Using File Copies" section (file copy is no longer a feature).
+- Remove "Installing SSH-Based Plugins" section.
+- Remove the "Network Isolation Workflow" section — network is now handled by sbx policy, not per-sandbox flags.
+- Remove "Advanced Plugin Configuration" section (OpenCode plugins/SANDBOX_OPENCODE_* env vars are docker-compose-era).
+- Update "Private Repositories" to remove SSH and mount references; credential injection is now via sbx.
+- Update "Tips and Best Practices" to remove `cast prune` and `SANDBOX_DEBUG`/`SANDBOX_VERBOSE` references.
+- Keep and lightly update the core workflow sections: Feature Development, PR Review, Multiple Sandboxes, Quick Iterations, Debugging Production Issues, Using Different AI Tools.
 
 Exit criteria:
-- `/ready` response includes a `decision_log` check with `ok: true/false`.
-- Unwritable log directory returns 200 with the check marked `ok: false` — not 503.
+- No references to `--mount`, `--copy`, `--with-ssh`, `--network`, `sudo network-mode`, `SANDBOX_ALLOWED_DOMAINS`, `SANDBOX_DEBUG`, `SANDBOX_VERBOSE`, `cast prune`.
+- All remaining workflow examples use current commands and flags.
 
-### 2.3 Add integration test: blocked commands return 422
+### 2.3 Add missing commands to docs/usage/commands.md
 
 Current state:
-- Unit tests cover `execute_git` returning validation errors for blocked commands.
-- No integration test proves the full HTTP stack returns `422` (not `500`) for blocked commands.
+- `cast diagnose`, `cast watchdog`, `cast migrate-to-sbx`, `cast migrate-from-sbx` have command modules but are not documented in commands.md.
 
 Required work:
-- Add an integration test in `foundry-git-safety/tests/integration/` that:
-  - Starts the server with a registered sandbox.
-  - Sends a request with a blocked command (e.g., `git push --force`, `git reflog`).
-  - Asserts HTTP 422 with a JSON error body.
-  - Also test that observability failures don't change 422 to 500.
+- Add documentation for `cast diagnose` (sbx diagnostics, git safety health checks).
+- Add documentation for `cast watchdog` (HMAC rotation, wrapper integrity monitoring).
+- Add documentation for `cast migrate-to-sbx` and `cast migrate-from-sbx` (cross-reference migration guide).
+- Verify existing command docs are still accurate (no removed flags shown).
 
 Exit criteria:
-- Integration test proves blocked commands produce HTTP 422 through the full stack.
+- All CLI commands with command modules are documented in commands.md.
 
-### 2.4 Add integration tests for denial paths while logging is unavailable
+### 2.4 Update docs/README.md (index)
 
 Current state:
-- `audit_log()` catches decision-log write failures with a bare `except Exception` and logs at debug level.
-- No integration test covers the path where the decision-log directory is missing/unwritable during a denial.
+- Does not link to `docs/sbx-compatibility.md` or `docs/migration/`.
+- Does not link to `docs/security/wrapper-integrity.md` or `docs/security/audit-5.6.md`.
+- ADR table is missing entries for ADR-009 through ADR-013.
 
 Required work:
-- Add integration tests that:
-  - Configure a non-existent/unwritable decision log directory.
-  - Send requests that should produce 401 (bad signature), 422 (blocked command), and 429 (rate limit).
-  - Assert each returns its expected status — never 500.
-  - Verify the decision-log directory is still empty/unwritable (proving the best-effort path).
+- Add sbx-compatibility and migration guide to the main table.
+- Add wrapper-integrity and audit-5.6 to the security table.
+- Add missing ADR entries (009–013).
+- Verify all links resolve.
 
 Exit criteria:
-- Auth failures, command denials, and rate limits all return their expected HTTP status even when logging is completely unavailable.
+- Every doc file under `docs/` is reachable from the index.
 
-### 2.5 Build required CI pipeline for `foundry-git-safety`
+### 2.5 Update docs/getting-started.md
 
 Current state:
-- `.github/workflows/test.yml` only runs root-package tests (`pytest tests/unit/`).
-- `foundry-git-safety` has ~30 test files across `unit/`, `integration/`, and `security/` but none are run in CI.
-- Running both packages' tests in one pytest invocation causes import collisions.
+- Prerequisites section lists sbx correctly but doesn't mention foundry-git-safety version requirement.
+- No mention of sbx version compatibility (documented separately in sbx-compatibility.md but not linked).
 
 Required work:
-- Add a `git-safety-unit` job to `test.yml`:
-  - Working directory: `foundry-git-safety/`
-  - Install: `pip install -e ".[dev]"`
-  - Run: `pytest tests/unit/ -v --tb=short`
-- Add a `git-safety-security` job to `test.yml`:
-  - Same setup, run: `pytest tests/security/ -v --tb=short`
-- Add a `git-safety-integration` job to `test.yml`:
-  - Same setup, run: `pytest tests/integration/ -v --tb=short`
-- Update the `all-pass` gate to require all four test jobs (root `unit`, `lint`, `git-safety-unit`, `git-safety-security`, `git-safety-integration`).
-- Update `scripts/ci-local.sh` to mirror: add steps for the three `foundry-git-safety` test suites.
-- Document the pytest isolation rule in a comment in `test.yml`.
+- Add a link to sbx-compatibility.md in the prerequisites section.
+- Verify the install steps are current (the guide looks mostly correct already).
 
 Exit criteria:
-- CI runs root-package + all three `foundry-git-safety` test tiers as merge-blocking jobs.
-- `scripts/ci-local.sh` covers all the same steps.
+- Prerequisites section links to sbx compatibility matrix.
 
-### 2.6 Move HMAC secret outside the repository worktree
+### 2.6 Version CHANGELOG.md for 0.21.0 release
 
 Current state:
-- `write_hmac_secret_to_worktree()` writes the secret to `{worktree}/.foundry/hmac-secret` — inside the VCS tree.
-- Both wrapper scripts (`stubs/git-wrapper-sbx.sh`, `foundry-git-safety/wrapper.sh`) auto-discover the secret at `${WORKSPACE_DIR}/.foundry/hmac-secret`.
-- `inject_git_wrapper()` sets `GIT_HMAC_SECRET_FILE` to that same path.
-- The watchdog also re-writes the secret to the worktree path on HMAC rotation.
-- This risks accidental VCS exposure if a target repo doesn't ignore `.foundry/`.
+- Massive `[Unreleased]` section contains the entire sbx migration.
+- Link reference at bottom says `v0.15.9...HEAD` instead of `v0.20.15...HEAD`.
+- Missing link entries for 0.16.0 through 0.20.15 versions.
 
 Required work:
-- Change `write_hmac_secret_to_worktree()` to write to `/run/foundry/hmac-secret` instead of `{worktree}/.foundry/hmac-secret`. Inside the container, `/run` is tmpfs — never persisted, never in any VCS tree.
-- Update `inject_git_wrapper()` to set `GIT_HMAC_SECRET_FILE="/run/foundry/hmac-secret"`.
-- Update both wrapper scripts to auto-discover at `/run/foundry/hmac-secret` (remove the `${WORKSPACE_DIR}/.foundry/hmac-secret` fallback).
-- Update the watchdog to write to the new location on rotation.
-- Remove the old `{worktree}/.foundry/hmac-secret` file during `cast new` if it exists (migration).
-- Rename `write_hmac_secret_to_worktree()` → `write_hmac_secret_to_sandbox()` since it no longer targets the worktree.
-
-Files touched:
-- `foundry_sandbox/git_safety.py` — write path + `inject_git_wrapper()` env var
-- `foundry_sandbox/commands/new_sbx.py` — call site
-- `foundry_sandbox/watchdog.py` — rotation call site
-- `stubs/git-wrapper-sbx.sh` — auto-discovery path
-- `foundry-git-safety/foundry_git_safety/wrapper.sh` — auto-discovery path
-- `tests/unit/test_git_safety.py` — update assertions
-- `tests/unit/test_new_sbx.py` — update mocks
-- `tests/unit/test_watchdog.py` — update mocks
+- Rename `[Unreleased]` to `[0.21.0] - 2026-04-XX` (date TBD).
+- Add link entries for all missing versions (0.16.0 through 0.20.15).
+- Fix the `[Unreleased]` link to compare from `v0.20.15`.
+- Add any Phase 8 entries (HMAC secret relocation, observability plumbing, CI pipeline).
 
 Exit criteria:
-- HMAC secret is written to `/run/foundry/hmac-secret` (outside VCS tree).
-- Both wrapper scripts read from the new location.
-- No code references `{worktree}/.foundry/hmac-secret` for the secret.
-- Existing tests updated to match.
+- CHANGELOG has a clean `[0.21.0]` header with all link references intact.
+- All version links resolve correctly.
+
+### 2.7 Update docs/development/contributing.md
+
+Current state:
+- Does not reference the CI workflows, foundry-git-safety test suites, or `scripts/ci-local.sh`.
+
+Required work:
+- Add a section on CI: describe the test.yml jobs, the foundry-git-safety test tiers, and the ci-local.sh script.
+- Reference the pytest isolation rule (root package and foundry-git-safety must not be run in the same pytest invocation).
+
+Exit criteria:
+- Contributing guide documents the CI pipeline and how to run tests locally.
 
 ---
 
 ## 3. Execution Order
 
-1. §2.1 — Plumb decision-log path from config
-2. §2.2 — Add decision-log health/readiness check
-3. §2.3 — Integration test: blocked commands → 422
-4. §2.4 — Integration tests: denial paths with broken logging
-5. §2.5 — CI pipeline (depends on §2.3/§2.4 tests existing)
-6. §2.6 — Move HMAC secret outside worktree (independent of §2.1–§2.5)
+1. §2.1 — Rewrite root README.md + pyproject.toml + CLAUDE.md (highest visibility)
+2. §2.2 — Update workflows.md (remove outdated sections)
+3. §2.3 — Add missing commands to commands.md
+4. §2.4 — Update docs/README.md index
+5. §2.5 — Update getting-started.md
+6. §2.6 — Version CHANGELOG.md
+7. §2.7 — Update contributing.md
 
 ---
 
@@ -153,13 +149,9 @@ Exit criteria:
 
 Before calling this phase complete:
 
-- [x] `foundry.yaml` can configure the decision-log directory
-- [x] `/ready` reports decision-log health without going 503 on failure
-- [x] `/health` shows logging status
-- [x] Blocked commands return 422 through the full HTTP stack
-- [x] Auth/deny/rate-limit responses are unchanged when logging is unavailable
-- [x] CI runs all test suites as merge-blocking
-- [x] `scripts/ci-local.sh` mirrors CI
-- [x] HMAC secret lives outside the VCS worktree (`/run/foundry/hmac-secret`)
-- [x] Wrapper scripts read from new location
-- [x] No code references `{worktree}/.foundry/hmac-secret`
+- [x] `grep -r "unified-proxy\|Squid\|mitmproxy\|docker.compose\|--mount\|--network=\|--with-ssh\|cast prune\|sudo network-mode" docs/ README.md` → zero hits in user-facing docs (ADRs and migration guide are historical records)
+- [x] `grep -r "\.foundry/hmac-secret" docs/ stubs/ foundry_sandbox/` → zero hits
+- [x] All CLI commands with command modules are documented in commands.md
+- [x] docs/README.md links to every doc file under `docs/`
+- [x] CHANGELOG.md has a clean `[0.21.0]` section with correct links
+- [x] pyproject.toml description says "microVM-based" (not "Docker-based")

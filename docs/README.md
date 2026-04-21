@@ -37,6 +37,7 @@ claude
 | [Architecture](architecture.md) | Technical design and diagrams |
 | [Operations](operations.md) | Operational procedures and runbook |
 | [sbx Compatibility](sbx-compatibility.md) | Supported sbx versions, tested-against matrix, drift detection |
+| [Migration Guide](migration/0.20-to-0.21.md) | Upgrading from 0.20.x to 0.21.x |
 | [Observability](observability.md) | Metrics, logging, and alerting |
 
 ### Security
@@ -44,6 +45,8 @@ claude
 | Document | Description |
 |----------|-------------|
 | [Security Model](security/security-model.md) | Threats, defenses, hardening, and security assumptions — organized by pillar |
+| [Wrapper Integrity](security/wrapper-integrity.md) | Wrapper tamper detection and watchdog design |
+| [Security Audit 5.6](security/audit-5.6.md) | Internal security audit findings and remediation |
 
 ### Usage
 
@@ -64,7 +67,11 @@ claude
 | [ADR-006: Allowlist Layering](adr/006-allowlist-layering.md) | Layered allowlist architecture for network access | Accepted |
 | [ADR-007: API Gateways](adr/007-api-gateways.md) | API gateway routing and credential injection | Superseded |
 | [ADR-008: sbx Migration](adr/008-sbx-migration.md) | Migration from docker-compose to Docker sbx backend | Accepted |
+| [ADR-009: No Dual-Mode Operation](adr/009-dual-mode-decision.md) | No dual-mode operation during migration | Accepted |
+| [ADR-010: User-Service Credential Injection](adr/010-user-service-credential-injection.md) | User-defined service credential injection via reverse proxy | Accepted |
+| [ADR-011: Deep Policy Sidecar](adr/011-deep-policy-sidecar.md) | Deep policy sidecar design | Accepted |
 | [ADR-012: DNS Filtering Deferred](adr/012-dns-filtering-deferred.md) | DNS-level filtering not achievable with sbx architecture | Accepted |
+| [ADR-013: Template-Preset Integration](adr/013-template-preset-integration.md) | Template-preset integration for sbx | Accepted |
 
 ### Development
 

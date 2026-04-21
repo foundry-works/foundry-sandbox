@@ -65,6 +65,7 @@ def _write_metadata(tmp_path, sandbox_id, branch="feature", repo="test/repo"):
         "sandbox_branch": branch,
         "from_branch": "main",
         "repos": [repo],
+        "repo_root": str(tmp_path / "repos" / "test--repo"),
     }))
 
 

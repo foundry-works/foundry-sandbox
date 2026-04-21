@@ -57,6 +57,7 @@ class TestGitExecChaos:
             "sandbox_branch": "feature",
             "from_branch": "main",
             "repos": ["test/repo"],
+            "repo_root": str(tmp_path / "repos" / "test--repo"),
         }))
 
         with patch("foundry_git_safety.operations.subprocess.run") as mock_run:
@@ -105,6 +106,7 @@ class TestGitExecChaos:
             "sandbox_branch": "feature",
             "from_branch": "main",
             "repos": ["test/repo"],
+            "repo_root": str(tmp_path / "repos" / "test--repo"),
         }))
 
         with patch("foundry_git_safety.operations.subprocess.run") as mock_run:

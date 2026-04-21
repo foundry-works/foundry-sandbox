@@ -190,7 +190,7 @@ def register_sandbox_with_git_safety(
     sandboxes_dir = Path(base_dir) / "sandboxes"
     sandboxes_dir.mkdir(parents=True, exist_ok=True)
 
-    metadata: dict = {
+    metadata: dict[str, object] = {
         "sandbox_branch": branch,
         "from_branch": from_branch,
         "repos": [repo_spec] if repo_spec else [],
@@ -510,7 +510,7 @@ def emit_wrapper_tamper_event(
         action: "reinjected" or "reinject_failed".
     """
     try:
-        from foundry_git_safety.decision_log import write_decision
+        from foundry_git_safety.decision_log import write_decision  # type: ignore[import-untyped]
 
         write_decision(
             sandbox=sandbox,

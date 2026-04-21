@@ -5,9 +5,18 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.21.0] - 2026-04-21
 
 ### Added
+
+- **HMAC secret relocated outside VCS tree** — `write_hmac_secret_to_sandbox()` now writes to `/run/foundry/hmac-secret` (tmpfs) instead of `{worktree}/.foundry/hmac-secret`, preventing accidental VCS exposure
+- **Config-driven decision log path** — `decision_log_dir` field in `GitSafetyServerConfig` threads through `create_git_api()` to `DecisionLogWriter` with singleton reset on path change
+- **Decision-log health checks** — `/ready` reports `decision_log: {ok: true/false}` without triggering 503; `/health` includes a `logging` section with path and writability
+- **Integration test: blocked commands → 422** — Full-stack test proving blocked commands return HTTP 422 (not 500) through the HTTP layer
+- **Integration tests: denial paths with broken logging** — Verifies 401, 422, and 429 responses are unchanged when the decision log directory is unwritable
+- **CI pipeline for foundry-git-safety** — `test.yml` now runs `git-safety-unit`, `git-safety-security`, and `git-safety-integration` as merge-blocking jobs; `scripts/ci-local.sh` mirrors all steps
+- **`cast diagnose` command** — Collects sbx diagnostics, git safety health, decision log entries, wrapper tamper events, and kernel isolation status with automatic secret redaction
+- **`cast watchdog` command** — Runs the wrapper integrity watchdog as a long-lived foreground process with configurable poll interval
 
 - **sbx CLI wrapper** (`foundry_sandbox/sbx.py`) — wraps all Docker `sbx` subprocess calls (create, run, stop, rm, ls, exec, secret, policy, template, diagnose)
 - **Git safety integration bridge** (`foundry_sandbox/git_safety.py`) — manages foundry-git-safety server lifecycle, HMAC secret provisioning, sandbox registration, and git wrapper injection
@@ -919,7 +928,37 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Tab completion for bash
 - macOS and Linux support
 
-[Unreleased]: https://github.com/foundry-works/foundry-sandbox/compare/v0.15.9...HEAD
+[Unreleased]: https://github.com/foundry-works/foundry-sandbox/compare/v0.21.0...HEAD
+[0.21.0]: https://github.com/foundry-works/foundry-sandbox/compare/v0.20.15...v0.21.0
+[0.20.15]: https://github.com/foundry-works/foundry-sandbox/compare/v0.20.14...v0.20.15
+[0.20.14]: https://github.com/foundry-works/foundry-sandbox/compare/v0.20.13...v0.20.14
+[0.20.13]: https://github.com/foundry-works/foundry-sandbox/compare/v0.20.12...v0.20.13
+[0.20.12]: https://github.com/foundry-works/foundry-sandbox/compare/v0.20.11...v0.20.12
+[0.20.11]: https://github.com/foundry-works/foundry-sandbox/compare/v0.20.10...v0.20.11
+[0.20.10]: https://github.com/foundry-works/foundry-sandbox/compare/v0.20.9...v0.20.10
+[0.20.9]: https://github.com/foundry-works/foundry-sandbox/compare/v0.20.8...v0.20.9
+[0.20.8]: https://github.com/foundry-works/foundry-sandbox/compare/v0.20.7...v0.20.8
+[0.20.7]: https://github.com/foundry-works/foundry-sandbox/compare/v0.20.6...v0.20.7
+[0.20.6]: https://github.com/foundry-works/foundry-sandbox/compare/v0.20.5...v0.20.6
+[0.20.5]: https://github.com/foundry-works/foundry-sandbox/compare/v0.20.4...v0.20.5
+[0.20.4]: https://github.com/foundry-works/foundry-sandbox/compare/v0.20.3...v0.20.4
+[0.20.3]: https://github.com/foundry-works/foundry-sandbox/compare/v0.20.2...v0.20.3
+[0.20.2]: https://github.com/foundry-works/foundry-sandbox/compare/v0.20.1...v0.20.2
+[0.20.1]: https://github.com/foundry-works/foundry-sandbox/compare/v0.20.0...v0.20.1
+[0.20.0]: https://github.com/foundry-works/foundry-sandbox/compare/v0.19.4...v0.20.0
+[0.19.4]: https://github.com/foundry-works/foundry-sandbox/compare/v0.19.3...v0.19.4
+[0.19.3]: https://github.com/foundry-works/foundry-sandbox/compare/v0.19.1...v0.19.3
+[0.19.1]: https://github.com/foundry-works/foundry-sandbox/compare/v0.19.0...v0.19.1
+[0.19.0]: https://github.com/foundry-works/foundry-sandbox/compare/v0.18.2...v0.19.0
+[0.18.2]: https://github.com/foundry-works/foundry-sandbox/compare/v0.18.1...v0.18.2
+[0.18.1]: https://github.com/foundry-works/foundry-sandbox/compare/v0.18.0...v0.18.1
+[0.18.0]: https://github.com/foundry-works/foundry-sandbox/compare/v0.17.4...v0.18.0
+[0.17.4]: https://github.com/foundry-works/foundry-sandbox/compare/v0.17.3...v0.17.4
+[0.17.3]: https://github.com/foundry-works/foundry-sandbox/compare/v0.17.2...v0.17.3
+[0.17.2]: https://github.com/foundry-works/foundry-sandbox/compare/v0.17.1...v0.17.2
+[0.17.1]: https://github.com/foundry-works/foundry-sandbox/compare/v0.17.0...v0.17.1
+[0.17.0]: https://github.com/foundry-works/foundry-sandbox/compare/v0.16.0...v0.17.0
+[0.16.0]: https://github.com/foundry-works/foundry-sandbox/compare/v0.15.9...v0.16.0
 [0.15.9]: https://github.com/foundry-works/foundry-sandbox/compare/v0.15.8...v0.15.9
 [0.15.8]: https://github.com/foundry-works/foundry-sandbox/compare/v0.15.7...v0.15.8
 [0.15.7]: https://github.com/foundry-works/foundry-sandbox/compare/v0.15.6...v0.15.7

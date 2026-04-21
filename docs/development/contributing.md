@@ -57,3 +57,48 @@ foundry-sandbox/
 │
 └── docs/                   # Documentation (you are here)
 ```
+
+## CI Pipeline
+
+CI runs via GitHub Actions on every push and PR. The main workflow is `.github/workflows/test.yml`.
+
+### Test Jobs
+
+| Job | What it runs |
+|-----|-------------|
+| `unit` | Root package tests: `pytest tests/unit/` |
+| `lint` | ruff lint + format check |
+| `git-safety-unit` | `foundry-git-safety` unit tests: `pytest tests/unit/` |
+| `git-safety-security` | `foundry-git-safety` security tests: `pytest tests/security/` |
+| `git-safety-integration` | `foundry-git-safety` integration tests: `pytest tests/integration/` |
+
+All five jobs must pass before merge (gated by the `all-pass` job).
+
+### Pytest Isolation
+
+The root package and `foundry-git-safety` have separate `pyproject.toml` files and must be tested independently. Running both in the same pytest invocation causes import collisions. Each CI job `cd`s into the correct directory before running pytest.
+
+### Running Tests Locally
+
+```bash
+# Run the same checks as CI
+./scripts/ci-local.sh
+
+# Include integration tests
+./scripts/ci-local.sh --all
+
+# Show all results (don't stop at first failure)
+./scripts/ci-local.sh --no-fail-fast
+
+# Run only foundry-git-safety tests
+cd foundry-git-safety && pytest tests/unit/ -v
+```
+
+Always run `./scripts/ci-local.sh` before committing to catch CI failures early.
+
+### Additional Workflows
+
+| Workflow | Trigger | Purpose |
+|----------|---------|---------|
+| `release.yml` | `v*` tags | GitHub release + PyPI publish |
+| `sbx-drift.yml` | Schedule | Detect sbx CLI version drift |

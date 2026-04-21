@@ -156,11 +156,11 @@ chmod 600 /run/secrets/sandbox-hmac/<name>
 **Step 3: Update the worktree-side secret**
 
 ```bash
-echo -n "${NEW_SECRET}" > ~/.sandboxes/worktrees/<name>/.foundry/hmac-secret
-chmod 600 ~/.sandboxes/worktrees/<name>/.foundry/hmac-secret
+echo -n "${NEW_SECRET}" > /run/foundry/hmac-secret
+chmod 600 /run/foundry/hmac-secret
 ```
 
-The sbx file sync will propagate the updated secret into the running sandbox.
+The secret is read from tmpfs at runtime — no file sync propagation needed.
 
 **Step 4: Restart the git safety server**
 
@@ -190,12 +190,9 @@ for secret_file in /run/secrets/sandbox-hmac/*; do
   echo -n "${NEW_SECRET}" > "$secret_file"
   chmod 600 "$secret_file"
 
-  # Update worktree side (if sandbox has a worktree)
-  WORKTREE_PATH=$(jq -r '.worktree_path // empty' ~/.sandboxes/claude-config/"${NAME}"/metadata.json 2>/dev/null)
-  if [ -n "$WORKTREE_PATH" ] && [ -d "$WORKTREE_PATH/.foundry" ]; then
-    echo -n "${NEW_SECRET}" > "${WORKTREE_PATH}/.foundry/hmac-secret"
-    chmod 600 "${WORKTREE_PATH}/.foundry/hmac-secret"
-  fi
+  # Update sandbox side (tmpfs)
+  echo -n "${NEW_SECRET}" > /run/foundry/hmac-secret
+  chmod 600 /run/foundry/hmac-secret
 done
 
 # Restart git safety server
@@ -326,9 +323,8 @@ foundry-git-safety status
 sbx exec <name> -- which git
 # Should return /usr/local/bin/git
 
-# 3. Check HMAC secret exists on both sides
-ls /run/secrets/sandbox-hmac/<name>
-ls ~/.sandboxes/worktrees/<name>/.foundry/hmac-secret
+# 3. Check HMAC secret exists
+ls /run/foundry/hmac-secret
 
 # 4. Test git operation directly
 sbx exec <name> -- git -C /workspace status

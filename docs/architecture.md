@@ -225,7 +225,7 @@ The git wrapper is installed into the sandbox during `cast new`:
 
 1. `stubs/git-wrapper-sbx.sh` is copied to `/usr/local/bin/git` inside the sandbox via `sbx exec --user root`
 2. Environment variables (`SANDBOX_ID`, `WORKSPACE_DIR`, `GIT_API_HOST`, `GIT_API_PORT`, `GIT_HMAC_SECRET_FILE`) are written to `/etc/profile.d/foundry-git-safety.sh`
-3. The HMAC secret is placed at `.foundry/hmac-secret` in the workspace, which sbx file-syncs into the sandbox
+3. The HMAC secret is placed at `/run/foundry/hmac-secret` (tmpfs, outside the VCS tree)
 
 **Note:** The wrapper is a regular file that the agent can remove. For persistence across `sbx reset`, use `cast preset save` to snapshot the full sandbox state (including the wrapper) into a managed template, or use `sbx template save` directly for a raw template. See [Security Model](security/security-model.md) for the full threat analysis.
 
