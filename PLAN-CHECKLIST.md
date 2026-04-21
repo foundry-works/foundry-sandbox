@@ -15,21 +15,26 @@ Legend: `[ ]` todo, `[x]` done, `[~]` partial / accepted risk
 - [ ] Make `cast new` fail when wrapper injection fails
 - [ ] Make `cast new` fail when checksum generation fails
 - [ ] Make `cast start` fail when wrapper integrity cannot be verified or repaired
-- [ ] Only write `git_safety_enabled=True` after provisioning succeeds
+- [ ] Remove `FileNotFoundError → is_ok = True` short-circuit from `cast start`
+- [ ] Remove the equivalent `FileNotFoundError → early-return` short-circuit from the watchdog poll
+- [ ] Only write `git_safety_enabled=True` after provisioning succeeds (shared with §3.3)
 - [ ] Add wheel test proving runtime assets are present or resolvable
-- [ ] Add negative test proving missing assets fail closed
+- [ ] Add negative test proving missing assets fail closed on `cast new`
+- [ ] Add negative test proving missing assets fail closed on `cast start`
+- [ ] Add negative test proving missing assets fail closed on the watchdog poll
 
 ## 3.2 Define and Implement Real sbx Migration Semantics
 
 - [ ] Decide migration contract: full sandbox migration or metadata-only migration
 - [ ] Update `cast migrate-to-sbx` command output for chosen contract
 - [ ] Update migration docs for chosen contract
-- [ ] Prevent ready-state metadata for non-existent sbx sandboxes
-- [ ] If full migration: create sbx sandbox during migration
+- [ ] Prevent ready-state metadata for non-existent sbx sandboxes (enforced by §3.3 helper)
+- [ ] Define behavior for pre-existing 0.20.x worktrees (reparent, re-clone, or refuse)
+- [ ] If full migration: create sbx sandbox during migration via §3.3 helper
 - [ ] If full migration: preserve or attach workspace state
-- [ ] If full migration: provision wrapper, HMAC secrets, and git-safety registration
-- [ ] If metadata-only: mark migrated records as requiring recreation
-- [ ] Add migration smoke test for chosen behavior
+- [ ] If full migration: provision wrapper, HMAC secrets, and git-safety registration via §3.3 helper
+- [ ] If metadata-only: confirm §3.3 helper refuses to mark unprovisioned records as protected (no new "migrated" flag)
+- [ ] Add migration smoke test for chosen behavior, including existing-worktree case
 
 ## 3.3 Centralize sbx Git-Safety Provisioning
 
@@ -40,11 +45,13 @@ Legend: `[ ]` todo, `[x]` done, `[~]` partial / accepted risk
 - [ ] Create host HMAC secret through shared function
 - [ ] Create guest HMAC secret through shared function
 - [ ] Verify sandbox connectivity to git-safety through shared function
+- [ ] Helper is the only writer of `git_safety_enabled=True` in metadata
 - [ ] Use shared provisioning from `cast new`
 - [ ] Use shared provisioning from `cast start` repair path
 - [ ] Use shared provisioning from watchdog repair path
 - [ ] Use shared provisioning from migration path, if full migration is chosen
 - [ ] Return structured provisioning failures to CLI callers
+- [ ] Detect stale foundry template digest and surface re-provisioning requirement on `cast start`
 
 ## 3.4 Wire or Correct GitHub API Safety Layer
 
@@ -61,10 +68,12 @@ Legend: `[ ]` todo, `[x]` done, `[~]` partial / accepted risk
 - [ ] Choose cache invalidation design
 - [ ] Implement server-side cache invalidation or reload mechanism
 - [ ] Update watchdog to use the rotation mechanism
+- [ ] If rotation uses a new endpoint: authenticate the endpoint
 - [ ] Add integration test that primes server cache
 - [ ] Add integration test that rotates secret from a host process
 - [ ] Add assertion that old HMAC is rejected after rotation
 - [ ] Add assertion that new HMAC is accepted after rotation
+- [ ] Add assertion that an unauthenticated caller cannot trigger rotation
 
 ## 3.6 Harden Per-Sandbox Proxy Authorization
 
@@ -72,9 +81,11 @@ Legend: `[ ]` todo, `[x]` done, `[~]` partial / accepted risk
 - [ ] Require HMAC or scoped capability token before injecting host service credentials
 - [ ] Bind service permissions to sandbox metadata or registration state
 - [ ] Stop trusting caller-supplied `X-Sandbox-Id` for deep-policy identity
+- [ ] Define and implement rejection path for unauthenticated callers (no shared `"unknown"` bucket)
 - [ ] Add test proving unauthorized sandbox cannot use a service credential
 - [ ] Add test proving one sandbox cannot spoof another sandbox's identity
 - [ ] Add test proving rate limits use verified sandbox identity
+- [ ] Add test proving unauthenticated callers are rejected on the documented path
 
 ## 3.7 Align Installer and Release Metadata
 
@@ -85,6 +96,7 @@ Legend: `[ ]` todo, `[x]` done, `[~]` partial / accepted risk
 - [ ] Validate supported `sbx` version during install
 - [ ] Align package version with changelog release version
 - [ ] Update stale fallback `__version__` values
+- [ ] Bound `foundry-git-safety[server]` dependency with `~=` or explicit upper bound
 - [ ] Rebuild wheel and confirm artifact version
 
 ## 3.8 Add Live Release Gates
@@ -101,8 +113,17 @@ Legend: `[ ]` todo, `[x]` done, `[~]` partial / accepted risk
 - [ ] Prove GitHub API merge/update path is blocked if filter is in scope
 - [ ] Destroy smoke-test sandbox
 - [ ] Add migration smoke test
+- [ ] Add named-asset packaging assertion covering `git-wrapper-sbx.sh`, template build helper, and `foundry_git_safety/default_config/*.yaml`
 - [ ] Shellcheck active sbx wrapper scripts
 - [ ] Keep root-package and `foundry-git-safety` pytest invocations isolated
+
+## 3.9 Decide Tamper-Event Delivery Policy
+
+- [ ] Decide delivery contract (fatal / buffered / metric-only)
+- [ ] Remove bare `except Exception: pass` from `emit_wrapper_tamper_event`
+- [ ] Implement the chosen delivery mechanism
+- [ ] Surface tamper-event status in `cast diagnose` and/or `/metrics`
+- [ ] Add test: tamper event in sandbox with read-only decision-log directory is still observable
 
 ---
 
@@ -112,13 +133,21 @@ Legend: `[ ]` todo, `[x]` done, `[~]` partial / accepted risk
 - [ ] `foundry-git-safety` unit tests pass
 - [ ] `foundry-git-safety` security tests pass
 - [ ] `foundry-git-safety` integration tests pass
-- [ ] Built wheels contain or can locate all runtime assets
+- [ ] Built wheels contain or can locate all runtime assets (named explicitly)
 - [ ] Installed-wheel `cast new` provisions git safety successfully
 - [ ] Installed-wheel `cast new` fails closed on provisioning errors
+- [ ] Installed-wheel `cast start` fails closed when the wrapper stub is missing
+- [ ] Installed-wheel watchdog fails closed when the wrapper stub is missing
 - [ ] `cast start` cannot silently start an unprotected sandbox with protected metadata
-- [ ] `cast migrate-to-sbx` behavior matches documented contract
+- [ ] Only the shared §3.3 helper writes `git_safety_enabled=True`
+- [ ] `cast migrate-to-sbx` behavior matches documented contract, including existing-worktree handling
 - [ ] Watchdog rotation invalidates old HMAC secrets without server restart
+- [ ] Rotation mechanism rejects unauthenticated callers
+- [ ] Proxy endpoints reject unauthenticated callers on a documented path
+- [ ] `X-Sandbox-Id` spoofing does not bypass rate limits
+- [ ] Tamper events are observable even with a degraded decision log
 - [ ] GitHub API protection is live-tested or removed from security claims
 - [ ] Installer validates sbx-era dependencies
 - [ ] Package metadata and changelog agree on version
+- [ ] `foundry-git-safety[server]` dependency range is bounded
 - [ ] `git diff --check main HEAD` is clean
