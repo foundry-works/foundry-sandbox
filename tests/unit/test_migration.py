@@ -160,7 +160,7 @@ class TestConvertOldMetadataToSbx:
         assert new_data["backend"] == "sbx"
         assert new_data["sbx_name"] == "my-sandbox"
         assert new_data["agent"] == "claude"
-        assert new_data["git_safety_enabled"] is True
+        assert new_data["git_safety_enabled"] is False
         assert new_data["workspace_dir"] == "/workspace"
         assert new_data["network_profile"] == "balanced"
         assert new_data["template"] == ""
@@ -573,6 +573,7 @@ class TestMigrateToSbxCommand:
         assert data["backend"] == "sbx"
         assert data["network_profile"] == "balanced"
         assert data["sbx_name"] == "test-sandbox"
+        assert data["git_safety_enabled"] is False
 
     def test_legacy_env_migration(self, sandbox_home):
         config_dir = _make_config_dir(sandbox_home, "legacy-sandbox")

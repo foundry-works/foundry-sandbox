@@ -25,16 +25,16 @@ Legend: `[ ]` todo, `[x]` done, `[~]` partial / accepted risk
 
 ## 3.2 Define and Implement Real sbx Migration Semantics
 
-- [ ] Decide migration contract: full sandbox migration or metadata-only migration
-- [ ] Update `cast migrate-to-sbx` command output for chosen contract
-- [ ] Update migration docs for chosen contract
-- [ ] Prevent ready-state metadata for non-existent sbx sandboxes (enforced by §3.3 helper)
-- [ ] Define behavior for pre-existing 0.20.x worktrees (reparent, re-clone, or refuse)
+- [x] Decide migration contract: full sandbox migration or metadata-only migration
+- [x] Update `cast migrate-to-sbx` command output for chosen contract
+- [x] Update migration docs for chosen contract
+- [x] Prevent ready-state metadata for non-existent sbx sandboxes (enforced by §3.3 helper)
+- [x] Define behavior for pre-existing 0.20.x worktrees (reparent, re-clone, or refuse)
 - [ ] If full migration: create sbx sandbox during migration via §3.3 helper
 - [ ] If full migration: preserve or attach workspace state
 - [ ] If full migration: provision wrapper, HMAC secrets, and git-safety registration via §3.3 helper
-- [ ] If metadata-only: confirm §3.3 helper refuses to mark unprovisioned records as protected (no new "migrated" flag)
-- [ ] Add migration smoke test for chosen behavior, including existing-worktree case
+- [x] If metadata-only: confirm §3.3 helper refuses to mark unprovisioned records as protected (no new "migrated" flag)
+- [x] Add migration smoke test for chosen behavior, including existing-worktree case
 
 ## 3.3 Centralize sbx Git-Safety Provisioning
 

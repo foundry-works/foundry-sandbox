@@ -173,6 +173,13 @@ def _migrate_to_sbx_impl(
     log_info("Rollback: cast migrate-from-sbx")
     if missing:
         log_info("Set missing credentials and run: cast refresh-credentials")
+    if needs_migration:
+        log_info("")
+        log_info("Next steps:")
+        log_info("  1. Verify: cast list")
+        log_info("  2. Start each sandbox: cast start <name>")
+        log_info("     (First start provisions the sbx sandbox — this may take a minute)")
+        log_info("     Existing bare repos and worktrees are reused automatically.")
 
     return True
 

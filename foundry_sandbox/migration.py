@@ -167,7 +167,7 @@ def convert_old_metadata_to_sbx(
         "branch": old_data.get("branch", ""),
         "from_branch": old_data.get("from_branch", ""),
         "network_profile": network_profile,
-        "git_safety_enabled": True,
+        "git_safety_enabled": False,
         "workspace_dir": "/workspace",
         "working_dir": old_data.get("working_dir", ""),
         "pip_requirements": old_data.get("pip_requirements", ""),
