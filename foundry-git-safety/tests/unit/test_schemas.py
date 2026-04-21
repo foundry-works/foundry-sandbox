@@ -7,7 +7,6 @@ from foundry_git_safety.schemas.foundry_yaml import (
     BranchIsolationConfig,
     FileRestrictionsConfig,
     FoundryConfig,
-    GitHubAPIConfig,
     GitSafetyConfig,
     GitSafetyServerConfig,
     ProtectedBranchesConfig,
@@ -68,18 +67,6 @@ class TestBranchIsolationConfig:
         assert cfg.enabled is True
         assert "main" in cfg.well_known_branches
         assert "release/" in cfg.well_known_prefixes
-
-
-class TestGitHubAPIConfig:
-    def test_defaults(self):
-        cfg = GitHubAPIConfig()
-        assert cfg.enabled is True
-        assert cfg.proxy_port == 8084
-        assert cfg.allow_pr_operations is False
-
-    def test_proxy_port_validation(self):
-        with pytest.raises(ValidationError):
-            GitHubAPIConfig(proxy_port=0)
 
 
 class TestRateLimitsConfig:

@@ -38,30 +38,32 @@ Legend: `[ ]` todo, `[x]` done, `[~]` partial / accepted risk
 
 ## 3.3 Centralize sbx Git-Safety Provisioning
 
-- [ ] Create shared provisioning function
-- [ ] Provision wrapper through shared function
-- [ ] Compute and store wrapper checksum through shared function
-- [ ] Register sandbox with git-safety through shared function
-- [ ] Create host HMAC secret through shared function
-- [ ] Create guest HMAC secret through shared function
+- [x] Create shared provisioning function
+- [x] Provision wrapper through shared function
+- [x] Compute and store wrapper checksum through shared function
+- [x] Register sandbox with git-safety through shared function
+- [x] Create host HMAC secret through shared function
+- [x] Create guest HMAC secret through shared function
 - [ ] Verify sandbox connectivity to git-safety through shared function
-- [ ] Helper is the only writer of `git_safety_enabled=True` in metadata
-- [ ] Use shared provisioning from `cast new`
-- [ ] Use shared provisioning from `cast start` repair path
-- [ ] Use shared provisioning from watchdog repair path
-- [ ] Use shared provisioning from migration path, if full migration is chosen
-- [ ] Return structured provisioning failures to CLI callers
-- [ ] Detect stale foundry template digest and surface re-provisioning requirement on `cast start`
+- [x] Helper is the only writer of `git_safety_enabled=True` in metadata
+- [x] Use shared provisioning from `cast new`
+- [x] Use shared provisioning from `cast start` repair path
+- [x] Use shared provisioning from watchdog repair path
+- [x] Use shared provisioning from migration path, if full migration is chosen
+- [x] Return structured provisioning failures to CLI callers
+- [x] Detect stale foundry template digest and surface re-provisioning requirement on `cast start`
 
 ## 3.4 Wire or Correct GitHub API Safety Layer
 
-- [ ] Decide whether GitHub API filtering is in scope for 0.21.0
-- [ ] If in scope: start GitHub API filter with git-safety service
-- [ ] If in scope: supervise GitHub API filter health
-- [ ] If in scope: route sandbox GitHub API traffic through the filter
-- [ ] If in scope: add live test for blocked PR merge/update GitHub API calls
-- [ ] If deferred: remove or qualify GitHub API filter claims in security docs
-- [ ] If deferred: document residual risk and unsupported commands
+- [x] Decide whether GitHub API filtering is in scope for 0.21.0
+- [~] If in scope: start GitHub API filter with git-safety service
+- [~] If in scope: supervise GitHub API filter health
+- [~] If in scope: route sandbox GitHub API traffic through the filter
+- [~] If in scope: add live test for blocked PR merge/update GitHub API calls
+- [x] If deferred: remove or qualify GitHub API filter claims in security docs
+- [x] If deferred: document residual risk and unsupported commands
+
+**Resolution:** Removed standalone `github_filter.py` proxy (port 8084) entirely. The deep policy sidecar (`deep-policy-github.yaml`) on port 8083 is the sole GitHub API protection mechanism. Updated security model, architecture docs, ADR-011, config schema, and CLI. Deleted dead code, config, and 4 test files that exclusively tested the removed proxy.
 
 ## 3.5 Fix HMAC Rotation Cache Invalidation
 

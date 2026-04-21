@@ -104,11 +104,6 @@ git_safety:
     well_known_branches: ["main", "master", "develop", "production"]
     well_known_prefixes: ["release/", "hotfix/"]
 
-  github_api:
-    enabled: true
-    proxy_port: 8084
-    allow_pr_operations: false
-
   rate_limits:
     burst: 300
     sustained: 120

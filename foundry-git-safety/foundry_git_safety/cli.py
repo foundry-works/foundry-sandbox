@@ -165,7 +165,7 @@ def validate(config_path: str | None) -> None:
         click.echo(f"  Server: {cfg.git_safety.server.host}:{cfg.git_safety.server.port}")
         click.echo(f"  Protected branches: {cfg.git_safety.protected_branches.enabled}")
         click.echo(f"  Branch isolation: {cfg.git_safety.branch_isolation.enabled}")
-        click.echo(f"  GitHub API filter: {cfg.git_safety.github_api.enabled}")
+        click.echo(f"  Deep policy: {cfg.git_safety.deep_policy.enabled}")
     except Exception as exc:
         click.echo(f"Configuration error: {exc}", err=True)
         sys.exit(1)

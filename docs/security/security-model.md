@@ -17,7 +17,7 @@ This document defines the complete security model: **what threats exist**, **how
 |                            |    |  foundry-git-safety           |
 |  +--------------------+   |    |  ┌──────────────────────────┐ |
 |  | Network Policy      |   |    |  │ Git API Server (:8083)  │ |
-|  +--------------------+   |    |  │ GitHub API Filter (:8084)│ |
+|  +--------------------+   |    |  │ Deep policy sidecar      │ |
 |  +--------------------+   |    |  │ Policy enforcement       │ |
 |  | .git hidden         |   |    |  └──────────────────────────┘ |
 |  +--------------------+   |    |                               |
@@ -249,7 +249,7 @@ The host holds all real credentials via sbx. Sandboxes never see real values.
 | Layer | Control | Effect |
 |-------|---------|--------|
 | Primary | Early-exit `is_merge_request()` | Unconditional check before any further processing |
-| Secondary | GitHub API blocklist | Redundant fallback in `foundry-git-safety`'s GitHub filter proxy |
+| Secondary | GitHub API blocklist | Redundant fallback in `foundry-git-safety`'s deep policy sidecar (when enabled) |
 
 Merge endpoints blocked: REST `PUT /repos/*/pulls/*/merge` and `*/auto-merge`, GraphQL `mergePullRequest` and `enablePullRequestAutoMerge` mutations.
 

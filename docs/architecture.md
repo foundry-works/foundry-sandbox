@@ -26,7 +26,7 @@ This document explains the technical design of Foundry Sandbox: how components f
 │       │                                                          │
 │       └── foundry-git-safety (standalone service)                │
 │            ├── Git API server (port 8083)                        │
-│            ├── GitHub API filter (port 8084)                     │
+│            ├── Deep policy sidecar (opt-in)                      │
 │            └── Policy enforcement (branch, push, command)        │
 │                                                                  │
 │  ┌──────────────────────────────────────────────────────────┐   │
@@ -217,7 +217,7 @@ The server enforces six policy layers in order:
 
 ### GitHub API Filtering
 
-A separate HTTP proxy on port 8084 blocks dangerous GitHub API operations (PR merges, release creation, webhook management, secrets access) while allowing read-only GETs and safe writes.
+When the deep policy sidecar is enabled, dangerous GitHub API operations (PR merges, release creation, webhook management, secrets access) are blocked by YAML-driven request-shape policies while read-only GETs and safe writes are allowed. The bundled `deep-policy-github.yaml` provides the default rule set.
 
 ### Wrapper Injection
 

@@ -1,6 +1,6 @@
 #!/bin/bash
 # Module: 11-github-api
-# Description: GitHub API filter, policy bypass, and registration isolation
+# Description: GitHub API deep policy sidecar, policy bypass, and registration isolation
 
 run_tests() {
     # ---- Section 14: GitHub API Filter Tests ----

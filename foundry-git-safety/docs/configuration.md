@@ -13,7 +13,6 @@ git_safety:
   protected_branches: ...
   file_restrictions: ...
   branch_isolation: ...
-  github_api: ...
   rate_limits: ...
 ```
 
@@ -53,15 +52,6 @@ git_safety:
 | `enabled` | boolean | `true` | Enable branch isolation |
 | `well_known_branches` | list of strings | `["main", "master", "develop", "production"]` | Branches visible to all sandboxes |
 | `well_known_prefixes` | list of strings | `["release/", "hotfix/"]` | Branch prefixes visible to all sandboxes |
-
-### github_api
-
-| Field | Type | Default | Description |
-|-------|------|---------|-------------|
-| `enabled` | boolean | `true` | Enable GitHub API filtering proxy |
-| `proxy_port` | integer | `8084` | Proxy bind port (1-65535) |
-| `allow_pr_operations` | boolean | `false` | Allow PR creation and commenting |
-| `allowed_hosts` | list of strings | `["api.github.com", "uploads.github.com"]` | GitHub API hosts to filter |
 
 ### rate_limits
 

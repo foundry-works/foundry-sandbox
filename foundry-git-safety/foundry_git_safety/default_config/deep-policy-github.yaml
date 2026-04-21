@@ -1,4 +1,4 @@
-# GitHub API default policy set — mirrors github_filter.py hardcoded rules.
+# GitHub API default policy set — canonical GitHub request-shape rules.
 #
 # Loaded automatically when deep_policy.enabled: true and
 # deep_policy.policy_file: "bundled://github-default".

@@ -86,25 +86,6 @@ class BranchIsolationConfig(BaseModel):
     ])
 
 
-class GitHubAPIConfig(BaseModel):
-    """GitHub API filtering configuration."""
-
-    enabled: bool = True
-    proxy_port: int = 8084
-    allow_pr_operations: bool = False
-    allowed_hosts: List[str] = Field(default_factory=lambda: [
-        "api.github.com",
-        "uploads.github.com",
-    ])
-
-    @field_validator("proxy_port")
-    @classmethod
-    def validate_port(cls, v: int) -> int:
-        if not (1 <= v <= 65535):
-            raise ValueError(f"Port must be between 1 and 65535, got {v}")
-        return v
-
-
 class RateLimitsConfig(BaseModel):
     """Rate limiting configuration."""
 
@@ -200,7 +181,6 @@ class GitSafetyConfig(BaseModel):
     branch_isolation: BranchIsolationConfig = Field(
         default_factory=BranchIsolationConfig
     )
-    github_api: GitHubAPIConfig = Field(default_factory=GitHubAPIConfig)
     rate_limits: RateLimitsConfig = Field(default_factory=RateLimitsConfig)
     observability: ObservabilityConfig = Field(default_factory=ObservabilityConfig)
     deep_policy: DeepPolicyConfig = Field(default_factory=DeepPolicyConfig)

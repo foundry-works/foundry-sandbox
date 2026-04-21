@@ -4,8 +4,6 @@ Extends the foundry-git-safety Flask server with /proxy/<service>/<path>
 routes. The sandbox talks HTTP to the proxy; the proxy reads the real API
 key from the host environment, adds the configured header, and forwards
 via HTTPS to the upstream service. No MITM, no custom CA.
-
-Follows the same streaming pattern as github_filter.py.
 """
 
 from __future__ import annotations

@@ -101,7 +101,7 @@ foundry-git-safety validate
 foundry-git-safety start --foreground
 
 # Custom port
-foundry-git-safety start --port 8084
+foundry-git-safety start --port 9090
 ```
 
 ### Checking Registered Sandboxes

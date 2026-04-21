@@ -1,8 +1,7 @@
 """Shared GitHub security policy enforcement.
 
-Single source of truth for GitHub API security policies used by both
-the GitHub API filter (github_filter.py) and the git safety server
-for push policy enforcement.
+Single source of truth for GitHub API security policies used by the
+deep policy sidecar and the git safety server for push policy enforcement.
 
 Policy layers:
   - Path normalization (URL decode, double-encoding rejection, slash collapsing)

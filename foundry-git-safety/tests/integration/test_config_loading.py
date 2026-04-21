@@ -50,10 +50,6 @@ class TestFoundryYamlIntegration:
                 "branch_isolation": {
                     "enabled": True,
                 },
-                "github_api": {
-                    "enabled": True,
-                    "allow_pr_operations": False,
-                },
                 "rate_limits": {
                     "burst": 500,
                     "sustained": 200,
@@ -75,7 +71,6 @@ class TestFoundryYamlIntegration:
         assert config.git_safety.rate_limits.burst == 500
         assert config.git_safety.rate_limits.sustained == 200
         assert config.git_safety.file_restrictions.warn_action == "reject"
-        assert config.git_safety.github_api.allow_pr_operations is False
 
     def test_missing_file_returns_defaults(self, tmp_path):
         """When the config file does not exist, defaults are returned."""

@@ -141,11 +141,6 @@ file_restrictions:
     - "package.json"
     - "pyproject.toml"
   warn_action: "log"  # "log" or "reject"
-
-github_api:
-  enabled: true
-  proxy_port: 8084
-  allow_pr_operations: false
 ```
 
 ### Git Safety Server Management

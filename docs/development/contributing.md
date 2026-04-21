@@ -45,7 +45,6 @@ foundry-sandbox/
 │   │   ├── policies.py     # Command allowlist, protected branches
 │   │   ├── operations.py   # Git command execution
 │   │   ├── branch_isolation.py  # Cross-sandbox branch isolation
-│   │   ├── github_filter.py     # GitHub API filtering proxy
 │   │   └── schemas/        # Pydantic config models
 │   └── tests/              # 727 tests (unit, integration, security)
 │
