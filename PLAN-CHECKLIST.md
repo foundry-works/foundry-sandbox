@@ -9,19 +9,19 @@ Legend: `[ ]` todo, `[x]` done, `[~]` partial / accepted risk
 
 ## 3.1 Package Runtime Assets and Fail Closed
 
-- [ ] Choose canonical wrapper asset source
-- [ ] Replace repo-root wrapper lookup with installed-package-safe resource lookup
-- [ ] Replace repo-root template builder lookup with installed-package-safe resource lookup or remove dependency
-- [ ] Make `cast new` fail when wrapper injection fails
-- [ ] Make `cast new` fail when checksum generation fails
-- [ ] Make `cast start` fail when wrapper integrity cannot be verified or repaired
-- [ ] Remove `FileNotFoundError → is_ok = True` short-circuit from `cast start`
-- [ ] Remove the equivalent `FileNotFoundError → early-return` short-circuit from the watchdog poll
-- [ ] Only write `git_safety_enabled=True` after provisioning succeeds (shared with §3.3)
-- [ ] Add wheel test proving runtime assets are present or resolvable
-- [ ] Add negative test proving missing assets fail closed on `cast new`
-- [ ] Add negative test proving missing assets fail closed on `cast start`
-- [ ] Add negative test proving missing assets fail closed on the watchdog poll
+- [x] Choose canonical wrapper asset source
+- [x] Replace repo-root wrapper lookup with installed-package-safe resource lookup
+- [x] Replace repo-root template builder lookup with installed-package-safe resource lookup or remove dependency
+- [x] Make `cast new` fail when wrapper injection fails
+- [x] Make `cast new` fail when checksum generation fails
+- [x] Make `cast start` fail when wrapper integrity cannot be verified or repaired
+- [x] Remove `FileNotFoundError → is_ok = True` short-circuit from `cast start`
+- [x] Remove the equivalent `FileNotFoundError → early-return` short-circuit from the watchdog poll
+- [x] Only write `git_safety_enabled=True` after provisioning succeeds (shared with §3.3)
+- [x] Add wheel test proving runtime assets are present or resolvable
+- [x] Add negative test proving missing assets fail closed on `cast new`
+- [x] Add negative test proving missing assets fail closed on `cast start`
+- [x] Add negative test proving missing assets fail closed on the watchdog poll
 
 ## 3.2 Define and Implement Real sbx Migration Semantics
 

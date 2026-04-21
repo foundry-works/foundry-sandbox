@@ -157,15 +157,18 @@ class TestWrapperWatchdogReinjectionCount:
 
 
 class TestWrapperWatchdogComputeError:
+    @patch("foundry_sandbox.watchdog.log_warn")
     @patch(
         "foundry_sandbox.git_safety.compute_wrapper_checksum",
         side_effect=FileNotFoundError,
     )
     @patch("foundry_sandbox.sbx.sbx_ls")
-    def test_returns_early_on_missing_wrapper(self, mock_ls, mock_checksum):
+    def test_logs_warning_on_missing_wrapper(self, mock_ls, mock_checksum, mock_log_warn):
         wd = WrapperWatchdog(poll_interval=999)
         wd._poll_all_sandboxes()
         mock_ls.assert_not_called()
+        mock_log_warn.assert_called_once()
+        assert "wrapper script not found" in mock_log_warn.call_args[0][0]
 
 
 # ============================================================================

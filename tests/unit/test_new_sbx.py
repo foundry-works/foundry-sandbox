@@ -250,6 +250,89 @@ class TestGitSafetyFailClosed:
         mock_gs_start.return_value = MagicMock(returncode=0)
         with pytest.raises(SetupError, match="did not become healthy"):
             new_sbx_setup(**self._base_kwargs(tmp_path))
+
+    @patch("foundry_sandbox.commands.new_sbx.register_sandbox_with_git_safety")
+    @patch("foundry_sandbox.commands.new_sbx.write_hmac_secret_for_server")
+    @patch("foundry_sandbox.commands.new_sbx.write_hmac_secret_to_sandbox")
+    @patch("foundry_sandbox.commands.new_sbx.generate_hmac_secret", return_value="a" * 64)
+    @patch("foundry_sandbox.commands.new_sbx.git_safety_server_is_running", return_value=True)
+    @patch("foundry_sandbox.commands.new_sbx.inject_git_wrapper", side_effect=OSError("inject failed"))
+    @patch("foundry_sandbox.commands.new_sbx.ensure_foundry_template", return_value=True)
+    @patch("foundry_sandbox.commands.new_sbx.sbx_create")
+    @patch("foundry_sandbox.commands.new_sbx.create_worktree")
+    @patch("foundry_sandbox.commands.new_sbx.ensure_bare_repo")
+    @patch("foundry_sandbox.commands.new_sbx.sbx_check_available")
+    def test_fails_closed_on_injection_failure(
+        self, mock_check, mock_bare, mock_worktree, mock_create,
+        mock_ensure, mock_inject, mock_gs_running, mock_hmac,
+        mock_write_wt, mock_write_srv, mock_register, tmp_path,
+    ):
+        from pathlib import Path
+
+        from foundry_sandbox.commands.new_sbx import SetupError
+        mock_create.return_value = MagicMock(returncode=0)
+        wt = MagicMock(spec=Path)
+        wt.is_dir.return_value = True
+        wt.__str__ = lambda s: str(tmp_path / "worktree")
+        with pytest.raises(SetupError, match="wrapper injection failed"):
+            new_sbx_setup(
+                repo_url="https://github.com/org/repo",
+                bare_path=str(tmp_path / "bare"),
+                worktree_path=wt,
+                branch="feature-x",
+                from_branch="main",
+                name="test-sandbox",
+                agent="claude",
+                claude_config_path=tmp_path / "config",
+                copies=[],
+                allow_pr=False,
+                pip_requirements="",
+                with_opencode=False,
+                with_zai=False,
+                wd="",
+            )
+
+    @patch("foundry_sandbox.commands.new_sbx.register_sandbox_with_git_safety")
+    @patch("foundry_sandbox.commands.new_sbx.write_hmac_secret_for_server")
+    @patch("foundry_sandbox.commands.new_sbx.write_hmac_secret_to_sandbox")
+    @patch("foundry_sandbox.commands.new_sbx.generate_hmac_secret", return_value="a" * 64)
+    @patch("foundry_sandbox.commands.new_sbx.git_safety_server_is_running", return_value=True)
+    @patch("foundry_sandbox.commands.new_sbx.compute_wrapper_checksum", side_effect=FileNotFoundError("missing"))
+    @patch("foundry_sandbox.commands.new_sbx.inject_git_wrapper")
+    @patch("foundry_sandbox.commands.new_sbx.ensure_foundry_template", return_value=True)
+    @patch("foundry_sandbox.commands.new_sbx.sbx_create")
+    @patch("foundry_sandbox.commands.new_sbx.create_worktree")
+    @patch("foundry_sandbox.commands.new_sbx.ensure_bare_repo")
+    @patch("foundry_sandbox.commands.new_sbx.sbx_check_available")
+    def test_fails_closed_on_checksum_failure(
+        self, mock_check, mock_bare, mock_worktree, mock_create,
+        mock_ensure, mock_inject, mock_checksum, mock_gs_running, mock_hmac,
+        mock_write_wt, mock_write_srv, mock_register, tmp_path,
+    ):
+        from pathlib import Path
+
+        from foundry_sandbox.commands.new_sbx import SetupError
+        mock_create.return_value = MagicMock(returncode=0)
+        wt = MagicMock(spec=Path)
+        wt.is_dir.return_value = True
+        wt.__str__ = lambda s: str(tmp_path / "worktree")
+        with pytest.raises(SetupError, match="checksum computation failed"):
+            new_sbx_setup(
+                repo_url="https://github.com/org/repo",
+                bare_path=str(tmp_path / "bare"),
+                worktree_path=wt,
+                branch="feature-x",
+                from_branch="main",
+                name="test-sandbox",
+                agent="claude",
+                claude_config_path=tmp_path / "config",
+                copies=[],
+                allow_pr=False,
+                pip_requirements="",
+                with_opencode=False,
+                with_zai=False,
+                wd="",
+            )
     @patch("foundry_sandbox.commands.new_sbx.shutil.rmtree")
     @patch("foundry_sandbox.commands.new_sbx.sbx_rm")
     def test_rollback(self, mock_rm, mock_rmtree):

@@ -90,7 +90,7 @@ def start(name: str, watchdog: bool) -> None:
             name, expected_checksum=expected_checksum,
         )
     except FileNotFoundError:
-        is_ok = True
+        is_ok = False
 
     if not is_ok:
         sandbox_id = metadata.get("sbx_name", name)
@@ -106,7 +106,12 @@ def start(name: str, watchdog: bool) -> None:
             )
             log_info("Git wrapper re-injected (checksum mismatch)")
         except Exception as exc:
-            log_warn(f"Failed to re-inject git wrapper: {exc}")
+            click.echo(
+                f"Error: Git wrapper re-injection failed: {exc}. "
+                "Sandbox started without git safety enforcement.",
+                err=True,
+            )
+            patch_sandbox_metadata(name, git_safety_enabled=False)
     else:
         now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
         try:

@@ -175,13 +175,19 @@ def new_sbx_setup(
     try:
         inject_git_wrapper(name, sandbox_id=name, workspace_dir="/workspace")
     except Exception as exc:
-        log_warn(f"Git wrapper injection failed: {exc}")
+        raise SetupError(
+            f"Git wrapper injection failed: {exc}. "
+            "Sandbox creation aborted — git safety cannot be enforced."
+        ) from exc
 
-    wrapper_checksum = ""
     try:
         wrapper_checksum = compute_wrapper_checksum()
-    except FileNotFoundError:
-        pass
+    except FileNotFoundError as exc:
+        raise SetupError(
+            f"Git wrapper checksum computation failed: {exc}. "
+            "The wrapper script is not bundled correctly. "
+            "Reinstall foundry-sandbox."
+        ) from exc
 
     # ------------------------------------------------------------------
     # 7.5. Inject user service environment overrides

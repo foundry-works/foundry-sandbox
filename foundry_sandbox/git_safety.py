@@ -238,8 +238,25 @@ def unregister_sandbox_from_git_safety(
 # Git Wrapper Injection
 # ============================================================================
 
-# Path to the wrapper script relative to the project root
-_WRAPPER_SCRIPT = Path(__file__).parent.parent / "stubs" / "git-wrapper-sbx.sh"
+def _wrapper_script_path() -> Path:
+    """Resolve the git wrapper script from package resources.
+
+    Uses importlib.resources so the asset is found in installed wheels
+    as well as editable/source checkouts.
+
+    Raises:
+        FileNotFoundError: If the wrapper script is not bundled in the package.
+    """
+    from importlib.resources import files
+
+    resource = files("foundry_sandbox.assets").joinpath("git-wrapper-sbx.sh")
+    path = Path(str(resource))
+    if not path.exists():
+        raise FileNotFoundError(
+            "Git wrapper script not found in package assets. "
+            "Reinstall with: pip install --force-reinstall foundry-sandbox"
+        )
+    return path
 
 
 def inject_git_wrapper(
@@ -264,9 +281,7 @@ def inject_git_wrapper(
     """
     from foundry_sandbox.sbx import sbx_exec
 
-    wrapper_src = _WRAPPER_SCRIPT
-    if not wrapper_src.exists():
-        raise FileNotFoundError(f"Git wrapper script not found: {wrapper_src}")
+    wrapper_src = _wrapper_script_path()
 
     # Read the wrapper script content
     wrapper_content = wrapper_src.read_text()
@@ -342,9 +357,8 @@ def compute_wrapper_checksum() -> str:
     """
     import hashlib
 
-    if not _WRAPPER_SCRIPT.exists():
-        raise FileNotFoundError(f"Git wrapper script not found: {_WRAPPER_SCRIPT}")
-    return hashlib.sha256(_WRAPPER_SCRIPT.read_bytes()).hexdigest()
+    wrapper_path = _wrapper_script_path()
+    return hashlib.sha256(wrapper_path.read_bytes()).hexdigest()
 
 
 def read_wrapper_checksum_from_sandbox(sandbox_name: str) -> str | None:
@@ -403,51 +417,70 @@ FOUNDRY_TEMPLATE_TAG = "foundry-git-wrapper:latest"
 def ensure_foundry_template() -> bool:
     """Ensure the foundry git-wrapper template exists, building it if needed.
 
-    Checks if the template exists via ``sbx template ls``, and runs the
-    build script if it does not.  Also triggers a rebuild when the stored
-    digest is stale (i.e. ``sbx`` was upgraded).
+    Uses the Python sbx APIs (sbx_create, sbx_exec, sbx_template_save)
+    instead of a shell script so this works from installed wheels.
 
     Returns:
         True if the template is available (pre-existing or freshly built).
     """
-    from foundry_sandbox.sbx import sbx_template_ls
+    from foundry_sandbox.sbx import (
+        get_sbx_version,
+        sbx_create,
+        sbx_exec,
+        sbx_rm,
+        sbx_template_ls,
+        sbx_template_save,
+    )
 
     templates = sbx_template_ls()
     if any(FOUNDRY_TEMPLATE_TAG in t for t in templates):
-        # Template exists — check staleness
-        build_script = _find_build_script()
-        if build_script:
-            subprocess.run(
-                [str(build_script), "--check-staleness"],
-                check=False,
-                timeout=120,
-            )
         return True
 
-    build_script = _find_build_script()
-    if not build_script:
-        return False
-
     print(f"Template {FOUNDRY_TEMPLATE_TAG} not found. Building...")
-    result = subprocess.run(
-        [str(build_script)],
-        check=False,
-        timeout=300,
-        capture_output=True,
-        text=True,
-    )
-    if result.returncode != 0:
-        print(f"Template build failed:\n{result.stderr}", file=sys.stderr)
+
+    try:
+        wrapper_path = _wrapper_script_path()
+        wrapper_content = wrapper_path.read_text()
+    except FileNotFoundError:
+        print("Wrapper script not found in package assets.", file=sys.stderr)
         return False
-    if result.stdout.strip():
-        print(result.stdout.strip())
-    return True
 
+    seed_name = f"foundry-template-seed-{os.getpid()}"
 
-def _find_build_script() -> Path | None:
-    """Locate the template build script relative to this package."""
-    script = Path(__file__).parent.parent / "scripts" / "build-foundry-template.sh"
-    return script if script.exists() else None
+    try:
+        sbx_create(seed_name, "shell", "/tmp")
+        sbx_exec(
+            seed_name, ["tee", "/usr/local/bin/git"],
+            user="root", input=wrapper_content, quiet=True,
+        )
+        sbx_exec(
+            seed_name, ["chmod", "755", "/usr/local/bin/git"],
+            user="root", quiet=True,
+        )
+
+        verify_result = sbx_exec(seed_name, ["which", "git"], quiet=True)
+        if verify_result.returncode != 0 or "/usr/local/bin/git" not in verify_result.stdout:
+            print("Error: wrapper verification failed during template build", file=sys.stderr)
+            return False
+
+        sbx_template_save(seed_name, FOUNDRY_TEMPLATE_TAG)
+
+        digest_file = Path.home() / ".foundry" / "template-image-digest"
+        digest_file.parent.mkdir(parents=True, exist_ok=True)
+        version = get_sbx_version() or "unknown"
+        digest_file.write_text(version)
+
+        print(f"  Template {FOUNDRY_TEMPLATE_TAG} built successfully.")
+        return True
+
+    except Exception as exc:
+        print(f"Template build failed: {exc}", file=sys.stderr)
+        return False
+    finally:
+        try:
+            sbx_rm(seed_name)
+        except Exception:
+            pass
 
 
 # ============================================================================

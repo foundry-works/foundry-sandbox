@@ -121,3 +121,47 @@ class TestStartCommand:
         assert result.exit_code == 0
         mock_start_wd.assert_called_once()
         assert "watchdog" in result.output
+
+    @patch("foundry_sandbox.commands.start.patch_sandbox_metadata")
+    @patch("foundry_sandbox.commands.start.compute_wrapper_checksum", return_value="newhash")
+    @patch("foundry_sandbox.commands.start.inject_git_wrapper")
+    @patch("foundry_sandbox.commands.start.verify_wrapper_integrity", side_effect=FileNotFoundError("missing"))
+    @patch("foundry_sandbox.commands.start.sbx_sandbox_exists", return_value=True)
+    @patch("foundry_sandbox.commands.start.sbx_run")
+    @patch("foundry_sandbox.commands.start.git_safety_server_is_running", return_value=True)
+    @patch("foundry_sandbox.commands.start.sbx_check_available")
+    @patch("foundry_sandbox.commands.start.load_sandbox_metadata")
+    def test_file_not_found_triggers_reinject(
+        self, mock_meta, mock_check, mock_gs, mock_run, mock_exists,
+        mock_verify, mock_inject, mock_checksum, mock_patch,
+    ):
+        """FileNotFoundError triggers re-injection attempt, not silent is_ok=True."""
+        mock_meta.return_value = {"sbx_name": "test-1", "workspace_dir": "/workspace"}
+        mock_run.return_value = MagicMock(returncode=0)
+        runner = CliRunner()
+        result = runner.invoke(start, ["my-sandbox"])
+        # Should have attempted re-injection
+        mock_inject.assert_called_once()
+        assert result.exit_code == 0
+
+    @patch("foundry_sandbox.commands.start.patch_sandbox_metadata")
+    @patch("foundry_sandbox.commands.start.inject_git_wrapper", side_effect=OSError("broken"))
+    @patch("foundry_sandbox.commands.start.verify_wrapper_integrity", side_effect=FileNotFoundError("missing"))
+    @patch("foundry_sandbox.commands.start.sbx_sandbox_exists", return_value=True)
+    @patch("foundry_sandbox.commands.start.sbx_run")
+    @patch("foundry_sandbox.commands.start.git_safety_server_is_running", return_value=True)
+    @patch("foundry_sandbox.commands.start.sbx_check_available")
+    @patch("foundry_sandbox.commands.start.load_sandbox_metadata")
+    def test_reinject_failure_downgrades_metadata(
+        self, mock_meta, mock_check, mock_gs, mock_run, mock_exists,
+        mock_verify, mock_inject, mock_patch,
+    ):
+        """Re-injection failure writes git_safety_enabled=False to metadata."""
+        mock_meta.return_value = {"sbx_name": "test-1", "workspace_dir": "/workspace"}
+        mock_run.return_value = MagicMock(returncode=0)
+        runner = CliRunner()
+        result = runner.invoke(start, ["my-sandbox"])
+        # Should downgrade metadata
+        downgrade_call = mock_patch.call_args_list[-1]
+        assert downgrade_call[1].get("git_safety_enabled") is False
+        assert "re-injection failed" in result.output

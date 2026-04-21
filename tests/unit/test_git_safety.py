@@ -242,10 +242,12 @@ class TestUnregisterSandboxFromGitSafety:
 
 class TestInjectGitWrapper:
     @patch("foundry_sandbox.sbx.sbx_exec")
-    @patch("foundry_sandbox.git_safety._WRAPPER_SCRIPT")
-    def test_injects_wrapper(self, mock_wrapper_path, mock_exec):
-        mock_wrapper_path.exists.return_value = True
-        mock_wrapper_path.read_text.return_value = "#!/bin/bash\nwrapper"
+    @patch("foundry_sandbox.git_safety._wrapper_script_path")
+    def test_injects_wrapper(self, mock_wrapper_fn, mock_exec):
+        mock_path = MagicMock()
+        mock_path.exists.return_value = True
+        mock_path.read_text.return_value = "#!/bin/bash\nwrapper"
+        mock_wrapper_fn.return_value = mock_path
         mock_exec.return_value = _mock_completed()
 
         inject_git_wrapper(
@@ -258,17 +260,19 @@ class TestInjectGitWrapper:
         assert mock_exec.call_count == 4
 
     @patch("foundry_sandbox.sbx.sbx_exec")
-    @patch("foundry_sandbox.git_safety._WRAPPER_SCRIPT")
-    def test_wrapper_not_found(self, mock_wrapper_path, mock_exec):
-        mock_wrapper_path.exists.return_value = False
+    @patch("foundry_sandbox.git_safety._wrapper_script_path")
+    def test_wrapper_not_found(self, mock_wrapper_fn, mock_exec):
+        mock_wrapper_fn.side_effect = FileNotFoundError("not found")
         with pytest.raises(FileNotFoundError):
             inject_git_wrapper("test", sandbox_id="sbx-1", workspace_dir="/workspace")
 
     @patch("foundry_sandbox.sbx.sbx_exec")
-    @patch("foundry_sandbox.git_safety._WRAPPER_SCRIPT")
-    def test_env_script_uses_workspace_dir(self, mock_wrapper_path, mock_exec):
-        mock_wrapper_path.exists.return_value = True
-        mock_wrapper_path.read_text.return_value = "#!/bin/bash\nwrapper"
+    @patch("foundry_sandbox.git_safety._wrapper_script_path")
+    def test_env_script_uses_workspace_dir(self, mock_wrapper_fn, mock_exec):
+        mock_path = MagicMock()
+        mock_path.exists.return_value = True
+        mock_path.read_text.return_value = "#!/bin/bash\nwrapper"
+        mock_wrapper_fn.return_value = mock_path
         mock_exec.return_value = _mock_completed()
 
         inject_git_wrapper(
@@ -311,23 +315,25 @@ class TestVerifyGitWrapper:
 
 
 class TestComputeWrapperChecksum:
-    def test_computes_sha256(self, tmp_path, monkeypatch):
+    @patch("foundry_sandbox.git_safety._wrapper_script_path")
+    def test_computes_sha256(self, mock_wrapper_fn, tmp_path):
         script = tmp_path / "git-wrapper-sbx.sh"
         script.write_text("#!/bin/bash\necho hello\n")
-        monkeypatch.setattr("foundry_sandbox.git_safety._WRAPPER_SCRIPT", script)
+        mock_wrapper_fn.return_value = script
         checksum = compute_wrapper_checksum()
         assert len(checksum) == 64
         assert all(c in "0123456789abcdef" for c in checksum)
 
-    def test_deterministic(self, tmp_path, monkeypatch):
+    @patch("foundry_sandbox.git_safety._wrapper_script_path")
+    def test_deterministic(self, mock_wrapper_fn, tmp_path):
         script = tmp_path / "git-wrapper-sbx.sh"
         script.write_text("#!/bin/bash\necho hello\n")
-        monkeypatch.setattr("foundry_sandbox.git_safety._WRAPPER_SCRIPT", script)
+        mock_wrapper_fn.return_value = script
         assert compute_wrapper_checksum() == compute_wrapper_checksum()
 
-    def test_raises_file_not_found(self, tmp_path, monkeypatch):
-        missing = tmp_path / "nonexistent.sh"
-        monkeypatch.setattr("foundry_sandbox.git_safety._WRAPPER_SCRIPT", missing)
+    @patch("foundry_sandbox.git_safety._wrapper_script_path")
+    def test_raises_file_not_found(self, mock_wrapper_fn):
+        mock_wrapper_fn.side_effect = FileNotFoundError("not found")
         with pytest.raises(FileNotFoundError):
             compute_wrapper_checksum()
 
@@ -484,3 +490,28 @@ class TestRepoRootResolution:
         assert resp.status_code == 400
         data = resp.get_json()
         assert "repo_root" in data["error"]
+
+
+class TestWrapperScriptResolution:
+    """Verify the wrapper script is resolvable from package resources."""
+
+    def test_wrapper_script_resolves_from_package(self):
+        from foundry_sandbox.git_safety import _wrapper_script_path
+
+        path = _wrapper_script_path()
+        assert path.exists()
+        assert path.name == "git-wrapper-sbx.sh"
+
+    def test_wrapper_script_is_readable(self):
+        from foundry_sandbox.git_safety import _wrapper_script_path
+
+        path = _wrapper_script_path()
+        content = path.read_text()
+        assert content.startswith("#!/bin/bash")
+        assert "WORKSPACE_DIR" in content
+
+    def test_wrapper_script_is_nonempty(self):
+        from foundry_sandbox.git_safety import _wrapper_script_path
+
+        path = _wrapper_script_path()
+        assert path.stat().st_size > 100

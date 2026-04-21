@@ -69,6 +69,10 @@ class WrapperWatchdog:
         try:
             expected_checksum = compute_wrapper_checksum()
         except FileNotFoundError:
+            log_warn(
+                "Watchdog: wrapper script not found in package assets. "
+                "Integrity monitoring disabled until foundry-sandbox is reinstalled."
+            )
             return
 
         for sb in sbx_ls():
