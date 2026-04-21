@@ -96,7 +96,7 @@ fi
 if command -v shellcheck &>/dev/null; then
   run_shellcheck() {
     # Copied verbatim from CI lint job
-    shellcheck -e SC2329,SC2259 stubs/git-wrapper-sbx.sh \
+    shellcheck -e SC2329,SC2259 foundry_sandbox/assets/git-wrapper-sbx.sh \
     && shellcheck -e SC2163 tests/run.sh \
     && shellcheck -e SC2317,SC2155,SC2034,SC1091,SC2162,SC2064,SC2129 install.sh \
     && shellcheck -e SC2034 uninstall.sh \

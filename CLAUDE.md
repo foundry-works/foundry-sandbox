@@ -6,7 +6,6 @@ MicroVM-based sandbox environment for running Claude Code with isolated credenti
 
 - `foundry_sandbox/` - Python CLI package (`cast` entry point via pyproject.toml)
 - `foundry-git-safety/` - Git safety server (policy engine, HMAC auth, branch isolation)
-- `stubs/` - Stub files injected into sandboxes (CLAUDE.md, git wrapper)
 - `tests/` - Test scripts including security red-team tests
 
 ## Pre-commit

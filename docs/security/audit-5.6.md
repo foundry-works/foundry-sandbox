@@ -149,7 +149,7 @@ Before Gate B sign-off, an external security review should focus on:
 3. **File descriptor leaks:** During rotation, ensure `_current_fd` is properly closed in all error paths
 4. **TOCTOU in metadata loading:** Server reads metadata from disk on every request; verify no race between read and write
 5. **Symlink attacks:** Verify `os.path.realpath()` in path validation prevents all symlink traversal vectors
-6. **Wrapper script security:** Review `stubs/git-wrapper-sbx.sh` for injection vulnerabilities in argument handling
+6. **Wrapper script security:** Review `foundry_sandbox/assets/git-wrapper-sbx.sh` for injection vulnerabilities in argument handling
 
 ---
 

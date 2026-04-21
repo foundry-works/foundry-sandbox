@@ -212,8 +212,8 @@ sbx exec <name> -- which git
 cast start <name>  # cast start re-injects automatically
 
 # Manual re-injection
-# (The wrapper script is at stubs/git-wrapper-sbx.sh in the project)
-WRAPPER_CONTENT=$(cat stubs/git-wrapper-sbx.sh)
+# (The wrapper script is at foundry_sandbox/assets/git-wrapper-sbx.sh in the project)
+WRAPPER_CONTENT=$(cat foundry_sandbox/assets/git-wrapper-sbx.sh)
 sbx exec <name> -u root -- tee /usr/local/bin/git <<< "$WRAPPER_CONTENT"
 sbx exec <name> -u root -- chmod 755 /usr/local/bin/git
 ```

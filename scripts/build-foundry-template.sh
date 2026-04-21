@@ -14,7 +14,7 @@ set -euo pipefail
 
 TEMPLATE_TAG="foundry-git-wrapper:latest"
 SEED_NAME="foundry-template-seed-$$"
-WRAPPER_SCRIPT="$(cd "$(dirname "$0")/.." && pwd)/stubs/git-wrapper-sbx.sh"
+WRAPPER_SCRIPT="$(cd "$(dirname "$0")/.." && pwd)/foundry_sandbox/assets/git-wrapper-sbx.sh"
 DIGEST_FILE="${HOME}/.foundry/template-image-digest"
 
 cleanup() {
@@ -27,7 +27,7 @@ trap cleanup EXIT
 
 # Resolve project root
 cd "$(dirname "$0")/.."
-WRAPPER_SCRIPT="$(pwd)/stubs/git-wrapper-sbx.sh"
+WRAPPER_SCRIPT="$(pwd)/foundry_sandbox/assets/git-wrapper-sbx.sh"
 
 if [ ! -f "${WRAPPER_SCRIPT}" ]; then
   echo "Error: wrapper script not found at ${WRAPPER_SCRIPT}" >&2

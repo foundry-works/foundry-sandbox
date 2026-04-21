@@ -31,17 +31,17 @@ Legend: `[ ]` todo, `[x]` done, `[~]` partial / accepted risk
 
 ## 3.2 Consolidate Sandbox Stubs
 
-- [ ] Delete `stubs/git-wrapper.sh`
-- [ ] Delete `stubs/proxy-sign.sh` (duplicate of `foundry_sandbox/assets/proxy-sign.sh`)
-- [ ] Delete `stubs/git-api-standalone.py`
-- [ ] Delete `stubs/AGENTS.md`
-- [ ] Delete `stubs/CLAUDE.md`
-- [ ] Decide on Option A (keep `stubs/git-wrapper-sbx.sh` in place) or Option B (move to `foundry_sandbox/assets/`)
-- [ ] If Option B: move `git-wrapper-sbx.sh` to `foundry_sandbox/assets/`
-- [ ] If Option B: update `scripts/build-foundry-template.sh:17,30` to resolve the new path
-- [ ] If Option B: update CI shellcheck target
-- [ ] If Option B: delete `stubs/` directory entirely
-- [ ] Verify no duplicate `proxy-sign.sh` remains
+- [x] Delete `stubs/git-wrapper.sh`
+- [x] Delete `stubs/proxy-sign.sh` (duplicate of `foundry_sandbox/assets/proxy-sign.sh`)
+- [x] Delete `stubs/git-api-standalone.py`
+- [x] Delete `stubs/AGENTS.md`
+- [x] Delete `stubs/CLAUDE.md`
+- [x] Decide on Option A (keep `stubs/git-wrapper-sbx.sh` in place) or Option B (move to `foundry_sandbox/assets/`) — chose B
+- [x] If Option B: move `git-wrapper-sbx.sh` to `foundry_sandbox/assets/` — already existed there (identical copy)
+- [x] If Option B: update `scripts/build-foundry-template.sh:17,30` to resolve the new path
+- [x] If Option B: update CI shellcheck target
+- [x] If Option B: delete `stubs/` directory entirely
+- [x] Verify no duplicate `proxy-sign.sh` remains
 - [ ] Foundry-template rebuild passes via `./scripts/ci-local.sh --all` or smoke tests
 
 ## 3.3 Prune Legacy Constants and Dependency Manifests

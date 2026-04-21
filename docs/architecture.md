@@ -223,7 +223,7 @@ When the deep policy sidecar is enabled, dangerous GitHub API operations (PR mer
 
 The git wrapper is installed into the sandbox during `cast new`:
 
-1. `stubs/git-wrapper-sbx.sh` is copied to `/usr/local/bin/git` inside the sandbox via `sbx exec --user root`
+1. `foundry_sandbox/assets/git-wrapper-sbx.sh` is copied to `/usr/local/bin/git` inside the sandbox via `sbx exec --user root`
 2. Environment variables (`SANDBOX_ID`, `WORKSPACE_DIR`, `GIT_API_HOST`, `GIT_API_PORT`, `GIT_HMAC_SECRET_FILE`) are written to `/etc/profile.d/foundry-git-safety.sh`
 3. The HMAC secret is placed at `/run/foundry/hmac-secret` (tmpfs, outside the VCS tree)
 

@@ -280,7 +280,7 @@ All git operations from sandboxes are proxied through the `foundry-git-safety` s
 
 **How it works:**
 
-1. **Git wrapper intercepts commands** — `stubs/git-wrapper-sbx.sh` is installed at `/usr/local/bin/git`, taking precedence over `/usr/bin/git`. For any git command under the workspace, the wrapper proxies the request to the git safety server
+1. **Git wrapper intercepts commands** — `foundry_sandbox/assets/git-wrapper-sbx.sh` is installed at `/usr/local/bin/git`, taking precedence over `/usr/bin/git`. For any git command under the workspace, the wrapper proxies the request to the git safety server
 2. **HMAC-SHA256 authentication** — Each request is signed with a per-sandbox HMAC secret (64 hex chars). The signature covers the HTTP method, path, request body hash, timestamp, and a random nonce to prevent replay attacks
 3. **Policy enforcement** — Before executing any command, the git API applies policy checks: command allowlist validation, branch isolation, protected branch enforcement, file restriction checks, and rate limiting
 4. **Network routing** — The wrapper sends requests through the sbx HTTP proxy (`gateway.docker.internal:3128`) to `host.docker.internal:8083`

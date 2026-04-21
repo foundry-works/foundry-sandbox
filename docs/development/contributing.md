@@ -47,9 +47,9 @@ foundry-sandbox/
 │   │   └── schemas/        # Pydantic config models
 │   └── tests/              # 727 tests (unit, integration, security)
 │
-├── stubs/                  # Files injected into sandboxes
+├── foundry_sandbox/assets/ # Assets injected into sandboxes
 │   ├── git-wrapper-sbx.sh  # Git wrapper for sbx networking
-│   └── ...
+│   └── proxy-sign.sh       # HMAC request signing helper
 │
 ├── tests/                  # Test suite
 │

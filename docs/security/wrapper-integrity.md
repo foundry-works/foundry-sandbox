@@ -21,7 +21,7 @@ The git wrapper script (`/usr/local/bin/git` inside each sandbox) mediates all g
 ### At Sandbox Creation (`cast new`)
 
 1. The wrapper is injected into the sandbox via `sbx exec`.
-2. The SHA-256 checksum of the local `stubs/git-wrapper-sbx.sh` is computed and stored in the sandbox's metadata file as `wrapper_checksum`.
+2. The SHA-256 checksum of the local `foundry_sandbox/assets/git-wrapper-sbx.sh` is computed and stored in the sandbox's metadata file as `wrapper_checksum`.
 
 ### At Sandbox Start (`cast start`)
 
