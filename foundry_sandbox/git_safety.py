@@ -15,12 +15,14 @@ import subprocess
 import sys
 from pathlib import Path
 
-# Default paths matching foundry-git-safety defaults
+# Default paths for standalone host usage (user-writable).
+# Container workloads override these via environment variables.
+_FOUNDRY_BASE = os.path.expanduser("~/.foundry")
 _DEFAULT_SECRETS_DIR = os.environ.get(
-    "GIT_API_SECRETS_PATH", "/run/secrets/sandbox-hmac"
+    "GIT_API_SECRETS_PATH", f"{_FOUNDRY_BASE}/secrets/sandbox-hmac"
 )
 _DEFAULT_DATA_DIR = os.environ.get(
-    "FOUNDRY_DATA_DIR", "/var/lib/foundry-git-safety"
+    "FOUNDRY_DATA_DIR", f"{_FOUNDRY_BASE}/data/git-safety"
 )
 
 _TIMEOUT = 10
@@ -153,6 +155,7 @@ def register_sandbox_with_git_safety(
     repo_spec: str,
     from_branch: str = "",
     allow_pr: bool = False,
+    repo_root: str | None = None,
     data_dir: str | None = None,
 ) -> Path:
     """Register a sandbox with the git safety server via file-based metadata.
@@ -166,6 +169,7 @@ def register_sandbox_with_git_safety(
         repo_spec: Repository spec (e.g. "owner/repo").
         from_branch: Base branch for PR operations.
         allow_pr: Whether PR operations are allowed.
+        repo_root: Host-side path to the sandbox's git worktree.
         data_dir: Override for the server's data directory.
 
     Returns:
@@ -175,12 +179,14 @@ def register_sandbox_with_git_safety(
     sandboxes_dir = Path(base_dir) / "sandboxes"
     sandboxes_dir.mkdir(parents=True, exist_ok=True)
 
-    metadata = {
+    metadata: dict = {
         "sandbox_branch": branch,
         "from_branch": from_branch,
         "repos": [repo_spec] if repo_spec else [],
         "allow_pr": allow_pr,
     }
+    if repo_root:
+        metadata["repo_root"] = repo_root
     metadata_path = sandboxes_dir / f"{sandbox_id}.json"
     metadata_path.write_text(json.dumps(metadata, indent=2))
     metadata_path.chmod(0o644)

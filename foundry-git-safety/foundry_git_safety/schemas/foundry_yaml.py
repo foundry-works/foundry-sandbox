@@ -1,5 +1,6 @@
 """Pydantic models for foundry.yaml configuration schema."""
 
+import os
 import re
 from typing import List, Literal
 
@@ -13,8 +14,8 @@ class GitSafetyServerConfig(BaseModel):
 
     host: str = "127.0.0.1"
     port: int = 8083
-    secrets_path: str = "/run/secrets/sandbox-hmac"
-    data_dir: str = "/var/lib/foundry-git-safety"
+    secrets_path: str = os.path.expanduser("~/.foundry/secrets/sandbox-hmac")
+    data_dir: str = os.path.expanduser("~/.foundry/data/git-safety")
 
     @field_validator("port")
     @classmethod

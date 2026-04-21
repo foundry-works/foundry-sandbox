@@ -51,13 +51,29 @@ def start(name: str, watchdog: bool) -> None:
 
     metadata = load_sandbox_metadata(name) or {}
 
-    # Ensure git safety server is running
+    # Ensure git safety server is running (fail closed)
     if not git_safety_server_is_running():
         click.echo("Starting git safety server...")
         try:
             git_safety_server_start()
+        except OSError:
+            click.echo(
+                "Error: foundry-git-safety is not installed. "
+                "Run: pip install foundry-git-safety[server]",
+                err=True,
+            )
+            sys.exit(1)
         except Exception as exc:
-            log_warn(f"Failed to start git safety server: {exc}")
+            click.echo(f"Error: Failed to start git safety server: {exc}", err=True)
+            sys.exit(1)
+
+        if not git_safety_server_is_running():
+            click.echo(
+                "Error: Git safety server did not become healthy after start. "
+                "Check `foundry-git-safety status` for details.",
+                err=True,
+            )
+            sys.exit(1)
 
     # Start the sandbox
     click.echo(f"Starting sandbox: {name}...")

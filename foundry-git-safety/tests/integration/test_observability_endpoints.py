@@ -75,6 +75,24 @@ class TestReadyEndpoint:
         assert data["ready"] is False
         assert data["checks"]["workspace"]["ok"] is False
 
+    def test_returns_503_when_secrets_dir_missing(self, tmp_path):
+        data_dir = str(tmp_path / "data")
+        os.makedirs(os.path.join(data_dir, "sandboxes"), exist_ok=True)
+
+        app = create_git_api(
+            data_dir=data_dir,
+            secret_store=SecretStore(secrets_path="/nonexistent/secrets"),
+            nonce_store=NonceStore(),
+            rate_limiter=RateLimiter(),
+        )
+        client = app.test_client()
+        resp = client.get("/ready")
+        assert resp.status_code == 503
+        data = resp.get_json()
+        assert data["ready"] is False
+        assert data["checks"]["secret_store"]["ok"] is False
+        assert "nonexistent/secrets" in data["checks"]["secret_store"]["detail"]
+
 
 class TestMetricsEndpoint:
     def test_returns_prometheus_format(self, client):

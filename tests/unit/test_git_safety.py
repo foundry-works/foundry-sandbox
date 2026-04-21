@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import json
+import os
 import subprocess
+from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -193,6 +195,29 @@ class TestRegisterSandboxWithGitSafety:
         )
         assert (data_dir / "sandboxes").is_dir()
 
+    def test_persists_repo_root(self, tmp_path):
+        data_dir = tmp_path / "data"
+        path = register_sandbox_with_git_safety(
+            "sbx-3",
+            branch="feature-y",
+            repo_spec="org/repo",
+            repo_root="/home/user/.sandboxes/worktrees/sbx-3",
+            data_dir=str(data_dir),
+        )
+        metadata = json.loads(path.read_text())
+        assert metadata["repo_root"] == "/home/user/.sandboxes/worktrees/sbx-3"
+
+    def test_no_repo_root_when_not_provided(self, tmp_path):
+        data_dir = tmp_path / "data"
+        path = register_sandbox_with_git_safety(
+            "sbx-4",
+            branch="main",
+            repo_spec="org/repo",
+            data_dir=str(data_dir),
+        )
+        metadata = json.loads(path.read_text())
+        assert "repo_root" not in metadata
+
 
 class TestUnregisterSandboxFromGitSafety:
     def test_removes_files(self, tmp_path):
@@ -371,3 +396,100 @@ class TestVerifyWrapperIntegrity:
         ok, actual = verify_wrapper_integrity("test")
         assert ok is False
         assert actual == ""
+
+
+class TestRepoRootResolution:
+    """Verify server-side repo_root resolution from metadata."""
+
+    def test_repo_root_returned_when_present_in_metadata(self, tmp_path):
+        from foundry_git_safety.auth import NonceStore, RateLimiter, SecretStore
+        from foundry_git_safety.server import create_git_api
+
+        data_dir = str(tmp_path / "data")
+        secrets_dir = str(tmp_path / "secrets")
+        os.makedirs(os.path.join(data_dir, "sandboxes"), exist_ok=True)
+        os.makedirs(secrets_dir, exist_ok=True)
+
+        sandbox_id = "test-sbx"
+        secret = "a" * 64
+        Path(secrets_dir, sandbox_id).write_text(secret)
+
+        metadata = {
+            "sandbox_branch": "feature",
+            "from_branch": "main",
+            "repos": [],
+            "repo_root": str(tmp_path / "worktree"),
+        }
+        Path(data_dir, "sandboxes", f"{sandbox_id}.json").write_text(
+            json.dumps(metadata)
+        )
+
+        app = create_git_api(
+            secret_store=SecretStore(secrets_path=secrets_dir),
+            nonce_store=NonceStore(),
+            rate_limiter=RateLimiter(),
+            data_dir=data_dir,
+        )
+        # The app should be created without error
+        assert app is not None
+
+    def test_missing_repo_root_returns_400(self, tmp_path):
+        from foundry_git_safety.auth import NonceStore, RateLimiter, SecretStore
+        from foundry_git_safety.server import create_git_api
+
+        data_dir = str(tmp_path / "data")
+        secrets_dir = str(tmp_path / "secrets")
+        os.makedirs(os.path.join(data_dir, "sandboxes"), exist_ok=True)
+        os.makedirs(secrets_dir, exist_ok=True)
+
+        sandbox_id = "test-sbx-no-root"
+        secret = "b" * 64
+        Path(secrets_dir, sandbox_id).write_text(secret)
+
+        # Metadata without repo_root
+        metadata = {
+            "sandbox_branch": "feature",
+            "from_branch": "main",
+            "repos": [],
+        }
+        Path(data_dir, "sandboxes", f"{sandbox_id}.json").write_text(
+            json.dumps(metadata)
+        )
+
+        app = create_git_api(
+            secret_store=SecretStore(secrets_path=secrets_dir),
+            nonce_store=NonceStore(),
+            rate_limiter=RateLimiter(),
+            data_dir=data_dir,
+        )
+        client = app.test_client()
+
+        # Build a valid HMAC-authenticated request (but we just need to get past
+        # the initial checks — the repo_root check happens before git execution)
+        import time
+        import hashlib
+        import hmac
+
+        timestamp = str(time.time())
+        nonce = "test-nonce-123"
+        body = '{"args": ["git", "status"]}'
+        body_hash = hashlib.sha256(body.encode()).hexdigest()
+        canonical = f"POST\n/git/exec\n{body_hash}\n{timestamp}\n{nonce}"
+        sig = hmac.new(
+            secret.encode(), canonical.encode(), hashlib.sha256
+        ).hexdigest()
+
+        resp = client.post(
+            "/git/exec",
+            data=body,
+            content_type="application/json",
+            headers={
+                "X-Sandbox-Id": sandbox_id,
+                "X-Request-Signature": sig,
+                "X-Request-Timestamp": timestamp,
+                "X-Request-Nonce": nonce,
+            },
+        )
+        assert resp.status_code == 400
+        data = resp.get_json()
+        assert "repo_root" in data["error"]

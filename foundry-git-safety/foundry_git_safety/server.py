@@ -37,9 +37,11 @@ from .logging_config import flask_request_middleware
 
 logger = logging.getLogger(__name__)
 
-# Default data directory for sandbox metadata
+# Default data directory for sandbox metadata (user-writable).
+# Container workloads override via FOUNDRY_DATA_DIR env var.
+_FOUNDRY_BASE = os.path.expanduser("~/.foundry")
 DEFAULT_DATA_DIR = os.environ.get(
-    "FOUNDRY_DATA_DIR", "/var/lib/foundry-git-safety"
+    "FOUNDRY_DATA_DIR", f"{_FOUNDRY_BASE}/data/git-safety"
 )
 
 
@@ -162,9 +164,13 @@ def create_git_api(
     def _resolve_repo_root(sandbox_id: str, metadata: dict | None) -> str:
         if repo_root_resolver:
             return repo_root_resolver(sandbox_id, metadata)
-        if metadata:
-            return metadata.get("repo_root", "/git-workspace")
-        return "/git-workspace"
+        if metadata and metadata.get("repo_root"):
+            return metadata["repo_root"]
+        logger.error(
+            "Sandbox %s has no repo_root in metadata — registration incomplete",
+            sandbox_id,
+        )
+        return ""
 
     def _make_error(message: str, status: int) -> Response:
         return Response(
@@ -292,6 +298,14 @@ def create_git_api(
         metadata = _load_sandbox_metadata(sandbox_id, resolved_data_dir)
         repo_root = _resolve_repo_root(sandbox_id, metadata)
 
+        if not repo_root:
+            _record_outcome(verb, sandbox_id, "error")
+            return _make_error(
+                f"Sandbox {sandbox_id} has no registered repo_root — "
+                "re-register with `cast new` or check registration",
+                400,
+            )
+
         # Execute git command
         response, err = execute_git(req, repo_root, metadata)
         if err:
@@ -337,7 +351,7 @@ def create_git_api(
             return {"ok": False, "detail": str(exc)}
 
     def _check_secret_store(store: SecretStore) -> dict:
-        secrets_path = getattr(store, "_secrets_dir", None)
+        secrets_path = getattr(store, "_path", None)
         if secrets_path and not os.path.isdir(secrets_path):
             return {"ok": False, "detail": f"Secrets directory missing: {secrets_path}"}
         return {"ok": True, "detail": "Secret store available"}

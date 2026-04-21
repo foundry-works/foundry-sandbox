@@ -28,7 +28,7 @@ class TestStartCommand:
     @patch("foundry_sandbox.commands.start.verify_wrapper_integrity", return_value=(True, "abc"))
     @patch("foundry_sandbox.commands.start.sbx_sandbox_exists", return_value=True)
     @patch("foundry_sandbox.commands.start.sbx_run")
-    @patch("foundry_sandbox.commands.start.git_safety_server_is_running", return_value=False)
+    @patch("foundry_sandbox.commands.start.git_safety_server_is_running", side_effect=[False, True])
     @patch("foundry_sandbox.commands.start.git_safety_server_start")
     @patch("foundry_sandbox.commands.start.sbx_check_available")
     @patch("foundry_sandbox.commands.start.load_sandbox_metadata")
@@ -39,6 +39,32 @@ class TestStartCommand:
         result = runner.invoke(start, ["my-sandbox"])
         assert result.exit_code == 0
         mock_gs_start.assert_called_once()
+
+    @patch("foundry_sandbox.commands.start.sbx_sandbox_exists", return_value=True)
+    @patch("foundry_sandbox.commands.start.git_safety_server_is_running", return_value=False)
+    @patch("foundry_sandbox.commands.start.git_safety_server_start", side_effect=OSError("not found"))
+    @patch("foundry_sandbox.commands.start.sbx_check_available")
+    @patch("foundry_sandbox.commands.start.load_sandbox_metadata")
+    def test_fails_closed_when_git_safety_not_installed(self, mock_meta, mock_check, mock_gs_start, mock_gs_running, mock_exists):
+        mock_meta.return_value = {}
+        runner = CliRunner()
+        result = runner.invoke(start, ["my-sandbox"])
+        assert result.exit_code == 1
+        assert "not installed" in result.output
+
+    @patch("foundry_sandbox.commands.start.sbx_sandbox_exists", return_value=True)
+    @patch("foundry_sandbox.commands.start.git_safety_server_is_running", return_value=False)
+    @patch("foundry_sandbox.commands.start.git_safety_server_start")
+    @patch("foundry_sandbox.commands.start.sbx_check_available")
+    @patch("foundry_sandbox.commands.start.load_sandbox_metadata")
+    def test_fails_closed_when_server_unhealthy_after_start(self, mock_meta, mock_check, mock_gs_start, mock_gs_running, mock_exists):
+        mock_meta.return_value = {}
+        # Server starts without error but is_running still returns False
+        mock_gs_start.return_value = MagicMock(returncode=0)
+        runner = CliRunner()
+        result = runner.invoke(start, ["my-sandbox"])
+        assert result.exit_code == 1
+        assert "did not become healthy" in result.output
 
     @patch("foundry_sandbox.commands.start.patch_sandbox_metadata")
     @patch("foundry_sandbox.commands.start.compute_wrapper_checksum", return_value="newhash")

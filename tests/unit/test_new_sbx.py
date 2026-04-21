@@ -198,7 +198,58 @@ class TestTemplateValidation:
         mock_create.assert_not_called()
 
 
-class TestRollbackNewSbx:
+class TestGitSafetyFailClosed:
+    """cast new must abort when git safety is unavailable (fail-closed)."""
+
+    def _base_kwargs(self, tmp_path):
+        from pathlib import Path
+        wt = MagicMock(spec=Path)
+        wt.is_dir.return_value = True
+        wt.__str__ = lambda s: str(tmp_path / "worktree")
+        return dict(
+            repo_url="https://github.com/org/repo",
+            bare_path=str(tmp_path / "bare"),
+            worktree_path=wt,
+            branch="feature-x",
+            from_branch="main",
+            name="test-sandbox",
+            agent="claude",
+            claude_config_path=tmp_path / "config",
+            copies=[],
+            allow_pr=False,
+            pip_requirements="",
+            with_opencode=False,
+            with_zai=False,
+            wd="",
+        )
+
+    @patch("foundry_sandbox.commands.new_sbx.sbx_create")
+    @patch("foundry_sandbox.commands.new_sbx.create_worktree")
+    @patch("foundry_sandbox.commands.new_sbx.ensure_bare_repo")
+    @patch("foundry_sandbox.commands.new_sbx.sbx_check_available")
+    @patch("foundry_sandbox.commands.new_sbx.git_safety_server_is_running", return_value=False)
+    @patch("foundry_sandbox.commands.new_sbx.git_safety_server_start", side_effect=OSError("not found"))
+    def test_fails_when_git_safety_not_installed(
+        self, mock_gs_start, mock_gs_running, mock_check, mock_bare, mock_worktree, mock_create, tmp_path,
+    ):
+        from foundry_sandbox.commands.new_sbx import SetupError
+        with pytest.raises(SetupError, match="not installed"):
+            new_sbx_setup(**self._base_kwargs(tmp_path))
+
+    @patch("foundry_sandbox.commands.new_sbx.sbx_create")
+    @patch("foundry_sandbox.commands.new_sbx.create_worktree")
+    @patch("foundry_sandbox.commands.new_sbx.ensure_bare_repo")
+    @patch("foundry_sandbox.commands.new_sbx.sbx_check_available")
+    @patch("foundry_sandbox.commands.new_sbx.git_safety_server_is_running", return_value=False)
+    @patch("foundry_sandbox.commands.new_sbx.git_safety_server_start")
+    def test_fails_when_server_unhealthy_after_start(
+        self, mock_gs_start, mock_gs_running, mock_check, mock_bare, mock_worktree, mock_create, tmp_path,
+    ):
+        from foundry_sandbox.commands.new_sbx import SetupError
+        # Server starts without error but is_running still returns False
+        mock_gs_start.return_value = MagicMock(returncode=0)
+        with pytest.raises(SetupError, match="did not become healthy"):
+            new_sbx_setup(**self._base_kwargs(tmp_path))
     @patch("foundry_sandbox.commands.new_sbx.shutil.rmtree")
     @patch("foundry_sandbox.commands.new_sbx.sbx_rm")
     def test_rollback(self, mock_rm, mock_rmtree):

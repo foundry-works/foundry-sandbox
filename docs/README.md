@@ -64,6 +64,7 @@ claude
 | [ADR-006: Allowlist Layering](adr/006-allowlist-layering.md) | Layered allowlist architecture for network access | Accepted |
 | [ADR-007: API Gateways](adr/007-api-gateways.md) | API gateway routing and credential injection | Superseded |
 | [ADR-008: sbx Migration](adr/008-sbx-migration.md) | Migration from docker-compose to Docker sbx backend | Accepted |
+| [ADR-012: DNS Filtering Deferred](adr/012-dns-filtering-deferred.md) | DNS-level filtering not achievable with sbx architecture | Accepted |
 
 ### Development
 

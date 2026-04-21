@@ -476,8 +476,18 @@ if [ "$MIGRATED" = "true" ]; then
     echo -e "  ${GREEN}✓${NC} Legacy references removed (cast is now installed via pip)"
 fi
 
-# Install Python package (provides `cast` entry point via pyproject.toml)
-echo -e "${BLUE}Installing Python package...${NC}"
+# Install Python packages (provides `cast` and `foundry-git-safety` entry points)
+echo -e "${BLUE}Installing Python packages...${NC}"
+
+# Install foundry-git-safety first (required dependency for git safety enforcement)
+if [ -d "$INSTALL_DIR/foundry-git-safety" ]; then
+    pip install -e "$INSTALL_DIR/foundry-git-safety[server]" >/dev/null 2>&1 && \
+        echo -e "  ${GREEN}✓${NC} foundry-git-safety installed" || \
+        echo -e "  ${RED}✗${NC} foundry-git-safety install failed — run manually: pip install -e $INSTALL_DIR/foundry-git-safety[server]"
+else
+    echo -e "  ${YELLOW}⚠${NC} foundry-git-safety directory not found — git safety will be unavailable"
+fi
+
 pip install -e "$INSTALL_DIR" >/dev/null 2>&1 && \
     echo -e "  ${GREEN}✓${NC} cast CLI installed ($(which cast 2>/dev/null || echo 'restart shell to use'))" || \
     echo -e "  ${RED}✗${NC} pip install failed — run manually: pip install -e $INSTALL_DIR"

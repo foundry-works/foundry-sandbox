@@ -17,10 +17,11 @@ from foundry_git_safety.schemas.foundry_yaml import (
 
 class TestGitSafetyServerConfig:
     def test_defaults(self):
+        import os
         cfg = GitSafetyServerConfig()
         assert cfg.host == "127.0.0.1"
         assert cfg.port == 8083
-        assert cfg.secrets_path == "/run/secrets/sandbox-hmac"
+        assert cfg.secrets_path == os.path.expanduser("~/.foundry/secrets/sandbox-hmac")
 
     def test_port_validation_rejects_zero(self):
         with pytest.raises(ValidationError):
@@ -95,6 +96,18 @@ class TestGitSafetyConfig:
         assert isinstance(cfg.server, GitSafetyServerConfig)
         assert isinstance(cfg.protected_branches, ProtectedBranchesConfig)
         assert isinstance(cfg.file_restrictions, FileRestrictionsConfig)
+
+    def test_custom_paths_override_defaults(self):
+        import os
+        custom_secrets = "/tmp/custom-secrets"
+        custom_data = "/tmp/custom-data"
+        cfg = GitSafetyServerConfig(secrets_path=custom_secrets, data_dir=custom_data)
+        assert cfg.secrets_path == custom_secrets
+        assert cfg.data_dir == custom_data
+        # Verify defaults are user-writable (not privileged)
+        default_cfg = GitSafetyServerConfig()
+        assert not default_cfg.secrets_path.startswith("/run/")
+        assert not default_cfg.data_dir.startswith("/var/")
 
     def test_partial_override(self):
         cfg = GitSafetyConfig(server=GitSafetyServerConfig(port=9999))

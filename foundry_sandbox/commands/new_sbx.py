@@ -129,15 +129,27 @@ def new_sbx_setup(
         raise SetupError(f"sbx create failed: {exc}") from exc
 
     # ------------------------------------------------------------------
-    # 5. Start git safety server if needed
+    # 5. Start git safety server if needed (fail closed)
     # ------------------------------------------------------------------
     log_section("Git Safety")
     if not git_safety_server_is_running():
         log_info("Starting git safety server...")
         try:
             git_safety_server_start()
+        except OSError as exc:
+            raise SetupError(
+                "foundry-git-safety is not installed. "
+                "Run: pip install foundry-git-safety[server]"
+            ) from exc
         except Exception as exc:
-            log_warn(f"Git safety server start failed: {exc}")
+            raise SetupError(f"Git safety server start failed: {exc}") from exc
+
+        if not git_safety_server_is_running():
+            raise SetupError(
+                "Git safety server did not become healthy after start. "
+                "Check `foundry-git-safety status` for details."
+            )
+    log_info("Git safety server running.")
 
     # ------------------------------------------------------------------
     # 6. Generate HMAC secret and register
@@ -153,6 +165,7 @@ def new_sbx_setup(
         repo_spec=repo_spec,
         from_branch=from_branch,
         allow_pr=allow_pr,
+        repo_root=str(worktree_path),
     )
 
     # ------------------------------------------------------------------

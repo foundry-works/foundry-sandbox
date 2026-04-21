@@ -7,8 +7,8 @@ git_safety:
   server:
     host: "127.0.0.1"
     port: 8083
-    secrets_path: "/run/secrets/sandbox-hmac"
-    data_dir: "/var/lib/foundry-git-safety"
+    secrets_path: "~/.foundry/secrets/sandbox-hmac"
+    data_dir: "~/.foundry/data/git-safety"
 
   protected_branches:
     enabled: true

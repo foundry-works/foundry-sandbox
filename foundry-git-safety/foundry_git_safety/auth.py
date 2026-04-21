@@ -13,9 +13,11 @@ from dataclasses import dataclass
 
 logger = logging.getLogger(__name__)
 
-# Configuration
+# Default secrets directory for standalone host usage (user-writable).
+# Container workloads override via GIT_API_SECRETS_PATH env var.
+_FOUNDRY_BASE = os.path.expanduser("~/.foundry")
 SECRETS_MOUNT_PATH = os.environ.get(
-    "GIT_API_SECRETS_PATH", "/run/secrets/sandbox-hmac"
+    "GIT_API_SECRETS_PATH", f"{_FOUNDRY_BASE}/secrets/sandbox-hmac"
 )
 CLOCK_WINDOW_SECONDS = 300
 NONCE_TTL_SECONDS = 600

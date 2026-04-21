@@ -131,6 +131,49 @@ class TestAuditLog:
         assert len(entry["stderr"]) == AUDIT_OUTPUT_TRUNCATE
         assert entry.get("stderr_truncated") is True
 
+    def test_decision_log_failure_does_not_raise(self):
+        """audit_log does not propagate exceptions from decision log writes."""
+        with patch("foundry_git_safety.operations.audit_logger") as mock_logger:
+            mock_logger.info = MagicMock()
+            mock_logger.warning = MagicMock()
+
+            with patch("foundry_git_safety.operations.logger") as ops_logger:
+                ops_logger.debug = MagicMock()
+
+                with patch(
+                    "foundry_git_safety.decision_log.write_decision",
+                    side_effect=OSError("disk full"),
+                ):
+                    # Should NOT raise — logging is best-effort
+                    audit_log(
+                        event="command_executed",
+                        action="status",
+                        decision="allow",
+                    )
+
+        # Verify the main log was still written
+        mock_logger.info.assert_called_once()
+
+    def test_metrics_failure_does_not_raise(self):
+        """audit_log does not propagate exceptions from metrics recording."""
+        with patch("foundry_git_safety.operations.audit_logger") as mock_logger:
+            mock_logger.info = MagicMock()
+            mock_logger.warning = MagicMock()
+
+            with patch(
+                "foundry_git_safety.metrics.registry.inc_counter",
+                side_effect=RuntimeError("metrics error"),
+            ):
+                # Should NOT raise
+                audit_log(
+                    event="command_blocked",
+                    action="push",
+                    decision="deny",
+                    matched_rule="protected_branch",
+                )
+
+        mock_logger.warning.assert_called_once()
+
 
 # ---------------------------------------------------------------------------
 # TestSandboxSemaphorePool

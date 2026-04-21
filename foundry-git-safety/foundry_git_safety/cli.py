@@ -60,9 +60,11 @@ def start(config_path: str | None, foreground: bool, port: int | None, pid_file:
 
 
 def _run_server(host: str, port: int, data_dir: str, cfg) -> None:
+    from .auth import SecretStore
     from .server import create_git_api, run_tcp_server
 
-    app = create_git_api(data_dir=data_dir, config=cfg)
+    secrets = SecretStore(secrets_path=cfg.git_safety.server.secrets_path)
+    app = create_git_api(secret_store=secrets, data_dir=data_dir, config=cfg)
     run_tcp_server(app, host=host, port=port)
 
 
