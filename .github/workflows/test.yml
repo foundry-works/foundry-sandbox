@@ -70,8 +70,6 @@ jobs:
       - name: Run shellcheck
         run: |
           sudo apt-get install -y -qq shellcheck 2>/dev/null
-          # No exclusions needed for core scripts
-          shellcheck entrypoint.sh entrypoint-root.sh stubs/git-wrapper.sh
           # SC2329: cleanup invoked via trap; SC2259: pipe + heredoc for HMAC body
           shellcheck -e SC2329,SC2259 stubs/git-wrapper-sbx.sh
           # SC2163: export -f for functions, not patterns (false positive)
@@ -83,10 +81,6 @@ jobs:
           shellcheck -e SC2317,SC2155,SC2034,SC1091,SC2162,SC2064,SC2129 install.sh
           # SC2034: color variables used in echo -e (false positive)
           shellcheck -e SC2034 uninstall.sh
-          # SC2163: export -f for functions, not patterns (false positive)
-          shellcheck -e SC2163 safety/credential-redaction.sh
-          # SC2015: intentional `cmd && echo || true` pattern for optional logging
-          shellcheck -e SC2015 safety/network-firewall.sh
 
   # -- foundry-git-safety standalone package --
   git-safety-unit:

@@ -1,3 +1,0 @@
-git_safety:
-  server:
-    data_dir: /home/tyler/.local/share/foundry-git-safety

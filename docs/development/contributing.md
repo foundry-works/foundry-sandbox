@@ -7,7 +7,6 @@ This guide covers how to contribute to Foundry Sandbox.
 ```
 foundry-sandbox/
 ├── install.sh              # Installation script
-├── completion.bash         # Bash tab completion
 ├── pyproject.toml          # Python package definition (entry point: cast)
 │
 ├── foundry_sandbox/        # Python package (orchestration layer)

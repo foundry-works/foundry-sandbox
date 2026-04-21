@@ -9,25 +9,25 @@ Legend: `[ ]` todo, `[x]` done, `[~]` partial / accepted risk
 
 ## 3.1 Remove Proxy-Era Legacy Artifacts
 
-- [ ] Delete `safety/` directory (network-firewall.sh, network-mode, gateway-*, credential-redaction.sh, sudoers-allowlist, operator-approve, sandbox-completions.bash)
-- [ ] Delete `lib/` directory (lib/python/*.py)
-- [ ] Delete `Dockerfile`
-- [ ] Delete `entrypoint.sh`
-- [ ] Delete `entrypoint-root.sh`
-- [ ] Delete `docker-compose.yml`
-- [ ] Delete `docker-compose.credential-isolation.yml`
-- [ ] Delete `tests/docker-compose.test.yml`
-- [ ] Delete `foundry.yaml`
-- [ ] Delete `statusline.conf`
-- [ ] Delete `completion.bash`
-- [ ] Delete `requirements.txt` (superseded by `pyproject.toml`)
-- [ ] Update `.github/workflows/test.yml:74` — drop shellcheck targets for deleted files
-- [ ] Update `scripts/ci-local.sh:99-100` — drop shellcheck targets for deleted files
-- [ ] Update `CLAUDE.md:9` description of `stubs/`
-- [ ] Update `AGENTS.md:9` description of `stubs/`
-- [ ] Sweep `docs/` for references to deleted files and update/remove
-- [ ] Confirm `git grep` finds no remaining references outside `CHANGELOG.md`, `docs/adr/`, `sbx-analysis.md`
-- [ ] `./scripts/ci-local.sh` passes
+- [x] Delete `safety/` directory (network-firewall.sh, network-mode, gateway-*, credential-redaction.sh, sudoers-allowlist, operator-approve, sandbox-completions.bash)
+- [x] Delete `lib/` directory (lib/python/*.py)
+- [x] Delete `Dockerfile`
+- [x] Delete `entrypoint.sh`
+- [x] Delete `entrypoint-root.sh`
+- [x] Delete `docker-compose.yml`
+- [x] Delete `docker-compose.credential-isolation.yml`
+- [x] Delete `tests/docker-compose.test.yml`
+- [x] Delete `foundry.yaml`
+- [x] Delete `statusline.conf`
+- [x] Delete `completion.bash`
+- [x] Delete `requirements.txt` (superseded by `pyproject.toml`)
+- [x] Update `.github/workflows/test.yml:74` — drop shellcheck targets for deleted files
+- [x] Update `scripts/ci-local.sh:99-100` — drop shellcheck targets for deleted files
+- [x] Update `CLAUDE.md:9` description of `stubs/` — no change needed; §3.2 will update
+- [x] Update `AGENTS.md:9` description of `stubs/` — fixed Docker→MicroVM, removed unified-proxy line
+- [x] Sweep `docs/` for references to deleted files and update/remove
+- [x] Confirm `git grep` finds no remaining references outside `CHANGELOG.md`, `docs/adr/`, `sbx-analysis.md`
+- [x] `./scripts/ci-local.sh` passes
 
 ## 3.2 Consolidate Sandbox Stubs
 

@@ -78,7 +78,7 @@ Unit tests validate individual components in isolation using mocks. They run fas
 pytest tests/unit/ -v
 
 # With coverage
-pytest tests/unit/ --cov=unified-proxy --cov-report=term-missing
+pytest tests/unit/ --cov=foundry_sandbox --cov-report=term-missing
 
 # Specific test file
 pytest tests/unit/test_registry.py -v

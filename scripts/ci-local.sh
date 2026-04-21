@@ -96,13 +96,10 @@ fi
 if command -v shellcheck &>/dev/null; then
   run_shellcheck() {
     # Copied verbatim from CI lint job
-    shellcheck entrypoint.sh entrypoint-root.sh stubs/git-wrapper.sh \
-    && shellcheck -e SC2329,SC2259 stubs/git-wrapper-sbx.sh \
+    shellcheck -e SC2329,SC2259 stubs/git-wrapper-sbx.sh \
     && shellcheck -e SC2163 tests/run.sh \
     && shellcheck -e SC2317,SC2155,SC2034,SC1091,SC2162,SC2064,SC2129 install.sh \
     && shellcheck -e SC2034 uninstall.sh \
-    && shellcheck -e SC2163 safety/credential-redaction.sh \
-    && shellcheck -e SC2015 safety/network-firewall.sh \
     && shellcheck -e SC1091,SC2086 scripts/build-foundry-template.sh
   }
   run_step "Shellcheck" run_shellcheck

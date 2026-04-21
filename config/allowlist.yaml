@@ -22,14 +22,8 @@ domains:
   - uploads.github.com
 
   # AI Providers
-  # NOTE: api.anthropic.com removed — Anthropic traffic routes through the
-  # gateway (http://unified-proxy:9848) which handles credential injection
-  # and forwards to the upstream over HTTPS.
-  # NOTE: api.openai.com and *.api.openai.com removed — OpenAI traffic
-  # routes through the gateway (http://unified-proxy:9849).
-  # NOTE: generativelanguage.googleapis.com API-key traffic now routes
-  # through the Gemini gateway (http://unified-proxy:9851). Domain kept
-  # here for defense-in-depth (OAuth-mode traffic still uses MITM).
+  # NOTE: Anthropic, OpenAI, and Gemini API domains are excluded because
+  # credentials are injected by the sbx sandbox environment directly.
   - chatgpt.com
   - "*.chatgpt.com"
   - generativelanguage.googleapis.com
@@ -160,11 +154,9 @@ http_endpoints:
       # GraphQL API (mutation filtering handled by github-api-filter.py)
       - "/graphql"
 
-  # Anthropic API — removed from allowlist. Traffic routes through the
-  # gateway (http://unified-proxy:9848) and no longer flows through mitmproxy.
+  # Anthropic API — excluded; credentials handled by sbx sandbox.
 
-  # OpenAI API — removed from allowlist. Traffic routes through the
-  # gateway (http://unified-proxy:9849) and no longer flows through mitmproxy.
+  # OpenAI API — excluded; credentials handled by sbx sandbox.
 
   # ChatGPT / Codex
   - host: chatgpt.com
