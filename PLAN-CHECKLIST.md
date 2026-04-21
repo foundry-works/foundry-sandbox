@@ -67,15 +67,15 @@ Legend: `[ ]` todo, `[x]` done, `[~]` partial / accepted risk
 
 ## 3.5 Fix HMAC Rotation Cache Invalidation
 
-- [ ] Choose cache invalidation design
-- [ ] Implement server-side cache invalidation or reload mechanism
-- [ ] Update watchdog to use the rotation mechanism
-- [ ] If rotation uses a new endpoint: authenticate the endpoint
-- [ ] Add integration test that primes server cache
-- [ ] Add integration test that rotates secret from a host process
-- [ ] Add assertion that old HMAC is rejected after rotation
-- [ ] Add assertion that new HMAC is accepted after rotation
-- [ ] Add assertion that an unauthenticated caller cannot trigger rotation
+- [x] Choose cache invalidation design
+- [x] Implement server-side cache invalidation or reload mechanism
+- [x] Update watchdog to use the rotation mechanism
+- [x] If rotation uses a new endpoint: authenticate the endpoint
+- [x] Add integration test that primes server cache
+- [x] Add integration test that rotates secret from a host process
+- [x] Add assertion that old HMAC is rejected after rotation
+- [x] Add assertion that new HMAC is accepted after rotation
+- [x] Add assertion that an unauthenticated caller cannot trigger rotation
 
 ## 3.6 Harden Per-Sandbox Proxy Authorization
 

@@ -157,6 +157,11 @@ def create_git_api(
     limiter = rate_limiter or RateLimiter()
     resolved_data_dir = data_dir or DEFAULT_DATA_DIR
 
+    # When mtime-based secret rotation is detected (e.g. watchdog writes a
+    # new secret file), clear the nonce store for that sandbox so replayed
+    # nonces from the old secret epoch are evicted.
+    secrets.on_secret_changed = nonces.clear_sandbox
+
     # Configure decision-log writer from config if available.
     if config is not None:
         obs = config.git_safety.observability

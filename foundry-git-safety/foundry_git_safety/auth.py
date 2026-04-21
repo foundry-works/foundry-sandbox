@@ -7,6 +7,7 @@ import os
 import re
 import threading
 import time
+import typing
 from collections import OrderedDict
 from dataclasses import dataclass
 
@@ -33,12 +34,19 @@ SANDBOX_ID_RE = re.compile(r"^[a-zA-Z0-9_-]{1,64}$")
 
 
 class SecretStore:
-    """Manages per-sandbox HMAC secrets from file-based storage."""
+    """Manages per-sandbox HMAC secrets from file-based storage.
+
+    Caches secrets in memory but detects external file changes via mtime
+    so that out-of-process rotation (e.g. watchdog) invalidates the cache
+    without requiring an explicit rotate() call or server restart.
+    """
 
     def __init__(self, secrets_path: str = SECRETS_MOUNT_PATH):
         self._path = secrets_path
         self._cache: dict[str, bytes] = {}
+        self._mtimes: dict[str, float] = {}
         self._lock = threading.Lock()
+        self.on_secret_changed: typing.Callable[[str], None] | None = None
 
     _MAX_SECRET_SIZE = 1024
 
@@ -47,38 +55,68 @@ class SecretStore:
         if not SANDBOX_ID_RE.match(sandbox_id):
             raise ValueError(f"Invalid sandbox_id: {sandbox_id!r}")
 
+    def _get_mtime(self, sandbox_id: str) -> float | None:
+        try:
+            return os.stat(os.path.join(self._path, sandbox_id)).st_mtime
+        except (FileNotFoundError, OSError):
+            return None
+
     def get_secret(self, sandbox_id: str) -> bytes | None:
-        """Get the HMAC secret for a sandbox."""
+        """Get the HMAC secret for a sandbox.
+
+        Detects external file rotation via mtime and evicts stale cache
+        entries before re-reading from disk.
+        """
         self._validate_sandbox_id(sandbox_id)
+        fire_callback = False
+
         with self._lock:
             if sandbox_id in self._cache:
-                return self._cache[sandbox_id]
+                current_mtime = self._get_mtime(sandbox_id)
+                if current_mtime is not None and current_mtime != self._mtimes.get(sandbox_id):
+                    logger.info("Secret file mtime changed for %s, re-reading", sandbox_id)
+                    self._cache.pop(sandbox_id, None)
+                    self._mtimes.pop(sandbox_id, None)
+                    fire_callback = True
+                else:
+                    return self._cache[sandbox_id]
+
             secret_path = os.path.join(self._path, sandbox_id)
             try:
+                stat_result = os.stat(secret_path)
                 with open(secret_path, "rb") as f:
                     secret = f.read(self._MAX_SECRET_SIZE)
                     if secret.endswith(b"\n"):
                         secret = secret[:-1]
                 if secret:
                     self._cache[sandbox_id] = secret
-                    return secret
+                    self._mtimes[sandbox_id] = stat_result.st_mtime
             except FileNotFoundError:
                 logger.warning("No secret found for sandbox: %s", sandbox_id)
+                secret = None
             except OSError as exc:
                 logger.error("Failed to read secret for %s: %s", sandbox_id, exc)
-            return None
+                secret = None
+
+        if fire_callback and self.on_secret_changed is not None:
+            self.on_secret_changed(sandbox_id)
+
+        return secret
 
     def revoke(self, sandbox_id: str) -> None:
         with self._lock:
             self._cache.pop(sandbox_id, None)
+            self._mtimes.pop(sandbox_id, None)
 
     def rotate(self, sandbox_id: str) -> None:
         with self._lock:
             self._cache.pop(sandbox_id, None)
+            self._mtimes.pop(sandbox_id, None)
 
     def clear_all(self) -> None:
         with self._lock:
             self._cache.clear()
+            self._mtimes.clear()
 
 
 class NonceStore:

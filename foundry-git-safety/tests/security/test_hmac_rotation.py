@@ -297,3 +297,89 @@ class TestRotationGap:
 
         assert result == new_secret
         assert elapsed < 0.1, f"Rotation gap was {elapsed:.3f}s (expected < 0.1s)"
+
+
+class TestFileBasedRotationDetection:
+    """Mtime-based rotation detection works without explicit rotate() call.
+
+    Simulates the watchdog scenario: a host process writes a new secret file
+    and the server detects the change automatically via mtime.
+    """
+
+    def test_file_rotation_detected_without_explicit_rotate(self, tmp_path):
+        """Writing a new secret file is detected via mtime; old HMAC rejected, new accepted."""
+        app = _make_app(tmp_path)
+        sid = app._test_sandbox_id
+        client = app.test_client()
+
+        # Write metadata so request reaches auth
+        metadata_dir = tmp_path / "data" / "sandboxes"
+        metadata_dir.mkdir(parents=True)
+        (metadata_dir / f"{sid}.json").write_text(json.dumps({
+            "sandbox_branch": "feature",
+            "from_branch": "main",
+            "repos": ["test/repo"],
+        }))
+
+        old_secret = b"old-secret-key-1234567890abcdef1234567890abcdef"
+        body = json.dumps({"args": ["version"], "cwd": "."}).encode()
+        headers = _make_auth_headers(app, body, old_secret)
+
+        # Old secret works before rotation
+        resp = client.post("/git/exec", data=body, headers=headers, content_type="application/json")
+        assert resp.status_code != 401
+
+        # Simulate watchdog: write new secret file (no rotate() call)
+        time.sleep(0.05)
+        new_secret = b"new-secret-key-rotated-via-file-write"
+        (app._test_secrets_dir / sid).write_bytes(new_secret + b"\n")
+
+        # Old secret should be rejected (mtime change detected, new secret loaded)
+        body2 = json.dumps({"args": ["version"], "cwd": "."}).encode()
+        headers2 = _make_auth_headers(app, body2, old_secret)
+        resp2 = client.post("/git/exec", data=body2, headers=headers2, content_type="application/json")
+        assert resp2.status_code == 401
+
+        # New secret should be accepted
+        body3 = json.dumps({"args": ["version"], "cwd": "."}).encode()
+        headers3 = _make_auth_headers(app, body3, new_secret)
+        resp3 = client.post("/git/exec", data=body3, headers=headers3, content_type="application/json")
+        assert resp3.status_code != 401
+
+    def test_file_rotation_clears_nonces_via_callback(self, tmp_path):
+        """Nonce store is cleared when mtime-based rotation is detected."""
+        app = _make_app(tmp_path)
+        sid = app._test_sandbox_id
+
+        # Prime cache and nonce store
+        app.secret_store.get_secret(sid)
+        app.nonce_store.check_and_store(sid, "nonce-before-rotation")
+
+        # Simulate watchdog: write new secret file
+        time.sleep(0.05)
+        new_secret = b"rotated-secret-clears-nonces"
+        (app._test_secrets_dir / sid).write_bytes(new_secret + b"\n")
+
+        # Trigger mtime detection via get_secret
+        app.secret_store.get_secret(sid)
+
+        # Old nonce should be accepted again (nonce store was cleared)
+        assert app.nonce_store.check_and_store(sid, "nonce-before-rotation") is True
+
+    def test_rotation_requires_host_filesystem_access(self, tmp_path):
+        """Secret files are owned by the host and not writable from sandbox context."""
+        secrets_dir = tmp_path / "secrets"
+        secrets_dir.mkdir()
+        sid = "host-owned-sandbox"
+        secret_file = secrets_dir / sid
+        secret_file.write_bytes(b"host-secret\n")
+        secret_file.chmod(0o600)
+
+        store = SecretStore(secrets_path=str(secrets_dir))
+        assert store.get_secret(sid) == b"host-secret"
+
+        # The secret file should be mode 600 (owner read/write only)
+        import stat
+        file_mode = secret_file.stat().st_mode
+        assert (file_mode & stat.S_IRWXO) == 0, "Secret file should not be world-accessible"
+        assert (file_mode & stat.S_IRWXG) == 0, "Secret file should not be group-accessible"

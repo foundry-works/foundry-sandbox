@@ -40,8 +40,7 @@ class TestSecretStore:
         first = store.get_secret("my-sandbox")
         assert first == b"original-key"
 
-        # Overwrite the file — cache should still hold old value
-        secret_file.write_bytes(b"new-key\n")
+        # A second call without file modification returns the same cached value
         second = store.get_secret("my-sandbox")
         assert second == b"original-key"
 
@@ -69,6 +68,88 @@ class TestSecretStore:
         # Change the file to confirm re-read
         secret_file.write_bytes(b"rotated-key\n")
         assert store.get_secret("my-sandbox") == b"rotated-key"
+
+    def test_mtime_change_invalidates_cache(self, tmp_path):
+        """External file modification is detected via mtime and cache is refreshed."""
+        import time
+
+        secret_file = tmp_path / "my-sandbox"
+        secret_file.write_bytes(b"original-key\n")
+        store = SecretStore(secrets_path=str(tmp_path))
+
+        assert store.get_secret("my-sandbox") == b"original-key"
+
+        # Overwrite the file and ensure mtime changes
+        time.sleep(0.05)
+        secret_file.write_bytes(b"rotated-key\n")
+
+        assert store.get_secret("my-sandbox") == b"rotated-key"
+
+    def test_mtime_unchanged_returns_cached_value(self, tmp_path):
+        """When mtime hasn't changed, the cached value is returned."""
+        secret_file = tmp_path / "my-sandbox"
+        secret_file.write_bytes(b"cached-key\n")
+        store = SecretStore(secrets_path=str(tmp_path))
+
+        assert store.get_secret("my-sandbox") == b"cached-key"
+
+        # Overwrite with different content but same mtime is unlikely
+        # — just verify the cached value is returned on a second call
+        assert store.get_secret("my-sandbox") == b"cached-key"
+
+    def test_callback_fired_on_mtime_change(self, tmp_path):
+        """on_secret_changed callback is invoked when mtime-based rotation is detected."""
+        import time
+
+        secret_file = tmp_path / "my-sandbox"
+        secret_file.write_bytes(b"first-key\n")
+        store = SecretStore(secrets_path=str(tmp_path))
+
+        changed_ids: list[str] = []
+        store.on_secret_changed = changed_ids.append
+
+        store.get_secret("my-sandbox")
+
+        # Rotate the file externally
+        time.sleep(0.05)
+        secret_file.write_bytes(b"second-key\n")
+
+        result = store.get_secret("my-sandbox")
+        assert result == b"second-key"
+        assert changed_ids == ["my-sandbox"]
+
+    def test_callback_not_fired_when_mtime_unchanged(self, tmp_path):
+        """on_secret_changed is not invoked when cache hit occurs without mtime change."""
+        secret_file = tmp_path / "my-sandbox"
+        secret_file.write_bytes(b"stable-key\n")
+        store = SecretStore(secrets_path=str(tmp_path))
+
+        changed_ids: list[str] = []
+        store.on_secret_changed = changed_ids.append
+
+        store.get_secret("my-sandbox")
+        store.get_secret("my-sandbox")
+
+        assert changed_ids == []
+
+    def test_rotate_clears_mtime(self, tmp_path):
+        """rotate() clears the mtime tracker so next read re-stat()s the file."""
+        import time
+
+        secret_file = tmp_path / "my-sandbox"
+        secret_file.write_bytes(b"first-key\n")
+        store = SecretStore(secrets_path=str(tmp_path))
+
+        store.get_secret("my-sandbox")
+        assert "my-sandbox" in store._mtimes
+
+        store.rotate("my-sandbox")
+        assert "my-sandbox" not in store._mtimes
+
+        # Write new file and verify re-read
+        time.sleep(0.05)
+        secret_file.write_bytes(b"new-key\n")
+        assert store.get_secret("my-sandbox") == b"new-key"
 
 
 # ---------------------------------------------------------------------------
