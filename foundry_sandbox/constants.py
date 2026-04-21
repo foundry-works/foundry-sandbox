@@ -66,21 +66,6 @@ def get_claude_configs_dir() -> Path:
 
 
 # ============================================================================
-# Container Constants
-# ============================================================================
-
-DOCKER_IMAGE: str = "foundry-sandbox:latest"
-"""Docker image name and tag for sandbox containers."""
-
-CONTAINER_USER: str = "ubuntu"
-"""Default container user (can be overridden via SANDBOX_USERNAME at build time)."""
-
-CONTAINER_HOME: str = "/home/ubuntu"
-"""Container home directory (tmpfs mount with user's home symlinked there)."""
-
-SSH_AGENT_CONTAINER_SOCK: str = "/ssh-agent"
-
-# ============================================================================
 # Retry / Timeout Constants
 # ============================================================================
 
@@ -90,30 +75,12 @@ CONTAINER_READY_ATTEMPTS: int = 5
 CONTAINER_READY_DELAY: float = 0.2
 """Seconds between container readiness retries."""
 
-CONTAINER_OPENCODE_PLUGIN_DIR: str = "/home/ubuntu/.config/opencode/plugins"
-"""Default OpenCode plugins directory inside container."""
-
 SANDBOX_NAME_MAX_LENGTH: int = 120
 """Maximum length for auto-generated sandbox names before truncation+hash."""
 
 # ============================================================================
 # Subprocess Timeout Constants (seconds)
 # ============================================================================
-
-TIMEOUT_DOCKER_QUERY: int = 30
-"""Timeout for docker ps/inspect/port/info queries."""
-
-TIMEOUT_DOCKER_COMPOSE: int = int(os.environ.get("CAST_COMPOSE_TIMEOUT", "300"))
-"""Timeout for docker compose up/down operations."""
-
-TIMEOUT_DOCKER_VOLUME: int = 30
-"""Timeout for docker volume create/rm and short docker run operations."""
-
-TIMEOUT_DOCKER_EXEC: int = 60
-"""Timeout for docker exec operations."""
-
-TIMEOUT_DOCKER_NETWORK: int = 30
-"""Timeout for docker network create/rm/inspect."""
 
 TIMEOUT_GIT_TRANSFER: int = 120
 """Timeout for git clone/fetch/worktree add (network-bound)."""
@@ -126,9 +93,6 @@ TIMEOUT_LOCAL_CMD: int = 5
 
 TIMEOUT_PIP_INSTALL: int = 300
 """Timeout for pip install (can be very slow)."""
-
-TIMEOUT_DOCKER_BUILD: int = 600
-"""Timeout for docker compose build / docker build."""
 
 
 # ============================================================================

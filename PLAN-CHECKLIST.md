@@ -46,18 +46,18 @@ Legend: `[ ]` todo, `[x]` done, `[~]` partial / accepted risk
 
 ## 3.3 Prune Legacy Constants and Dependency Manifests
 
-- [ ] Delete `TIMEOUT_DOCKER_COMPOSE` from `foundry_sandbox/constants.py`
-- [ ] Delete `TIMEOUT_DOCKER_BUILD` from `foundry_sandbox/constants.py`
-- [ ] Delete `TIMEOUT_DOCKER_NETWORK` from `foundry_sandbox/constants.py`
-- [ ] Delete `TIMEOUT_DOCKER_VOLUME` from `foundry_sandbox/constants.py`
-- [ ] Delete `CONTAINER_USER`, `CONTAINER_HOME`, `CONTAINER_OPENCODE_PLUGIN_DIR`, `SSH_AGENT_CONTAINER_SOCK` from `foundry_sandbox/constants.py`
-- [ ] Delete `DOCKER_IMAGE` from `foundry_sandbox/constants.py` (if present and unused)
-- [ ] Remove `"lib/python/**" = ["E402"]` from `pyproject.toml:94`
-- [ ] Remove `orchestration` pytest marker from `pyproject.toml:76` (if no test references it)
-- [ ] Grep for `UNIFIED_PROXY`, `GATEWAY_PORT`, `PROXY_SUBNET` and remove orphans from `config.py`, `paths.py`, `state.py`
-- [ ] `mypy --strict` passes
-- [ ] `ruff check` passes
-- [ ] `git grep -n "DOCKER_COMPOSE\|UNIFIED_PROXY\|TIMEOUT_DOCKER_" foundry_sandbox/` is empty
+- [x] Delete `TIMEOUT_DOCKER_COMPOSE` from `foundry_sandbox/constants.py`
+- [x] Delete `TIMEOUT_DOCKER_BUILD` from `foundry_sandbox/constants.py`
+- [x] Delete `TIMEOUT_DOCKER_NETWORK` from `foundry_sandbox/constants.py`
+- [x] Delete `TIMEOUT_DOCKER_VOLUME` from `foundry_sandbox/constants.py`
+- [x] Delete `CONTAINER_USER`, `CONTAINER_HOME`, `CONTAINER_OPENCODE_PLUGIN_DIR`, `SSH_AGENT_CONTAINER_SOCK` from `foundry_sandbox/constants.py`
+- [x] Delete `DOCKER_IMAGE` from `foundry_sandbox/constants.py` (if present and unused)
+- [x] Remove `"lib/python/**" = ["E402"]` from `pyproject.toml:94`
+- [x] Remove `orchestration` pytest marker from `pyproject.toml:76` (if no test references it)
+- [x] Grep for `UNIFIED_PROXY`, `GATEWAY_PORT`, `PROXY_SUBNET` and remove orphans from `config.py`, `paths.py`, `state.py`
+- [x] `mypy --strict` passes
+- [x] `ruff check` passes
+- [x] `git grep -n "DOCKER_COMPOSE\|UNIFIED_PROXY\|TIMEOUT_DOCKER_" foundry_sandbox/` is empty
 
 ## 3.4 Complete `sbx` CLI Wrapper Surface
 
