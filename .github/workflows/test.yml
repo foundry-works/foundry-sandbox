@@ -72,6 +72,8 @@ jobs:
           sudo apt-get install -y -qq shellcheck 2>/dev/null
           # No exclusions needed for core scripts
           shellcheck entrypoint.sh entrypoint-root.sh stubs/git-wrapper.sh
+          # SC2329: cleanup invoked via trap; SC2259: pipe + heredoc for HMAC body
+          shellcheck -e SC2329,SC2259 stubs/git-wrapper-sbx.sh
           # SC2163: export -f for functions, not patterns (false positive)
           shellcheck -e SC2163 tests/run.sh
           # SC2317: trap cleanup removal pattern; SC2155: local+assign for readability
@@ -153,10 +155,61 @@ jobs:
       - name: Run integration tests
         run: pytest tests/integration/ -v --tb=short
 
+  # -- Smoke gate (installed-wheel verification) --
+  smoke-gate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+
+      - name: Install build tools
+        run: pip install build pytest
+
+      - name: Build wheels
+        run: |
+          python -m build --outdir /tmp/wheels .
+          python -m build --outdir /tmp/wheels foundry-git-safety/
+
+      - name: Install into clean venv
+        run: |
+          python -m venv /tmp/smoke-venv
+          source /tmp/smoke-venv/bin/activate
+          pip install /tmp/wheels/foundry_git_safety-*.whl
+          pip install /tmp/wheels/foundry_sandbox-*.whl
+
+      - name: Run root packaging assertions
+        run: |
+          source /tmp/smoke-venv/bin/activate
+          pytest tests/unit/test_packaging.py -v --tb=short
+
+      - name: Run git-safety packaging assertions
+        run: |
+          source /tmp/smoke-venv/bin/activate
+          cd foundry-git-safety
+          pytest tests/unit/test_packaging.py -v --tb=short
+
+      - name: Run cast diagnose
+        run: |
+          source /tmp/smoke-venv/bin/activate
+          OUTPUT=$(cast diagnose --json)
+          echo "$OUTPUT" | python3 -c "import json,sys; d=json.load(sys.stdin); assert 'versions' in d; assert 'sbx_diagnose' in d"
+
+      - name: Run migration smoke test
+        run: |
+          source /tmp/smoke-venv/bin/activate
+          pip install -q -e ".[dev]"
+          pytest tests/smoke/test_migration_smoke.py -v --tb=short
+
   # -- Gate --
   all-pass:
     runs-on: ubuntu-latest
-    needs: [unit, lint, git-safety-unit, git-safety-security, git-safety-integration]
+    needs: [unit, lint, git-safety-unit, git-safety-security, git-safety-integration, smoke-gate]
     if: always()
     steps:
       - name: Check all jobs passed
@@ -165,13 +218,15 @@ jobs:
              [ "${{ needs.lint.result }}" != "success" ] ||
              [ "${{ needs.git-safety-unit.result }}" != "success" ] ||
              [ "${{ needs.git-safety-security.result }}" != "success" ] ||
-             [ "${{ needs.git-safety-integration.result }}" != "success" ]; then
+             [ "${{ needs.git-safety-integration.result }}" != "success" ] ||
+             [ "${{ needs.smoke-gate.result }}" != "success" ]; then
             echo "One or more required jobs failed:"
             echo "  unit: ${{ needs.unit.result }}"
             echo "  lint: ${{ needs.lint.result }}"
             echo "  git-safety-unit: ${{ needs.git-safety-unit.result }}"
             echo "  git-safety-security: ${{ needs.git-safety-security.result }}"
             echo "  git-safety-integration: ${{ needs.git-safety-integration.result }}"
+            echo "  smoke-gate: ${{ needs.smoke-gate.result }}"
             exit 1
           fi
           echo "All required jobs passed."

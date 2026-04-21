@@ -103,21 +103,23 @@ Legend: `[ ]` todo, `[x]` done, `[~]` partial / accepted risk
 
 ## 3.8 Add Live Release Gates
 
-- [ ] Build root wheel in CI smoke gate
-- [ ] Build `foundry-git-safety` wheel in CI smoke gate
-- [ ] Install wheels into clean environment
-- [ ] Run `cast diagnose`
-- [ ] Create a real sbx sandbox
-- [ ] Verify wrapper file exists in sandbox
-- [ ] Verify wrapper checksum matches metadata
-- [ ] Run basic git command through wrapper
-- [ ] Prove protected push path is blocked or shadowed as expected
-- [ ] Prove GitHub API merge/update path is blocked if filter is in scope
-- [ ] Destroy smoke-test sandbox
-- [ ] Add migration smoke test
-- [ ] Add named-asset packaging assertion covering `git-wrapper-sbx.sh`, template build helper, and `foundry_git_safety/default_config/*.yaml`
-- [ ] Shellcheck active sbx wrapper scripts
-- [ ] Keep root-package and `foundry-git-safety` pytest invocations isolated
+- [x] Build root wheel in CI smoke gate
+- [x] Build `foundry-git-safety` wheel in CI smoke gate
+- [x] Install wheels into clean environment
+- [x] Run `cast diagnose`
+- [x] Create a real sbx sandbox
+- [x] Verify wrapper file exists in sandbox
+- [x] Verify wrapper checksum matches metadata
+- [x] Run basic git command through wrapper
+- [x] Prove protected push path is blocked or shadowed as expected
+- [~] Prove GitHub API merge/update path is blocked if filter is in scope
+- [x] Destroy smoke-test sandbox
+- [x] Add migration smoke test
+- [x] Add named-asset packaging assertion covering `git-wrapper-sbx.sh`, template build helper, and `foundry_git_safety/default_config/*.yaml`
+- [x] Shellcheck active sbx wrapper scripts
+- [x] Keep root-package and `foundry-git-safety` pytest invocations isolated
+
+**Note:** GitHub API merge/update blocking (item 10) is accepted risk — the GitHub filter was removed per §3.4 resolution. The deep-policy sidecar is the sole mechanism; live testing requires a running deep-policy proxy which needs sbx networking. The local smoke tests include `test_protected_push_blocked` which verifies the git-safety stack blocks protected branch pushes.
 
 ## 3.9 Decide Tamper-Event Delivery Policy
 

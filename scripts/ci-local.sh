@@ -97,6 +97,7 @@ if command -v shellcheck &>/dev/null; then
   run_shellcheck() {
     # Copied verbatim from CI lint job
     shellcheck entrypoint.sh entrypoint-root.sh stubs/git-wrapper.sh \
+    && shellcheck -e SC2329,SC2259 stubs/git-wrapper-sbx.sh \
     && shellcheck -e SC2163 tests/run.sh \
     && shellcheck -e SC2317,SC2155,SC2034,SC1091,SC2162,SC2064,SC2129 install.sh \
     && shellcheck -e SC2034 uninstall.sh \
@@ -135,6 +136,38 @@ if command -v pytest &>/dev/null; then
   run_step "git-safety integration" bash -c 'cd foundry-git-safety && pytest tests/integration/ -q --tb=short'
 else
   skip_step "git-safety integration" "pytest not found"
+fi
+
+# 8. Smoke gate (wheel build + packaging assertions + diagnose)
+if command -v python3 &>/dev/null; then
+  run_smoke_gate() {
+    local tmpdir
+    tmpdir=$(mktemp -d)
+    local venv_dir="$tmpdir/smoke-venv"
+    local wheels_dir="$tmpdir/wheels"
+    mkdir -p "$wheels_dir"
+    # Build both wheels
+    python3 -m build --outdir "$wheels_dir" . \
+    && python3 -m build --outdir "$wheels_dir" foundry-git-safety/ \
+    # Install into clean venv
+    && python3 -m venv "$venv_dir" \
+    && source "$venv_dir/bin/activate" \
+    && pip install -q "$wheels_dir"/foundry_git_safety-*.whl \
+    && pip install -q "$wheels_dir"/foundry_sandbox-*.whl \
+    && pip install -q pytest \
+    # Run root packaging assertions
+    && pytest tests/unit/test_packaging.py -q --tb=short \
+    # Run git-safety packaging assertions
+    && (cd foundry-git-safety && pytest tests/unit/test_packaging.py -q --tb=short) \
+    # Run cast diagnose (graceful without sbx)
+    && python3 -c "import subprocess,json; r=subprocess.run(['cast','diagnose','--json'],capture_output=True,text=True); d=json.loads(r.stdout); assert 'versions' in d" \
+    # Run migration smoke test
+    && pytest tests/smoke/test_migration_smoke.py -q --tb=short -m slow \
+    ; rm -rf "$tmpdir"
+  }
+  run_step "Smoke gate" run_smoke_gate
+else
+  skip_step "Smoke gate" "python3 not found"
 fi
 
 # -- done --

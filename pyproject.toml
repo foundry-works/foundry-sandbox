@@ -74,6 +74,7 @@ markers = [
     "security: marks security-focused tests",
     "chaos: marks chaos/fault-injection tests",
     "orchestration: marks docker orchestration/lifecycle tests",
+    "requires_sbx: marks tests requiring sbx binary and KVM",
 ]
 
 [tool.mypy]

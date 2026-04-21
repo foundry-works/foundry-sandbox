@@ -10,7 +10,11 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  test-gate:
+    uses: ./.github/workflows/test.yml
+
   release:
+    needs: [test-gate]
     runs-on: ubuntu-latest
     permissions:
       contents: write
