@@ -121,13 +121,12 @@ class TestWriteHmacSecretToSandbox:
         mock_exec.return_value = _mock_completed()
         secret_path = write_hmac_secret_to_sandbox("test-sandbox", "my-secret")
         assert str(secret_path) == "/run/foundry/hmac-secret"
-        assert mock_exec.call_count == 2
-        # First call: mkdir
-        mkdir_call = mock_exec.call_args_list[0]
-        assert "mkdir" in str(mkdir_call)
-        # Second call: write secret
-        write_call = mock_exec.call_args_list[1]
-        assert "hmac-secret" in str(write_call)
+        assert mock_exec.call_count == 1
+        # Combined mkdir + write in a single exec call
+        call_args = mock_exec.call_args_list[0]
+        cmd = str(call_args)
+        assert "mkdir" in cmd
+        assert "hmac-secret" in cmd
 
 
 class TestWriteHmacSecretForServer:
@@ -258,8 +257,8 @@ class TestInjectGitWrapper:
             workspace_dir="/workspace",
         )
 
-        # 6 calls: tee git, chmod git, tee proxy-sign, chmod proxy-sign, tee env, chmod env
-        assert mock_exec.call_count == 6
+        # 3 calls: base64 git, base64 proxy-sign, base64 env (each combines write+chmod)
+        assert mock_exec.call_count == 3
 
     @patch("foundry_sandbox.sbx.sbx_exec")
     @patch("foundry_sandbox.git_safety._wrapper_script_path")
@@ -285,11 +284,17 @@ class TestInjectGitWrapper:
             workspace_dir="/custom/path",
         )
 
-        # Find the sbx_exec call that writes the env script (5th call, index 4)
-        env_call = mock_exec.call_args_list[4]
-        env_call_input = env_call[1]["input"]
-        assert "WORKSPACE_DIR=/custom/path" in env_call_input
-        assert 'GIT_HMAC_SECRET_FILE="/run/foundry/hmac-secret"' in env_call_input
+        # The env script is the 3rd call (index 2), base64-encoded
+        env_call = mock_exec.call_args_list[2]
+        env_cmd = str(env_call)
+        assert "foundry-git-safety.sh" in env_cmd
+        # Decode the base64 to check content
+        import base64
+        cmd_str = env_call[0][1][2]  # ["sh", "-c", "..."]
+        b64_part = cmd_str.split("echo '")[1].split("' | base64")[0]
+        env_content = base64.b64decode(b64_part).decode()
+        assert "WORKSPACE_DIR=/custom/path" in env_content
+        assert 'GIT_HMAC_SECRET_FILE="/run/foundry/hmac-secret"' in env_content
 
 
 class TestVerifyGitWrapper:

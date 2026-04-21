@@ -330,7 +330,7 @@ class TestSbxExec:
         mock_run.return_value = _mock_completed()
         sbx_exec("test", ["cp", "a", "b"], user="root")
         mock_run.assert_called_once_with(
-            ["exec", "test", "-u", "root", "--", "cp", "a", "b"],
+            ["exec", "-u", "root", "test", "--", "cp", "a", "b"],
             timeout=TIMEOUT_SBX_EXEC,
             quiet=False,
             input=None,
@@ -341,7 +341,7 @@ class TestSbxExec:
         mock_run.return_value = _mock_completed()
         sbx_exec("test", ["echo", "hi"], env={"FOO": "bar"})
         mock_run.assert_called_once_with(
-            ["exec", "test", "-e", "FOO=bar", "--", "echo", "hi"],
+            ["exec", "-e", "FOO=bar", "test", "--", "echo", "hi"],
             timeout=TIMEOUT_SBX_EXEC,
             quiet=False,
             input=None,
@@ -386,14 +386,14 @@ class TestSbxExecStreaming:
         mock_popen.return_value = MagicMock()
         sbx_exec_streaming("test", ["bash"], user="root")
         cmd = mock_popen.call_args[0][0]
-        assert cmd == ["sbx", "exec", "test", "-u", "root", "--", "bash"]
+        assert cmd == ["sbx", "exec", "-u", "root", "test", "--", "bash"]
 
     @patch("foundry_sandbox.sbx.subprocess.Popen")
     def test_interactive(self, mock_popen):
         mock_popen.return_value = MagicMock()
         sbx_exec_streaming("test", ["bash", "-l"], interactive=True)
         cmd = mock_popen.call_args[0][0]
-        assert cmd == ["sbx", "exec", "test", "-it", "--", "bash", "-l"]
+        assert cmd == ["sbx", "exec", "-it", "test", "--", "bash", "-l"]
 
     @patch("foundry_sandbox.sbx.subprocess.Popen")
     def test_interactive_with_user(self, mock_popen):

@@ -140,11 +140,13 @@ Legend: `[ ]` todo, `[x]` done, `[~]` partial / accepted risk
 - [x] `foundry-git-safety` security tests pass
 - [x] `foundry-git-safety` integration tests pass
 - [x] Built wheels contain or can locate all runtime assets (named explicitly)
-- [ ] Installed-wheel `cast new` provisions git safety successfully
-- [ ] Installed-wheel `cast new` fails closed on provisioning errors
-- [ ] Installed-wheel `cast start` fails closed when the wrapper stub is missing
-- [ ] Installed-wheel watchdog fails closed when the wrapper stub is missing
-- [ ] `cast start` cannot silently start an unprotected sandbox with protected metadata
+- [~] Installed-wheel `cast new` provisions git safety successfully
+- [x] Installed-wheel `cast new` fails closed on provisioning errors
+- [x] Installed-wheel `cast start` fails closed when the wrapper stub is missing
+- [x] Installed-wheel watchdog fails closed when the wrapper stub is missing
+- [x] `cast start` cannot silently start an unprotected sandbox with protected metadata
+
+**Note (item 6):** HMAC secret write and wrapper injection succeed from installed wheel. Full `provision_git_safety` (including `_verify_sandbox_connectivity`) requires the sbx HTTP proxy and Docker networking to the git-safety server, which is not available in the local smoke test environment. The connectivity check is verified separately via unit tests. Fail-closed behavior for all error paths (items 7–10) is verified by running `TestGitSafetyFailClosed`, `TestLazyProvisioning`, and `TestWrapperWatchdogComputeError` from the installed wheel.
 - [x] Only the shared §3.3 helper writes `git_safety_enabled=True`
 - [x] `cast migrate-to-sbx` behavior matches documented contract, including existing-worktree handling
 - [x] Watchdog rotation invalidates old HMAC secrets without server restart

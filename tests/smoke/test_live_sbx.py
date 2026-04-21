@@ -52,7 +52,7 @@ class TestLiveSbxSmoke:
         )
 
         # Create sandbox
-        sbx_create(sandbox, agent="smoke", path=str(repo_dir), branch="main")
+        sbx_create(sandbox, agent="shell", path=str(repo_dir), branch="main")
 
         # Ensure git safety server is running
         if not git_safety_server_is_running():
@@ -107,7 +107,7 @@ class TestLiveSbxSmoke:
         )
 
         # Create, provision, start
-        sbx_create(sandbox, agent="smoke", path=str(repo_dir), branch="main")
+        sbx_create(sandbox, agent="shell", path=str(repo_dir), branch="main")
         if not git_safety_server_is_running():
             git_safety_server_start()
 
@@ -153,7 +153,7 @@ class TestLiveSbxSmoke:
         )
 
         # Create, provision, start
-        sbx_create(sandbox, agent="smoke", path=str(repo_dir), branch="main")
+        sbx_create(sandbox, agent="shell", path=str(repo_dir), branch="main")
         if not git_safety_server_is_running():
             git_safety_server_start()
 
@@ -199,7 +199,7 @@ class TestLiveSbxSmoke:
         )
 
         # Create sandbox
-        sbx_create(sandbox, agent="smoke", path=str(repo_dir), branch="main")
+        sbx_create(sandbox, agent="shell", path=str(repo_dir), branch="main")
 
         # Destroy (stop then remove)
         sbx_stop(sandbox)

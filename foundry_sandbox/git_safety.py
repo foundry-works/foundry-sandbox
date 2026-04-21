@@ -116,16 +116,9 @@ def write_hmac_secret_to_sandbox(
     """
     from foundry_sandbox.sbx import sbx_exec
 
-    secret_dir = "/run/foundry"
     sbx_exec(
         sandbox_name,
-        ["mkdir", "-p", secret_dir],
-        user="root",
-        quiet=True,
-    )
-    sbx_exec(
-        sandbox_name,
-        ["sh", "-c", f"printf '%s' '{secret}' > /run/foundry/hmac-secret && chmod 600 /run/foundry/hmac-secret"],
+        ["sh", "-c", f"mkdir -p /run/foundry && printf '%s' '{secret}' > /run/foundry/hmac-secret && chmod 600 /run/foundry/hmac-secret"],
         user="root",
         quiet=True,
     )
@@ -302,23 +295,18 @@ def inject_git_wrapper(
         git_api_port: Git API server port.
     """
     from foundry_sandbox.sbx import sbx_exec
+    import base64
 
     wrapper_src = _wrapper_script_path()
 
     # Read the wrapper script content
     wrapper_content = wrapper_src.read_text()
+    wrapper_b64 = base64.b64encode(wrapper_content.encode()).decode()
 
-    # Use sbx_exec to write the wrapper to /usr/local/bin/git
+    # Use base64 to avoid stdin piping issues with sbx exec
     sbx_exec(
         sandbox_name,
-        ["tee", "/usr/local/bin/git"],
-        user="root",
-        input=wrapper_content,
-        quiet=True,
-    )
-    sbx_exec(
-        sandbox_name,
-        ["chmod", "755", "/usr/local/bin/git"],
+        ["sh", "-c", f"echo '{wrapper_b64}' | base64 -d > /usr/local/bin/git && chmod 755 /usr/local/bin/git"],
         user="root",
         quiet=True,
     )
@@ -326,16 +314,11 @@ def inject_git_wrapper(
     # Install proxy-sign helper
     proxy_sign_src = _proxy_sign_script_path()
     proxy_sign_content = proxy_sign_src.read_text()
+    proxy_b64 = base64.b64encode(proxy_sign_content.encode()).decode()
+
     sbx_exec(
         sandbox_name,
-        ["tee", "/usr/local/bin/proxy-sign"],
-        user="root",
-        input=proxy_sign_content,
-        quiet=True,
-    )
-    sbx_exec(
-        sandbox_name,
-        ["chmod", "755", "/usr/local/bin/proxy-sign"],
+        ["sh", "-c", f"echo '{proxy_b64}' | base64 -d > /usr/local/bin/proxy-sign && chmod 755 /usr/local/bin/proxy-sign"],
         user="root",
         quiet=True,
     )
@@ -348,16 +331,10 @@ def inject_git_wrapper(
         f"export GIT_API_PORT={git_api_port}\n"
         f'export GIT_HMAC_SECRET_FILE="/run/foundry/hmac-secret"\n'
     )
+    env_b64 = base64.b64encode(env_script.encode()).decode()
     sbx_exec(
         sandbox_name,
-        ["tee", "/etc/profile.d/foundry-git-safety.sh"],
-        user="root",
-        input=env_script,
-        quiet=True,
-    )
-    sbx_exec(
-        sandbox_name,
-        ["chmod", "644", "/etc/profile.d/foundry-git-safety.sh"],
+        ["sh", "-c", f"echo '{env_b64}' | base64 -d > /etc/profile.d/foundry-git-safety.sh && chmod 644 /etc/profile.d/foundry-git-safety.sh"],
         user="root",
         quiet=True,
     )

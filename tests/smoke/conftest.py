@@ -15,17 +15,27 @@ def _sbx_available() -> bool:
     """Check if sbx binary is installed and at a supported version."""
     try:
         result = subprocess.run(
-            ["sbx", "--version"], capture_output=True, text=True, timeout=10
+            ["sbx", "version"], capture_output=True, text=True, timeout=10
         )
         if result.returncode != 0:
             return False
-        version_str = result.stdout.strip()
+        # Parse first line: "Client Version:  v0.26.1 abc123"
+        raw = result.stdout.strip().split("\n")[0]
+        for prefix in ("Client Version:  v", "Client Version: v"):
+            if raw.startswith(prefix):
+                raw = raw[len(prefix):]
+                break
+        version_str = raw.split()[0] if raw else ""
+        if not version_str:
+            return False
         from foundry_sandbox.version_check import _parse_version
 
         parsed = _parse_version(version_str)
+        min_parsed = _parse_version(SBX_MIN_VERSION)
+        max_parsed = _parse_version(SBX_MAX_VERSION)
         if not parsed:
             return False
-        return SBX_MIN_VERSION <= str(parsed) < SBX_MAX_VERSION
+        return min_parsed <= parsed < max_parsed
     except (FileNotFoundError, subprocess.TimeoutExpired):
         return False
 

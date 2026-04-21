@@ -120,19 +120,22 @@ def get_sbx_version() -> str | None:
         return None
     try:
         result = subprocess.run(
-            ["sbx", "--version"],
+            ["sbx", "version"],
             capture_output=True,
             text=True,
             timeout=5,
         )
-        # Output is like "sbx 0.26.1\n" or just "0.26.1\n"
+        # Output like "Client Version:  v0.26.1 abc123\nServer Version: ..."
         raw = result.stdout.strip().split("\n")[0]
-        # Strip any prefix like "sbx " or "sbx version "
-        for prefix in ("sbx version ", "sbx "):
-            if raw.lower().startswith(prefix):
+        # Strip prefixes like "Client Version:  v" or "sbx " or bare version
+        for prefix in ("Client Version:  v", "Client Version: v",
+                        "sbx version ", "sbx "):
+            if raw.startswith(prefix):
                 raw = raw[len(prefix):]
                 break
-        return raw
+        # Drop anything after the version (commit hash, etc.)
+        raw = raw.split()[0] if raw else ""
+        return raw or None
     except (OSError, subprocess.TimeoutExpired):
         return None
 
@@ -325,12 +328,13 @@ def sbx_exec(
     Returns:
         CompletedProcess result.
     """
-    args = ["exec", name]
+    args = ["exec"]
     if user:
         args.extend(["-u", user])
     if env:
         for k, v in env.items():
             args.extend(["-e", f"{k}={v}"])
+    args.append(name)
     args.append("--")
     args.extend(cmd)
     return _run_sbx(args, timeout=TIMEOUT_SBX_EXEC, quiet=quiet, input=input)
@@ -354,11 +358,12 @@ def sbx_exec_streaming(
     Returns:
         Popen process with inherited stdio.
     """
-    args = ["sbx", "exec", name]
+    args = ["sbx", "exec"]
     if interactive:
         args.append("-it")
     if user:
         args.extend(["-u", user])
+    args.append(name)
     args.append("--")
     args.extend(cmd)
 
