@@ -648,7 +648,6 @@ def _verify_sandbox_connectivity(
             "--proxy", proxy,
             url,
         ],
-        quiet=True,
     )
     if result.returncode != 0:
         raise RuntimeError(
