@@ -1,267 +1,187 @@
-# foundry-sandbox - sbx Migration Release Readiness Plan
+# foundry-sandbox — Post-sbx-Migration Cleanup Plan
 
 **Last updated:** 2026-04-21
 **Branch:** `sbx`
-**Scope:** Close the correctness, safety, packaging, and verification gaps found during the senior engineering review of the sbx migration.
+**Scope:** Delete proxy-era legacy code that the sbx migration superseded, close small fidelity gaps in the `sbx` CLI wrapper, and put the remaining fragile pieces (deep-policy live gate, compose-era test modules, 0.20.x migration path) on an explicit schedule.
+
+**Companion file:** `PLAN-CHECKLIST.md`
 
 ---
 
 ## 1. Objective
 
-Make the sbx migration releasable by proving that installed builds create, migrate, start, and operate sandboxes with the same safety boundaries documented in the security model.
+Finish the sbx migration by removing the docker-compose / unified-proxy artifacts that are now dead, reducing surface area for security auditors, shellcheck/CI, and new contributors. Fill the handful of sbx wrapper gaps identified during review. Do not change runtime semantics for the sbx control plane that already shipped in 0.21.0.
 
-The release should fail closed when git safety cannot be provisioned, migration should not create misleading metadata, and CI should exercise at least one real installed-wheel sbx flow instead of only unit-level behavior.
+The migration itself is ~85% complete (see §3.1–§3.9 of the prior plan in `CHANGELOG.md`). This plan is about removing the remaining 15% of legacy mass, plus two small correctness/observability items that were deferred.
 
 ---
 
 ## 2. Review Findings Driving This Plan
 
-1. Packaged installs do not include the root `stubs/git-wrapper-sbx.sh` or `scripts/build-foundry-template.sh` assets, while runtime code depends on them (`foundry_sandbox/git_safety.py:242,449`).
-2. `cast new` and `cast start` can continue after git-safety wrapper provisioning fails, leaving metadata that claims git safety is enabled (`commands/new_sbx.py:174-184,249-259`).
-3. `cast start` treats a missing local wrapper stub as "integrity OK" because `FileNotFoundError` from `compute_wrapper_checksum` is caught and forces `is_ok = True` (`commands/start.py:87-94`). The same pattern short-circuits the watchdog at `watchdog.py:69-72`.
-4. `cast migrate-to-sbx` converts metadata but does not create sbx sandboxes, inject wrappers, register git-safety state, or provision HMAC secrets (`commands/migrate.py:_convert_one_sandbox`). It also has no story for existing worktrees from the 0.20.x layout.
-5. The security model documents a GitHub API safety filter, but `foundry_git_safety.github_filter` is referenced only by tests — `server.py` / `cli.py` never start it or route `api.github.com` traffic through it.
-6. Watchdog HMAC rotation rewrites secrets on disk but does not invalidate the running git-safety server's cached secret (`foundry_git_safety/auth.py:50-69` memoizes reads; `revoke()`/`rotate()` are never called out-of-process).
-7. User-service and deep-policy proxy paths are not strongly authenticated per sandbox: `user_services_proxy.py:68-102` injects host-env credentials with no caller verification, and `deep_policy_proxy.py:67-73` keys rate limits on a caller-supplied `X-Sandbox-Id`.
-8. Installer checks and release metadata still contain pre-sbx assumptions: `install.sh` installs tmux, checks `docker info`, and touches `unified-proxy/` stubs; `pyproject.toml` says 0.20.15 while `CHANGELOG.md` declares 0.21.0; `foundry_sandbox/__init__.py:8` falls back to `"0.13.0"`.
-9. CI lacks a live installed-wheel sbx smoke test and does not prove the migration boundary end to end. No test currently builds a wheel and exercises `cast new` against it.
-10. Dependency on `foundry-git-safety[server]>=0.1.0` is unpinned, so any internal API change in the git-safety package during the experimental phase silently ships with a 0.21.x release.
-11. `emit_wrapper_tamper_event` (`git_safety.py:497-524`) swallows all exceptions, so tamper notifications can vanish when the decision log is unwritable — in the same scenario where `/ready` intentionally stays 200 ("degraded logging is non-fatal").
+1. The proxy-era runtime — `safety/` helpers, `lib/python/` agent-init scripts, `Dockerfile`, `entrypoint.sh`, `entrypoint-root.sh`, `docker-compose.yml`, `docker-compose.credential-isolation.yml`, `tests/docker-compose.test.yml`, `foundry.yaml`, `statusline.conf`, `completion.bash` — is unreferenced from `foundry_sandbox/` Python code but still present at the repo root and still exercised by `.github/workflows/test.yml:74` and `scripts/ci-local.sh:99` (shellcheck only).
+2. `stubs/` contains a mix of live assets (`git-wrapper-sbx.sh`) and dead duplicates (`git-wrapper.sh`, `proxy-sign.sh`, `git-api-standalone.py`, `AGENTS.md`, `CLAUDE.md`). The canonical copies the code actually loads live at `foundry_sandbox/assets/` (`git_safety.py:276`, `scripts/build-foundry-template.sh:17,30`).
+3. `foundry_sandbox/constants.py:103-131` declares `TIMEOUT_DOCKER_COMPOSE`, `TIMEOUT_DOCKER_BUILD`, `TIMEOUT_DOCKER_NETWORK`, `TIMEOUT_DOCKER_VOLUME` and earlier container constants with no callers. `pyproject.toml:94` carries a `lib/python/**` ruff override that becomes dead as soon as `lib/` is removed. `requirements.txt` still lists Flask/Werkzeug/gunicorn/mitmproxy/httpx/python-dotenv — none are in `pyproject.toml` and none are imported from `foundry_sandbox/`.
+4. `foundry_sandbox/sbx.py` covers lifecycle, exec, secrets, policy, templates, and diagnose — but `sbx_diagnose()` returns a raw `CompletedProcess` rather than parsed JSON (`sbx.py:529-535`), `sbx_create()` has no `--cpus`/`--memory` parameters, and there is no wrapper for `sbx ports publish/unpublish`.
+5. `PLAN-CHECKLIST.md §3.8` accepted as risk that the deep-policy sidecar GitHub merge/update blocking is not live-tested. That gap is still open; the smoke suite only exercises git-safety wrapper paths.
+6. `tests/redteam/modules/` still contains compose-shaped scenarios (`05-proxy-egress.sh`, `07-proxy-admin.sh`, `04-network-isolation.sh`, `18-ip-encoding-bypass.sh`) that exercise the removed unified-proxy. They likely fail or silently skip under sbx. `tests/chaos/modules/` looks partially ported.
+7. `commands/migrate.py` and `foundry_sandbox/migration.py` are still live because 0.20.x users may upgrade, but there is no declared sunset. Once 0.20.x EOL is set, the two `_LAZY_COMMANDS` entries at `cli.py:50-51` plus ~540 lines of migration code can go.
 
 ---
 
 ## 3. Workstreams
 
-### 3.1 Package Runtime Assets and Fail Closed
+### 3.1 Remove Proxy-Era Legacy Artifacts
 
 Current state:
-- The root wheel packages only `foundry_sandbox` (`pyproject.toml:96`).
-- Runtime code reads wrapper/template assets from repo-root paths that do not exist in installed wheels (`git_safety.py:242,449`).
-- Wrapper injection and checksum failures are warnings in normal flows.
-- `cast start` and the watchdog both short-circuit to "integrity OK" when the local wrapper stub is missing, which is the exact failure mode on a wheel install.
+- Repo-root legacy files exist and are shellchecked in CI but never executed by the sbx path.
+- No `foundry_sandbox/*.py` or `scripts/*` references these files except CI lint rules.
+- `docker-compose.credential-isolation.yml:180` is the only live reference to `stubs/git-wrapper.sh`; once the compose files go, the old wrapper has no consumer.
 
 Required work:
-- Decide the runtime asset source:
-  - Prefer `foundry_git_safety` package resources for the canonical wrapper.
-  - Include template-building assets in the root package or replace shell-script lookup with package resources.
-- Replace repo-root path assumptions with `importlib.resources` or another installed-package-safe lookup.
-- Make wrapper injection, checksum generation, and wrapper integrity repair fatal by default on **both** `cast new` and `cast start`.
-- Change `FileNotFoundError` handling in `start.py` and `watchdog.py` so a missing wrapper asset raises or surfaces an error — never silently sets `is_ok = True`.
-- Add an explicit diagnostic or unsafe escape hatch only if needed for development.
-- Set `git_safety_enabled=True` only after provisioning succeeds (shared with §3.3).
-- Add wheel packaging tests that build the root wheel and verify each required asset (`git-wrapper-sbx.sh`, template build script or its replacement, any default YAML shipped out of `foundry_git_safety/default_config/`) is resolvable from the installed artifact.
+- Delete: `safety/` (8 files), `lib/` (entire `python/` subdir), `Dockerfile`, `entrypoint.sh`, `entrypoint-root.sh`, `docker-compose.yml`, `docker-compose.credential-isolation.yml`, `tests/docker-compose.test.yml`, `foundry.yaml`, `statusline.conf`, `completion.bash`, `requirements.txt`.
+- Update `.github/workflows/test.yml:74` to stop shellchecking `entrypoint.sh entrypoint-root.sh stubs/git-wrapper.sh`; keep only `stubs/git-wrapper-sbx.sh` (or its new home — see §3.2).
+- Update `scripts/ci-local.sh:99-100` in the same way.
+- Update `CLAUDE.md:9` and `AGENTS.md:9` descriptions of `stubs/` to reflect the final contents.
+- Remove any mention of the deleted files from `docs/` (grep-driven sweep, not a rewrite).
 
 Exit criteria:
-- A locally built wheel can run `cast new` without relying on the source checkout.
-- Missing wrapper/template assets produce a hard failure with a clear error on `cast new`, `cast start`, and the watchdog poll.
-- Metadata never reports git safety enabled unless wrapper provisioning and checksum verification succeeded.
+- `git grep -l "docker-compose\|unified-proxy\|entrypoint\.sh" -- ':!CHANGELOG.md' ':!docs/adr/**' ':!sbx-analysis.md'` returns nothing.
+- `./scripts/ci-local.sh` still passes.
+- The wheel artifact list is unchanged (these files were never packaged).
 
-### 3.2 Define and Implement Real sbx Migration Semantics
+### 3.2 Consolidate Sandbox Stubs
 
 Current state:
-- Migration docs promise automatic sandbox migration.
-- `migrate-to-sbx` converts metadata and presets but does not create sbx sandboxes or provision git safety (`commands/migrate.py:_convert_one_sandbox`).
-- Converted metadata can describe non-existent or unsafe sbx sandboxes.
-- Existing 0.20.x worktrees under the old layout have no reparenting story; `ensure_bare_repo` / `create_worktree` assume fresh creation.
+- `stubs/git-wrapper-sbx.sh` is live — loaded by `scripts/build-foundry-template.sh` during template build.
+- `stubs/git-wrapper.sh`, `stubs/proxy-sign.sh`, `stubs/git-api-standalone.py`, `stubs/AGENTS.md`, `stubs/CLAUDE.md` have no runtime consumers.
+- Canonical copies of the live wrapper and proxy-sign helper already live at `foundry_sandbox/assets/`, shipped in the wheel via `pyproject.toml:96-100`.
 
 Required work:
-- Pick one migration contract:
-  - Full migration: create sbx sandboxes, preserve workspace state, provision git safety, and verify startability.
-  - Metadata-only migration: migrate presets/configuration and explicitly mark old sandboxes as requiring recreation.
-- Update docs and command output to match the chosen contract.
-- If full migration is chosen:
-  - Share the same provisioning path used by `cast new` (via §3.3).
-  - Define explicit handling for pre-existing worktrees (reparent, re-clone, or refuse and error).
-- If metadata-only migration is chosen, rely on the §3.3 helper to refuse writing `git_safety_enabled=True` for sandboxes that don't exist in `sbx` yet. Do not invent a separate "migrated" flag that `cast start` has to special-case.
-- Add an end-to-end migration smoke test for the chosen behavior.
+- Delete `stubs/git-wrapper.sh`, `stubs/proxy-sign.sh`, `stubs/git-api-standalone.py`, `stubs/AGENTS.md`, `stubs/CLAUDE.md`.
+- Decide placement of `git-wrapper-sbx.sh`:
+  - Option A: leave under `stubs/`, delete everything else.
+  - Option B: move to `foundry_sandbox/assets/git-wrapper-sbx.sh` alongside the other canonical assets, update `scripts/build-foundry-template.sh:17,30` and the CI shellcheck target, and delete `stubs/` entirely.
+- Option B is preferred — it eliminates a top-level directory and makes the wrapper wheel-resident, but requires updating the build script and any developer muscle memory.
+- Verify no duplicate `proxy-sign.sh` remains; `foundry_sandbox/assets/proxy-sign.sh` is the only copy after cleanup.
 
 Exit criteria:
-- A migrated sandbox is either startable and fully protected, or clearly marked as not migrated/requiring recreation.
-- `cast migrate-to-sbx` output does not overstate what happened.
-- Tests cover the exact migration contract, including the existing-worktree case.
+- There is exactly one git wrapper on disk (`git-wrapper-sbx.sh`) and one proxy-sign script (`proxy-sign.sh`).
+- `scripts/build-foundry-template.sh` and the CI shellcheck step both resolve the chosen path.
+- The foundry-template rebuild in `./scripts/ci-local.sh --all` or the smoke tests still succeeds.
 
-### 3.3 Centralize sbx Git-Safety Provisioning
+### 3.3 Prune Legacy Constants and Dependency Manifests
 
 Current state:
-- New sandbox creation (`new_sbx.py:157-178`), start-time repair (`start.py:95-109`), and watchdog repair (`watchdog.py:109-161`) duplicate the same five-step sequence (HMAC gen → write guest secret → write server secret → register → inject) in slightly different forms, with inconsistent failure handling across the three sites.
-- Migration (§3.2) does none of these today and needs to share this path if it becomes full-migration.
+- `foundry_sandbox/constants.py:103-131` defines `TIMEOUT_DOCKER_COMPOSE/BUILD/NETWORK/VOLUME`, none referenced outside the file.
+- Earlier in the same file, `CONTAINER_USER`, `CONTAINER_HOME`, `CONTAINER_OPENCODE_PLUGIN_DIR`, `SSH_AGENT_CONTAINER_SOCK`, `DOCKER_IMAGE` describe the old container model.
+- `pyproject.toml:94` has `"lib/python/**" = ["E402"]` — becomes dead once §3.1 lands.
+- `pyproject.toml:76` declares a pytest marker `orchestration: marks docker orchestration/lifecycle tests` — no current test applies it (grep).
+- `requirements.txt` lists Flask/Werkzeug/gunicorn/mitmproxy/httpx/python-dotenv — zero imports from `foundry_sandbox/`. Deleted as part of §3.1 but cross-listed here for traceability.
 
 Required work:
-- Introduce a single provisioning function for:
-  - Wrapper injection.
-  - Wrapper checksum computation and metadata update.
-  - Sandbox registration with git-safety.
-  - Host and guest HMAC secret creation.
-  - Verification that the sandbox can reach git-safety through the expected path.
-- Route all four callers (`cast new`, `cast start` repair, watchdog repair, migration full-path) through this helper. No caller writes `git_safety_enabled=True` directly; only the helper does, and only after verification.
-- Return structured provisioning status so commands can print precise failures.
-- Include a "template compatibility" check that detects sandboxes built from a stale foundry template (e.g., after an `sbx` upgrade that rebuilt the template) so `cast start` can force re-provisioning rather than assuming an older wrapper version is still valid.
+- Remove unreferenced container/docker-era constants from `foundry_sandbox/constants.py`. Keep `TIMEOUT_SBX_*` (in `sbx.py`) as the authoritative source.
+- Remove the `lib/python/**` ruff override and the `orchestration` pytest marker.
+- Grep once more for any other docker/compose term (`unified-proxy`, `GATEWAY_PORT`, `PROXY_SUBNET`, etc.) that leaked into `config.py`, `paths.py`, or `state.py`; delete orphans.
+- Cross-check `mypy --strict` and `ruff check` both still pass after removal.
 
 Exit criteria:
-- There is one primary code path for provisioning git safety into an sbx sandbox.
-- Callers cannot silently downgrade from protected to unprotected operation.
-- Running sandboxes whose template digest is stale are surfaced as requiring re-provisioning.
+- `git grep -n "DOCKER\|CONTAINER_\|UNIFIED_PROXY" foundry_sandbox/` returns only genuine sbx usage (if any) or nothing.
+- No pytest marker or ruff override references removed paths.
+- `./scripts/ci-local.sh` passes.
 
-### 3.4 Wire or Correct the GitHub API Safety Layer
+### 3.4 Complete the `sbx` CLI Wrapper Surface
 
 Current state:
-- The security model documents a GitHub API filter on port 8084.
-- The filter code exists, but the git-safety CLI start path appears to start only the git API server.
+- `foundry_sandbox/sbx.py` covers: lifecycle (create/run/stop/rm/ls/exists/is_running), exec (normal + streaming), secrets (set), policy (set-default/allow/deny network), templates (save/load/ls/rm), diagnose, version check, plugin-shim detection.
+- Gaps: `sbx_diagnose()` returns raw `CompletedProcess` (no JSON parsing), `sbx_create()` lacks `--cpus`/`--memory` parameters, no wrapper for `sbx ports publish/unpublish`.
+- Nothing in `commands/` currently needs ports/resource-limits — the gap is feature-completeness, not a bug.
 
 Required work:
-- Decide whether GitHub API filtering is required for this release.
-- If required:
-  - Start and supervise the GitHub API filter with git-safety.
-  - Ensure sandbox GitHub API traffic is routed through it.
-  - Add a live test proving `gh api` merge/update operations are blocked.
-- If deferred:
-  - Remove or qualify the security-model claim.
-  - Document the residual risk and unsupported commands.
+- Teach `sbx_diagnose()` to parse `sbx diagnose --json` output into a structured dict, with a `parse: bool` flag so existing callers that want raw text still work. Update `commands/diagnose.py` to display structured fields instead of piping raw output.
+- Add optional `cpus: str | None` and `memory: str | None` parameters to `sbx_create()` (accept either numeric strings or sbx's native format; let sbx error on invalid input).
+- Add `sbx_ports_publish(name, spec)` and `sbx_ports_unpublish(name, spec)` helpers. Do **not** add a `cast ports` command in this PR — expose via config/preset first, or defer until a command case materializes.
+- Add unit tests asserting the wrappers build the right `sbx ...` argv.
 
 Exit criteria:
-- The documented GitHub API protection is either enforced by runtime behavior or explicitly marked out of scope.
+- `cast diagnose` surfaces parsed sbx status alongside foundry git-safety status.
+- Resource-limit parameters flow from `sbx_create()` to the `sbx create` argv.
+- Ports helpers exist on `sbx.py` with unit-test coverage but need not be wired to the CLI.
 
-### 3.5 Fix HMAC Rotation Cache Invalidation
+### 3.5 Audit and Retire Compose-Era Test Modules
 
 Current state:
-- Watchdog rotation writes new secret files (`watchdog.py:123-127`).
-- The running git-safety server caches secrets in `SecretStore._cache` (`foundry_git_safety/auth.py:50-69`) with no mtime check; `revoke()` and `rotate()` exist but are not called from any out-of-process path.
+- `tests/redteam/modules/` contains 20 scripts; several are explicitly compose/proxy-shaped: `05-proxy-egress.sh`, `07-proxy-admin.sh`, `04-network-isolation.sh`, `14-network-bypass.sh`, `18-ip-encoding-bypass.sh`. Others (git-security, self-merge, workflow-push, credential-*) likely still have value against an sbx sandbox but have not been verified.
+- `tests/chaos/modules/01-sbx-daemon-kill.sh` and `02-git-safety-server-kill.sh` suggest partial sbx rewrite; `03-network-partition.sh` and `04-corrupted-reset.sh` need confirmation.
+- `tests/redteam/harness.sh` and `tests/redteam/runner.sh` may assume compose networking.
 
 Required work:
-- Add one of:
-  - An authenticated local admin endpoint or CLI command to rotate/revoke a sandbox secret and clear server cache.
-  - File mtime/version-aware secret reloading in `SecretStore`.
-  - A short TTL cache with atomic file reload semantics.
-- Update watchdog to use the chosen rotation mechanism.
-- Add an integration test that primes the cache, rotates the secret from a host process, and verifies the old HMAC is rejected.
-- Authenticate the admin path (if that's the chosen design) — the rotation mechanism itself must not become a new unauthenticated endpoint exposed on the same socket.
+- Per module, make a three-way decision: **port** (rewrite against sbx), **retire** (delete), or **skip** (keep for reference behind a marker that's not run in CI).
+- Suggested initial classification (subject to confirmation on read):
+  - Port: `01-credentials-env`, `02-credentials-files`, `08-credential-injection`, `09-git-security`, `11-github-api`, `13-credential-patterns`, `15-self-merge`, `17-workflow-push`, `19-merge-early-exit`.
+  - Retire: `03-dns-filtering`, `04-network-isolation`, `05-proxy-egress`, `06-direct-ip-egress`, `07-proxy-admin`, `14-network-bypass`, `18-ip-encoding-bypass` (these depend on the deleted proxy network stack).
+  - Defer / evaluate: `10-container-escape`, `12-tls-filesystem`, `16-readonly-fs`, `20-package-install`.
+- Update `tests/redteam-sandbox.sh` and `tests/redteam/harness.sh` to only launch modules in the current set; retire the obsolete ones; document what's covered and what isn't in `tests/redteam/README` (new file) or `tests/README.md`.
+- Do not add new security claims during this audit — this is scope reduction, not new coverage.
 
 Exit criteria:
-- Old HMAC secrets stop working after watchdog rotation without requiring a server restart.
-- The rotation mechanism is not itself spoofable from within a sandbox or from another local process.
+- Every remaining redteam/chaos module runs to completion against a live sbx sandbox.
+- `docs/security/security-model.md` accurately reflects what the reduced suite covers.
+- Deleted modules are noted in `CHANGELOG.md` so external users who ran them know they went away deliberately.
 
-### 3.6 Harden Per-Sandbox Proxy Authorization
+### 3.6 Close the Deferred Deep-Policy Live Gate
 
 Current state:
-- User-service proxy requests (`user_services_proxy.py:68-102`) inject host-env credentials into upstream calls with no caller authentication.
-- Deep-policy proxy (`deep_policy_proxy.py:67-73`) rate-limits by a caller-supplied `X-Sandbox-Id` header.
-- Unauthenticated requests currently collapse into a shared `"unknown"` bucket, silently degrading rate limiting for everyone.
+- `PLAN-CHECKLIST.md §3.8` accepted as risk: "GitHub API merge/update blocking is accepted risk — live testing requires a running deep-policy proxy which needs sbx networking."
+- The deep-policy sidecar lives in `foundry-git-safety` and is documented as the sole GitHub API protection after `github_filter.py` was removed (§3.4 resolution).
+- `tests/smoke/test_live_sbx.py` covers git-safety but not the deep-policy path.
 
 Required work:
-- Add per-sandbox authorization to user-service proxy requests.
-- Require HMAC or a scoped capability token before injecting host service credentials.
-- Make deep-policy identity derive from verified sandbox authentication instead of caller-supplied headers.
-- Decide explicit behavior for unauthenticated callers: reject with 401/403, or route to a dedicated penalty bucket — not a shared "unknown" entry.
-- Add tests proving one sandbox cannot use another sandbox's service capability.
+- Stand up the deep-policy sidecar inside the smoke-test sbx sandbox (or alongside it, depending on how `foundry-git-safety` wires it).
+- Add one live smoke test that attempts a blocked GitHub API call (e.g. `PUT /repos/:owner/:repo/pulls/:pr/merge`) from inside the sandbox and asserts the deep-policy sidecar returns the block response.
+- Mark the test with the existing `requires_sbx` marker.
+- Update `PLAN-CHECKLIST.md §3.8` to flip the remaining `[~]` item and remove the note.
 
 Exit criteria:
-- Host credentials are only injected for sandboxes authorized to use that service.
-- Spoofing `X-Sandbox-Id` does not bypass rate limits or policy.
-- Unauthenticated requests follow a documented, tested rejection path.
+- A protected GitHub API path is live-tested end-to-end, not just asserted in unit tests.
+- The accepted-risk line in the previous plan becomes a closed item.
 
-### 3.7 Align Installer and Release Metadata
+### 3.7 Plan the Post-0.20.x Migration Sunset
 
 Current state:
-- `install.sh` still validates Docker/tmux and touches `unified-proxy` paths.
-- The changelog declares 0.21.0 while package metadata still reports 0.20.15.
-- `foundry_sandbox/__init__.py:8` falls back to `"0.13.0"` — eight releases stale.
-- `pyproject.toml:33` pins `foundry-git-safety[server]>=0.1.0`, an unbounded range against an experimental internal API.
+- `foundry_sandbox/migration.py` (544 LOC), `commands/migrate.py` (383 LOC), plus `docs/migration/0.20-to-0.21.md` exist to help 0.20.x users land on 0.21.x.
+- No EOL date is declared. Until one is, this code is load-bearing.
 
 Required work:
-- Replace stale installer checks with sbx-specific validation.
-- Remove tmux and unified-proxy setup from the installer unless still required by live code.
-- Validate `sbx` availability and supported version during install.
-- Bump package version metadata to 0.21.0 or align the changelog with the actual release version.
-- Update any fallback `__version__` values to avoid stale reporting.
-- Pin `foundry-git-safety[server]` with a compatible-release operator (e.g. `~=0.1.0`) or an explicit upper bound so internal API changes during the experimental phase cannot silently ship with a 0.21.x release.
+- Pick a concrete EOL date or release for 0.20.x (e.g. "deleted in 0.23.0" or "deleted 2026-10-01, whichever first").
+- Write it into `docs/migration/0.20-to-0.21.md` and `CHANGELOG.md` as a prominent notice.
+- File a tracked issue / TODO for the actual deletion work: remove `foundry_sandbox/migration.py`, `commands/migrate.py`, the two `_LAZY_COMMANDS` entries at `cli.py:50-51`, the `test_migration*.py` files, and `docs/migration/0.20-to-0.21.md` itself.
+- This workstream **does not delete the code now**; it only sets the schedule.
 
 Exit criteria:
-- Fresh install checks the dependencies actually required by the sbx implementation.
-- Built artifacts and changelog agree on the release version.
-- `foundry-git-safety` dependency range is bounded.
-
-**Note:** This workstream is cheap and independent of the correctness fixes — can (and should) run in parallel with §3.1–§3.3.
-
-### 3.8 Add Live Release Gates
-
-Current state:
-- Unit tests cover many helper paths.
-- CI does not prove an installed wheel can create and operate a real sbx sandbox.
-- No test exercises `importlib.resources` (because it isn't used yet — see §3.1).
-
-Required work:
-- Add an installed-wheel smoke test:
-  - Build root wheel and git-safety wheel.
-  - Install them into a clean environment.
-  - Run `cast diagnose`.
-  - Create a sandbox.
-  - Verify wrapper injection and checksum.
-  - Run a basic git command through the wrapper.
-  - Prove blocked push/merge paths.
-  - Destroy the sandbox.
-- Add a negative wheel test that names each required asset explicitly — `git-wrapper-sbx.sh`, the template build helper, and `foundry_git_safety/default_config/*.yaml` — and asserts it resolves from the installed package.
-- Add a separate migration smoke test for the chosen migration contract.
-- Add shellcheck or equivalent coverage for the active sbx wrapper scripts.
-- Keep root-package and `foundry-git-safety` pytest invocations isolated.
-
-Exit criteria:
-- CI has a required or manually triggered gate that validates the real sbx runtime path.
-- Release sign-off does not rely only on unit tests.
-- Every runtime asset is named in at least one packaging assertion.
-
-### 3.9 Decide Tamper-Event Delivery Policy
-
-Current state:
-- `emit_wrapper_tamper_event` (`git_safety.py:497-524`) swallows all exceptions.
-- `/ready` is intentionally non-fatal for decision-log failures (Phase 8).
-- A broken log therefore silently drops tamper notifications in exactly the failure mode where observability matters most.
-
-Required work:
-- Decide the contract:
-  - Fatal emission: failure to record a tamper event aborts re-injection and surfaces a CLI/watchdog error.
-  - Buffered emission: in-memory ring buffer surfaced via `/metrics` or `cast diagnose` when the log is unavailable.
-  - Metric-only: increment a Prometheus counter for tamper events even when the log write fails.
-- Implement the chosen option and remove the bare `except Exception: pass`.
-- Add a test that writes to a read-only decision-log directory and asserts tamper events are still counted / surfaced through the chosen channel.
-
-Exit criteria:
-- Wrapper tamper events cannot disappear silently.
-- Operators can observe tamper activity even with a degraded decision log.
+- Users who still have 0.20.x metadata know when the migration path disappears.
+- The deletion is ticketed, not ambient debt.
 
 ---
 
 ## 4. Execution Order
 
-1. Align installer and release metadata (§3.7). Cheap, independent, unblocks clean wheel builds for everything downstream.
-2. Package runtime assets and fail closed (§3.1).
-3. Centralize git-safety provisioning (§3.3) — this is the refactor that makes §3.1's "fail closed" invariant enforceable everywhere and prevents §3.2 from re-introducing the same bug.
-4. Define and implement migration semantics (§3.2), reusing the §3.3 helper.
-5. Fix HMAC rotation cache invalidation (§3.5).
-6. Harden user-service and deep-policy proxy authorization (§3.6).
-7. Decide tamper-event delivery policy (§3.9).
-8. Wire or correct GitHub API filtering (§3.4). This is a scope decision that can be deferred without blocking correctness fixes upstream; resolving it late avoids speculative work if the filter is dropped from 0.21.0.
-9. Add live release gates and update docs to match final behavior (§3.8).
+1. **§3.1 (delete legacy artifacts)** and **§3.3 (prune constants/deps)** — do these together in one PR. They are pure removals with no behavior change; doing them first unblocks the rest and gives immediate signal from CI.
+2. **§3.2 (consolidate stubs)** — follow-up PR once §3.1's compose-file consumer is gone. Pick Option A or B; A is one line of CI change, B is a small but broader refactor.
+3. **§3.4 (sbx wrapper surface)** — small additive PR; can run in parallel with §3.2.
+4. **§3.5 (redteam/chaos audit)** — largest unknown; do after §3.1 so the deleted files don't muddy the analysis.
+5. **§3.6 (deep-policy live gate)** — do after §3.5 so the smoke harness is in known-good shape.
+6. **§3.7 (migration sunset scheduling)** — documentation-only, can be first or last; does not block anything.
 
-This order puts the §3.1 + §3.3 correctness foundation first because both classes of "claims git safety, isn't actually protected" bugs share a root cause. §3.7 runs in parallel at the start. The GitHub-filter scope call (§3.4) is intentionally late so it doesn't gate the correctness track.
+The first PR should delete files and fix CI. The rest can be sequenced or parallelized per team bandwidth.
 
 ---
 
 ## 5. Verification Gate
 
-Before calling this plan complete:
-
-- Root unit tests pass.
-- `foundry-git-safety` unit, security, and integration tests pass.
-- Built wheels contain or can locate all runtime assets (named explicitly in the packaging test).
-- `cast new` from an installed wheel provisions git safety and fails closed on provisioning errors.
-- `cast start` cannot silently start an unprotected sandbox that claims git safety is enabled, including when the local wrapper stub is missing.
-- Watchdog cannot skip integrity checks because the local wrapper stub is missing.
-- All four provisioning callers (`cast new`, `cast start` repair, watchdog, migration full-path if chosen) route through a single helper; `git_safety_enabled=True` is only written by that helper.
-- `cast migrate-to-sbx` behavior matches the documented migration contract, including handling of pre-existing 0.20.x worktrees.
-- Watchdog HMAC rotation invalidates old secrets in the running server.
-- The rotation mechanism itself is authenticated.
-- User-service and deep-policy proxy endpoints reject unauthenticated callers on a documented path; `X-Sandbox-Id` spoofing does not bypass rate limits.
-- Wrapper tamper events are delivered through a documented channel even when the decision log is unavailable.
-- GitHub API protection is either live-tested or removed from the release security claims.
-- Installer validates sbx-era dependencies.
-- Version metadata and changelog agree; `foundry-git-safety` dependency is version-bounded.
+- `./scripts/ci-local.sh` passes after every PR.
+- `./scripts/ci-local.sh --all` passes after §3.1–§3.3 land.
+- `tests/smoke/test_live_sbx.py` still passes against a local `sbx` installation.
+- After §3.6, the smoke suite includes a live-blocked GitHub API assertion.
+- No file deleted in §3.1 or §3.2 is referenced from any `.py`, `.sh`, `.yml`, or `.toml` file outside `CHANGELOG.md`, `docs/adr/`, and `sbx-analysis.md` (historical records).
+- `git grep -n "DOCKER_COMPOSE\|UNIFIED_PROXY\|TIMEOUT_DOCKER_" foundry_sandbox/` returns nothing.
+- `mypy --strict` and `ruff check` both pass.
