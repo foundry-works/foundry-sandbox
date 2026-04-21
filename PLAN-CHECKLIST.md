@@ -1,4 +1,4 @@
-# foundry-sandbox — Phase 9 Checklist: Documentation Alignment
+# foundry-sandbox - sbx Migration Release Readiness Checklist
 
 **Last updated:** 2026-04-21
 **Companion to:** `PLAN.md`
@@ -7,81 +7,118 @@ Legend: `[ ]` todo, `[x]` done, `[~]` partial / accepted risk
 
 ---
 
-## 2.1 Rewrite Root README.md
+## 3.1 Package Runtime Assets and Fail Closed
 
-- [x] Replace architecture diagram with sbx-based flow
-- [x] Update security layers table for sbx architecture
-- [x] Remove references to `--mount`, volume mounts, `--network`
-- [x] Update prerequisites: Docker sbx, remove tmux
-- [x] Update limitations section
-- [x] Update `pyproject.toml` description from "Docker-based" to "microVM-based"
-- [x] Update CLAUDE.md: remove `unified-proxy/`, update `stubs/` description
+- [ ] Choose canonical wrapper asset source
+- [ ] Replace repo-root wrapper lookup with installed-package-safe resource lookup
+- [ ] Replace repo-root template builder lookup with installed-package-safe resource lookup or remove dependency
+- [ ] Make `cast new` fail when wrapper injection fails
+- [ ] Make `cast new` fail when checksum generation fails
+- [ ] Make `cast start` fail when wrapper integrity cannot be verified or repaired
+- [ ] Only write `git_safety_enabled=True` after provisioning succeeds
+- [ ] Add wheel test proving runtime assets are present or resolvable
+- [ ] Add negative test proving missing assets fail closed
 
-## 2.2 Update docs/usage/workflows.md
+## 3.2 Define and Implement Real sbx Migration Semantics
 
-- [x] Remove "Using Custom Mounts" section
-- [x] Remove "Using File Copies" section
-- [x] Remove "Installing SSH-Based Plugins" section
-- [x] Remove "Network Isolation Workflow" section
-- [x] Remove "Advanced Plugin Configuration" section
-- [x] Update "Private Repositories" — remove SSH/mount references
-- [x] Update "Tips and Best Practices" — remove `cast prune`, `SANDBOX_DEBUG`, `SANDBOX_VERBOSE`
-- [x] Verify remaining sections use current commands/flags
+- [ ] Decide migration contract: full sandbox migration or metadata-only migration
+- [ ] Update `cast migrate-to-sbx` command output for chosen contract
+- [ ] Update migration docs for chosen contract
+- [ ] Prevent ready-state metadata for non-existent sbx sandboxes
+- [ ] If full migration: create sbx sandbox during migration
+- [ ] If full migration: preserve or attach workspace state
+- [ ] If full migration: provision wrapper, HMAC secrets, and git-safety registration
+- [ ] If metadata-only: mark migrated records as requiring recreation
+- [ ] Add migration smoke test for chosen behavior
 
-## 2.3 Add Missing Commands to docs/usage/commands.md
+## 3.3 Centralize sbx Git-Safety Provisioning
 
-- [x] Add `cast diagnose` documentation
-- [x] Add `cast watchdog` documentation
-- [x] Add `cast migrate-to-sbx` documentation
-- [x] Add `cast migrate-from-sbx` documentation
-- [x] Verify existing command docs accurate (no removed flags) — removed `--with-ide`/`--ide-only`/`--no-ide` from new and attach
+- [ ] Create shared provisioning function
+- [ ] Provision wrapper through shared function
+- [ ] Compute and store wrapper checksum through shared function
+- [ ] Register sandbox with git-safety through shared function
+- [ ] Create host HMAC secret through shared function
+- [ ] Create guest HMAC secret through shared function
+- [ ] Verify sandbox connectivity to git-safety through shared function
+- [ ] Use shared provisioning from `cast new`
+- [ ] Use shared provisioning from `cast start` repair path
+- [ ] Use shared provisioning from watchdog repair path
+- [ ] Use shared provisioning from migration path, if full migration is chosen
+- [ ] Return structured provisioning failures to CLI callers
 
-## 2.4 Update docs/README.md (Index)
+## 3.4 Wire or Correct GitHub API Safety Layer
 
-- [x] Add sbx-compatibility.md to main table
-- [x] Add migration guide to main table
-- [x] Add wrapper-integrity.md to security table
-- [x] Add audit-5.6.md to security table
-- [x] Add ADR entries 009–013
-- [x] Verify all links resolve
+- [ ] Decide whether GitHub API filtering is in scope for 0.21.0
+- [ ] If in scope: start GitHub API filter with git-safety service
+- [ ] If in scope: supervise GitHub API filter health
+- [ ] If in scope: route sandbox GitHub API traffic through the filter
+- [ ] If in scope: add live test for blocked PR merge/update GitHub API calls
+- [ ] If deferred: remove or qualify GitHub API filter claims in security docs
+- [ ] If deferred: document residual risk and unsupported commands
 
-## 2.5 Update docs/getting-started.md
+## 3.5 Fix HMAC Rotation Cache Invalidation
 
-- [x] Add link to sbx-compatibility.md in prerequisites
-- [x] Verify install steps are current
+- [ ] Choose cache invalidation design
+- [ ] Implement server-side cache invalidation or reload mechanism
+- [ ] Update watchdog to use the rotation mechanism
+- [ ] Add integration test that primes server cache
+- [ ] Add integration test that rotates secret from a host process
+- [ ] Add assertion that old HMAC is rejected after rotation
+- [ ] Add assertion that new HMAC is accepted after rotation
 
-## 2.6 Version CHANGELOG.md
+## 3.6 Harden Per-Sandbox Proxy Authorization
 
-- [x] Rename `[Unreleased]` to `[0.21.0] - 2026-04-21`
-- [x] Add Phase 8 entries (HMAC relocation, observability, CI)
-- [x] Add link entries for 0.16.0–0.20.15
-- [x] Fix `[Unreleased]` link to `v0.21.0...HEAD`
-- [x] Verify all version links resolve
+- [ ] Add per-sandbox authorization to user-service proxy requests
+- [ ] Require HMAC or scoped capability token before injecting host service credentials
+- [ ] Bind service permissions to sandbox metadata or registration state
+- [ ] Stop trusting caller-supplied `X-Sandbox-Id` for deep-policy identity
+- [ ] Add test proving unauthorized sandbox cannot use a service credential
+- [ ] Add test proving one sandbox cannot spoof another sandbox's identity
+- [ ] Add test proving rate limits use verified sandbox identity
 
-## 2.7 Update docs/development/contributing.md
+## 3.7 Align Installer and Release Metadata
 
-- [x] Add CI pipeline section (test.yml jobs, foundry-git-safety test tiers)
-- [x] Reference ci-local.sh
-- [x] Document pytest isolation rule
+- [ ] Remove stale tmux requirement from installer if no longer needed
+- [ ] Remove stale unified-proxy setup from installer
+- [ ] Replace generic Docker checks with sbx-era dependency checks
+- [ ] Validate `sbx` binary availability during install
+- [ ] Validate supported `sbx` version during install
+- [ ] Align package version with changelog release version
+- [ ] Update stale fallback `__version__` values
+- [ ] Rebuild wheel and confirm artifact version
+
+## 3.8 Add Live Release Gates
+
+- [ ] Build root wheel in CI smoke gate
+- [ ] Build `foundry-git-safety` wheel in CI smoke gate
+- [ ] Install wheels into clean environment
+- [ ] Run `cast diagnose`
+- [ ] Create a real sbx sandbox
+- [ ] Verify wrapper file exists in sandbox
+- [ ] Verify wrapper checksum matches metadata
+- [ ] Run basic git command through wrapper
+- [ ] Prove protected push path is blocked or shadowed as expected
+- [ ] Prove GitHub API merge/update path is blocked if filter is in scope
+- [ ] Destroy smoke-test sandbox
+- [ ] Add migration smoke test
+- [ ] Shellcheck active sbx wrapper scripts
+- [ ] Keep root-package and `foundry-git-safety` pytest invocations isolated
 
 ---
 
-## Verification Gate
+## Final Verification Gate
 
-- [x] `grep -r "unified-proxy\|Squid\|mitmproxy\|docker.compose\|--mount\|--network=\|--with-ssh\|cast prune\|sudo network-mode" docs/ README.md` → zero hits in user-facing docs (ADRs and migration guide are historical records)
-- [x] `grep -r "\.foundry/hmac-secret" docs/ stubs/ foundry_sandbox/` → zero hits
-- [x] All CLI commands documented in commands.md
-- [x] docs/README.md links to every doc file
-- [x] CHANGELOG.md has clean `[0.21.0]` section
-- [x] pyproject.toml description says "microVM-based"
-
----
-
-## Phase 8 Carry-Over
-
-- [ ] Verify CI passes on a test push
-
-## Pre-existing Issues (not from Phase 9)
-
-- [~] 2 chaos tests in foundry-git-safety expect 422 but get 400 (missing repo_root metadata) — test/code mismatch from earlier change
-- [x] 2 mypy errors in git_safety.py — fixed (dict type params + import-untyped)
+- [ ] Root unit tests pass
+- [ ] `foundry-git-safety` unit tests pass
+- [ ] `foundry-git-safety` security tests pass
+- [ ] `foundry-git-safety` integration tests pass
+- [ ] Built wheels contain or can locate all runtime assets
+- [ ] Installed-wheel `cast new` provisions git safety successfully
+- [ ] Installed-wheel `cast new` fails closed on provisioning errors
+- [ ] `cast start` cannot silently start an unprotected sandbox with protected metadata
+- [ ] `cast migrate-to-sbx` behavior matches documented contract
+- [ ] Watchdog rotation invalidates old HMAC secrets without server restart
+- [ ] GitHub API protection is live-tested or removed from security claims
+- [ ] Installer validates sbx-era dependencies
+- [ ] Package metadata and changelog agree on version
+- [ ] `git diff --check main HEAD` is clean
