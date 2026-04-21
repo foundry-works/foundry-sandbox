@@ -128,6 +128,16 @@ class TestWriteHmacSecretToSandbox:
         assert "mkdir" in cmd
         assert "hmac-secret" in cmd
 
+    @patch("foundry_sandbox.sbx.sbx_exec")
+    def test_writes_to_both_tmpfs_and_persistent(self, mock_exec):
+        mock_exec.return_value = _mock_completed()
+        write_hmac_secret_to_sandbox("test-sandbox", "my-secret")
+        call_args = mock_exec.call_args_list[0]
+        cmd = str(call_args)
+        # Both locations must be written in a single exec
+        assert "/run/foundry/hmac-secret" in cmd
+        assert "/var/lib/foundry/hmac-secret" in cmd
+
 
 class TestWriteHmacSecretForServer:
     def test_creates_file(self, tmp_path):
@@ -257,8 +267,8 @@ class TestInjectGitWrapper:
             workspace_dir="/workspace",
         )
 
-        # 3 calls: base64 git, base64 proxy-sign, base64 env (each combines write+chmod)
-        assert mock_exec.call_count == 3
+        # 4 calls: base64 git, base64 proxy-sign, base64 profile.d env, base64 persistent env
+        assert mock_exec.call_count == 4
 
     @patch("foundry_sandbox.sbx.sbx_exec")
     @patch("foundry_sandbox.git_safety._wrapper_script_path")
@@ -284,7 +294,7 @@ class TestInjectGitWrapper:
             workspace_dir="/custom/path",
         )
 
-        # The env script is the 3rd call (index 2), base64-encoded
+        # The profile.d env script is the 3rd call (index 2), base64-encoded
         env_call = mock_exec.call_args_list[2]
         env_cmd = str(env_call)
         assert "foundry-git-safety.sh" in env_cmd
@@ -295,6 +305,16 @@ class TestInjectGitWrapper:
         env_content = base64.b64decode(b64_part).decode()
         assert "WORKSPACE_DIR=/custom/path" in env_content
         assert 'GIT_HMAC_SECRET_FILE="/run/foundry/hmac-secret"' in env_content
+
+        # The persistent env file is the 4th call (index 3)
+        persistent_call = mock_exec.call_args_list[3]
+        persistent_cmd = str(persistent_call)
+        assert "git-safety.env" in persistent_cmd
+        cmd_str_p = persistent_call[0][1][2]
+        b64_part_p = cmd_str_p.split("echo '")[1].split("' | base64")[0]
+        persistent_content = base64.b64decode(b64_part_p).decode()
+        assert "WORKSPACE_DIR=/custom/path" in persistent_content
+        assert "SANDBOX_ID=sbx-1" in persistent_content
 
 
 class TestVerifyGitWrapper:

@@ -34,6 +34,21 @@ fi
 # ---------------------------------------------------------------------------
 
 REAL_GIT="/usr/bin/git"
+
+# Discover configuration from persistent env file when env vars are unset.
+# This handles sbx exec calls that run without a login shell (no profile.d sourcing).
+if [[ -f "/var/lib/foundry/git-safety.env" ]]; then
+    while IFS='=' read -r _key _val; do
+        case "$_key" in
+            SANDBOX_ID|WORKSPACE_DIR|GIT_API_HOST|GIT_API_PORT)
+                if [[ -z "${!_key:-}" ]]; then
+                    export "$_key=$_val"
+                fi
+                ;;
+        esac
+    done < /var/lib/foundry/git-safety.env
+fi
+
 GIT_API_HOST="${GIT_API_HOST:-host.docker.internal}"
 GIT_API_PORT="${GIT_API_PORT:-8083}"
 GIT_API_URL="http://${GIT_API_HOST}:${GIT_API_PORT}/git/exec"
@@ -44,10 +59,12 @@ WORKSPACE_DIR="${WORKSPACE_DIR:-}"
 HMAC_SECRET_FILE="${GIT_HMAC_SECRET_FILE:-}"
 PROXY_TIMEOUT=30
 
-# Discover HMAC secret if not set
+# Discover HMAC secret: prefer tmpfs, fall back to persistent disk
 if [[ -z "$HMAC_SECRET_FILE" ]]; then
     if [[ -f "/run/foundry/hmac-secret" ]]; then
         HMAC_SECRET_FILE="/run/foundry/hmac-secret"
+    elif [[ -f "/var/lib/foundry/hmac-secret" ]]; then
+        HMAC_SECRET_FILE="/var/lib/foundry/hmac-secret"
     fi
 fi
 
@@ -228,7 +245,7 @@ if [[ "$SANDBOX_ID" =~ [[:cntrl:]] ]]; then
 fi
 
 if [[ -z "$HMAC_SECRET_FILE" || ! -f "$HMAC_SECRET_FILE" ]]; then
-    echo "error: git wrapper: HMAC secret file not found (set GIT_HMAC_SECRET_FILE or check /run/foundry/hmac-secret)" >&2
+    echo "error: git wrapper: HMAC secret file not found (set GIT_HMAC_SECRET_FILE or check /run/foundry/hmac-secret or /var/lib/foundry/hmac-secret)" >&2
     exit 1
 fi
 

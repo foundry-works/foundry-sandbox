@@ -52,6 +52,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **All documentation** updated to reflect sbx architecture (architecture, security model, configuration, operations, observability, getting started, commands, ADRs)
 - **ADR-001, 002, 004, 005, 007** marked as superseded by ADR-008
 
+### Fixed
+
+- **`sbx exec` flag ordering** — `sbx exec` requires flags before the sandbox name; reordered argument passing to match CLI expectations
+- **`quiet=True` suppressing stdout** — Subprocess calls with `capture_output=True` and `quiet=True` swallowed stdout needed by callers; fixed to only suppress logging while preserving output
+- **Base64 encoding for wrapper injection** — Git wrapper injection now correctly base64-encodes the wrapper script before passing through `sbx exec` to avoid shell escaping issues
+- **CI smoke gate syntax error** — `scripts/ci-local.sh` had inline comments between `&&` continuations in a multi-line command, causing a shell syntax error; moved comments above the command block
+
 ### Removed
 
 - **`unified-proxy/` directory** — entire proxy infrastructure deleted (mitmproxy, Squid, API gateways, DNS filter, circuit breaker, rate limiter, container registry, credential injector, policy engine)

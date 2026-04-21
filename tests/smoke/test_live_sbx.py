@@ -58,7 +58,7 @@ def _setup_and_provision(sandbox, tmp_path, branch="main"):
 
     result = provision_git_safety(
         sandbox,
-        workspace_dir=str(repo_dir),
+        workspace_dir="/workspace",
         branch=branch,
         repo_spec=str(repo_dir),
     )
@@ -93,20 +93,46 @@ class TestLiveSbxSmoke:
     def test_git_command_through_wrapper(self, sandbox, tmp_path):
         """Run basic git command through the wrapper proxy.
 
-        Requires the HMAC secret to persist in /run/foundry across exec calls,
-        which only works with a long-running agent process (e.g. claude).
-        Skipped for shell agent since the sandbox restarts between exec calls.
+        The HMAC secret and config are persisted to /var/lib/foundry/ which
+        survives VM restarts between sbx exec calls.
         """
-        pytest.skip("Shell agent sandbox restarts between exec calls, losing HMAC secret")
+        repo_dir, result = _setup_and_provision(sandbox, tmp_path)
+        assert result.success, f"Provisioning failed: {result.error}"
+
+        # Run a simple read-only git command through the wrapper
+        status = sbx_exec(
+            sandbox,
+            ["git", "status", "--porcelain"],
+        )
+        assert status.returncode == 0, (
+            f"git status failed: stdout={status.stdout} stderr={status.stderr}"
+        )
+
+        # Cleanup
+        sbx_stop(sandbox)
+        sbx_rm(sandbox)
 
     def test_protected_push_blocked(self, sandbox, tmp_path):
         """Protected push path is blocked by git-safety.
 
-        Requires the HMAC secret to persist in /run/foundry across exec calls,
-        which only works with a long-running agent process (e.g. claude).
-        Skipped for shell agent since the sandbox restarts between exec calls.
+        The HMAC secret and config are persisted to /var/lib/foundry/ which
+        survives VM restarts between sbx exec calls.
         """
-        pytest.skip("Shell agent sandbox restarts between exec calls, losing HMAC secret")
+        repo_dir, result = _setup_and_provision(sandbox, tmp_path, branch="main")
+        assert result.success, f"Provisioning failed: {result.error}"
+
+        # Attempt to push to the protected 'main' branch — should be blocked
+        push_result = sbx_exec(
+            sandbox,
+            ["git", "push", "origin", "main"],
+        )
+        assert push_result.returncode != 0, (
+            "Push to protected branch should have been blocked but succeeded"
+        )
+
+        # Cleanup
+        sbx_stop(sandbox)
+        sbx_rm(sandbox)
 
     def test_destroy_sandbox(self, sandbox, tmp_path):
         """Sandbox is fully destroyed and no longer listed."""

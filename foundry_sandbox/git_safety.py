@@ -104,21 +104,30 @@ def write_hmac_secret_to_sandbox(
 ) -> Path:
     """Write an HMAC secret file for the wrapper inside the sandbox.
 
-    The secret is written to /run/foundry/hmac-secret — a tmpfs location
-    outside any VCS tree.  The wrapper script reads it from there.
+    The secret is written to two locations:
+      /run/foundry/hmac-secret     — tmpfs, for live sessions
+      /var/lib/foundry/hmac-secret — persistent disk, survives VM restarts
+
+    The wrapper discovers the persistent copy when the tmpfs copy is absent
+    (e.g. after a sandbox restart between sbx exec calls).
 
     Args:
         sandbox_name: Sandbox name (used only for logging context).
         secret: HMAC secret value.
 
     Returns:
-        Path to the written secret file (container-absolute).
+        Path to the primary (tmpfs) secret file (container-absolute).
     """
     from foundry_sandbox.sbx import sbx_exec
 
     sbx_exec(
         sandbox_name,
-        ["sh", "-c", f"mkdir -p /run/foundry && printf '%s' '{secret}' > /run/foundry/hmac-secret && chmod 600 /run/foundry/hmac-secret"],
+        ["sh", "-c",
+         f"mkdir -p /run/foundry /var/lib/foundry "
+         f"&& printf '%s' '{secret}' > /run/foundry/hmac-secret "
+         f"&& chmod 600 /run/foundry/hmac-secret "
+         f"&& printf '%s' '{secret}' > /var/lib/foundry/hmac-secret "
+         f"&& chmod 600 /var/lib/foundry/hmac-secret"],
         user="root",
         quiet=True,
     )
@@ -323,7 +332,7 @@ def inject_git_wrapper(
         quiet=True,
     )
 
-    # Write environment configuration to a profile script
+    # Write environment configuration to a profile script (login shells)
     env_script = (
         f"export SANDBOX_ID={sandbox_id}\n"
         f"export WORKSPACE_DIR={workspace_dir}\n"
@@ -335,6 +344,22 @@ def inject_git_wrapper(
     sbx_exec(
         sandbox_name,
         ["sh", "-c", f"echo '{env_b64}' | base64 -d > /etc/profile.d/foundry-git-safety.sh && chmod 644 /etc/profile.d/foundry-git-safety.sh"],
+        user="root",
+        quiet=True,
+    )
+
+    # Write a plain env file (no export) for the wrapper to source directly.
+    # This persists across VM restarts and does not require a login shell.
+    plain_env = (
+        f"SANDBOX_ID={sandbox_id}\n"
+        f"WORKSPACE_DIR={workspace_dir}\n"
+        f"GIT_API_HOST={git_api_host}\n"
+        f"GIT_API_PORT={git_api_port}\n"
+    )
+    env_plain_b64 = base64.b64encode(plain_env.encode()).decode()
+    sbx_exec(
+        sandbox_name,
+        ["sh", "-c", f"mkdir -p /var/lib/foundry && echo '{env_plain_b64}' | base64 -d > /var/lib/foundry/git-safety.env && chmod 644 /var/lib/foundry/git-safety.env"],
         user="root",
         quiet=True,
     )

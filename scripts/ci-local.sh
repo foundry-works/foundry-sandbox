@@ -146,7 +146,7 @@ if command -v python3 &>/dev/null; then
     local venv_dir="$tmpdir/smoke-venv"
     local wheels_dir="$tmpdir/wheels"
     mkdir -p "$wheels_dir"
-    # Build both wheels
+    # Build both wheels, install, and run packaging assertions
     python3 -m build --outdir "$wheels_dir" . \
     && python3 -m build --outdir "$wheels_dir" foundry-git-safety/ \
     && python3 -m venv "$venv_dir" \
@@ -154,13 +154,9 @@ if command -v python3 &>/dev/null; then
     && pip install -q "$wheels_dir"/foundry_git_safety-*.whl \
     && pip install -q "$wheels_dir"/foundry_sandbox-*.whl \
     && pip install -q pytest \
-    # Run root packaging assertions
     && pytest tests/unit/test_packaging.py -q --tb=short \
-    # Run git-safety packaging assertions
     && (cd foundry-git-safety && pytest tests/unit/test_packaging.py -q --tb=short) \
-    # Run cast diagnose (graceful without sbx)
     && python3 -c "import subprocess,json; r=subprocess.run(['cast','diagnose','--json'],capture_output=True,text=True); d=json.loads(r.stdout); assert 'versions' in d" \
-    # Run migration smoke test
     && pytest tests/smoke/test_migration_smoke.py -q --tb=short -m slow \
     ; rm -rf "$tmpdir"
   }
