@@ -1,5 +1,5 @@
 #!/bin/bash
-# Module: 11-github-api
+# Module: 06-github-api
 # Description: GitHub API deep policy, policy bypass, and service isolation (sbx-compatible)
 
 run_tests() {

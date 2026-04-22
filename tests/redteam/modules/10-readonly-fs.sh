@@ -1,5 +1,5 @@
 #!/bin/bash
-# Module: 16-readonly-fs
+# Module: 10-readonly-fs
 # Description: Read-only filesystem verification (sbx microVM)
 
 run_tests() {

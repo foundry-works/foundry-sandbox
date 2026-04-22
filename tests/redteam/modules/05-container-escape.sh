@@ -1,5 +1,5 @@
 #!/bin/bash
-# Module: 10-container-escape
+# Module: 05-container-escape
 # Description: VM boundary, lateral movement prevention, and process/mount inspection
 
 run_tests() {

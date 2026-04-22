@@ -1,5 +1,5 @@
 #!/bin/bash
-# Module: 19-merge-early-exit
+# Module: 12-merge-early-exit
 # Description: Early-exit merge blocking validation
 # Tests that merge operations are blocked at the earliest possible point
 # in the policy engine, before identity verification or domain matching.

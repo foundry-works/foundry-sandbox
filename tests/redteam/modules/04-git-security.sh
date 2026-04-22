@@ -1,5 +1,5 @@
 #!/bin/bash
-# Module: 09-git-security
+# Module: 04-git-security
 # Description: Git security, hooks, shadow isolation, and marketplace access (sbx-compatible)
 
 run_tests() {

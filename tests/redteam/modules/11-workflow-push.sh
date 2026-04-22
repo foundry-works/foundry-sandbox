@@ -1,5 +1,5 @@
 #!/bin/bash
-# Module: 17-workflow-push
+# Module: 11-workflow-push
 # Description: Workflow push blocking verification
 
 run_tests() {

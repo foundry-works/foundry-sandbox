@@ -1,5 +1,5 @@
 #!/bin/bash
-# Module: 12-tls-filesystem
+# Module: 07-tls-filesystem
 # Description: Filesystem isolation and capability verification (sbx microVM)
 
 run_tests() {

@@ -1,5 +1,5 @@
 #!/bin/bash
-# Module: 08-credential-injection
+# Module: 03-credential-injection
 # Description: Verify sbx-native credential injection (proxy-level, not in-VM)
 
 run_tests() {

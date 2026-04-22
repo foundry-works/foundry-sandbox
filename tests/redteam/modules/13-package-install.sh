@@ -1,5 +1,5 @@
 #!/bin/bash
-# Module: 20-package-install
+# Module: 13-package-install
 # Description: Package installation (pip and npm) in credential isolation mode
 
 run_tests() {

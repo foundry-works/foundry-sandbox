@@ -1,5 +1,5 @@
 #!/bin/bash
-# Module: 13-credential-patterns
+# Module: 08-credential-patterns
 # Description: Additional credential pattern scanning
 
 run_tests() {

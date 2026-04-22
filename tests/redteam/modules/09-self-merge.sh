@@ -1,5 +1,5 @@
 #!/bin/bash
-# Module: 15-self-merge
+# Module: 09-self-merge
 # Description: Self-merge prevention controls
 
 run_tests() {
