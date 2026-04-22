@@ -11,12 +11,8 @@ import sys
 
 import click
 
-from foundry_sandbox.commands._helpers import (
-    auto_detect_sandbox as _auto_detect_sandbox,
-    fzf_select_sandbox as _fzf_select_sandbox_shared,
-)
+from foundry_sandbox.commands._helpers import resolve_sandbox_name
 from foundry_sandbox.sbx import sbx_check_available, sbx_is_running, sbx_secret_set
-from foundry_sandbox.state import load_last_attach
 from foundry_sandbox.utils import log_error, log_info
 from foundry_sandbox.validate import validate_existing_sandbox_name
 
@@ -131,23 +127,7 @@ def refresh_creds(name: str | None, last: bool, all_sandboxes: bool) -> None:
         return
 
     # Handle --last flag
-    if last:
-        name = load_last_attach()
-        if not name:
-            log_error("No last attached sandbox found.")
-            sys.exit(1)
-        click.echo(f"Refreshing credentials for: {name}")
-
-    # Auto-detect from current directory
-    if not name:
-        name = _auto_detect_sandbox()
-
-    # fzf selection fallback
-    if not name:
-        name = _fzf_select_sandbox_shared()
-        if not name:
-            click.echo("Usage: cast refresh-credentials <sandbox-name>")
-            sys.exit(1)
+    name = resolve_sandbox_name(name, use_last=last)
 
     click.echo(f"[{name}]")
     if not _refresh_one(name):

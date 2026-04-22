@@ -20,6 +20,7 @@ from foundry_sandbox.git_safety import (
 )
 from foundry_sandbox.paths import ensure_dir
 from foundry_sandbox.sbx import (
+    install_pip_requirements_sbx,
     sbx_check_available,
     sbx_create,
     sbx_exec,
@@ -35,14 +36,6 @@ from foundry_sandbox.paths import strip_github_url
 
 class SetupError(Exception):
     """Raised when sandbox setup fails."""
-
-
-def _install_pip_requirements_sbx(name: str, requirements: str) -> None:
-    """Install pip requirements inside an sbx sandbox."""
-    try:
-        sbx_exec(name, ["pip", "install", "-r", requirements])
-    except Exception as exc:
-        log_warn(f"Failed to install pip requirements: {exc}")
 
 
 def new_sbx_setup(
@@ -74,7 +67,7 @@ def new_sbx_setup(
     7. Write metadata
 
     Returns:
-        The workspace_path (host-side path to the sbx-managed worktree).
+        The host_worktree_path (host-side path to the sbx-managed worktree).
     """
     # ------------------------------------------------------------------
     # 1. Check sbx
@@ -118,15 +111,15 @@ def new_sbx_setup(
     # as ground truth and fall back to the formula only when parsing fails.
     info = sbx_get_workspace_info(result.stdout or "")
     if info["worktree"]:
-        workspace_path = info["worktree"]
+        host_worktree_path = info["worktree"]
         expected = sbx_worktree_path(repo_root, name, branch)
-        if workspace_path != expected:
+        if host_worktree_path != expected:
             log_warn(
                 f"sbx worktree path differs from deterministic formula: "
-                f"{workspace_path} vs {expected} (sbx may have truncated the name)"
+                f"{host_worktree_path} vs {expected} (sbx may have truncated the name)"
             )
     else:
-        workspace_path = sbx_worktree_path(repo_root, name, branch)
+        host_worktree_path = sbx_worktree_path(repo_root, name, branch)
 
     # ------------------------------------------------------------------
     # 3. Start git safety server if needed (fail closed)
@@ -171,7 +164,7 @@ def new_sbx_setup(
         enable_zai=with_zai,
         copies=copies,
         template=use_template or "",
-        workspace_path=workspace_path,
+        host_worktree_path=host_worktree_path,
     )
 
     # ------------------------------------------------------------------
@@ -187,7 +180,7 @@ def new_sbx_setup(
         repo_spec=repo_spec,
         from_branch=from_branch,
         allow_pr=allow_pr,
-        repo_root=workspace_path,
+        repo_root=host_worktree_path,
     )
     if not prov_result.success:
         raise SetupError(
@@ -245,7 +238,7 @@ def new_sbx_setup(
 
     if pip_requirements:
         log_section("Dependencies")
-        _install_pip_requirements_sbx(name, pip_requirements)
+        install_pip_requirements_sbx(name, pip_requirements)
 
     # ------------------------------------------------------------------
     # 7. Final metadata patch (user services)
@@ -254,7 +247,7 @@ def new_sbx_setup(
         from foundry_sandbox.state import patch_sandbox_metadata
         patch_sandbox_metadata(name, user_services=user_service_overrides)
 
-    return workspace_path
+    return host_worktree_path
 
 
 def rollback_new_sbx(

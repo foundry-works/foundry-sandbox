@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **`install_pip_requirements_sbx` deduplicated** — moved from per-command copies in `start.py` and `new_sbx.py` to a single canonical function in `sbx.py`
+- **Shared `resolve_sandbox_name()` helper** — consolidated per-command sandbox name resolution logic (attach, git-mode, refresh-credentials, preset) into `commands/_helpers.py`
+- **Metadata field rename: `workspace_path` → `host_worktree_path`** — the on-disk JSON key is now `host_worktree_path`; loading still accepts the legacy `workspace_path` key for backward compatibility (compat shim drops in a future release)
+
 ### Removed
 
 - **0.20.x migration path** — `cast migrate-to-sbx` and `cast migrate-from-sbx` are now unknown commands. `foundry_sandbox/commands/migrate.py`, `foundry_sandbox/migration.py`, and all migration tests have been deleted. Users on 0.20.x must downgrade to an older release to migrate before upgrading. `docs/migration/0.20-to-0.21.md` has been removed; the migration guide is available in the 0.22.x release branch.

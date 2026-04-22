@@ -25,7 +25,7 @@ class TestNewSbxSetup:
     ):
         mock_create.return_value = MagicMock(returncode=0, stdout="")
         repo_root = str(tmp_path / "repo")
-        workspace_path = new_sbx_setup(
+        host_worktree_path = new_sbx_setup(
             repo_url="https://github.com/org/repo",
             repo_root=repo_root,
             branch="feature-x",
@@ -46,7 +46,7 @@ class TestNewSbxSetup:
         assert call_args[0][1] == "claude"
         assert call_args[0][2] == repo_root
         assert call_args[1]["branch"] == "feature-x"
-        assert workspace_path == f"{repo_root}/.sbx/test-sandbox-worktrees/feature-x"
+        assert host_worktree_path == f"{repo_root}/.sbx/test-sandbox-worktrees/feature-x"
         # Shared helper was called
         mock_provision.assert_called_once()
         mock_metadata.assert_called_once()
@@ -82,7 +82,7 @@ class TestNewSbxSetup:
     @patch("foundry_sandbox.commands.new_sbx.ensure_foundry_template", return_value=True)
     @patch("foundry_sandbox.commands.new_sbx.sbx_create")
     @patch("foundry_sandbox.commands.new_sbx.sbx_check_available")
-    def test_workspace_path_stored_in_metadata(
+    def test_host_worktree_path_stored_in_metadata(
         self, mock_check, mock_create, mock_ensure,
         mock_gs_running, mock_provision, mock_metadata, tmp_path,
     ):
@@ -105,7 +105,7 @@ class TestNewSbxSetup:
         )
         mock_metadata.assert_called_once()
         call_kwargs = mock_metadata.call_args[1]
-        assert call_kwargs["workspace_path"] == f"{repo_root}/.sbx/test-sandbox-worktrees/feature-x"
+        assert call_kwargs["host_worktree_path"] == f"{repo_root}/.sbx/test-sandbox-worktrees/feature-x"
 
     @patch("foundry_sandbox.commands.new_sbx.write_sandbox_metadata")
     @patch("foundry_sandbox.commands.new_sbx.provision_git_safety", return_value=ProvisioningResult(success=True, wrapper_checksum="abc123"))
@@ -113,7 +113,7 @@ class TestNewSbxSetup:
     @patch("foundry_sandbox.commands.new_sbx.ensure_foundry_template", return_value=True)
     @patch("foundry_sandbox.commands.new_sbx.sbx_create")
     @patch("foundry_sandbox.commands.new_sbx.sbx_check_available")
-    def test_provision_git_safety_uses_workspace_path(
+    def test_provision_git_safety_uses_host_worktree_path(
         self, mock_check, mock_create, mock_ensure,
         mock_gs_running, mock_provision, mock_metadata, tmp_path,
     ):

@@ -20,6 +20,7 @@ from foundry_sandbox.state import (
     show_cast_preset,
 )
 from foundry_sandbox.sbx import sbx_is_running, sbx_sandbox_exists, sbx_template_rm, sbx_template_save
+from foundry_sandbox.commands._helpers import resolve_sandbox_name
 from foundry_sandbox.utils import log_error, log_warn
 
 
@@ -100,12 +101,7 @@ def save(name: str, sandbox_name: str | None) -> None:
     _validate_preset_name(name)
 
     # Resolve sandbox name
-    if sandbox_name is None:
-        from foundry_sandbox.commands._helpers import auto_detect_sandbox
-        sandbox_name = auto_detect_sandbox()
-        if sandbox_name is None:
-            log_error("Cannot determine sandbox name. Use --sandbox <name> or run from a worktree directory.")
-            sys.exit(1)
+    sandbox_name = resolve_sandbox_name(sandbox_name, allow_fzf=False)
 
     # Validate sandbox exists and is running
     if not sbx_sandbox_exists(sandbox_name):

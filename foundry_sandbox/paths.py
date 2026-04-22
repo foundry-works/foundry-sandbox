@@ -206,12 +206,12 @@ def derive_sandbox_paths(name: str) -> SandboxPaths:
     )
 
 
-def resolve_workspace_path(name: str) -> Path:
+def resolve_host_worktree_path(name: str) -> Path:
     """Resolve the host-side workspace path for a sandbox.
 
-    For new-layout sandboxes (sbx-managed worktrees), reads ``workspace_path``
-    from metadata. Falls back to the legacy ``path_worktree(name)`` formula
-    for pre-migration sandboxes.
+    For new-layout sandboxes (sbx-managed worktrees), reads
+    ``host_worktree_path`` from metadata. Falls back to the legacy
+    ``path_worktree(name)`` formula for pre-migration sandboxes.
 
     Args:
         name: Sandbox name.
@@ -223,8 +223,8 @@ def resolve_workspace_path(name: str) -> Path:
 
     _assert_safe_path_component(name)
     metadata = load_sandbox_metadata(name)
-    if metadata and metadata.get("workspace_path"):
-        return Path(metadata["workspace_path"])
+    if metadata and metadata.get("host_worktree_path"):
+        return Path(metadata["host_worktree_path"])
     return path_worktree(name)
 
 

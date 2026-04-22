@@ -6,7 +6,7 @@ from unittest.mock import MagicMock, patch
 
 from click.testing import CliRunner
 
-from foundry_sandbox.commands.attach import attach, _resolve_sandbox_name
+from foundry_sandbox.commands.attach import attach
 
 
 class TestAttachCommand:
@@ -15,8 +15,8 @@ class TestAttachCommand:
     @patch("foundry_sandbox.commands.attach.sbx_exec_streaming")
     @patch("foundry_sandbox.commands.attach.load_sandbox_metadata")
     @patch("foundry_sandbox.commands.attach.save_last_attach")
-    @patch("foundry_sandbox.commands.attach.resolve_workspace_path")
-    @patch("foundry_sandbox.commands.attach.validate_existing_sandbox_name")
+    @patch("foundry_sandbox.commands.attach.resolve_host_worktree_path")
+    @patch("foundry_sandbox.commands._helpers.validate_existing_sandbox_name")
     def test_attach_running(
         self, mock_validate, mock_resolve, mock_save, mock_meta,
         mock_streaming, mock_running, mock_check,
@@ -43,8 +43,8 @@ class TestAttachCommand:
     @patch("foundry_sandbox.commands.attach.sbx_exec_streaming")
     @patch("foundry_sandbox.commands.attach.load_sandbox_metadata")
     @patch("foundry_sandbox.commands.attach.save_last_attach")
-    @patch("foundry_sandbox.commands.attach.resolve_workspace_path")
-    @patch("foundry_sandbox.commands.attach.validate_existing_sandbox_name")
+    @patch("foundry_sandbox.commands.attach.resolve_host_worktree_path")
+    @patch("foundry_sandbox.commands._helpers.validate_existing_sandbox_name")
     def test_attach_with_working_dir(
         self, mock_validate, mock_resolve, mock_save, mock_meta,
         mock_streaming, mock_running, mock_check,
@@ -75,8 +75,8 @@ class TestAttachCommand:
     @patch("foundry_sandbox.commands.attach.sbx_exec_streaming")
     @patch("foundry_sandbox.commands.attach.load_sandbox_metadata")
     @patch("foundry_sandbox.commands.attach.save_last_attach")
-    @patch("foundry_sandbox.commands.attach.resolve_workspace_path")
-    @patch("foundry_sandbox.commands.attach.validate_existing_sandbox_name")
+    @patch("foundry_sandbox.commands.attach.resolve_host_worktree_path")
+    @patch("foundry_sandbox.commands._helpers.validate_existing_sandbox_name")
     def test_attach_auto_starts(
         self, mock_validate, mock_resolve, mock_save, mock_meta,
         mock_streaming, mock_running, mock_check, mock_start,
@@ -96,8 +96,8 @@ class TestAttachCommand:
         mock_start.assert_called_once_with("my-sandbox")
 
     @patch("foundry_sandbox.commands.attach.sbx_check_available")
-    @patch("foundry_sandbox.commands.attach.resolve_workspace_path")
-    @patch("foundry_sandbox.commands.attach.validate_existing_sandbox_name")
+    @patch("foundry_sandbox.commands.attach.resolve_host_worktree_path")
+    @patch("foundry_sandbox.commands._helpers.validate_existing_sandbox_name")
     def test_attach_not_found(
         self, mock_validate, mock_resolve, mock_check,
     ):
@@ -110,19 +110,3 @@ class TestAttachCommand:
         result = runner.invoke(attach, ["missing-sandbox"])
         assert result.exit_code == 1
         assert "not found" in result.output
-
-
-class TestResolveSandboxName:
-    @patch("foundry_sandbox.commands.attach.validate_existing_sandbox_name")
-    def test_explicit_name(self, mock_validate):
-        mock_validate.return_value = (True, "")
-        result = _resolve_sandbox_name("my-sandbox", False)
-        assert result == "my-sandbox"
-
-    @patch("foundry_sandbox.commands.attach.validate_existing_sandbox_name")
-    @patch("foundry_sandbox.commands.attach.load_last_attach")
-    def test_last_flag(self, mock_last, mock_validate):
-        mock_last.return_value = "previous-sandbox"
-        mock_validate.return_value = (True, "")
-        result = _resolve_sandbox_name(None, True)
-        assert result == "previous-sandbox"

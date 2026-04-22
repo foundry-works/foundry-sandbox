@@ -1,15 +1,18 @@
 """Shared helper functions for sandbox commands.
 
-UI helpers (auto-detect, fzf select, list) live here.
+UI helpers (auto-detect, fzf select, list, resolve) live here.
 """
 from __future__ import annotations
 
 import shutil
 import subprocess
+import sys
 from pathlib import Path
 
+import click
+
 from foundry_sandbox.constants import get_claude_configs_dir, get_worktrees_dir
-from foundry_sandbox.utils import log_debug
+from foundry_sandbox.utils import log_debug, log_error
 from foundry_sandbox.validate import validate_existing_sandbox_name
 
 
@@ -21,7 +24,7 @@ from foundry_sandbox.validate import validate_existing_sandbox_name
 def auto_detect_sandbox() -> str | None:
     """Auto-detect sandbox name from current working directory.
 
-    For new-layout sandboxes, matches cwd against the ``workspace_path``
+    For new-layout sandboxes, matches cwd against the ``host_worktree_path``
     stored in each sandbox's metadata. For legacy sandboxes, matches
     against the old ``~/.sandboxes/worktrees/<name>/`` directory.
 
@@ -33,12 +36,12 @@ def auto_detect_sandbox() -> str | None:
     except OSError:
         return None
 
-    # Check new-layout sandboxes via metadata workspace_path
+    # Check new-layout sandboxes via metadata host_worktree_path
     from foundry_sandbox.state import list_sandboxes
 
     try:
         for sb in list_sandboxes():
-            wp = sb.get("workspace_path", "")
+            wp = sb.get("host_worktree_path", "")
             if wp:
                 try:
                     cwd.relative_to(Path(wp).resolve())
@@ -118,3 +121,43 @@ def list_sandbox_names() -> list[str]:
         )
     except OSError:
         return []
+
+
+def resolve_sandbox_name(
+    name: str | None,
+    *,
+    use_last: bool = False,
+    allow_fzf: bool = True,
+) -> str:
+    """Resolve sandbox name via --last, auto-detect, fzf, then validate."""
+    if use_last:
+        from foundry_sandbox.state import load_last_attach
+
+        name = load_last_attach()
+        if not name:
+            log_error("No previous sandbox found.")
+            sys.exit(1)
+
+    if not name:
+        name = auto_detect_sandbox()
+        if name:
+            click.echo(f"Auto-detected sandbox: {name}")
+
+    if not name and allow_fzf:
+        name = fzf_select_sandbox()
+
+    if not name:
+        click.echo("Usage: cast <command> <sandbox-name>")
+        names = list_sandbox_names()
+        if names:
+            click.echo("Available sandboxes:")
+            for n in names:
+                click.echo(f"  {n}")
+        sys.exit(1)
+
+    valid, err = validate_existing_sandbox_name(name)
+    if not valid:
+        log_error(err)
+        sys.exit(1)
+
+    return name

@@ -11,29 +11,16 @@ import sys
 
 import click
 
-from foundry_sandbox.commands._helpers import auto_detect_sandbox as _auto_detect_sandbox, fzf_select_sandbox as _fzf_select_sandbox_shared
-from foundry_sandbox.paths import resolve_workspace_path
+from foundry_sandbox.commands._helpers import resolve_sandbox_name
+from foundry_sandbox.paths import resolve_host_worktree_path
 from foundry_sandbox.sbx import sbx_check_available, sbx_exec_streaming, sbx_is_running
-from foundry_sandbox.state import load_last_attach, load_sandbox_metadata, save_last_attach
+from foundry_sandbox.state import load_sandbox_metadata, save_last_attach
 from foundry_sandbox.utils import log_error
-from foundry_sandbox.validate import validate_existing_sandbox_name
 
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
-
-
-def _list_sandboxes() -> None:
-    """Display available sandboxes."""
-    from foundry_sandbox.commands.list_cmd import list_cmd
-    ctx = click.Context(list_cmd, info_name="list")
-    ctx.invoke(list_cmd)
-
-
-def _fzf_select_sandbox() -> str | None:
-    """Interactively select a sandbox using fzf."""
-    return _fzf_select_sandbox_shared()
 
 
 def _start_sandbox(name: str) -> None:
@@ -42,36 +29,6 @@ def _start_sandbox(name: str) -> None:
     from foundry_sandbox.commands.start import start as start_cmd
     ctx = click.Context(start_cmd, info_name="start")
     ctx.invoke(start_cmd, name=name)
-
-
-def _resolve_sandbox_name(name: str | None, use_last: bool) -> str:
-    """Resolve sandbox name from --last flag, auto-detect, or fzf selection."""
-    if use_last:
-        name = load_last_attach()
-        if not name:
-            log_error("No previous sandbox found. Run 'cast attach <name>' first.")
-            sys.exit(1)
-        click.echo(f"Reattaching to: {name}")
-
-    if not name:
-        name = _auto_detect_sandbox()
-        if name:
-            click.echo(f"Auto-detected sandbox: {name}")
-
-    if not name:
-        name = _fzf_select_sandbox()
-        if not name:
-            click.echo("Usage: cast attach <sandbox-name>")
-            click.echo("")
-            _list_sandboxes()
-            sys.exit(1)
-
-    valid_name, name_error = validate_existing_sandbox_name(name)
-    if not valid_name:
-        log_error(name_error)
-        sys.exit(1)
-
-    return name
 
 
 def _handle_ide_options(
@@ -163,17 +120,16 @@ def attach(
     # ------------------------------------------------------------------
     # 1. Resolve sandbox name
     # ------------------------------------------------------------------
-    name = _resolve_sandbox_name(name, use_last)
+    name = resolve_sandbox_name(name, use_last=use_last)
 
     # ------------------------------------------------------------------
     # 2. Check sandbox exists
     # ------------------------------------------------------------------
     sbx_check_available()
-    worktree_path = resolve_workspace_path(name)
+    worktree_path = resolve_host_worktree_path(name)
 
     if not worktree_path.is_dir():
         log_error(f"Sandbox '{name}' not found")
-        _list_sandboxes()
         sys.exit(1)
 
     # ------------------------------------------------------------------

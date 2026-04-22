@@ -13,48 +13,12 @@ from pathlib import Path
 import click
 
 from foundry_sandbox.atomic_io import file_lock
-from foundry_sandbox.commands._helpers import (
-    auto_detect_sandbox as _auto_detect_sandbox,
-    list_sandbox_names as _list_sandbox_names_shared,
-)
+from foundry_sandbox.commands._helpers import resolve_sandbox_name
 from foundry_sandbox.constants import TIMEOUT_GIT_QUERY, get_repos_dir, get_worktrees_dir
 from foundry_sandbox.git import remove_stale_git_locks
-from foundry_sandbox.paths import resolve_workspace_path
+from foundry_sandbox.paths import resolve_host_worktree_path
 from foundry_sandbox.state import load_sandbox_metadata
 from foundry_sandbox.utils import log_error
-from foundry_sandbox.validate import validate_existing_sandbox_name
-
-
-def _list_sandboxes_simple() -> None:
-    """Print available sandbox names."""
-    sandboxes = _list_sandbox_names_shared()
-    if sandboxes:
-        click.echo("Available sandboxes:")
-        for sandbox in sandboxes:
-            click.echo(f"  - {sandbox}")
-    else:
-        click.echo("No sandboxes found.")
-
-
-def _resolve_sandbox_name(name: str | None) -> str:
-    """Resolve sandbox name from argument or cwd auto-detection."""
-    if not name:
-        name = _auto_detect_sandbox()
-        if name:
-            click.echo(f"Auto-detected sandbox: {name}")
-
-    if not name:
-        click.echo("Usage: cast git-mode [sandbox-name] --mode <host|sandbox>")
-        click.echo("")
-        _list_sandboxes_simple()
-        sys.exit(1)
-
-    valid_name, name_error = validate_existing_sandbox_name(name)
-    if not valid_name:
-        log_error(name_error)
-        sys.exit(1)
-
-    return name
 
 
 def _is_within(path: Path, root: Path) -> bool:
@@ -119,18 +83,18 @@ def _validate_git_paths(
 
     Accepts both legacy (``~/.sandboxes/worktrees/``) and sbx-managed
     (``<repo>/.sbx/<name>-worktrees/<branch>/``) layouts. Dispatches on
-    ``metadata.workspace_path`` first, falls back to path-shape detection
+    ``metadata.host_worktree_path`` first, falls back to path-shape detection
     when metadata is absent. Fails closed on unrecognised layouts.
     """
     metadata = load_sandbox_metadata(name)
-    workspace_path = metadata.get("workspace_path", "") if metadata else ""
+    host_worktree_path = metadata.get("host_worktree_path", "") if metadata else ""
 
-    if workspace_path:
-        _validate_new_layout_paths(worktree_path, gitdir, bare_dir, workspace_path)
+    if host_worktree_path:
+        _validate_new_layout_paths(worktree_path, gitdir, bare_dir, host_worktree_path)
         return
 
     if metadata is not None:
-        # Metadata exists but workspace_path is empty → legacy sandbox.
+        # Metadata exists but host_worktree_path is empty → legacy sandbox.
         _validate_legacy_layout_paths(worktree_path, gitdir, bare_dir)
         return
 
@@ -146,18 +110,18 @@ def _validate_git_paths(
 
 
 def _validate_new_layout_paths(
-    worktree_path: Path, gitdir: Path, bare_dir: Path, workspace_path: str
+    worktree_path: Path, gitdir: Path, bare_dir: Path, host_worktree_path: str
 ) -> None:
     """Validate paths for sbx-managed (new-layout) worktrees."""
-    ws_resolved = Path(workspace_path).resolve()
+    ws_resolved = Path(host_worktree_path).resolve()
     wt_resolved = worktree_path.resolve()
 
     if wt_resolved != ws_resolved:
         raise RuntimeError(
-            f"Worktree {wt_resolved} doesn't match metadata workspace_path {ws_resolved}"
+            f"Worktree {wt_resolved} doesn't match metadata host_worktree_path {ws_resolved}"
         )
 
-    # Derive repo root from workspace_path: <repo_root>/.sbx/<name>-worktrees/<branch>/
+    # Derive repo root from host_worktree_path: <repo_root>/.sbx/<name>-worktrees/<branch>/
     parts = ws_resolved.parts
     try:
         sbx_idx = parts.index(".sbx")
@@ -253,9 +217,9 @@ def _apply_git_mode(
 def git_mode(name: str | None, mode: str) -> None:
     """Toggle sandbox git config between host and sandbox-compatible modes."""
     mode = mode.lower()
-    name = _resolve_sandbox_name(name)
+    name = resolve_sandbox_name(name)
 
-    worktree_path = resolve_workspace_path(name)
+    worktree_path = resolve_host_worktree_path(name)
 
     if not worktree_path.is_dir():
         log_error(f"Sandbox '{name}' not found at {worktree_path}")

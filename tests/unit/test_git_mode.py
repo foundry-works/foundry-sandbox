@@ -129,13 +129,13 @@ class TestResolveGitPaths:
 class TestValidateNewLayoutPaths:
     def test_valid_new_layout(self, tmp_path: Path):
         paths = _setup_new_layout(tmp_path)
-        workspace_path = str(paths["worktree"])
+        host_worktree_path = str(paths["worktree"])
         # Should not raise
         _validate_new_layout_paths(
-            paths["worktree"], paths["gitdir"], paths["repo_git"], workspace_path
+            paths["worktree"], paths["gitdir"], paths["repo_git"], host_worktree_path
         )
 
-    def test_mismatched_workspace_path(self, tmp_path: Path):
+    def test_mismatched_host_worktree_path(self, tmp_path: Path):
         paths = _setup_new_layout(tmp_path)
         wrong_ws = str(tmp_path / "other-repo" / ".sbx" / "sandbox1-worktrees" / "feature")
         with pytest.raises(RuntimeError, match="doesn't match metadata"):
@@ -221,7 +221,7 @@ class TestValidateGitPathsDispatch:
     @patch("foundry_sandbox.commands.git_mode.load_sandbox_metadata")
     def test_dispatches_new_layout(self, mock_meta, tmp_path: Path):
         paths = _setup_new_layout(tmp_path)
-        mock_meta.return_value = {"workspace_path": str(paths["worktree"])}
+        mock_meta.return_value = {"host_worktree_path": str(paths["worktree"])}
         _validate_git_paths(
             "sandbox1", paths["worktree"], paths["gitdir"], paths["repo_git"]
         )
@@ -229,11 +229,11 @@ class TestValidateGitPathsDispatch:
     @patch("foundry_sandbox.commands.git_mode.load_sandbox_metadata")
     @patch("foundry_sandbox.commands.git_mode.get_worktrees_dir")
     @patch("foundry_sandbox.commands.git_mode.get_repos_dir")
-    def test_dispatches_legacy_when_empty_workspace_path(
+    def test_dispatches_legacy_when_empty_host_worktree_path(
         self, mock_repos, mock_wts, mock_meta, tmp_path: Path
     ):
         paths = _setup_legacy_layout(tmp_path)
-        mock_meta.return_value = {"workspace_path": ""}
+        mock_meta.return_value = {"host_worktree_path": ""}
         mock_wts.return_value = paths["worktrees_dir"]
         mock_repos.return_value = paths["repos_dir"]
         _validate_git_paths(
@@ -268,7 +268,7 @@ class TestValidateGitPathsDispatch:
         paths = _setup_new_layout(tmp_path)
         rogue = tmp_path / "evil" / ".git" / "worktrees" / "feature"
         rogue.mkdir(parents=True)
-        mock_meta.return_value = {"workspace_path": str(paths["worktree"])}
+        mock_meta.return_value = {"host_worktree_path": str(paths["worktree"])}
         with pytest.raises(RuntimeError, match="Gitdir escapes"):
             _validate_git_paths(
                 "sandbox1", paths["worktree"], rogue, paths["repo_git"]

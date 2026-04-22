@@ -19,23 +19,14 @@ from foundry_sandbox.git_safety import (
     verify_wrapper_integrity,
 )
 from foundry_sandbox.sbx import (
+    install_pip_requirements_sbx,
     sbx_check_available,
-    sbx_exec,
     sbx_run,
     sbx_sandbox_exists,
 )
 from foundry_sandbox.state import load_sandbox_metadata, patch_sandbox_metadata
-from foundry_sandbox.utils import log_info, log_warn
+from foundry_sandbox.utils import log_info
 from foundry_sandbox.validate import validate_existing_sandbox_name
-
-
-def _install_pip_requirements_sbx(name: str, requirements: str) -> None:
-    """Install pip requirements inside an sbx sandbox."""
-    log_info(f"Installing pip requirements: {requirements}")
-    try:
-        sbx_exec(name, ["pip", "install", "-r", requirements])
-    except Exception as exc:
-        log_warn(f"Failed to install pip requirements: {exc}")
 
 
 def _ensure_git_safety_server() -> None:
@@ -149,7 +140,7 @@ def start(name: str, watchdog: bool) -> None:
     # Install pip requirements if configured
     pip_req = metadata.get("pip_requirements", "")
     if pip_req:
-        _install_pip_requirements_sbx(name, pip_req)
+        install_pip_requirements_sbx(name, pip_req)
 
     click.echo(f"Sandbox '{name}' started.")
 

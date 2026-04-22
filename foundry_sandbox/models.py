@@ -70,7 +70,7 @@ class SbxSandboxMetadata(BaseModel):
     template_managed: bool = False
     """True if the template was created by cast preset save and eligible for auto-cleanup."""
 
-    workspace_path: str = ""
+    host_worktree_path: str = ""
     """Host-side path to the sbx-managed worktree (set after sbx create)."""
 
 

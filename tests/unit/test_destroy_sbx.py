@@ -10,7 +10,7 @@ from foundry_sandbox.commands.destroy import destroy, destroy_impl
 
 
 class TestDestroyImplNewLayout:
-    """New-layout sandboxes (workspace_path set in metadata)."""
+    """New-layout sandboxes (host_worktree_path set in metadata)."""
 
     @patch("foundry_sandbox.commands.destroy.cleanup_sandbox_branch_repo")
     @patch("foundry_sandbox.commands.destroy.load_sandbox_metadata")
@@ -30,7 +30,7 @@ class TestDestroyImplNewLayout:
         mock_metadata.return_value = {
             "branch": "feature-x",
             "repo_url": "https://github.com/org/repo",
-            "workspace_path": "/home/user/repo/.sbx/test-sandbox-worktrees/feature-x",
+            "host_worktree_path": "/home/user/repo/.sbx/test-sandbox-worktrees/feature-x",
         }
 
         destroy_impl("test-sandbox")
@@ -63,7 +63,7 @@ class TestDestroyImplNewLayout:
         mock_metadata.return_value = {
             "branch": "feature-x",
             "repo_url": "https://github.com/org/repo",
-            "workspace_path": "/home/user/repo/.sbx/test-sandbox-worktrees/feature-x",
+            "host_worktree_path": "/home/user/repo/.sbx/test-sandbox-worktrees/feature-x",
         }
 
         destroy_impl("test-sandbox")
@@ -89,7 +89,7 @@ class TestDestroyImplNewLayout:
         mock_metadata.return_value = {
             "branch": "main",
             "repo_url": "https://github.com/org/repo",
-            "workspace_path": "/home/user/repo/.sbx/test-sandbox-worktrees/main",
+            "host_worktree_path": "/home/user/repo/.sbx/test-sandbox-worktrees/main",
         }
 
         destroy_impl("test-sandbox")
@@ -99,7 +99,7 @@ class TestDestroyImplNewLayout:
 
 
 class TestDestroyImplLegacyLayout:
-    """Legacy sandboxes (workspace_path empty in metadata)."""
+    """Legacy sandboxes (host_worktree_path empty in metadata)."""
 
     @patch("foundry_sandbox.commands.destroy.cleanup_sandbox_branch")
     @patch("foundry_sandbox.commands.destroy.remove_worktree")
@@ -119,7 +119,7 @@ class TestDestroyImplLegacyLayout:
         mock_path.claude_config_path = MagicMock()
         mock_path.claude_config_path.is_dir.return_value = True
         mock_paths.return_value = mock_path
-        mock_metadata.return_value = {"branch": "feature-x", "repo_url": "https://github.com/org/repo", "workspace_path": ""}
+        mock_metadata.return_value = {"branch": "feature-x", "repo_url": "https://github.com/org/repo", "host_worktree_path": ""}
 
         destroy_impl("test-sandbox")
 
@@ -145,7 +145,7 @@ class TestDestroyImplLegacyLayout:
         mock_path.worktree_path = MagicMock()
         mock_path.worktree_path.is_dir.return_value = False
         mock_paths.return_value = mock_path
-        mock_metadata.return_value = {"branch": "feature-x", "repo_url": "https://github.com/org/repo", "workspace_path": ""}
+        mock_metadata.return_value = {"branch": "feature-x", "repo_url": "https://github.com/org/repo", "host_worktree_path": ""}
 
         destroy_impl("test-sandbox")
 
@@ -210,7 +210,7 @@ class TestDestroyImplCommon:
         mock_metadata.return_value = {
             "branch": "feature-x",
             "repo_url": "https://github.com/org/repo",
-            "workspace_path": "/home/user/repo/.sbx/test-sandbox-worktrees/feature-x",
+            "host_worktree_path": "/home/user/repo/.sbx/test-sandbox-worktrees/feature-x",
         }
 
         destroy_impl("test-sandbox", keep_worktree=True)

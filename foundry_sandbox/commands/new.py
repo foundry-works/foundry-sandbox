@@ -379,7 +379,7 @@ def new(
     click.echo(f"Setting up your sandbox: {name}")
 
     try:
-        workspace_path = new_sbx_setup(
+        host_worktree_path = new_sbx_setup(
             repo_url=repo_url,
             repo_root=repo_root,
             branch=branch,
@@ -447,7 +447,7 @@ def new(
     click.echo("Sandbox is ready!")
     click.echo()
     click.echo(f"  Sandbox    {name}")
-    click.echo(f"  Worktree   {workspace_path}")
+    click.echo(f"  Worktree   {host_worktree_path}")
     click.echo(f"  Agent      {agent}")
     click.echo()
     click.echo("  Commands:")

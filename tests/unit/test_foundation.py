@@ -43,7 +43,7 @@ from foundry_sandbox.paths import (
     derive_sandbox_paths,
     ensure_dir,
     safe_remove,
-    resolve_workspace_path,
+    resolve_host_worktree_path,
     find_next_sandbox_name,
 )
 
@@ -505,23 +505,21 @@ class TestEnvironmentScope:
 # ============================================================================
 
 
-class TestResolveWorkspacePath:
-    """Tests for resolve_workspace_path — new-layout vs legacy fallback."""
+class TestResolveHostWorktreePath:
+    """Tests for resolve_host_worktree_path — new-layout vs legacy fallback."""
 
     @pytest.fixture(autouse=True)
     def set_sandbox_home(self, monkeypatch):
         monkeypatch.setenv("SANDBOX_HOME", "/tmp/sb")
 
-    def test_new_layout_returns_metadata_workspace_path(self, tmp_path, monkeypatch):
-        from foundry_sandbox.paths import path_metadata_file, ensure_dir
-
+    def test_new_layout_returns_metadata_host_worktree_path(self, tmp_path, monkeypatch):
         # Set up metadata directory
         meta_dir = tmp_path / "claude-config" / "my-sandbox"
         meta_dir.mkdir(parents=True)
         metadata_file = meta_dir / "metadata.json"
         metadata_file.write_text(
             '{"sbx_name":"my-sandbox","repo_url":"url","branch":"br","agent":"claude",'
-            '"workspace_path":"/repo/.sbx/my-sandbox-worktrees/br"}\n'
+            '"host_worktree_path":"/repo/.sbx/my-sandbox-worktrees/br"}\n'
         )
 
         monkeypatch.setattr(
@@ -533,26 +531,26 @@ class TestResolveWorkspacePath:
             lambda name: metadata_file,
         )
 
-        result = resolve_workspace_path("my-sandbox")
+        result = resolve_host_worktree_path("my-sandbox")
         assert str(result) == "/repo/.sbx/my-sandbox-worktrees/br"
 
     def test_legacy_falls_back_to_worktree_path(self, monkeypatch):
         from unittest.mock import patch as mock_patch
 
-        # load_sandbox_metadata is imported inside resolve_workspace_path
+        # load_sandbox_metadata is imported inside resolve_host_worktree_path
         # so we patch it at the source module
         with mock_patch("foundry_sandbox.state.load_sandbox_metadata", return_value=None):
-            result = resolve_workspace_path("my-sandbox")
+            result = resolve_host_worktree_path("my-sandbox")
         assert str(result) == "/tmp/sb/worktrees/my-sandbox"
 
-    def test_empty_workspace_path_falls_back(self, monkeypatch):
+    def test_empty_host_worktree_path_falls_back(self, monkeypatch):
         from unittest.mock import patch as mock_patch
 
         with mock_patch(
             "foundry_sandbox.state.load_sandbox_metadata",
-            return_value={"workspace_path": ""},
+            return_value={"host_worktree_path": ""},
         ):
-            result = resolve_workspace_path("my-sandbox")
+            result = resolve_host_worktree_path("my-sandbox")
         assert str(result) == "/tmp/sb/worktrees/my-sandbox"
 
 

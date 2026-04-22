@@ -18,7 +18,7 @@ from pathlib import Path
 from typing import Any, cast
 
 from foundry_sandbox.constants import get_sandbox_verbose
-from foundry_sandbox.utils import log_warn
+from foundry_sandbox.utils import log_info, log_warn
 
 
 # ============================================================================
@@ -388,6 +388,20 @@ def sbx_exec_streaming(
         stderr=sys.stderr,
         text=True,
     )
+
+
+# ============================================================================
+# Pip helpers
+# ============================================================================
+
+
+def install_pip_requirements_sbx(name: str, requirements: str) -> None:
+    """Install pip requirements inside an sbx sandbox."""
+    log_info(f"Installing pip requirements: {requirements}")
+    try:
+        sbx_exec(name, ["pip", "install", "-r", requirements])
+    except Exception as exc:
+        log_warn(f"Failed to install pip requirements: {exc}")
 
 
 # ============================================================================

@@ -14,30 +14,30 @@
 
 ### 2.1 Dedup `_install_pip_requirements_sbx`
 
-- [ ] Move function to `foundry_sandbox/sbx.py`
-- [ ] Delete copy at `commands/new_sbx.py:40`
-- [ ] Delete copy at `commands/start.py:32`
-- [ ] Update import at `tests/unit/test_start_sbx.py:101`
-- [ ] Run `python -m pytest tests/unit/ -x`
+- [x] Move function to `foundry_sandbox/sbx.py`
+- [x] Delete copy at `commands/new_sbx.py:40`
+- [x] Delete copy at `commands/start.py:32`
+- [x] Update import at `tests/unit/test_start_sbx.py:101`
+- [x] Run `python -m pytest tests/unit/ -x`
 
 ### 2.2 Extract `resolve_sandbox_name()` to `_helpers.py`
 
-- [ ] Add `resolve_sandbox_name(name, *, use_last, last_key)` to `commands/_helpers.py`
-- [ ] Replace in-command helper at `commands/attach.py:47-74`
-- [ ] Replace in `commands/git_mode.py`
-- [ ] Replace in `commands/refresh_creds.py`
-- [ ] Replace in `commands/preset.py`
-- [ ] Add unit test for the shared helper
-- [ ] Verify `cast attach --last`, `cast attach` (auto-detect), `cast attach` (fzf) all still work
+- [x] Add `resolve_sandbox_name(name, *, use_last, allow_fzf)` to `commands/_helpers.py`
+- [x] Replace in-command helper at `commands/attach.py:47-74`
+- [x] Replace in `commands/git_mode.py`
+- [x] Replace in `commands/refresh_creds.py`
+- [x] Replace in `commands/preset.py`
+- [x] Add unit test for the shared helper
+- [x] Verify `cast attach --last`, `cast attach` (auto-detect), `cast attach` (fzf) all still work
 
 ### 2.3 Rename `workspace_path` → `host_worktree_path`
 
-- [ ] Rename field in `models.py:SbxSandboxMetadata`
-- [ ] Update `state.py:write_sandbox_metadata()` to write the new name
-- [ ] `state.py:load_sandbox_metadata()` reads either `host_worktree_path` or `workspace_path` (compat shim)
-- [ ] Update all in-code references (`paths.py`, `_helpers.py`, `commands/destroy.py`, `commands/attach.py`, `commands/git_mode.py`)
-- [ ] Update tests that reference `workspace_path` in metadata fixtures
-- [ ] Document the rename in `CHANGELOG.md`
+- [x] Rename field in `models.py:SbxSandboxMetadata`
+- [x] Update `state.py:write_sandbox_metadata()` to write the new name
+- [x] `state.py:load_sandbox_metadata()` reads either `host_worktree_path` or `workspace_path` (compat shim)
+- [x] Update all in-code references (`paths.py`, `_helpers.py`, `commands/destroy.py`, `commands/attach.py`, `commands/git_mode.py`)
+- [x] Update tests that reference `workspace_path` in metadata fixtures
+- [x] Document the rename in `CHANGELOG.md`
 
 ## Phase 3: Command Structure Cleanup
 
