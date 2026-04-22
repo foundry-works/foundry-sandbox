@@ -16,17 +16,16 @@ class TestDestroyImplNewLayout:
     @patch("foundry_sandbox.commands.destroy.load_sandbox_metadata")
     @patch("foundry_sandbox.commands.destroy.unregister_sandbox_from_git_safety")
     @patch("foundry_sandbox.commands.destroy.sbx_rm")
-    @patch("foundry_sandbox.commands.destroy.derive_sandbox_paths")
+    @patch("foundry_sandbox.commands.destroy.path_claude_config")
     @patch("foundry_sandbox.commands.destroy.validate_existing_sandbox_name")
     def test_new_layout_cleans_branch_from_repo(
-        self, mock_validate, mock_paths, mock_rm, mock_unregister,
+        self, mock_validate, mock_config_path, mock_rm, mock_unregister,
         mock_metadata, mock_branch_repo,
     ):
         mock_validate.return_value = (True, "")
         mock_path = MagicMock()
-        mock_path.claude_config_path = MagicMock()
-        mock_path.claude_config_path.is_dir.return_value = True
-        mock_paths.return_value = mock_path
+        mock_path.is_dir.return_value = True
+        mock_config_path.return_value = mock_path
         mock_metadata.return_value = {
             "branch": "feature-x",
             "repo_url": "https://github.com/org/repo",
@@ -46,17 +45,16 @@ class TestDestroyImplNewLayout:
     @patch("foundry_sandbox.commands.destroy.load_sandbox_metadata")
     @patch("foundry_sandbox.commands.destroy.unregister_sandbox_from_git_safety")
     @patch("foundry_sandbox.commands.destroy.sbx_rm")
-    @patch("foundry_sandbox.commands.destroy.derive_sandbox_paths")
+    @patch("foundry_sandbox.commands.destroy.path_claude_config")
     @patch("foundry_sandbox.commands.destroy.validate_existing_sandbox_name")
     def test_new_layout_skips_branch_for_protected(
-        self, mock_validate, mock_paths, mock_rm, mock_unregister,
+        self, mock_validate, mock_config_path, mock_rm, mock_unregister,
         mock_metadata, mock_branch_repo,
     ):
         mock_validate.return_value = (True, "")
         mock_path = MagicMock()
-        mock_path.claude_config_path = MagicMock()
-        mock_path.claude_config_path.is_dir.return_value = True
-        mock_paths.return_value = mock_path
+        mock_path.is_dir.return_value = True
+        mock_config_path.return_value = mock_path
         mock_metadata.return_value = {
             "branch": "main",
             "repo_url": "https://github.com/org/repo",
@@ -73,18 +71,15 @@ class TestDestroyImplCommon:
     @patch("foundry_sandbox.commands.destroy.load_sandbox_metadata")
     @patch("foundry_sandbox.commands.destroy.unregister_sandbox_from_git_safety")
     @patch("foundry_sandbox.commands.destroy.sbx_rm")
-    @patch("foundry_sandbox.commands.destroy.derive_sandbox_paths")
+    @patch("foundry_sandbox.commands.destroy.path_claude_config")
     @patch("foundry_sandbox.commands.destroy.validate_existing_sandbox_name")
     def test_sbx_rm_failure_best_effort(
-        self, mock_validate, mock_paths, mock_rm, mock_unregister, mock_metadata,
+        self, mock_validate, mock_config_path, mock_rm, mock_unregister, mock_metadata,
     ):
         mock_validate.return_value = (True, "")
         mock_path = MagicMock()
-        mock_path.worktree_path = MagicMock()
-        mock_path.worktree_path.is_dir.return_value = False
-        mock_path.claude_config_path = MagicMock()
-        mock_path.claude_config_path.is_dir.return_value = False
-        mock_paths.return_value = mock_path
+        mock_path.is_dir.return_value = False
+        mock_config_path.return_value = mock_path
         mock_rm.side_effect = Exception("sbx rm failed")
         mock_metadata.return_value = None
 
@@ -94,10 +89,10 @@ class TestDestroyImplCommon:
     @patch("foundry_sandbox.commands.destroy.load_sandbox_metadata")
     @patch("foundry_sandbox.commands.destroy.unregister_sandbox_from_git_safety")
     @patch("foundry_sandbox.commands.destroy.sbx_rm")
-    @patch("foundry_sandbox.commands.destroy.derive_sandbox_paths")
+    @patch("foundry_sandbox.commands.destroy.path_claude_config")
     @patch("foundry_sandbox.commands.destroy.validate_existing_sandbox_name")
     def test_invalid_name_raises(
-        self, mock_validate, mock_paths, mock_rm, mock_unregister, mock_metadata,
+        self, mock_validate, mock_config_path, mock_rm, mock_unregister, mock_metadata,
     ):
         mock_validate.return_value = (False, "Invalid")
         try:
@@ -110,19 +105,16 @@ class TestDestroyImplCommon:
     @patch("foundry_sandbox.commands.destroy.load_sandbox_metadata")
     @patch("foundry_sandbox.commands.destroy.unregister_sandbox_from_git_safety")
     @patch("foundry_sandbox.commands.destroy.sbx_rm")
-    @patch("foundry_sandbox.commands.destroy.derive_sandbox_paths")
+    @patch("foundry_sandbox.commands.destroy.path_claude_config")
     @patch("foundry_sandbox.commands.destroy.validate_existing_sandbox_name")
     def test_keep_worktree(
-        self, mock_validate, mock_paths, mock_rm, mock_unregister,
+        self, mock_validate, mock_config_path, mock_rm, mock_unregister,
         mock_metadata, mock_branch_repo,
     ):
         mock_validate.return_value = (True, "")
         mock_path = MagicMock()
-        mock_path.worktree_path = MagicMock()
-        mock_path.worktree_path.is_dir.return_value = True
-        mock_path.claude_config_path = MagicMock()
-        mock_path.claude_config_path.is_dir.return_value = True
-        mock_paths.return_value = mock_path
+        mock_path.is_dir.return_value = True
+        mock_config_path.return_value = mock_path
         mock_metadata.return_value = {
             "branch": "feature-x",
             "repo_url": "https://github.com/org/repo",
@@ -148,14 +140,11 @@ class TestDestroyCommand:
     @patch("foundry_sandbox.commands.destroy.resolve_host_worktree_path")
     @patch("foundry_sandbox.commands.destroy.destroy_impl")
     @patch("foundry_sandbox.commands.destroy.sbx_check_available")
-    @patch("foundry_sandbox.commands.destroy.derive_sandbox_paths")
+    @patch("foundry_sandbox.commands.destroy.path_claude_config")
     @patch("foundry_sandbox.commands.destroy.validate_existing_sandbox_name")
-    def test_confirmation_yes(self, mock_validate, mock_paths, mock_check, mock_impl, mock_resolve):
+    def test_confirmation_yes(self, mock_validate, mock_config_path, mock_check, mock_impl, mock_resolve):
         mock_validate.return_value = (True, "")
-        mock_path = MagicMock()
-        mock_path.worktree_path = MagicMock()
-        mock_path.claude_config_path = MagicMock()
-        mock_paths.return_value = mock_path
+        mock_config_path.return_value = MagicMock()
         mock_resolve.return_value = MagicMock()
 
         runner = CliRunner()
@@ -164,14 +153,11 @@ class TestDestroyCommand:
 
     @patch("foundry_sandbox.commands.destroy.resolve_host_worktree_path")
     @patch("foundry_sandbox.commands.destroy.sbx_check_available")
-    @patch("foundry_sandbox.commands.destroy.derive_sandbox_paths")
+    @patch("foundry_sandbox.commands.destroy.path_claude_config")
     @patch("foundry_sandbox.commands.destroy.validate_existing_sandbox_name")
-    def test_confirmation_no_aborts(self, mock_validate, mock_paths, mock_check, mock_resolve):
+    def test_confirmation_no_aborts(self, mock_validate, mock_config_path, mock_check, mock_resolve):
         mock_validate.return_value = (True, "")
-        mock_path = MagicMock()
-        mock_path.worktree_path = MagicMock()
-        mock_path.claude_config_path = MagicMock()
-        mock_paths.return_value = mock_path
+        mock_config_path.return_value = MagicMock()
         mock_resolve.return_value = MagicMock()
 
         runner = CliRunner()

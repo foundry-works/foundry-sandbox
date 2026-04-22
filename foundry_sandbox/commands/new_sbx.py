@@ -34,6 +34,7 @@ from foundry_sandbox.sbx import (
     sbx_worktree_path,
 )
 from foundry_sandbox.state import write_sandbox_metadata
+from foundry_sandbox.models import SbxSandboxMetadata
 from foundry_sandbox.paths import strip_github_url
 
 
@@ -60,9 +61,6 @@ def _validate_preconditions(
             log_error(f"Copy source does not exist: {src}")
             sys.exit(1)
 
-
-class SetupError(Exception):
-    """Raised when sandbox setup fails."""
 
 
 def new_sbx_setup(
@@ -117,7 +115,7 @@ def new_sbx_setup(
             # Custom/managed templates must exist — no silent fallback.
             templates = sbx_template_ls()
             if not any(use_template in t for t in templates):
-                raise SetupError(
+                raise RuntimeError(
                     f"Template '{use_template}' not found in sbx. "
                     f"Run `sbx template ls` to see available tags, or recreate "
                     f"it via `cast preset save` / `sbx template save`."
@@ -131,7 +129,7 @@ def new_sbx_setup(
                 name, agent, repo_root, branch=branch, template=use_template
             )
     except Exception as exc:
-        raise SetupError(f"sbx create failed: {exc}") from exc
+        raise RuntimeError(f"sbx create failed: {exc}") from exc
 
     # sbx may truncate the sandbox name internally, so the actual worktree
     # path can differ from our deterministic formula.  Use the parsed stdout
@@ -157,15 +155,15 @@ def new_sbx_setup(
         try:
             git_safety_server_start(deep_policy=True)
         except OSError as exc:
-            raise SetupError(
+            raise RuntimeError(
                 "foundry-git-safety is not installed. "
                 "Run: pip install foundry-git-safety[server]"
             ) from exc
         except Exception as exc:
-            raise SetupError(f"Git safety server start failed: {exc}") from exc
+            raise RuntimeError(f"Git safety server start failed: {exc}") from exc
 
         if not git_safety_server_is_running():
-            raise SetupError(
+            raise RuntimeError(
                 "Git safety server did not become healthy after start. "
                 "Check `foundry-git-safety status` for details."
             )
@@ -177,21 +175,23 @@ def new_sbx_setup(
     ensure_dir(claude_config_path)
     write_sandbox_metadata(
         name,
-        sbx_name=name,
-        agent=agent,
-        repo_url=repo_url,
-        branch=branch,
-        from_branch=from_branch,
-        git_safety_enabled=False,
-        workspace_dir="/workspace",
-        working_dir=wd,
-        pip_requirements=pip_requirements,
-        allow_pr=allow_pr,
-        enable_opencode=with_opencode,
-        enable_zai=with_zai,
-        copies=copies,
-        template=use_template or "",
-        host_worktree_path=host_worktree_path,
+        SbxSandboxMetadata(
+            sbx_name=name,
+            agent=agent,
+            repo_url=repo_url,
+            branch=branch,
+            from_branch=from_branch,
+            git_safety_enabled=False,
+            workspace_dir="/workspace",
+            working_dir=wd,
+            pip_requirements=pip_requirements,
+            allow_pr=allow_pr,
+            enable_opencode=with_opencode,
+            enable_zai=with_zai,
+            copies=copies,
+            template=use_template or "",
+            host_worktree_path=host_worktree_path,
+        ),
     )
 
     # ------------------------------------------------------------------
@@ -210,7 +210,7 @@ def new_sbx_setup(
         repo_root=host_worktree_path,
     )
     if not prov_result.success:
-        raise SetupError(
+        raise RuntimeError(
             f"Git safety provisioning failed: {prov_result.error}. "
             "Sandbox creation aborted — git safety cannot be enforced."
         )

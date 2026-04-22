@@ -21,10 +21,10 @@ from foundry_sandbox.paths import (
     repo_url_to_checkout_path,
     sandbox_name as _helpers_sandbox_name,
 )
-from foundry_sandbox.commands.new_sbx import new_sbx_setup, rollback_new_sbx, SetupError, _validate_preconditions
+from foundry_sandbox.commands.new_sbx import new_sbx_setup, rollback_new_sbx, _validate_preconditions
 from foundry_sandbox.api_keys import has_opencode_key, has_zai_key
 from foundry_sandbox.constants import TIMEOUT_GIT_QUERY, TIMEOUT_LOCAL_CMD
-from foundry_sandbox.paths import derive_sandbox_paths
+from foundry_sandbox.paths import path_claude_config
 from foundry_sandbox.state import save_last_cast_new, save_cast_preset, load_last_cast_new, load_cast_preset, save_last_attach
 from foundry_sandbox.utils import log_debug, log_error, log_info, log_warn, sanitize_ref_component
 from foundry_sandbox.validate import validate_sandbox_name
@@ -48,52 +48,65 @@ class NewDefaults:
     template_managed: bool
 
 
+# (NewDefaults field, saved-data key, type coerce)
+_STR_FIELDS: list[tuple[str, str]] = [
+    ("repo", "repo"),
+    ("branch", "branch"),
+    ("from_branch", "from_branch"),
+    ("agent", "agent"),
+    ("wd", "working_dir"),
+    ("pip_requirements", "pip_requirements"),
+    ("template", "template"),
+]
+_BOOL_FIELDS: list[tuple[str, str]] = [
+    ("with_opencode", "enable_opencode"),
+    ("with_zai", "enable_zai"),
+    ("allow_pr", "allow_pr"),
+]
+
+
 def _apply_saved_new_defaults(
     saved: dict[str, object],
-    *,
     explicit_params: set[str],
-    repo: str,
-    branch: str,
-    from_branch: str,
-    copies: tuple[str, ...],
-    agent: str,
-    with_opencode: bool,
-    with_zai: bool,
-    wd: str,
-    pip_requirements: str,
-    allow_pr: bool,
-    template: str,
-    template_managed: bool = False,
+    **defaults: object,
 ) -> NewDefaults:
     """Apply saved/preset values for parameters not explicitly set by the user."""
     data = saved or {}
+    resolved: dict[str, object] = {}
 
-    def _saved(key: str, default: str) -> str:
-        if key in explicit_params:
-            return str(locals().get("_" + key, default))
-        val = data.get(key, default)
-        return str(val) if val is not None else default
+    # copies: needs list/tuple → tuple coercion
+    caller_copies: tuple[str, ...] = defaults.get("copies", ())  # type: ignore[assignment]
+    if "copies" in explicit_params:
+        resolved["copies"] = caller_copies
+    else:
+        raw = data.get("copies", caller_copies)
+        resolved["copies"] = tuple(str(v) for v in raw) if isinstance(raw, (list, tuple)) else caller_copies
 
-    raw_copies = data.get("copies", copies)
-    resolved_copies: tuple[str, ...] = copies if "copies" in explicit_params else tuple(str(v) for v in raw_copies) if isinstance(raw_copies, (list, tuple)) else copies
+    for field, saved_key in _STR_FIELDS:
+        caller_val = str(defaults.get(field, ""))
+        if field in explicit_params:
+            resolved[field] = caller_val
+        else:
+            val = data.get(saved_key, caller_val)
+            resolved[field] = str(val) if val is not None else caller_val
 
-    resolved_template = template if "template" in explicit_params else str(data.get("template", template))
-    resolved_template_managed = template_managed if "template" in explicit_params else bool(data.get("template_managed", template_managed))
+    for field, saved_key in _BOOL_FIELDS:
+        bval = bool(defaults.get(field, False))
+        if field in explicit_params:
+            resolved[field] = bval
+        else:
+            braw = data.get(saved_key, bval)
+            resolved[field] = bool(braw) if braw is not None else bval
 
-    return NewDefaults(
-        repo=repo if "repo" in explicit_params else str(data.get("repo", repo)),
-        branch=branch if "branch" in explicit_params else str(data.get("branch", branch)),
-        from_branch=from_branch if "from_branch" in explicit_params else str(data.get("from_branch", from_branch)),
-        copies=resolved_copies,
-        agent=agent if "agent" in explicit_params else str(data.get("agent", agent)),
-        with_opencode=with_opencode if "with_opencode" in explicit_params else bool(data.get("enable_opencode", with_opencode)),
-        with_zai=with_zai if "with_zai" in explicit_params else bool(data.get("enable_zai", with_zai)),
-        wd=wd if "wd" in explicit_params else str(data.get("working_dir", wd)),
-        pip_requirements=pip_requirements if "pip_requirements" in explicit_params else str(data.get("pip_requirements", pip_requirements)),
-        allow_pr=allow_pr if "allow_pr" in explicit_params else bool(data.get("allow_pr", allow_pr)),
-        template=resolved_template,
-        template_managed=resolved_template_managed,
-    )
+    # template_managed is coupled to the "template" explicit key
+    caller_tm = bool(defaults.get("template_managed", False))
+    if "template" in explicit_params:
+        resolved["template_managed"] = caller_tm
+    else:
+        val = data.get("template_managed", caller_tm)
+        resolved["template_managed"] = bool(val) if val is not None else caller_tm
+
+    return NewDefaults(**resolved)  # type: ignore[arg-type]
 
 
 def _load_and_apply_defaults(
@@ -108,26 +121,9 @@ def _load_and_apply_defaults(
 
     ep = kwargs.pop("explicit_params", set())
     explicit_params: set[str] = ep if isinstance(ep, set) else set()
-    raw_copies = kwargs.get("copies", ())
-    copies_val: tuple[str, ...] = raw_copies if isinstance(raw_copies, tuple) else ()
     click.echo(f"Reusing {label}...")
     click.echo()
-    return _apply_saved_new_defaults(
-        saved_data,
-        explicit_params=explicit_params,
-        repo=str(kwargs.get("repo", "")),
-        branch=str(kwargs.get("branch", "")),
-        from_branch=str(kwargs.get("from_branch", "")),
-        copies=copies_val,
-        agent=str(kwargs.get("agent", "claude")),
-        with_opencode=bool(kwargs.get("with_opencode", False)),
-        with_zai=bool(kwargs.get("with_zai", False)),
-        wd=str(kwargs.get("wd", "")),
-        pip_requirements=str(kwargs.get("pip_requirements", "")),
-        allow_pr=bool(kwargs.get("allow_pr", False)),
-        template=str(kwargs.get("template", "foundry-git-wrapper:latest")),
-        template_managed=bool(kwargs.get("template_managed", False)),
-    )
+    return _apply_saved_new_defaults(saved_data, explicit_params, **kwargs)
 
 
 def _ensure_repo_root(repo_url: str) -> str:
@@ -469,8 +465,7 @@ def new(
             branch = f"{base_branch}{suffix}"
 
     # Atomically claim the sandbox name
-    paths = derive_sandbox_paths(name)
-    claude_config_path = paths.claude_config_path
+    claude_config_path = path_claude_config(name)
 
     _MAX_NAME_RETRIES = 5
     _seen_names = {name}
@@ -492,8 +487,7 @@ def new(
                 branch = f"{base_branch}{suffix}"
             else:
                 branch = base_branch
-            paths = derive_sandbox_paths(name)
-            claude_config_path = paths.claude_config_path
+            claude_config_path = path_claude_config(name)
     else:
         log_error(f"Could not claim a unique sandbox name after {_MAX_NAME_RETRIES} attempts")
         sys.exit(1)
@@ -519,7 +513,7 @@ def new(
             wd=wd or "",
             template=template,
         )
-    except SetupError as exc:
+    except RuntimeError as exc:
         log_error(str(exc))
         log_info("Cleaning up partial sandbox resources...")
         rollback_new_sbx(claude_config_path, name)

@@ -80,72 +80,15 @@ def metadata_is_secure(path: str | Path) -> bool:
 
 def write_sandbox_metadata(
     name: str,
-    *,
-    sbx_name: str,
-    agent: str,
-    repo_url: str,
-    branch: str,
-    from_branch: str = "",
-    network_profile: str = "balanced",
-    git_safety_enabled: bool = True,
-    workspace_dir: str = "/workspace",
-    working_dir: str = "",
-    pip_requirements: str = "",
-    allow_pr: bool = False,
-    enable_opencode: bool = False,
-    enable_zai: bool = False,
-    copies: list[str] | None = None,
-    template: str = "",
-    user_services: dict[str, str] | None = None,
-    wrapper_checksum: str = "",
-    wrapper_last_verified: str = "",
-    host_worktree_path: str = "",
+    metadata: SbxSandboxMetadata,
 ) -> None:
     """Write sandbox metadata to a JSON file.
 
     Args:
         name: Sandbox name identifier.
-        sbx_name: Name as known to sbx CLI.
-        agent: Agent type (claude, codex, etc.).
-        repo_url: Git repository URL.
-        branch: Target branch name.
-        from_branch: Base branch for PR creation.
-        network_profile: Network policy profile.
-        git_safety_enabled: Whether git safety server is active.
-        workspace_dir: Workspace mount path inside sandbox.
-        working_dir: Working directory path.
-        pip_requirements: Path to requirements file.
-        allow_pr: Whether to allow PR creation.
-        enable_opencode: Whether to enable OpenCode.
-        enable_zai: Whether to enable ZAI.
-        copies: List of copy specs.
-        template: Template tag used for sandbox creation.
-        wrapper_checksum: SHA-256 hex digest of the expected wrapper.
-        wrapper_last_verified: ISO 8601 UTC timestamp of last verification.
-        host_worktree_path: Host-side path to the sbx-managed worktree.
+        metadata: Complete sandbox metadata to persist.
     """
-    model = SbxSandboxMetadata(
-        sbx_name=sbx_name,
-        agent=agent,
-        repo_url=repo_url,
-        branch=branch,
-        from_branch=from_branch,
-        network_profile=network_profile,
-        git_safety_enabled=git_safety_enabled,
-        workspace_dir=workspace_dir,
-        working_dir=working_dir,
-        pip_requirements=pip_requirements,
-        allow_pr=allow_pr,
-        enable_opencode=enable_opencode,
-        enable_zai=enable_zai,
-        copies=copies or [],
-        template=template,
-        user_services=user_services or {},
-        wrapper_checksum=wrapper_checksum,
-        wrapper_last_verified=wrapper_last_verified,
-        host_worktree_path=host_worktree_path,
-    )
-    data = model.model_dump()
+    data = metadata.model_dump()
 
     path = path_metadata_file(name)
     content = json.dumps(data) + "\n"

@@ -15,7 +15,7 @@ import click
 from foundry_sandbox.git_safety import unregister_sandbox_from_git_safety
 from foundry_sandbox.git import cleanup_sandbox_branch_repo
 from foundry_sandbox.paths import (
-    derive_sandbox_paths,
+    path_claude_config,
     resolve_host_worktree_path,
 )
 from foundry_sandbox.sbx import sbx_check_available, sbx_rm
@@ -54,8 +54,7 @@ def destroy_impl(
     if not valid_name:
         raise ValueError(f"Invalid sandbox name: {name_error}")
 
-    paths = derive_sandbox_paths(name)
-    claude_config_path = paths.claude_config_path
+    claude_config_path = path_claude_config(name)
 
     # ------------------------------------------------------------------
     # 1. Load metadata BEFORE removing anything (needed for branch cleanup)
@@ -149,13 +148,13 @@ def destroy(name: str, keep_worktree: bool, force: bool, yes: bool) -> None:
     skip_confirm = force or yes or noninteractive
 
     if not skip_confirm:
-        paths = derive_sandbox_paths(name)
         workspace = resolve_host_worktree_path(name)
+        config_path = path_claude_config(name)
         click.echo(f"This will destroy sandbox '{name}' including:")
         click.echo("  - Sandbox container (sbx rm)")
         if not keep_worktree:
             click.echo(f"  - Worktree at {workspace}")
-            click.echo(f"  - Claude config at {paths.claude_config_path}")
+            click.echo(f"  - Claude config at {config_path}")
         click.echo("")
         try:
             if not click.confirm("Are you sure?", default=False):

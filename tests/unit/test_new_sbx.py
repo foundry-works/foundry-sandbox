@@ -57,9 +57,9 @@ class TestNewSbxSetup:
     def test_sbx_create_failure(
         self, mock_check, mock_create, mock_ensure, tmp_path,
     ):
-        from foundry_sandbox.commands.new_sbx import SetupError
+
         repo_root = str(tmp_path / "repo")
-        with pytest.raises(SetupError, match="sbx create failed"):
+        with pytest.raises(RuntimeError, match="sbx create failed"):
             new_sbx_setup(
                 repo_url="https://github.com/org/repo",
                 repo_root=repo_root,
@@ -104,8 +104,8 @@ class TestNewSbxSetup:
             wd="",
         )
         mock_metadata.assert_called_once()
-        call_kwargs = mock_metadata.call_args[1]
-        assert call_kwargs["host_worktree_path"] == f"{repo_root}/.sbx/test-sandbox-worktrees/feature-x"
+        call_metadata = mock_metadata.call_args[0][1]
+        assert call_metadata.host_worktree_path == f"{repo_root}/.sbx/test-sandbox-worktrees/feature-x"
 
     @patch("foundry_sandbox.commands.new_sbx.write_sandbox_metadata")
     @patch("foundry_sandbox.commands.new_sbx.provision_git_safety", return_value=ProvisioningResult(success=True, wrapper_checksum="abc123"))
@@ -284,10 +284,10 @@ class TestTemplateValidation:
         self, mock_check, mock_create,
         mock_ls, mock_ensure, tmp_path,
     ):
-        """Missing custom/managed template surfaces as SetupError, not opaque sbx failure."""
-        from foundry_sandbox.commands.new_sbx import SetupError
+        """Missing custom/managed template surfaces as RuntimeError, not opaque sbx failure."""
 
-        with pytest.raises(SetupError, match="not found in sbx"):
+
+        with pytest.raises(RuntimeError, match="not found in sbx"):
             new_sbx_setup(
                 template="preset-missing:latest", **self._base_kwargs(tmp_path)
             )
@@ -326,8 +326,8 @@ class TestGitSafetyFailClosed:
     def test_fails_when_git_safety_not_installed(
         self, mock_gs_start, mock_gs_running, mock_check, mock_create, mock_metadata, tmp_path,
     ):
-        from foundry_sandbox.commands.new_sbx import SetupError
-        with pytest.raises(SetupError, match="not installed"):
+
+        with pytest.raises(RuntimeError, match="not installed"):
             new_sbx_setup(**self._base_kwargs(tmp_path))
 
     @patch("foundry_sandbox.commands.new_sbx.write_sandbox_metadata")
@@ -338,10 +338,10 @@ class TestGitSafetyFailClosed:
     def test_fails_when_server_unhealthy_after_start(
         self, mock_gs_start, mock_gs_running, mock_check, mock_create, mock_metadata, tmp_path,
     ):
-        from foundry_sandbox.commands.new_sbx import SetupError
+
         # Server starts without error but is_running still returns False
         mock_gs_start.return_value = MagicMock(returncode=0)
-        with pytest.raises(SetupError, match="did not become healthy"):
+        with pytest.raises(RuntimeError, match="did not become healthy"):
             new_sbx_setup(**self._base_kwargs(tmp_path))
 
     @patch("foundry_sandbox.commands.new_sbx.write_sandbox_metadata")
@@ -354,9 +354,9 @@ class TestGitSafetyFailClosed:
         self, mock_check, mock_create,
         mock_ensure, mock_gs_running, mock_provision, mock_metadata, tmp_path,
     ):
-        from foundry_sandbox.commands.new_sbx import SetupError
+
         mock_create.return_value = MagicMock(returncode=0, stdout="")
-        with pytest.raises(SetupError, match="provisioning failed"):
+        with pytest.raises(RuntimeError, match="provisioning failed"):
             new_sbx_setup(**self._base_kwargs(tmp_path))
 
     @patch("foundry_sandbox.commands.new_sbx.write_sandbox_metadata")
@@ -369,9 +369,9 @@ class TestGitSafetyFailClosed:
         self, mock_check, mock_create,
         mock_ensure, mock_gs_running, mock_provision, mock_metadata, tmp_path,
     ):
-        from foundry_sandbox.commands.new_sbx import SetupError
+
         mock_create.return_value = MagicMock(returncode=0, stdout="")
-        with pytest.raises(SetupError, match="provisioning failed"):
+        with pytest.raises(RuntimeError, match="provisioning failed"):
             new_sbx_setup(**self._base_kwargs(tmp_path))
 
     @patch("foundry_sandbox.commands.new_sbx.sbx_rm")
@@ -416,21 +416,20 @@ class TestSbxWorkspaceInfo:
 
 class TestNewCommand:
     @patch("foundry_sandbox.commands.new.new_sbx_setup")
-    @patch("foundry_sandbox.commands.new.derive_sandbox_paths")
+    @patch("foundry_sandbox.commands.new.path_claude_config")
     @patch("foundry_sandbox.commands.new._validate_preconditions")
     @patch("foundry_sandbox.commands.new._resolve_repo_input")
     @patch("foundry_sandbox.commands.new.validate_sandbox_name")
     def test_basic_new(
         self, mock_validate_name, mock_resolve, mock_precond,
-        mock_paths, mock_setup,
+        mock_config_path, mock_setup,
     ):
         mock_validate_name.return_value = (True, "")
         mock_resolve.return_value = ("https://github.com/org/repo", "/home/user/repo", "org/repo", "main")
         mock_precond.return_value = None
         mock_path = MagicMock()
-        mock_path.claude_config_path = MagicMock()
-        mock_path.claude_config_path.__truediv__ = MagicMock()
-        mock_paths.return_value = mock_path
+        mock_path.__truediv__ = MagicMock()
+        mock_config_path.return_value = mock_path
         mock_setup.return_value = "/home/user/repo/.sbx/test-worktrees/feature-x"
 
         runner = CliRunner()

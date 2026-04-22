@@ -9,7 +9,6 @@ Covers:
 
 import json
 import os
-from pathlib import Path
 
 import pytest
 
@@ -31,7 +30,6 @@ from foundry_sandbox.config import (
 )
 from foundry_sandbox.models import SbxSandboxMetadata
 from foundry_sandbox.paths import (
-    SandboxPaths,
     path_claude_config,
     path_claude_home,
     path_metadata_file,
@@ -39,7 +37,6 @@ from foundry_sandbox.paths import (
     path_last_attach,
     path_presets_dir,
     path_preset_file,
-    derive_sandbox_paths,
     ensure_dir,
     safe_remove,
     resolve_host_worktree_path,
@@ -131,38 +128,6 @@ class TestPathDerivation:
         assert str(path_preset_file("default")) == "/tmp/sb/presets/default.json"
 
 
-class TestDeriveSandboxPaths:
-    """Tests for derive_sandbox_paths composite function."""
-
-    @pytest.fixture(autouse=True)
-    def set_sandbox_home(self, monkeypatch):
-        monkeypatch.setenv("SANDBOX_HOME", "/tmp/sb")
-
-    def test_returns_sandbox_paths_tuple(self):
-        from unittest.mock import patch
-        with patch("foundry_sandbox.paths.resolve_host_worktree_path", return_value=Path("/repo/.sbx/test-box-worktrees/br")):
-            result = derive_sandbox_paths("test-box")
-        assert isinstance(result, SandboxPaths)
-
-    def test_worktree_path_from_metadata(self):
-        from unittest.mock import patch
-        with patch("foundry_sandbox.paths.resolve_host_worktree_path", return_value=Path("/repo/.sbx/test-box-worktrees/br")):
-            result = derive_sandbox_paths("test-box")
-        assert str(result.worktree_path) == "/repo/.sbx/test-box-worktrees/br"
-
-    def test_claude_config_path(self):
-        from unittest.mock import patch
-        with patch("foundry_sandbox.paths.resolve_host_worktree_path", return_value=Path("/repo/.sbx/test-box-worktrees/br")):
-            result = derive_sandbox_paths("test-box")
-        assert str(result.claude_config_path) == "/tmp/sb/claude-config/test-box"
-
-    def test_claude_home_path(self):
-        from unittest.mock import patch
-        with patch("foundry_sandbox.paths.resolve_host_worktree_path", return_value=Path("/repo/.sbx/test-box-worktrees/br")):
-            result = derive_sandbox_paths("test-box")
-        assert str(result.claude_home_path) == "/tmp/sb/claude-config/test-box/claude"
-
-
 class TestPathSafetyAssertions:
     """Tests for path traversal prevention via _assert_safe_path_component."""
 
@@ -192,16 +157,14 @@ class TestPathSafetyAssertions:
             path_preset_file(bad_name)
 
     @pytest.mark.parametrize("bad_name", ["../x", "a/b", ".", "..", ""])
-    def test_derive_sandbox_paths_rejects_traversal(self, bad_name):
+    def test_path_claude_home_rejects_traversal(self, bad_name):
         with pytest.raises(ValueError):
-            derive_sandbox_paths(bad_name)
+            path_claude_home(bad_name)
 
     def test_valid_names_pass(self):
-        from unittest.mock import patch
         path_claude_config("my-sandbox")
         path_preset_file("default")
-        with patch("foundry_sandbox.paths.resolve_host_worktree_path", return_value=Path("/repo/.sbx/test-box-worktrees/br")):
-            derive_sandbox_paths("test-box")
+        path_claude_home("test-box")
 
 
 class TestFilesystemHelpers:

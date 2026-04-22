@@ -24,6 +24,7 @@ from foundry_sandbox.state import (
     save_last_attach,
     load_last_attach,
 )
+from foundry_sandbox.models import SbxSandboxMetadata
 
 
 @pytest.fixture
@@ -71,19 +72,21 @@ class TestMetadataWriteRead:
     def test_write_then_read_full(self, sandbox_home):
         write_sandbox_metadata(
             "test-sandbox",
-            sbx_name="test-sandbox",
-            agent="claude",
-            repo_url="https://github.com/user/repo.git",
-            branch="main",
-            from_branch="dev",
-            network_profile="balanced",
-            git_safety_enabled=True,
-            working_dir="src",
-            pip_requirements="requirements.txt",
-            allow_pr=True,
-            enable_opencode=True,
-            enable_zai=False,
-            copies=["file.txt:/dest/file.txt"],
+            SbxSandboxMetadata(
+                sbx_name="test-sandbox",
+                agent="claude",
+                repo_url="https://github.com/user/repo.git",
+                branch="main",
+                from_branch="dev",
+                network_profile="balanced",
+                git_safety_enabled=True,
+                working_dir="src",
+                pip_requirements="requirements.txt",
+                allow_pr=True,
+                enable_opencode=True,
+                enable_zai=False,
+                copies=["file.txt:/dest/file.txt"],
+            ),
         )
 
         metadata = load_sandbox_metadata("test-sandbox")
@@ -107,10 +110,12 @@ class TestMetadataWriteRead:
     def test_write_minimal_metadata(self, sandbox_home):
         write_sandbox_metadata(
             "minimal",
-            sbx_name="minimal",
-            agent="codex",
-            repo_url="https://github.com/test/repo.git",
-            branch="main",
+            SbxSandboxMetadata(
+                sbx_name="minimal",
+                agent="codex",
+                repo_url="https://github.com/test/repo.git",
+                branch="main",
+            ),
         )
 
         metadata = load_sandbox_metadata("minimal")
@@ -147,10 +152,12 @@ class TestMetadataWriteRead:
 
         write_sandbox_metadata(
             "new-sandbox",
-            sbx_name="new-sandbox",
-            agent="claude",
-            repo_url="https://github.com/org/repo",
-            branch="main",
+            SbxSandboxMetadata(
+                sbx_name="new-sandbox",
+                agent="claude",
+                repo_url="https://github.com/org/repo",
+                branch="main",
+            ),
         )
 
         assert config_dir.exists()
@@ -159,10 +166,12 @@ class TestMetadataWriteRead:
     def test_metadata_json_is_valid(self, sandbox_home):
         write_sandbox_metadata(
             "json-check",
-            sbx_name="json-check",
-            agent="claude",
-            repo_url="https://github.com/org/repo",
-            branch="main",
+            SbxSandboxMetadata(
+                sbx_name="json-check",
+                agent="claude",
+                repo_url="https://github.com/org/repo",
+                branch="main",
+            ),
         )
 
         config_dir = sandbox_home / "claude-config" / "json-check"
@@ -178,10 +187,12 @@ class TestPatchMetadata:
     def test_patch_single_field(self, sandbox_home):
         write_sandbox_metadata(
             "patch-test",
-            sbx_name="patch-test",
-            agent="claude",
-            repo_url="https://github.com/org/repo",
-            branch="main",
+            SbxSandboxMetadata(
+                sbx_name="patch-test",
+                agent="claude",
+                repo_url="https://github.com/org/repo",
+                branch="main",
+            ),
         )
 
         patch_sandbox_metadata("patch-test", branch="develop")
@@ -193,10 +204,12 @@ class TestPatchMetadata:
     def test_patch_multiple_fields(self, sandbox_home):
         write_sandbox_metadata(
             "patch-multi",
-            sbx_name="patch-multi",
-            agent="claude",
-            repo_url="https://github.com/org/repo",
-            branch="main",
+            SbxSandboxMetadata(
+                sbx_name="patch-multi",
+                agent="claude",
+                repo_url="https://github.com/org/repo",
+                branch="main",
+            ),
         )
 
         patch_sandbox_metadata(
@@ -214,10 +227,12 @@ class TestPatchMetadata:
     def test_patch_unknown_field_raises(self, sandbox_home):
         write_sandbox_metadata(
             "patch-bad",
-            sbx_name="patch-bad",
-            agent="claude",
-            repo_url="u",
-            branch="b",
+            SbxSandboxMetadata(
+                sbx_name="patch-bad",
+                agent="claude",
+                repo_url="u",
+                branch="b",
+            ),
         )
 
         with pytest.raises(ValueError, match="Unknown"):
@@ -237,17 +252,21 @@ class TestListSandboxes:
     def test_lists_existing_sandboxes(self, sandbox_home):
         write_sandbox_metadata(
             "sbx-1",
-            sbx_name="sbx-1",
-            agent="claude",
-            repo_url="https://github.com/org/repo",
-            branch="main",
+            SbxSandboxMetadata(
+                sbx_name="sbx-1",
+                agent="claude",
+                repo_url="https://github.com/org/repo",
+                branch="main",
+            ),
         )
         write_sandbox_metadata(
             "sbx-2",
-            sbx_name="sbx-2",
-            agent="codex",
-            repo_url="https://github.com/org/other",
-            branch="dev",
+            SbxSandboxMetadata(
+                sbx_name="sbx-2",
+                agent="codex",
+                repo_url="https://github.com/org/other",
+                branch="dev",
+            ),
         )
 
         result = list_sandboxes()
@@ -269,10 +288,12 @@ class TestInspectSandbox:
     def test_existing_sandbox(self, sandbox_home):
         write_sandbox_metadata(
             "inspect-me",
-            sbx_name="inspect-me",
-            agent="claude",
-            repo_url="https://github.com/org/repo",
-            branch="main",
+            SbxSandboxMetadata(
+                sbx_name="inspect-me",
+                agent="claude",
+                repo_url="https://github.com/org/repo",
+                branch="main",
+            ),
         )
 
         result = inspect_sandbox("inspect-me")

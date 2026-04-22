@@ -25,6 +25,7 @@ from foundry_sandbox.sbx import (
     sbx_stop,
 )
 from foundry_sandbox.state import write_sandbox_metadata
+from foundry_sandbox.models import SbxSandboxMetadata
 
 
 def _init_git_repo(repo_dir, branch="main"):
@@ -48,11 +49,13 @@ def _setup_and_provision(sandbox, tmp_path, branch="main"):
     # Write initial metadata so provision_git_safety can patch it
     write_sandbox_metadata(
         sandbox,
-        sbx_name=sandbox,
-        agent="shell",
-        repo_url=str(repo_dir),
-        branch=branch,
-        git_safety_enabled=False,
+        SbxSandboxMetadata(
+            sbx_name=sandbox,
+            agent="shell",
+            repo_url=str(repo_dir),
+            branch=branch,
+            git_safety_enabled=False,
+        ),
     )
 
     if not git_safety_server_is_running():

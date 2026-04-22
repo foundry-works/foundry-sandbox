@@ -2,7 +2,6 @@
 
 Provides functions for:
   - Resolving sandbox paths (configs, metadata)
-  - Deriving all related paths for a named sandbox
   - Directory and path management (ensure_dir, safe_remove)
   - Sandbox name generation
 """
@@ -12,7 +11,6 @@ from __future__ import annotations
 import hashlib
 import os
 from pathlib import Path
-from typing import NamedTuple
 
 from foundry_sandbox.constants import (
     SANDBOX_NAME_MAX_LENGTH,
@@ -21,25 +19,6 @@ from foundry_sandbox.constants import (
     get_sandbox_home,
 )
 from foundry_sandbox.utils import sanitize_ref_component
-
-
-# ============================================================================
-# SandboxPaths Data Structure
-# ============================================================================
-
-
-class SandboxPaths(NamedTuple):
-    """Container for all derived paths related to a sandbox.
-
-    Attributes:
-        worktree_path: Path to the Git worktree (also the sbx workspace dir)
-        claude_config_path: Path to Claude configuration directory
-        claude_home_path: Path to Claude home directory
-    """
-
-    worktree_path: Path
-    claude_config_path: Path
-    claude_home_path: Path
 
 
 # ============================================================================
@@ -166,28 +145,6 @@ def path_preset_file(name: str) -> Path:
     """
     _assert_safe_path_component(name)
     return path_presets_dir() / f"{name}.json"
-
-
-# ============================================================================
-# Path Derivation
-# ============================================================================
-
-
-def derive_sandbox_paths(name: str) -> SandboxPaths:
-    """Derive all paths related to a named sandbox.
-
-    Args:
-        name: Sandbox name (also used as the sbx sandbox name).
-
-    Returns:
-        SandboxPaths with all derived paths.
-    """
-    _assert_safe_path_component(name)
-    return SandboxPaths(
-        worktree_path=resolve_host_worktree_path(name),
-        claude_config_path=path_claude_config(name),
-        claude_home_path=path_claude_home(name),
-    )
 
 
 def resolve_host_worktree_path(name: str) -> Path:

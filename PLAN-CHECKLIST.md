@@ -103,10 +103,10 @@
 
 ## Phase 5: Minor Cleanups (Optional)
 
-- [ ] Remove `SetupError` (`new_sbx.py:36`); replace with `RuntimeError`
-- [ ] Simplify `NewDefaults` + `_apply_saved_new_defaults()` (`new.py:38-100`)
-- [ ] Reduce `write_sandbox_metadata` arg list (`state.py:81-147`) — pass `SbxSandboxMetadata` directly
-- [ ] Inline or delete `SandboxPaths` NamedTuple (`paths.py:34`)
+- [x] Remove `SetupError` (`new_sbx.py:36`); replace with `RuntimeError`
+- [x] Simplify `NewDefaults` + `_apply_saved_new_defaults()` (`new.py:38-100`)
+- [x] Reduce `write_sandbox_metadata` arg list (`state.py:81-147`) — pass `SbxSandboxMetadata` directly
+- [x] Inline or delete `SandboxPaths` NamedTuple (`paths.py:34`)
 
 ## Cross-Phase Gates
 
