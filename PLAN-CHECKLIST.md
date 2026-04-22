@@ -74,15 +74,15 @@ Legend: `[ ]` todo, `[x]` done, `[~]` partial / accepted risk
 
 ## 3.5 Audit and Retire Compose-Era Test Modules
 
-- [ ] Classify each module in `tests/redteam/modules/` as port / retire / skip
-- [ ] Retire: delete `03-dns-filtering.sh`, `04-network-isolation.sh`, `05-proxy-egress.sh`, `06-direct-ip-egress.sh`, `07-proxy-admin.sh`, `14-network-bypass.sh`, `18-ip-encoding-bypass.sh` (contingent on classification)
-- [ ] Port surviving credential / git-security modules to run against a live sbx sandbox
-- [ ] Confirm `tests/chaos/modules/` modules 03 and 04 run under sbx or retire them
-- [ ] Update `tests/redteam/harness.sh` and `tests/redteam/runner.sh` to match the new module set
-- [ ] Update `tests/redteam-sandbox.sh` launcher to match
-- [ ] Add `tests/redteam/README.md` (or update `tests/README.md`) documenting covered threats
-- [ ] Update `docs/security/security-model.md` to reflect the reduced live suite
-- [ ] Record deletions in `CHANGELOG.md`
+- [x] Classify each module in `tests/redteam/modules/` as port / retire / skip
+- [x] Retire: delete `03-dns-filtering.sh`, `04-network-isolation.sh`, `05-proxy-egress.sh`, `06-direct-ip-egress.sh`, `07-proxy-admin.sh`, `14-network-bypass.sh`, `18-ip-encoding-bypass.sh`
+- [x] Port surviving credential / git-security modules to run against a live sbx sandbox
+- [x] Confirm `tests/chaos/modules/` modules 03 and 04 run under sbx or retire them
+- [x] Update `tests/redteam/harness.sh` and `tests/redteam/runner.sh` to match the new module set — no changes needed (glob discovery)
+- [x] Update `tests/redteam-sandbox.sh` launcher to match — no changes needed (delegates to runner)
+- [x] Add `tests/redteam/README.md` (or update `tests/README.md`) documenting covered threats
+- [x] Update `docs/security/security-model.md` to reflect the reduced live suite
+- [x] Record deletions in `CHANGELOG.md`
 
 ## 3.6 Close the Deferred Deep-Policy Live Gate
 

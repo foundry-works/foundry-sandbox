@@ -19,7 +19,7 @@ run_tests() {
     # Test 1: Wrapper timeout on unreachable server
     section_start "timeout"
     # Block traffic to git safety port from the sandbox's perspective
-    # Using sbx policy to deny access to the host
+    # Using sbx policy to deny access to the host (host.docker.internal is the sbx host gateway)
     sbx policy deny network host.docker.internal &>/dev/null || true
 
     # Measure wrapper response time

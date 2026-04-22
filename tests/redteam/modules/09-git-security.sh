@@ -1,6 +1,6 @@
 #!/bin/bash
 # Module: 09-git-security
-# Description: Git security, hooks, shadow isolation, and marketplace access
+# Description: Git security, hooks, shadow isolation, and marketplace access (sbx-compatible)
 
 run_tests() {
     # ---- Section 9: Git Security Tests ----
@@ -203,7 +203,7 @@ HOOKEOF
 
         # Test 5: direct curl to git API without HMAC returns 401
         info "Testing unauthenticated git API access returns 401..."
-        GIT_API_HOST="${GIT_API_HOST:-unified-proxy}"
+        GIT_API_HOST="${GIT_API_HOST:-host.docker.internal}"
         GIT_API_PORT="${GIT_API_PORT:-8083}"
         NOAUTH_RESP=$(curl -s --connect-timeout 5 --max-time 10 \
             -X POST \
@@ -242,7 +242,7 @@ HOOKEOF
     CLONE_EXIT=$?
 
     if [[ $CLONE_EXIT -eq 0 ]] && [[ -d "$MARKETPLACE_DIR/.git" ]]; then
-        test_pass "Plugin marketplace clone succeeded (git proxy allows anthropics repos)"
+        test_pass "Plugin marketplace clone succeeded (git safety server allows anthropics repos)"
         rm -rf "$MARKETPLACE_DIR"
     elif echo "$CLONE_OUTPUT" | grep -qiE "(403|forbidden|blocked|not allowed)"; then
         test_fail "Plugin marketplace clone blocked (should be in allowed list)"
@@ -265,7 +265,7 @@ HOOKEOF
         test_pass "Unauthorized repo clone blocked by git proxy (403)"
         rm -rf "$BLOCKED_DIR" 2>/dev/null
     elif [[ $BLOCKED_EXIT -eq 0 ]] && [[ -d "$BLOCKED_DIR/.git" ]]; then
-        test_fail "Unauthorized repo clone succeeded (should be blocked by git proxy)"
+        test_fail "Unauthorized repo clone succeeded (should be blocked by git safety server)"
         rm -rf "$BLOCKED_DIR"
     else
         # Could be blocked by other means (network, etc.)
@@ -273,10 +273,10 @@ HOOKEOF
         info "Output: $(echo "$BLOCKED_OUTPUT" | head -c 200)"
     fi
 
-    # Test 3: Node.js proxy integration (global-agent bootstrap)
-    info "Testing Node.js proxy integration..."
+    # Test 3: Node.js network connectivity
+    info "Testing Node.js network connectivity..."
     if command -v node &>/dev/null; then
-        # Test that Node.js can make HTTPS requests through the proxy
+        # Test that Node.js can make HTTPS requests through the sbx network proxy
         NODE_OUTPUT=$(node -e "
 const https = require('https');
 const req = https.get('https://api.github.com/', (res) => {
@@ -298,17 +298,17 @@ req.setTimeout(10000, () => {
         if echo "$NODE_OUTPUT" | grep -q "STATUS:"; then
             STATUS_CODE=$(echo "$NODE_OUTPUT" | grep "STATUS:" | cut -d: -f2)
             if [[ "$STATUS_CODE" == "200" ]] || [[ "$STATUS_CODE" == "403" ]]; then
-                test_pass "Node.js routes through proxy (HTTP $STATUS_CODE)"
+                test_pass "Node.js routes through network proxy (HTTP $STATUS_CODE)"
             else
-                test_warn "Node.js proxy response: HTTP $STATUS_CODE"
+                test_warn "Node.js network response: HTTP $STATUS_CODE"
             fi
         elif echo "$NODE_OUTPUT" | grep -qiE "(ECONNREFUSED|ETIMEDOUT|certificate)"; then
-            test_warn "Node.js proxy connection issue: $(echo "$NODE_OUTPUT" | head -c 100)"
+            test_warn "Node.js network connection issue: $(echo "$NODE_OUTPUT" | head -c 100)"
         else
-            test_warn "Node.js proxy test inconclusive"
+            test_warn "Node.js network test inconclusive"
             info "Output: $(echo "$NODE_OUTPUT" | head -c 150)"
         fi
     else
-        info "Node.js not available for proxy integration test"
+        info "Node.js not available for network connectivity test"
     fi
 }

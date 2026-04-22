@@ -3,7 +3,7 @@
 # Description: Early-exit merge blocking validation
 # Tests that merge operations are blocked at the earliest possible point
 # in the policy engine, before identity verification or domain matching.
-# This is defense-in-depth on top of the existing Step 3 GitHub blocklist.
+# This is defense-in-depth on top of the deep-policy sidecar fallback.
 
 # Helper: assert a merge request is blocked.
 # Checks HTTP status code first (403 = blocked), then falls back to body
@@ -51,14 +51,14 @@ run_tests() {
     header "19. EARLY-EXIT MERGE BLOCKING"
 
     echo ""
-    echo "Testing that merge operations are blocked at early-exit (Step E)..."
+    echo "Testing that merge operations are blocked at foundry-git-safety early-exit..."
     echo "(These are blocked before identity or domain checks for defense-in-depth)"
 
     # Test 1: REST PR merge endpoint (PUT /repos/*/pulls/*/merge)
     info "Testing REST PR merge block (PUT /repos/*/pulls/*/merge)..."
     _assert_merge_blocked "REST PR merge" \
         -X PUT \
-        -H "Authorization: token CREDENTIAL_PROXY_PLACEHOLDER" \
+        -H "Authorization: token ${GH_TOKEN:-}" \
         -H "Content-Type: application/json" \
         -d '{"commit_title":"test merge","merge_method":"merge"}' \
         "https://api.github.com/repos/octocat/Hello-World/pulls/1/merge"
@@ -67,7 +67,7 @@ run_tests() {
     info "Testing REST auto-merge block (PUT /repos/*/pulls/*/auto-merge)..."
     _assert_merge_blocked "REST auto-merge" \
         -X PUT \
-        -H "Authorization: token CREDENTIAL_PROXY_PLACEHOLDER" \
+        -H "Authorization: token ${GH_TOKEN:-}" \
         -H "Content-Type: application/json" \
         -d '{}' \
         "https://api.github.com/repos/octocat/Hello-World/pulls/1/auto-merge"
@@ -76,7 +76,7 @@ run_tests() {
     info "Testing GraphQL mergePullRequest mutation block..."
     _assert_merge_blocked "GraphQL mergePullRequest" \
         -X POST \
-        -H "Authorization: token CREDENTIAL_PROXY_PLACEHOLDER" \
+        -H "Authorization: token ${GH_TOKEN:-}" \
         -H "Content-Type: application/json" \
         -d '{"query":"mutation { mergePullRequest(input: {pullRequestId: \"PR_test123\"}) { pullRequest { id } } }"}' \
         "https://api.github.com/graphql"
@@ -85,7 +85,7 @@ run_tests() {
     info "Testing GraphQL enablePullRequestAutoMerge mutation block..."
     _assert_merge_blocked "GraphQL enablePullRequestAutoMerge" \
         -X POST \
-        -H "Authorization: token CREDENTIAL_PROXY_PLACEHOLDER" \
+        -H "Authorization: token ${GH_TOKEN:-}" \
         -H "Content-Type: application/json" \
         -d '{"query":"mutation { enablePullRequestAutoMerge(input: {pullRequestId: \"PR_test123\"}) { pullRequest { id } } }"}' \
         "https://api.github.com/graphql"
@@ -95,7 +95,7 @@ run_tests() {
     info "Testing that /merges path is NOT caught by early-exit..."
     MERGES_CODE=$(curl -s -o /dev/null -w "%{http_code}" --max-time 10 \
         -X POST \
-        -H "Authorization: token CREDENTIAL_PROXY_PLACEHOLDER" \
+        -H "Authorization: token ${GH_TOKEN:-}" \
         -H "Content-Type: application/json" \
         -d '{"base":"main","head":"feature","commit_message":"test"}' \
         "https://api.github.com/repos/octocat/Hello-World/merges" 2>&1)
@@ -114,7 +114,7 @@ run_tests() {
     # Test 6: Non-merge GitHub API request should pass through
     info "Testing that non-merge GitHub API requests pass through..."
     LIST_CODE=$(curl -s -o /dev/null -w "%{http_code}" --max-time 10 \
-        -H "Authorization: token CREDENTIAL_PROXY_PLACEHOLDER" \
+        -H "Authorization: token ${GH_TOKEN:-}" \
         "https://api.github.com/repos/octocat/Hello-World/pulls" 2>&1)
 
     if [[ "$LIST_CODE" =~ ^(200|301|304|404)$ ]]; then
@@ -125,7 +125,7 @@ run_tests() {
     elif [[ "$LIST_CODE" == "403" ]]; then
         # Could be auth failure or merge block — get detail
         DETAIL_BODY=$(curl -s --max-time 10 \
-            -H "Authorization: token CREDENTIAL_PROXY_PLACEHOLDER" \
+            -H "Authorization: token ${GH_TOKEN:-}" \
             "https://api.github.com/repos/octocat/Hello-World/pulls" 2>&1)
         if echo "$DETAIL_BODY" | grep -qiE "merge"; then
             test_fail "Non-merge request incorrectly blocked by merge policy"

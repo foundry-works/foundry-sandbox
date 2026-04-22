@@ -51,6 +51,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Git operations** proxied through standalone `foundry-git-safety` server instead of unified proxy git API
 - **All documentation** updated to reflect sbx architecture (architecture, security model, configuration, operations, observability, getting started, commands, ADRs)
 - **ADR-001, 002, 004, 005, 007** marked as superseded by ADR-008
+- **7 redteam test modules ported to sbx** — credentials-files (02), git-security (09), github-api (11), credential-patterns (13), self-merge (15), workflow-push (17), merge-early-exit (19). Updated proxy/compose references to sbx equivalents (host.docker.internal, GH_TOKEN, git-safety server)
 
 ### Fixed
 
@@ -61,6 +62,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Removed
 
+- **7 compose-era redteam test modules** — DNS filtering (03), network isolation (04), proxy egress (05), direct IP egress (06), proxy admin (07), network bypass (14), IP encoding bypass (18). These tested the removed unified-proxy/mitmproxy network stack and have no sbx equivalent
+- **4 redteam test modules disabled** — credential injection (08), container escape (10), TLS/filesystem (12), readonly-fs (16). Moved to `tests/redteam/modules/disabled/` pending sbx-native rewrites
 - **`unified-proxy/` directory** — entire proxy infrastructure deleted (mitmproxy, Squid, API gateways, DNS filter, circuit breaker, rate limiter, container registry, credential injector, policy engine)
 - **`cast build` command** — sandbox images managed by sbx templates
 - **`cast prune` command** — orphan cleanup handled by sbx

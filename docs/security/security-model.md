@@ -445,7 +445,13 @@ Security measures are covered by:
 - **Unit tests** — `foundry-git-safety/tests/unit/` (619 tests across 15 files)
 - **Integration tests** — `foundry-git-safety/tests/integration/` (46 tests)
 - **Security invariant tests** — `foundry-git-safety/tests/security/` (41 tests)
-- **Red team modules** — `tests/redteam/`
+- **Red team modules** — `tests/redteam/` (9 active modules):
+  - Credential isolation: env scanning (01), file scanning (02), credential patterns (13)
+  - Git safety: hooks/shadow/wrapper (09), GitHub API deep-policy (11), self-merge prevention (15), workflow push blocking (17), early-exit merge blocking (19)
+  - Package installation: pip/npm boundary testing (20)
+- **Chaos modules** — `tests/chaos/` (4 modules): daemon kill, server kill, network partition, corrupted reset
+
+Note: 7 compose-era redteam modules were retired in 0.21.0 (DNS filtering, proxy egress, network isolation, IP encoding bypass, proxy admin, container escape, TLS/filesystem). 4 modules are deferred pending live sbx validation (see `tests/redteam/README.md`).
 
 ### Manual Verification
 

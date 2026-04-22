@@ -190,16 +190,16 @@ Shell tests validate sandbox behavior and CLI functionality.
 
 ### Red-Team Tests (`redteam-sandbox.sh`)
 
-**Run inside the sandbox container.** Validates credential isolation:
+**Run inside the sandbox.** 9 active modules validate:
 
-1. **Environment credential leakage** - No real API keys in environment
-2. **Proxy bypass attempts** - Direct connections blocked
-3. **DNS exfiltration** - External DNS queries blocked
-4. **Filesystem credential hunting** - No credentials in mounted volumes
-5. **Network isolation** - Only allowlisted destinations reachable
+1. **Credential isolation** — No real API keys in environment or filesystem (01, 02, 13)
+2. **Git safety** — Hooks, shadow isolation, GitHub API deep-policy, self-merge prevention, workflow push blocking (09, 11, 15, 17, 19)
+3. **Package installation** — pip/npm boundary testing, sudo blocking (20)
+
+Network egress control (proxy bypass, DNS exfiltration, network isolation) is now covered by `sbx policy` and the chaos test suite rather than dedicated redteam modules.
 
 ```bash
-# Inside sandbox container
+# Inside sandbox
 ./tests/redteam-sandbox.sh
 ```
 

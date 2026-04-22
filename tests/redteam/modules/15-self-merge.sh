@@ -13,7 +13,7 @@ run_tests() {
     info "Testing PR merge block (PUT /repos/*/pulls/*/merge)..."
     SELF_MERGE_RESP=$(curl -s --max-time 10 \
         -X PUT \
-        -H "Authorization: token CREDENTIAL_PROXY_PLACEHOLDER" \
+        -H "Authorization: token ${GH_TOKEN:-}" \
         -H "Content-Type: application/json" \
         -d '{"commit_title":"self-merge test","merge_method":"merge"}' \
         "https://api.github.com/repos/octocat/Hello-World/pulls/1/merge" 2>&1)
@@ -31,7 +31,7 @@ run_tests() {
     info "Testing auto-merge enablement block (PUT /repos/*/pulls/*/auto-merge)..."
     AUTOMERGE_RESP=$(curl -s --max-time 10 \
         -X PUT \
-        -H "Authorization: token CREDENTIAL_PROXY_PLACEHOLDER" \
+        -H "Authorization: token ${GH_TOKEN:-}" \
         -H "Content-Type: application/json" \
         -d '{}' \
         "https://api.github.com/repos/octocat/Hello-World/pulls/1/auto-merge" 2>&1)
@@ -49,7 +49,7 @@ run_tests() {
     info "Testing PR review approval block (POST /repos/*/pulls/*/reviews, event=APPROVE)..."
     APPROVE_RESP=$(curl -s --max-time 10 \
         -X POST \
-        -H "Authorization: token CREDENTIAL_PROXY_PLACEHOLDER" \
+        -H "Authorization: token ${GH_TOKEN:-}" \
         -H "Content-Type: application/json" \
         -d '{"event":"APPROVE","body":"Looks good"}' \
         "https://api.github.com/repos/octocat/Hello-World/pulls/1/reviews" 2>&1)
@@ -67,7 +67,7 @@ run_tests() {
     info "Testing PR review comment (POST /repos/*/pulls/*/reviews, event=COMMENT)..."
     COMMENT_REVIEW_RESP=$(curl -s --max-time 10 \
         -X POST \
-        -H "Authorization: token CREDENTIAL_PROXY_PLACEHOLDER" \
+        -H "Authorization: token ${GH_TOKEN:-}" \
         -H "Content-Type: application/json" \
         -d '{"event":"COMMENT","body":"non-approval review comment"}' \
         "https://api.github.com/repos/octocat/Hello-World/pulls/1/reviews" 2>&1)
@@ -87,7 +87,7 @@ run_tests() {
     info "Testing review deletion block (DELETE /repos/*/pulls/*/reviews/123)..."
     DELETE_REVIEW_RESP=$(curl -s --max-time 10 \
         -X DELETE \
-        -H "Authorization: token CREDENTIAL_PROXY_PLACEHOLDER" \
+        -H "Authorization: token ${GH_TOKEN:-}" \
         "https://api.github.com/repos/octocat/Hello-World/pulls/1/reviews/123" 2>&1)
 
     if echo "$DELETE_REVIEW_RESP" | grep -qiE "(blocked|forbidden|not allowed|policy)"; then
@@ -103,7 +103,7 @@ run_tests() {
     info "Testing GraphQL updatePullRequestBranch block..."
     GRAPHQL_UPDATE_RESP=$(curl -s --max-time 10 \
         -X POST \
-        -H "Authorization: token CREDENTIAL_PROXY_PLACEHOLDER" \
+        -H "Authorization: token ${GH_TOKEN:-}" \
         -H "Content-Type: application/json" \
         -d '{"query":"mutation { updatePullRequestBranch(input: {pullRequestId: \"PR_test123\"}) { pullRequest { id } } }"}' \
         "https://api.github.com/graphql" 2>&1)

@@ -27,7 +27,7 @@ run_tests() {
 
     # Generic high-entropy check for KEY/TOKEN/SECRET vars
     SUSPICIOUS_VARS=$(env | grep -iE "^[^=]*(KEY|TOKEN|SECRET|PASSWORD|CREDENTIAL)[^=]*=" | \
-        grep -vE "(PLACEHOLDER|PROXY|PATH|LESS|COLORS)" | \
+        grep -vE "(PLACEHOLDER|PATH|LESS|COLORS)" | \
         awk -F= 'length($2) > 32 {print $1}')
     if [[ -n "$SUSPICIOUS_VARS" ]]; then
         test_warn "High-entropy values in sensitive-named vars: $SUSPICIOUS_VARS"

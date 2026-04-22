@@ -59,8 +59,8 @@ WFEOF
             else
                 test_fail "Push with .github/workflows/ file SUCCEEDED (should be blocked!)"
                 # Note: Branch cleanup via DELETE /git/refs/ is also blocked by the
-                # proxy's git ref mutation policy. Log the orphan for manual cleanup.
-                info "Orphan branch '${WORKFLOW_TEST_BRANCH}' may remain on remote (cleanup blocked by policy)"
+                # git safety server's ref mutation enforcement. Log the orphan for manual cleanup.
+                info "Orphan branch '${WORKFLOW_TEST_BRANCH}' may remain on remote (cleanup blocked by enforcement)"
             fi
 
             # Test 2: Normal code push should still work after workflow block
@@ -76,8 +76,8 @@ WFEOF
             if [[ $NORMAL_PUSH_EXIT -eq 0 ]]; then
                 test_pass "Normal code push succeeded after workflow block"
                 # Note: Branch cleanup via DELETE /git/refs/ is blocked by the
-                # proxy's git ref mutation policy. Log the orphan for manual cleanup.
-                info "Orphan branch '${WORKFLOW_TEST_BRANCH}' may remain on remote (cleanup blocked by policy)"
+                # git safety server's ref mutation enforcement. Log the orphan for manual cleanup.
+                info "Orphan branch '${WORKFLOW_TEST_BRANCH}' may remain on remote (cleanup blocked by enforcement)"
             else
                 test_fail "Normal code push failed after workflow block (exit: $NORMAL_PUSH_EXIT)"
                 info "Output: $(echo "$NORMAL_PUSH_OUTPUT" | head -c 300)"

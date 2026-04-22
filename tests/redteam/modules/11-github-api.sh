@@ -1,6 +1,6 @@
 #!/bin/bash
 # Module: 11-github-api
-# Description: GitHub API deep policy sidecar, policy bypass, and registration isolation
+# Description: GitHub API deep policy, policy bypass, and service isolation (sbx-compatible)
 
 run_tests() {
     # ---- Section 14: GitHub API Filter Tests ----
@@ -14,7 +14,7 @@ run_tests() {
 
     # Try to access secrets endpoint
     SECRETS_RESP=$(curl -s --max-time 10 \
-        -H "Authorization: token CREDENTIAL_PROXY_PLACEHOLDER" \
+        -H "Authorization: token ${GH_TOKEN:-}" \
         "https://api.github.com/repos/octocat/Hello-World/actions/secrets" 2>&1)
 
     if echo "$SECRETS_RESP" | grep -qiE "(blocked|forbidden|not allowed)"; then
@@ -37,7 +37,7 @@ run_tests() {
     info "Testing PR merge block (PUT /repos/*/pulls/*/merge)..."
     MERGE_RESP=$(curl -s --max-time 10 \
         -X PUT \
-        -H "Authorization: token CREDENTIAL_PROXY_PLACEHOLDER" \
+        -H "Authorization: token ${GH_TOKEN:-}" \
         -H "Content-Type: application/json" \
         -d '{"commit_title":"test","merge_method":"merge"}' \
         "https://api.github.com/repos/octocat/Hello-World/pulls/1/merge" 2>&1)
@@ -58,7 +58,7 @@ run_tests() {
     info "Testing release creation block (POST /repos/*/releases)..."
     RELEASE_RESP=$(curl -s --max-time 10 \
         -X POST \
-        -H "Authorization: token CREDENTIAL_PROXY_PLACEHOLDER" \
+        -H "Authorization: token ${GH_TOKEN:-}" \
         -H "Content-Type: application/json" \
         -d '{"tag_name":"v0.0.1-test","name":"Test Release"}' \
         "https://api.github.com/repos/octocat/Hello-World/releases" 2>&1)
@@ -76,7 +76,7 @@ run_tests() {
     info "Testing issue comment creation (always allowed)..."
     COMMENT_RESP=$(curl -s --max-time 10 \
         -X POST \
-        -H "Authorization: token CREDENTIAL_PROXY_PLACEHOLDER" \
+        -H "Authorization: token ${GH_TOKEN:-}" \
         -H "Content-Type: application/json" \
         -d '{"body":"Test comment from sandbox"}' \
         "https://api.github.com/repos/octocat/Hello-World/issues/1/comments" 2>&1)
@@ -95,14 +95,14 @@ run_tests() {
 
     echo ""
     echo "Testing that internal registration API is not accessible from sandbox..."
-    echo "(Registration API should only be available via Unix socket on proxy)"
+    echo "(Service endpoints should not be accessible from inside sandbox)"
 
     # Test direct TCP access to common internal API ports
     info "Testing internal API TCP exposure..."
     INTERNAL_PORTS=(8081 8082 9090 5000)
     for port in "${INTERNAL_PORTS[@]}"; do
         INTERNAL_RESP=$(curl -s --connect-timeout 3 --max-time 5 \
-            "http://unified-proxy:${port}/internal/health" 2>&1)
+            "http://127.0.0.1:${port}/internal/health" 2>&1)
         if echo "$INTERNAL_RESP" | grep -qE "(ok|healthy|status)"; then
             test_fail "Internal API accessible on port $port!"
         else
@@ -112,10 +112,10 @@ run_tests() {
 
     # Test Unix socket path (should not exist in sandbox)
     SOCKET_PATHS=(
-        "/var/run/unified-proxy/internal.sock"
-        "/var/run/proxy/internal.sock"
-        "/run/unified-proxy/internal.sock"
-        "/tmp/unified-proxy.sock"
+        "/var/run/foundry/git-safety.sock"
+        "/var/run/foundry/internal.sock"
+        "/run/foundry/git-safety.sock"
+        "/tmp/foundry-git-safety.sock"
     )
     for sock in "${SOCKET_PATHS[@]}"; do
         if [[ -S "$sock" ]]; then
@@ -125,20 +125,20 @@ run_tests() {
         fi
     done
 
-    # Test container registration endpoint (should be inaccessible)
-    info "Testing container registration endpoint..."
+    # Test git-safety registration endpoint (should be inaccessible from inside sandbox)
+    info "Testing git-safety registration endpoint isolation..."
     REGISTER_RESP=$(curl -s --connect-timeout 5 --max-time 10 \
         -X POST \
         -H "Content-Type: application/json" \
         -d '{"container_id":"evil-container","ip":"172.17.0.100"}' \
-        "http://unified-proxy:8080/internal/containers" 2>&1)
+        "http://127.0.0.1:8083/internal/containers" 2>&1)
 
     if echo "$REGISTER_RESP" | grep -qiE "(forbidden|denied|not found|404|blocked)"; then
-        test_pass "Container registration endpoint blocked"
+        test_pass "Git-safety registration endpoint blocked"
     elif echo "$REGISTER_RESP" | grep -qE '"(registered|status|container_id)"'; then
-        test_fail "Container registration endpoint accessible via HTTP!"
+        test_fail "Git-safety registration endpoint accessible via HTTP!"
     else
         info "Registration response: $(echo "$REGISTER_RESP" | head -c 100)"
-        test_pass "Container registration not accessible"
+        test_pass "Git-safety registration endpoint not accessible"
     fi
 }
