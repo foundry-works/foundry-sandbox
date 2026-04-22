@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from pathlib import Path
 from unittest.mock import patch
 
 import pytest
@@ -18,10 +17,9 @@ from foundry_sandbox.commands._helpers import (
 class TestAutoDetectSandbox:
     """auto_detect_sandbox: match cwd against metadata host_worktree_path."""
 
-    @patch("foundry_sandbox.commands._helpers.get_worktrees_dir")
     @patch("foundry_sandbox.state.list_sandboxes")
     @patch("foundry_sandbox.commands._helpers.validate_existing_sandbox_name", return_value=(True, ""))
-    def test_detects_new_layout_sandbox(self, mock_validate, mock_list, mock_wt_dir, tmp_path):
+    def test_detects_new_layout_sandbox(self, mock_validate, mock_list, tmp_path):
         # Simulate cwd inside an sbx worktree
         workspace = tmp_path / ".sbx" / "test-wt-worktrees" / "feature"
         workspace.mkdir(parents=True)
@@ -29,18 +27,15 @@ class TestAutoDetectSandbox:
         mock_list.return_value = [
             {"name": "test-wt", "host_worktree_path": str(workspace)},
         ]
-        mock_wt_dir.return_value = Path("/nonexistent")
 
         with patch("foundry_sandbox.commands._helpers.Path.cwd", return_value=workspace):
             result = auto_detect_sandbox()
         assert result == "test-wt"
 
-    @patch("foundry_sandbox.commands._helpers.get_worktrees_dir")
     @patch("foundry_sandbox.state.list_sandboxes")
     @patch("foundry_sandbox.commands._helpers.validate_existing_sandbox_name", return_value=(True, ""))
-    def test_no_match_returns_none(self, mock_validate, mock_list, mock_wt_dir, tmp_path):
+    def test_no_match_returns_none(self, mock_validate, mock_list, tmp_path):
         mock_list.return_value = []
-        mock_wt_dir.return_value = Path("/nonexistent")
 
         with patch("foundry_sandbox.commands._helpers.Path.cwd", return_value=tmp_path):
             result = auto_detect_sandbox()

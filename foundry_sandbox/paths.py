@@ -1,11 +1,9 @@
 """Path resolution utilities for foundry-sandbox.
 
-This module replaces lib/paths.sh and absorbs lib/fs.sh helpers.
-It provides functions for:
-  - Resolving sandbox paths (worktrees, configs, metadata)
+Provides functions for:
+  - Resolving sandbox paths (configs, metadata)
   - Deriving all related paths for a named sandbox
   - Directory and path management (ensure_dir, safe_remove)
-  - Repository URL → bare-path conversion
   - Sandbox name generation
 """
 
@@ -21,7 +19,6 @@ from foundry_sandbox.constants import (
     get_claude_configs_dir,
     get_repos_dir,
     get_sandbox_home,
-    get_worktrees_dir,
 )
 from foundry_sandbox.utils import sanitize_ref_component
 
@@ -68,19 +65,6 @@ def _assert_safe_path_component(name: str) -> None:
 # ============================================================================
 # Path Resolution Functions
 # ============================================================================
-
-
-def path_worktree(name: str) -> Path:
-    """Get the path to a sandbox worktree.
-
-    Args:
-        name: Sandbox name
-
-    Returns:
-        Path to the worktree directory
-    """
-    _assert_safe_path_component(name)
-    return get_worktrees_dir() / name
 
 
 def path_claude_config(name: str) -> Path:
@@ -200,7 +184,7 @@ def derive_sandbox_paths(name: str) -> SandboxPaths:
     """
     _assert_safe_path_component(name)
     return SandboxPaths(
-        worktree_path=path_worktree(name),
+        worktree_path=resolve_host_worktree_path(name),
         claude_config_path=path_claude_config(name),
         claude_home_path=path_claude_home(name),
     )
@@ -209,15 +193,16 @@ def derive_sandbox_paths(name: str) -> SandboxPaths:
 def resolve_host_worktree_path(name: str) -> Path:
     """Resolve the host-side workspace path for a sandbox.
 
-    For new-layout sandboxes (sbx-managed worktrees), reads
-    ``host_worktree_path`` from metadata. Falls back to the legacy
-    ``path_worktree(name)`` formula for pre-migration sandboxes.
+    Reads ``host_worktree_path`` from sandbox metadata.
 
     Args:
         name: Sandbox name.
 
     Returns:
         Resolved workspace path (may not exist on disk).
+
+    Raises:
+        ValueError: If metadata has no ``host_worktree_path`` set.
     """
     from foundry_sandbox.state import load_sandbox_metadata
 
@@ -225,7 +210,7 @@ def resolve_host_worktree_path(name: str) -> Path:
     metadata = load_sandbox_metadata(name)
     if metadata and metadata.get("host_worktree_path"):
         return Path(metadata["host_worktree_path"])
-    return path_worktree(name)
+    raise ValueError(f"Sandbox '{name}' has no host_worktree_path in metadata")
 
 
 # ============================================================================
@@ -299,47 +284,6 @@ def safe_remove(path: str | Path) -> None:
 # ============================================================================
 # Repository & Sandbox Name Helpers (moved from commands/_helpers.py)
 # ============================================================================
-
-
-def repo_url_to_bare_path(repo_url: str) -> str:
-    """Convert a repository URL to its bare-clone path under REPOS_DIR.
-
-    Handles https://, http://, git@, and local filesystem paths.
-
-    Args:
-        repo_url: Repository URL or local path.
-
-    Returns:
-        Absolute path string to the bare repository.
-    """
-    repos_dir = str(get_repos_dir())
-
-    if not repo_url:
-        return f"{repos_dir}/unknown.git"
-
-    # Local filesystem path
-    if repo_url.startswith(("~/", "/", "./", "../")):
-        expanded = repo_url
-        if expanded.startswith("~/"):
-            expanded = str(Path.home()) + expanded[1:]
-        p = Path(expanded)
-        if p.exists():
-            try:
-                expanded = str(p.resolve())
-            except OSError:
-                pass
-        stripped = expanded.lstrip("/")
-        return f"{repos_dir}/local/{stripped}.git"
-
-    # HTTPS, HTTP, or git@ URL
-    path = repo_url
-    path = path.removeprefix("https://")
-    path = path.removeprefix("http://")
-    path = path.removeprefix("git@")
-    path = path.replace(":", "/", 1) if ":" in path else path
-    if path.endswith(".git"):
-        path = path[:-4]
-    return f"{repos_dir}/{path}.git"
 
 
 def repo_url_to_checkout_path(repo_url: str) -> str:

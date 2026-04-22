@@ -14,7 +14,7 @@ import click
 
 from foundry_sandbox.atomic_io import file_lock
 from foundry_sandbox.commands._helpers import resolve_sandbox_name
-from foundry_sandbox.constants import TIMEOUT_GIT_QUERY, get_repos_dir, get_worktrees_dir
+from foundry_sandbox.constants import TIMEOUT_GIT_QUERY
 from foundry_sandbox.git import remove_stale_git_locks
 from foundry_sandbox.paths import resolve_host_worktree_path
 from foundry_sandbox.state import load_sandbox_metadata
@@ -81,32 +81,16 @@ def _validate_git_paths(
 ) -> None:
     """Enforce trust boundaries for git config writes.
 
-    Accepts both legacy (``~/.sandboxes/worktrees/``) and sbx-managed
-    (``<repo>/.sbx/<name>-worktrees/<branch>/``) layouts. Dispatches on
-    ``metadata.host_worktree_path`` first, falls back to path-shape detection
-    when metadata is absent. Fails closed on unrecognised layouts.
+    Validates against the ``host_worktree_path`` from sandbox metadata.
+    Fails closed on missing or invalid layouts.
     """
     metadata = load_sandbox_metadata(name)
     host_worktree_path = metadata.get("host_worktree_path", "") if metadata else ""
-
-    if host_worktree_path:
-        _validate_new_layout_paths(worktree_path, gitdir, bare_dir, host_worktree_path)
-        return
-
-    if metadata is not None:
-        # Metadata exists but host_worktree_path is empty → legacy sandbox.
-        _validate_legacy_layout_paths(worktree_path, gitdir, bare_dir)
-        return
-
-    # No metadata — fall back to path-shape detection.
-    worktrees_root = get_worktrees_dir().resolve()
-    if _is_within(worktree_path, worktrees_root):
-        _validate_legacy_layout_paths(worktree_path, gitdir, bare_dir)
-    else:
+    if not host_worktree_path:
         raise RuntimeError(
-            f"Cannot determine layout for sandbox '{name}' "
-            f"(no metadata, worktree not under {worktrees_root}): {worktree_path}"
+            f"Sandbox '{name}' has no host_worktree_path in metadata"
         )
+    _validate_new_layout_paths(worktree_path, gitdir, bare_dir, host_worktree_path)
 
 
 def _validate_new_layout_paths(
@@ -138,21 +122,6 @@ def _validate_new_layout_paths(
         raise RuntimeError(
             f"Commondir doesn't point to repo .git: {bare_dir} (expected {expected_git_dir})"
         )
-
-
-def _validate_legacy_layout_paths(
-    worktree_path: Path, gitdir: Path, bare_dir: Path
-) -> None:
-    """Validate paths for legacy (cast-managed) worktrees."""
-    repos_root = get_repos_dir().resolve()
-    worktrees_root = get_worktrees_dir().resolve()
-
-    if not _is_within(worktree_path, worktrees_root):
-        raise RuntimeError(f"Worktree path escapes sandbox root: {worktree_path}")
-    if not _is_within(gitdir, repos_root):
-        raise RuntimeError(f"Gitdir path escapes repos root: {gitdir}")
-    if not _is_within(bare_dir, repos_root):
-        raise RuntimeError(f"Bare repo path escapes repos root: {bare_dir}")
 
 
 def _git_config_set(config_file: Path, key: str, value: str) -> None:

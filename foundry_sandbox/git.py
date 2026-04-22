@@ -1,12 +1,14 @@
 """Git operations for repository management.
 
-Replaces lib/git.sh (76 lines). Handles:
+Handles:
   - Retry wrapper with exponential backoff for git commands
-  - Bare repository clone and update
+  - Stale lockfile cleanup
   - Working directory checkout with uncommitted change detection
   - Branch existence checking
+  - Sandbox branch cleanup for new-layout sandboxes
 
-Security-critical: ref validation preserves deny-by-default behavior.
+Security-critical: ref validation and protected-branch guards preserve
+deny-by-default behavior.
 """
 
 from __future__ import annotations
@@ -14,13 +16,12 @@ from __future__ import annotations
 import re
 import subprocess
 import time
-import warnings
 from pathlib import Path
 from typing import Callable
 
 from foundry_sandbox.constants import TIMEOUT_GIT_QUERY, TIMEOUT_GIT_TRANSFER
 from foundry_sandbox.paths import ensure_dir
-from foundry_sandbox.utils import log_info, log_step, log_warn
+from foundry_sandbox.utils import log_info, log_warn
 
 # Git lockfile names that can become stale in a bare repo.
 _GIT_LOCK_NAMES = ("config.lock", "HEAD.lock")
@@ -137,172 +138,6 @@ def remove_stale_git_locks(repo_path: str | Path) -> None:
                 pass
 
 
-def _ensure_fetch_refspec(bare_path: Path) -> None:
-    """Add a standard fetch refspec to a bare repo if missing.
-
-    .. deprecated::
-        Removed in next release. Bare repo functions are no longer used.
-
-    ``git clone --bare`` does not configure ``remote.origin.fetch``, so
-    subsequent ``git fetch origin`` never updates ``refs/remotes/origin/*``.
-    This causes worktrees to see a stale ``origin/main`` tracking ref.
-
-    Silently returns if the path is not a valid git repository.
-    """
-    warnings.warn(
-        "_ensure_fetch_refspec() is deprecated and will be removed in the next release; "
-        "bare repo functions are no longer used.",
-        DeprecationWarning,
-        stacklevel=2,
-    )
-    result = subprocess.run(
-        ["git", "-C", str(bare_path), "config", "--get", "remote.origin.fetch"],
-        capture_output=True,
-        text=True,
-        check=False,
-        timeout=TIMEOUT_GIT_QUERY,
-    )
-    if result.returncode not in (0, 1):
-        # returncode 1 = key not found (expected for bare clones);
-        # anything else means the repo is broken or not a git dir.
-        return
-
-    expected = "+refs/heads/*:refs/remotes/origin/*"
-    if expected not in (result.stdout or ""):
-        subprocess.run(
-            ["git", "-C", str(bare_path), "config", "remote.origin.fetch", expected],
-            capture_output=True,
-            check=False,
-            timeout=TIMEOUT_GIT_QUERY,
-        )
-
-
-def ensure_bare_repo(repo_url: str, bare_path: str | Path) -> None:
-    """Clone or update a bare repository.
-
-    .. deprecated::
-        Removed in next release. Bare repo functions are no longer used.
-
-    If *bare_path* does not exist, clones *repo_url* as a bare repo.
-    After ensuring the fetch refspec is configured, fetches all remote
-    refs so ``refs/remotes/origin/*`` stays current for worktrees.
-
-    Individual branch refs (``refs/heads/*``) may still be updated by
-    :func:`fetch_bare_branch` when a worktree is created, since ``git
-    fetch`` refuses to update a ref that is checked out in a worktree.
-
-    Args:
-        repo_url: Remote repository URL.
-        bare_path: Local path for the bare clone.
-    """
-    bp = Path(bare_path)
-
-    warnings.warn(
-        "ensure_bare_repo() is deprecated and will be removed in the next release; "
-        "bare repo functions are no longer used.",
-        DeprecationWarning,
-        stacklevel=2,
-    )
-
-    fresh_clone = not bp.is_dir()
-    if fresh_clone:
-        log_step("Cloning repository...")
-        bp.parent.mkdir(parents=True, exist_ok=True)
-        git_with_retry(["clone", "--bare", repo_url, str(bp)])
-
-    # Ensure fetch refspec is configured.  ``git clone --bare`` omits it,
-    # so ``git fetch`` never updates ``refs/remotes/origin/*``.  Without
-    # this, worktrees see a stale ``origin/main`` and think they are ahead.
-    if bp.is_dir():
-        _ensure_fetch_refspec(bp)
-
-    if not fresh_clone:
-        log_step("Fetching latest from origin...")
-        remove_stale_git_locks(bp)
-        git_with_retry(["-C", str(bp), "fetch", "origin", "--prune"])
-
-
-_VALID_BRANCH_RE = re.compile(
-    r"^[a-zA-Z0-9]"          # Must start with alnum
-    r"(?!.*\.\.)"             # No ".." anywhere (path traversal)
-    r"(?!.*//)"               # No consecutive slashes
-    r"(?!.*\.lock$)"          # Must not end with .lock
-    r"(?!.*\.$)"              # Must not end with "."
-    r"(?!.*/\.)"              # No component starting with "."
-    r"[a-zA-Z0-9._/-]*$"     # Body: alnum, dot, underscore, slash, hyphen
-)
-
-
-def fetch_bare_branch(bare_path: str | Path, branch: str) -> str:
-    """Fetch a single branch into a bare repo, updating refs/heads/<branch>.
-
-    .. deprecated::
-        Removed in next release. Bare repo functions are no longer used.
-
-    ``git clone --bare`` omits the fetch refspec and ``git fetch`` refuses
-    to update a ref that is checked out in any worktree.  This function
-    works around both issues by fetching to ``FETCH_HEAD`` and then using
-    ``update-ref`` to move the local branch pointer.
-
-    Note: the fetch → rev-parse → update-ref sequence is not atomic. A
-    concurrent fetch could change FETCH_HEAD between steps. In practice
-    bare repos are per-user so contention is unlikely.
-
-    Args:
-        bare_path: Path to the bare repository.
-        branch: Remote branch name to fetch and update.
-
-    Returns:
-        The commit SHA that refs/heads/<branch> was set to.
-
-    Raises:
-        ValueError: If *branch* contains invalid ref characters or path traversal.
-    """
-    if not _VALID_BRANCH_RE.match(branch):
-        raise ValueError(f"Invalid branch name: {branch!r}")
-
-    warnings.warn(
-        "fetch_bare_branch() is deprecated and will be removed in the next release; "
-        "bare repo functions are no longer used.",
-        DeprecationWarning,
-        stacklevel=2,
-    )
-    bp = str(bare_path)
-
-    # Fetch the branch — this always writes FETCH_HEAD regardless of
-    # whether refs/heads/<branch> is "checked out" somewhere.
-    git_with_retry(["-C", bp, "fetch", "origin", branch])
-
-    # Read the fetched commit SHA.
-    result = subprocess.run(
-        ["git", "-C", bp, "rev-parse", "FETCH_HEAD"],
-        capture_output=True,
-        text=True,
-        check=True,
-        timeout=TIMEOUT_GIT_QUERY,
-    )
-    sha = result.stdout.strip()
-
-    # Force-update the local branch ref (bypasses checked-out guard).
-    subprocess.run(
-        ["git", "-C", bp, "update-ref", f"refs/heads/{branch}", sha],
-        capture_output=True,
-        check=True,
-        timeout=TIMEOUT_GIT_QUERY,
-    )
-
-    # Also update the remote tracking ref so worktrees see an accurate
-    # ``origin/<branch>`` and don't report phantom ahead/behind counts.
-    subprocess.run(
-        ["git", "-C", bp, "update-ref", f"refs/remotes/origin/{branch}", sha],
-        capture_output=True,
-        check=True,
-        timeout=TIMEOUT_GIT_QUERY,
-    )
-
-    return sha
-
-
 def ensure_repo_checkout(
     repo_url: str,
     checkout_path: str | Path,
@@ -400,6 +235,74 @@ def ensure_repo_checkout(
     )
     if pull_result.returncode != 0:
         log_warn(f"Could not fast-forward {cp}")
+
+
+def _assert_safe_ref(name: str, label: str = "ref") -> None:
+    """Reject ref names that look like git flags.
+
+    Raises:
+        ValueError: If *name* starts with ``-``.
+    """
+    if name and name.startswith("-"):
+        raise ValueError(f"{label} must not start with '-': {name!r}")
+
+
+def cleanup_sandbox_branch_repo(branch: str, repo_root: str | Path) -> None:
+    """Delete a sandbox branch from a regular repo checkout.
+
+    Skips deletion if:
+      - Branch or repo_root is empty
+      - Branch is protected (main, master, develop, production, release/*, hotfix/*)
+      - Another worktree is using the branch
+
+    Args:
+        branch: Branch name to delete.
+        repo_root: Path to the repository root (non-bare checkout).
+    """
+    if not branch or not repo_root:
+        return
+
+    _assert_safe_ref(branch, "branch")
+
+    protected_patterns = [
+        r"^main$",
+        r"^master$",
+        r"^develop$",
+        r"^production$",
+        r"^release/",
+        r"^hotfix/",
+    ]
+    for pattern in protected_patterns:
+        if re.match(pattern, branch):
+            return
+
+    repo_p = Path(repo_root)
+    if not repo_p.is_dir():
+        return
+
+    # Check if another worktree is using this branch
+    worktree_list = subprocess.run(
+        ["git", "-C", str(repo_p), "worktree", "list", "--porcelain"],
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=TIMEOUT_GIT_QUERY,
+    )
+
+    if worktree_list.returncode == 0:
+        if f"branch refs/heads/{branch}" in worktree_list.stdout:
+            log_info(f"Branch '{branch}' still in use by another worktree, skipping cleanup")
+            return
+
+    result = subprocess.run(
+        ["git", "-C", str(repo_p), "branch", "-D", "--", branch],
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=TIMEOUT_GIT_QUERY,
+    )
+    if result.returncode == 0:
+        log_info(f"Cleaned up sandbox branch: {branch}")
 
 
 def branch_exists(repo_path: str | Path, branch: str) -> bool:

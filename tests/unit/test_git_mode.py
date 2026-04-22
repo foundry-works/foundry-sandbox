@@ -1,4 +1,4 @@
-"""Tests for git_mode.py — dual-layout path validation and resolution."""
+"""Tests for git_mode.py — path validation and resolution."""
 
 from __future__ import annotations
 
@@ -12,13 +12,12 @@ from foundry_sandbox.commands.git_mode import (
     _is_within,
     _resolve_git_paths,
     _validate_git_paths,
-    _validate_legacy_layout_paths,
     _validate_new_layout_paths,
 )
 
 
 # ---------------------------------------------------------------------------
-# Helpers to create realistic filesystem structures for both layouts
+# Helpers to create realistic filesystem structures
 # ---------------------------------------------------------------------------
 
 
@@ -50,32 +49,6 @@ def _setup_new_layout(tmp_path: Path) -> dict[str, Path]:
     }
 
 
-def _setup_legacy_layout(tmp_path: Path) -> dict[str, Path]:
-    """Create a legacy cast-managed worktree on disk."""
-    worktrees_dir = tmp_path / "worktrees"
-    repos_dir = tmp_path / "repos"
-    bare_repo = repos_dir / "github.com" / "org" / "repo.git"
-    worktree = worktrees_dir / "sandbox1"
-    gitdir = bare_repo / "worktrees" / "feature"
-
-    worktree.mkdir(parents=True)
-    gitdir.mkdir(parents=True)
-    bare_repo.mkdir(parents=True, exist_ok=True)
-
-    (worktree / ".git").write_text(f"gitdir: {gitdir}\n")
-    (gitdir / "commondir").write_text("../..\n")
-    (gitdir / "HEAD").write_text("ref: refs/heads/feature\n")
-    (bare_repo / "config").write_text("[core]\n\trepositoryformatversion = 0\n")
-
-    return {
-        "worktrees_dir": worktrees_dir,
-        "repos_dir": repos_dir,
-        "worktree": worktree,
-        "gitdir": gitdir,
-        "bare_repo": bare_repo,
-    }
-
-
 # ---------------------------------------------------------------------------
 # _is_within
 # ---------------------------------------------------------------------------
@@ -90,7 +63,7 @@ class TestIsWithin:
 
 
 # ---------------------------------------------------------------------------
-# _resolve_git_paths — layout-agnostic chain traversal
+# _resolve_git_paths — chain traversal
 # ---------------------------------------------------------------------------
 
 
@@ -100,12 +73,6 @@ class TestResolveGitPaths:
         gitdir, bare_dir = _resolve_git_paths(paths["worktree"])
         assert gitdir == paths["gitdir"]
         assert bare_dir == paths["repo_git"]
-
-    def test_legacy_layout_chain(self, tmp_path: Path):
-        paths = _setup_legacy_layout(tmp_path)
-        gitdir, bare_dir = _resolve_git_paths(paths["worktree"])
-        assert gitdir == paths["gitdir"]
-        assert bare_dir == paths["bare_repo"]
 
     def test_missing_dot_git_file(self, tmp_path: Path):
         empty_wt = tmp_path / "empty-worktree"
@@ -130,7 +97,6 @@ class TestValidateNewLayoutPaths:
     def test_valid_new_layout(self, tmp_path: Path):
         paths = _setup_new_layout(tmp_path)
         host_worktree_path = str(paths["worktree"])
-        # Should not raise
         _validate_new_layout_paths(
             paths["worktree"], paths["gitdir"], paths["repo_git"], host_worktree_path
         )
@@ -174,45 +140,6 @@ class TestValidateNewLayoutPaths:
 
 
 # ---------------------------------------------------------------------------
-# _validate_legacy_layout_paths
-# ---------------------------------------------------------------------------
-
-
-class TestValidateLegacyLayoutPaths:
-    @patch("foundry_sandbox.commands.git_mode.get_worktrees_dir")
-    @patch("foundry_sandbox.commands.git_mode.get_repos_dir")
-    def test_valid_legacy_layout(self, mock_repos, mock_wts, tmp_path: Path):
-        paths = _setup_legacy_layout(tmp_path)
-        mock_wts.return_value = paths["worktrees_dir"]
-        mock_repos.return_value = paths["repos_dir"]
-        _validate_legacy_layout_paths(
-            paths["worktree"], paths["gitdir"], paths["bare_repo"]
-        )
-
-    @patch("foundry_sandbox.commands.git_mode.get_worktrees_dir")
-    @patch("foundry_sandbox.commands.git_mode.get_repos_dir")
-    def test_worktree_escapes(self, mock_repos, mock_wts, tmp_path: Path):
-        paths = _setup_legacy_layout(tmp_path)
-        mock_wts.return_value = paths["worktrees_dir"]
-        mock_repos.return_value = paths["repos_dir"]
-        with pytest.raises(RuntimeError, match="Worktree path escapes"):
-            _validate_legacy_layout_paths(
-                Path("/tmp/rogue"), paths["gitdir"], paths["bare_repo"]
-            )
-
-    @patch("foundry_sandbox.commands.git_mode.get_worktrees_dir")
-    @patch("foundry_sandbox.commands.git_mode.get_repos_dir")
-    def test_gitdir_escapes(self, mock_repos, mock_wts, tmp_path: Path):
-        paths = _setup_legacy_layout(tmp_path)
-        mock_wts.return_value = paths["worktrees_dir"]
-        mock_repos.return_value = paths["repos_dir"]
-        with pytest.raises(RuntimeError, match="Gitdir path escapes"):
-            _validate_legacy_layout_paths(
-                paths["worktree"], Path("/tmp/rogue"), paths["bare_repo"]
-            )
-
-
-# ---------------------------------------------------------------------------
 # _validate_git_paths — top-level dispatcher
 # ---------------------------------------------------------------------------
 
@@ -227,40 +154,19 @@ class TestValidateGitPathsDispatch:
         )
 
     @patch("foundry_sandbox.commands.git_mode.load_sandbox_metadata")
-    @patch("foundry_sandbox.commands.git_mode.get_worktrees_dir")
-    @patch("foundry_sandbox.commands.git_mode.get_repos_dir")
-    def test_dispatches_legacy_when_empty_host_worktree_path(
-        self, mock_repos, mock_wts, mock_meta, tmp_path: Path
-    ):
-        paths = _setup_legacy_layout(tmp_path)
+    def test_fails_on_missing_host_worktree_path(self, mock_meta, tmp_path: Path):
         mock_meta.return_value = {"host_worktree_path": ""}
-        mock_wts.return_value = paths["worktrees_dir"]
-        mock_repos.return_value = paths["repos_dir"]
-        _validate_git_paths(
-            "sandbox1", paths["worktree"], paths["gitdir"], paths["bare_repo"]
-        )
-
-    @patch("foundry_sandbox.commands.git_mode.load_sandbox_metadata")
-    @patch("foundry_sandbox.commands.git_mode.get_worktrees_dir")
-    @patch("foundry_sandbox.commands.git_mode.get_repos_dir")
-    def test_falls_back_to_path_shape_when_no_metadata(
-        self, mock_repos, mock_wts, mock_meta, tmp_path: Path
-    ):
-        paths = _setup_legacy_layout(tmp_path)
-        mock_meta.return_value = None
-        mock_wts.return_value = paths["worktrees_dir"]
-        mock_repos.return_value = paths["repos_dir"]
-        _validate_git_paths(
-            "sandbox1", paths["worktree"], paths["gitdir"], paths["bare_repo"]
-        )
-
-    @patch("foundry_sandbox.commands.git_mode.load_sandbox_metadata")
-    def test_fails_closed_on_unrecognised_layout(self, mock_meta, tmp_path: Path):
-        mock_meta.return_value = None
-        with pytest.raises(RuntimeError, match="Cannot determine layout"):
+        with pytest.raises(RuntimeError, match="no host_worktree_path"):
             _validate_git_paths(
-                "unknown", Path("/not/under/worktrees"),
-                Path("/x/.git/worktrees/b"), Path("/x/.git"),
+                "sandbox1", tmp_path, tmp_path / "gd", tmp_path / ".git"
+            )
+
+    @patch("foundry_sandbox.commands.git_mode.load_sandbox_metadata")
+    def test_fails_on_no_metadata(self, mock_meta, tmp_path: Path):
+        mock_meta.return_value = None
+        with pytest.raises(RuntimeError, match="no host_worktree_path"):
+            _validate_git_paths(
+                "sandbox1", tmp_path, tmp_path / "gd", tmp_path / ".git"
             )
 
     @patch("foundry_sandbox.commands.git_mode.load_sandbox_metadata")

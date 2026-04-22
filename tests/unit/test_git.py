@@ -1,20 +1,21 @@
-"""Unit tests for foundry_sandbox/git.py and foundry_sandbox/git_worktree.py.
+"""Unit tests for foundry_sandbox/git.py.
 
 Tests cover:
-- foundry_sandbox.git: retry logic, bare repo management, checkout management,
-  branch existence checking
-- foundry_sandbox.git_worktree: sparse checkout configuration, change detection,
-  worktree creation, branch cleanup, worktree removal
+- Retry logic with exponential backoff
+- Stale git lockfile cleanup
+- Working directory checkout management
+- Branch existence checking
+- Sandbox branch cleanup (new-layout)
+- Ref injection prevention
 """
 
 from __future__ import annotations
 
-import subprocess
 from unittest.mock import Mock, patch
 
 import pytest
 
-from foundry_sandbox import git, git_worktree
+from foundry_sandbox import git
 
 
 # ============================================================================
@@ -143,54 +144,6 @@ class TestRemoveStaleGitLocks:
         assert lock.exists()
 
 
-class TestEnsureBareRepo:
-    """Tests for ensure_bare_repo()."""
-
-    @patch("foundry_sandbox.git.git_with_retry")
-    def test_new_clone(self, mock_retry, tmp_path):
-        """Non-existent bare_path should trigger a clone."""
-        bare_path = tmp_path / "repo.git"
-
-        git.ensure_bare_repo("https://github.com/user/repo.git", bare_path)
-
-        mock_retry.assert_called_once()
-        args = mock_retry.call_args[0][0]
-        assert "clone" in args
-        assert "--bare" in args
-        assert "https://github.com/user/repo.git" in args
-
-    @patch("foundry_sandbox.git.git_with_retry")
-    def test_existing_repo_fetches(self, mock_retry, tmp_path):
-        """Existing bare_path should trigger a fetch."""
-        bare_path = tmp_path / "repo.git"
-        bare_path.mkdir()
-
-        git.ensure_bare_repo("https://github.com/user/repo.git", bare_path)
-
-        mock_retry.assert_called_once()
-        args = mock_retry.call_args[0][0]
-        assert "fetch" in args
-        assert "origin" in args
-        assert "--prune" in args
-
-    @patch("foundry_sandbox.git.git_with_retry")
-    def test_existing_repo_removes_stale_locks_before_fetch(self, mock_retry, tmp_path):
-        """Stale lockfiles should be cleaned before fetch."""
-        bare_path = tmp_path / "repo.git"
-        bare_path.mkdir()
-
-        lock = bare_path / "config.lock"
-        lock.write_text("")
-        import os
-        old_time = __import__("time").time() - 300
-        os.utime(lock, (old_time, old_time))
-
-        git.ensure_bare_repo("https://github.com/user/repo.git", bare_path)
-
-        assert not lock.exists()
-        mock_retry.assert_called_once()
-
-
 class TestEnsureRepoCheckout:
     """Tests for ensure_repo_checkout()."""
 
@@ -267,123 +220,6 @@ class TestEnsureRepoCheckout:
         assert mock_retry.call_count >= 1
 
 
-class TestFetchBareBranch:
-    """Tests for fetch_bare_branch()."""
-
-    @patch("foundry_sandbox.git.subprocess.run")
-    @patch("foundry_sandbox.git.git_with_retry")
-    def test_success_calls_fetch_revparse_updateref(self, mock_retry, mock_run):
-        """Happy path: fetch, rev-parse FETCH_HEAD, update-ref for local and remote."""
-        mock_retry.return_value = Mock(returncode=0)
-        mock_run.side_effect = [
-            Mock(returncode=0, stdout="abc123\n", stderr=""),  # rev-parse
-            Mock(returncode=0, stdout="", stderr=""),  # update-ref (local)
-            Mock(returncode=0, stdout="", stderr=""),  # update-ref (remote tracking)
-        ]
-
-        sha = git.fetch_bare_branch("/bare/repo", "my-branch")
-
-        assert sha == "abc123"
-        mock_retry.assert_called_once_with(["-C", "/bare/repo", "fetch", "origin", "my-branch"])
-        assert mock_run.call_count == 3
-        # rev-parse FETCH_HEAD
-        assert mock_run.call_args_list[0][0][0] == [
-            "git", "-C", "/bare/repo", "rev-parse", "FETCH_HEAD"
-        ]
-        # update-ref for local branch
-        assert mock_run.call_args_list[1][0][0] == [
-            "git", "-C", "/bare/repo", "update-ref", "refs/heads/my-branch", "abc123"
-        ]
-        # update-ref for remote tracking ref
-        assert mock_run.call_args_list[2][0][0] == [
-            "git", "-C", "/bare/repo", "update-ref", "refs/remotes/origin/my-branch", "abc123"
-        ]
-
-    @patch("foundry_sandbox.git.git_with_retry")
-    def test_fetch_failure_propagates(self, mock_retry):
-        """If git fetch fails, the error should propagate."""
-        mock_retry.side_effect = subprocess.CalledProcessError(1, "git fetch")
-
-        with pytest.raises(subprocess.CalledProcessError):
-            git.fetch_bare_branch("/bare/repo", "main")
-
-    @patch("foundry_sandbox.git.subprocess.run")
-    @patch("foundry_sandbox.git.git_with_retry")
-    def test_revparse_failure_propagates(self, mock_retry, mock_run):
-        """If rev-parse FETCH_HEAD fails, the error should propagate."""
-        mock_retry.return_value = Mock(returncode=0)
-        mock_run.side_effect = subprocess.CalledProcessError(1, "git rev-parse")
-
-        with pytest.raises(subprocess.CalledProcessError):
-            git.fetch_bare_branch("/bare/repo", "main")
-
-    @patch("foundry_sandbox.git.subprocess.run")
-    @patch("foundry_sandbox.git.git_with_retry")
-    def test_updateref_failure_propagates(self, mock_retry, mock_run):
-        """If update-ref fails, the error should propagate."""
-        mock_retry.return_value = Mock(returncode=0)
-        mock_run.side_effect = [
-            Mock(returncode=0, stdout="abc123\n", stderr=""),  # rev-parse OK
-            subprocess.CalledProcessError(1, "git update-ref"),  # update-ref fails
-        ]
-
-        with pytest.raises(subprocess.CalledProcessError):
-            git.fetch_bare_branch("/bare/repo", "main")
-
-    def test_invalid_branch_name_rejected(self):
-        """Branch names with path traversal or invalid chars are rejected."""
-        with pytest.raises(ValueError, match="Invalid branch name"):
-            git.fetch_bare_branch("/bare/repo", "../etc/passwd")
-
-        with pytest.raises(ValueError, match="Invalid branch name"):
-            git.fetch_bare_branch("/bare/repo", "branch\x00name")
-
-        with pytest.raises(ValueError, match="Invalid branch name"):
-            git.fetch_bare_branch("/bare/repo", "")
-
-    def test_dotlock_suffix_rejected(self):
-        """Branch names ending with .lock are rejected."""
-        with pytest.raises(ValueError, match="Invalid branch name"):
-            git.fetch_bare_branch("/bare/repo", "refs.lock")
-
-    def test_consecutive_slashes_rejected(self):
-        """Branch names with consecutive slashes are rejected."""
-        with pytest.raises(ValueError, match="Invalid branch name"):
-            git.fetch_bare_branch("/bare/repo", "foo//bar")
-
-    def test_component_starting_with_dot_rejected(self):
-        """Branch names with a component starting with '.' are rejected."""
-        with pytest.raises(ValueError, match="Invalid branch name"):
-            git.fetch_bare_branch("/bare/repo", "foo/.bar")
-
-    def test_trailing_dot_rejected(self):
-        """Branch names ending with '.' are rejected."""
-        with pytest.raises(ValueError, match="Invalid branch name"):
-            git.fetch_bare_branch("/bare/repo", "foo.")
-
-    @patch("foundry_sandbox.git.subprocess.run")
-    @patch("foundry_sandbox.git.git_with_retry")
-    def test_slashed_branch_name_accepted(self, mock_retry, mock_run):
-        """Branch names like 'feature/foo' should be accepted."""
-        mock_retry.return_value = Mock(returncode=0)
-        mock_run.side_effect = [
-            Mock(returncode=0, stdout="abc123\n", stderr=""),  # rev-parse
-            Mock(returncode=0, stdout="", stderr=""),  # update-ref (local)
-            Mock(returncode=0, stdout="", stderr=""),  # update-ref (remote tracking)
-        ]
-
-        git.fetch_bare_branch("/bare/repo", "feature/my-branch")
-
-        assert mock_run.call_args_list[1][0][0] == [
-            "git", "-C", "/bare/repo", "update-ref",
-            "refs/heads/feature/my-branch", "abc123"
-        ]
-        assert mock_run.call_args_list[2][0][0] == [
-            "git", "-C", "/bare/repo", "update-ref",
-            "refs/remotes/origin/feature/my-branch", "abc123"
-        ]
-
-
 class TestBranchExists:
     """Tests for branch_exists()."""
 
@@ -407,280 +243,72 @@ class TestBranchExists:
         assert git.branch_exists("/path/to/repo", "nonexistent") is False
 
 
-# ============================================================================
-# git_worktree.py Tests
-# ============================================================================
-
-
-class TestConfigureSparseCheckout:
-    """Tests for configure_sparse_checkout()."""
-
-    def test_missing_git_file_raises(self, tmp_path):
-        """Missing .git file in worktree should raise RuntimeError."""
-        bare = tmp_path / "bare.git"
-        bare.mkdir()
-        wt = tmp_path / "worktree"
-        wt.mkdir()
-
-        with pytest.raises(RuntimeError, match="not found"):
-            git_worktree.configure_sparse_checkout(bare, wt, "src")
-
-    def test_invalid_git_file_format_raises(self, tmp_path):
-        """Invalid .git file format should raise RuntimeError."""
-        bare = tmp_path / "bare.git"
-        bare.mkdir()
-        wt = tmp_path / "worktree"
-        wt.mkdir()
-        (wt / ".git").write_text("not a gitdir line")
-
-        with pytest.raises(RuntimeError, match="Invalid .git file format"):
-            git_worktree.configure_sparse_checkout(bare, wt, "src")
-
-    @patch("foundry_sandbox.git_worktree.subprocess.run")
-    def test_sparse_checkout_patterns(self, mock_run, tmp_path):
-        """Sparse-checkout file should contain correct cone patterns."""
-        bare = tmp_path / "bare.git"
-        bare.mkdir()
-        wt = tmp_path / "worktree"
-        wt.mkdir()
-
-        # Create gitdir structure
-        gitdir = bare / "worktrees" / "wt"
-        gitdir.mkdir(parents=True)
-        (wt / ".git").write_text(f"gitdir: {gitdir}")
-
-        # Mock all subprocess calls to succeed
-        mock_run.return_value = Mock(returncode=0, stdout="0", stderr="")
-
-        git_worktree.configure_sparse_checkout(bare, wt, "src/app")
-
-        # Verify sparse-checkout file was written
-        sparse_file = gitdir / "info" / "sparse-checkout"
-        assert sparse_file.exists()
-
-        content = sparse_file.read_text()
-        lines = content.strip().split("\n")
-
-        # Should include root files pattern
-        assert "/*" in lines
-        # Should include .github
-        assert "/.github/" in lines
-        # Should include src/ and src/app/ path segments
-        assert "/src/" in lines
-        assert "/src/app/" in lines
-        # Should exclude src siblings but NOT app siblings (last exclusion removed)
-        assert "!/src/*/" in lines
-        # The last exclusion (!/src/app/*/) should be removed
-        assert "!/src/app/*/" not in lines
-
-
-class TestWorktreeHasChanges:
-    """Tests for worktree_has_changes()."""
-
-    @patch("foundry_sandbox.git_worktree.subprocess.run")
-    def test_clean_worktree(self, mock_run):
-        """Clean worktree should return False."""
-        mock_run.return_value = Mock(returncode=0)
-
-        assert git_worktree.worktree_has_changes("/path/to/wt") is False
-
-    @patch("foundry_sandbox.git_worktree.subprocess.run")
-    def test_unstaged_changes(self, mock_run):
-        """Unstaged changes should return True."""
-        mock_run.side_effect = [
-            Mock(returncode=1),  # diff --quiet (has changes)
-            Mock(returncode=0),  # diff --cached --quiet (no staged)
-        ]
-
-        assert git_worktree.worktree_has_changes("/path/to/wt") is True
-
-    @patch("foundry_sandbox.git_worktree.subprocess.run")
-    def test_staged_changes(self, mock_run):
-        """Staged changes should return True."""
-        mock_run.side_effect = [
-            Mock(returncode=0),  # diff --quiet (no unstaged)
-            Mock(returncode=1),  # diff --cached --quiet (has staged)
-        ]
-
-        assert git_worktree.worktree_has_changes("/path/to/wt") is True
-
-
-class TestCreateWorktree:
-    """Tests for create_worktree()."""
-
-    @patch("foundry_sandbox.git_worktree.subprocess.run")
-    def test_new_worktree_no_from_branch(self, mock_run, tmp_path):
-        """New worktree without from_branch should use worktree add."""
-        bare = tmp_path / "bare.git"
-        bare.mkdir()
-        wt = tmp_path / "worktree"
-
-        # prune succeeds, worktree add succeeds
-        mock_run.return_value = Mock(returncode=0, stdout="", stderr="")
-
-        git_worktree.create_worktree(bare, wt, "feature-branch")
-
-        # Should have called worktree prune and worktree add
-        calls = mock_run.call_args_list
-        assert any("prune" in str(c) for c in calls)
-        assert any("worktree" in str(c) and "add" in str(c) for c in calls)
-
-    @patch("foundry_sandbox.git_worktree.configure_sparse_checkout")
-    @patch("foundry_sandbox.git_worktree.fetch_bare_branch")
-    @patch("foundry_sandbox.git_worktree.subprocess.run")
-    def test_new_worktree_with_from_branch_and_sparse(self, mock_run, mock_fetch_branch, mock_sparse, tmp_path):
-        """New worktree with from_branch and sparse should use --no-checkout."""
-        bare = tmp_path / "bare.git"
-        bare.mkdir()
-        wt = tmp_path / "worktree"
-
-        # prune, rev-parse --verify (from_branch exists), show-ref (not found),
-        # worktree add, push.autoSetupRemote config
-        mock_run.side_effect = [
-            Mock(returncode=0, stdout="", stderr=""),  # prune
-            Mock(returncode=0, stdout="", stderr=""),  # rev-parse --verify (from_branch found)
-            Mock(returncode=1, stdout="", stderr=""),  # show-ref (target branch not found)
-            Mock(returncode=0, stdout="", stderr=""),  # worktree add --no-checkout
-            Mock(returncode=0, stdout="", stderr=""),  # git config push.autoSetupRemote
-        ]
-
-        git_worktree.create_worktree(
-            bare, wt, "sandbox-branch", from_branch="main",
-            sparse_checkout=True, working_dir="src"
-        )
-
-        # Should fetch the base branch
-        mock_fetch_branch.assert_called_once_with(bare, "main")
-
-        # Should call configure_sparse_checkout
-        mock_sparse.assert_called_once_with(bare, wt, "src")
-
-        # worktree add should use --no-checkout
-        add_call = [c for c in mock_run.call_args_list if "add" in str(c)]
-        assert len(add_call) >= 1
-        assert "--no-checkout" in str(add_call[-1])
-
-    @patch("foundry_sandbox.git_worktree.worktree_has_changes")
-    @patch("foundry_sandbox.git_worktree.git_with_retry")
-    @patch("foundry_sandbox.git_worktree.subprocess.run")
-    def test_existing_worktree_dirty_skips_pull(self, mock_run, mock_retry, mock_changes, tmp_path):
-        """Existing worktree with changes should skip pull."""
-        bare = tmp_path / "bare.git"
-        bare.mkdir()
-        wt = tmp_path / "worktree"
-        wt.mkdir()  # Already exists
-
-        # prune succeeds
-        mock_run.return_value = Mock(returncode=0, stdout="", stderr="")
-        mock_changes.return_value = True
-
-        git_worktree.create_worktree(bare, wt, "feature-branch")
-
-        # git_with_retry should NOT be called (no pull)
-        mock_retry.assert_not_called()
-
-
-class TestCleanupSandboxBranch:
-    """Tests for cleanup_sandbox_branch()."""
+class TestCleanupSandboxBranchRepo:
+    """Tests for cleanup_sandbox_branch_repo()."""
 
     def test_empty_branch_noop(self, tmp_path):
         """Empty branch should do nothing."""
-        git_worktree.cleanup_sandbox_branch("", tmp_path)
+        git.cleanup_sandbox_branch_repo("", tmp_path)
 
-    def test_empty_bare_path_noop(self):
-        """Empty bare_path should do nothing."""
-        git_worktree.cleanup_sandbox_branch("feature", "")
+    def test_empty_repo_root_noop(self):
+        """Empty repo_root should do nothing."""
+        git.cleanup_sandbox_branch_repo("feature", "")
 
-    @patch("foundry_sandbox.git_worktree.subprocess.run")
+    def test_dash_branch_rejected(self):
+        """Branch starting with '-' must be rejected."""
+        with pytest.raises(ValueError, match="must not start with"):
+            git.cleanup_sandbox_branch_repo("--upload-pack=evil", "/repo")
+
+    @patch("foundry_sandbox.git.subprocess.run")
     def test_protected_branches_skipped(self, mock_run, tmp_path):
         """Protected branches should not be deleted."""
-        bare = tmp_path / "bare.git"
-        bare.mkdir()
+        repo = tmp_path / "repo"
+        repo.mkdir()
 
         for branch in ["main", "master", "develop", "production", "release/1.0", "hotfix/fix"]:
-            git_worktree.cleanup_sandbox_branch(branch, bare)
+            git.cleanup_sandbox_branch_repo(branch, repo)
 
-        # subprocess.run should never be called for protected branches
         mock_run.assert_not_called()
 
-    @patch("foundry_sandbox.git_worktree.subprocess.run")
+    @patch("foundry_sandbox.git.subprocess.run")
     def test_branch_in_use_skipped(self, mock_run, tmp_path):
         """Branch in use by another worktree should not be deleted."""
-        bare = tmp_path / "bare.git"
-        bare.mkdir()
+        repo = tmp_path / "repo"
+        repo.mkdir()
 
-        # worktree list shows the branch in use
         mock_run.return_value = Mock(
             returncode=0,
             stdout="worktree /path/to/wt\nHEAD abc123\nbranch refs/heads/sandbox-123\n",
             stderr="",
         )
 
-        git_worktree.cleanup_sandbox_branch("sandbox-123", bare)
+        git.cleanup_sandbox_branch_repo("sandbox-123", repo)
 
         # Should only call worktree list, NOT branch -D
         assert mock_run.call_count == 1
         assert "worktree" in str(mock_run.call_args)
 
-    @patch("foundry_sandbox.git_worktree.subprocess.run")
+    @patch("foundry_sandbox.git.subprocess.run")
     def test_unprotected_branch_deleted(self, mock_run, tmp_path):
         """Unprotected branch not in use should be deleted."""
-        bare = tmp_path / "bare.git"
-        bare.mkdir()
+        repo = tmp_path / "repo"
+        repo.mkdir()
 
         mock_run.side_effect = [
-            Mock(returncode=0, stdout="worktree /bare\nHEAD abc\n", stderr=""),  # worktree list
+            Mock(returncode=0, stdout="worktree /repo\nHEAD abc\n", stderr=""),  # worktree list
             Mock(returncode=0, stdout="", stderr=""),  # branch -D
         ]
 
-        git_worktree.cleanup_sandbox_branch("sandbox-456", bare)
+        git.cleanup_sandbox_branch_repo("sandbox-456", repo)
 
         assert mock_run.call_count == 2
         delete_call = mock_run.call_args_list[1]
         assert "branch" in str(delete_call)
         assert "-D" in str(delete_call)
 
-
-class TestRemoveWorktree:
-    """Tests for remove_worktree()."""
-
-    def test_nonexistent_path_noop(self, tmp_path):
-        """Non-existent worktree path should do nothing."""
-        wt = tmp_path / "nonexistent"
-
-        # Should not raise
-        git_worktree.remove_worktree(wt)
-
-    @patch("foundry_sandbox.git_worktree.subprocess.run")
-    def test_git_remove_succeeds(self, mock_run, tmp_path):
-        """Successful git worktree remove should not fall back."""
-        wt = tmp_path / "worktree"
-        wt.mkdir()
-
-        mock_run.side_effect = [
-            Mock(returncode=0, stdout=str(tmp_path / "bare.git" / "worktrees" / "wt"), stderr=""),  # rev-parse
-            Mock(returncode=0, stdout="", stderr=""),  # worktree remove
-        ]
-
-        git_worktree.remove_worktree(wt)
-
-        assert mock_run.call_count == 2
-
-    @patch("foundry_sandbox.git_worktree.shutil.rmtree")
-    @patch("foundry_sandbox.git_worktree.subprocess.run")
-    def test_fallback_to_rmtree(self, mock_run, mock_rmtree, tmp_path):
-        """Failed git worktree remove should fall back to shutil.rmtree with retry."""
-        wt = tmp_path / "worktree"
-        wt.mkdir()
-
-        mock_run.side_effect = [
-            Mock(returncode=0, stdout=str(tmp_path / "bare.git" / "worktrees" / "wt"), stderr=""),  # rev-parse
-            Mock(returncode=1, stdout="", stderr="error"),  # worktree remove fails
-        ]
-
-        git_worktree.remove_worktree(wt)
-
-        mock_rmtree.assert_called_once_with(wt)
+    def test_nonexistent_repo_noop(self, tmp_path):
+        """Non-existent repo directory should do nothing."""
+        git.cleanup_sandbox_branch_repo("sandbox-branch", tmp_path / "nonexistent")
 
 
 # ============================================================================
@@ -691,17 +319,9 @@ class TestRemoveWorktree:
 class TestRefInjectionPrevention:
     """Branches starting with '-' must be rejected to prevent flag injection."""
 
-    def test_create_worktree_rejects_dash_branch(self):
+    def test_cleanup_sandbox_branch_repo_rejects_dash(self):
         with pytest.raises(ValueError, match="must not start with"):
-            git_worktree.create_worktree("/bare", "/wt", "--upload-pack=evil")
-
-    def test_create_worktree_rejects_dash_from_branch(self):
-        with pytest.raises(ValueError, match="must not start with"):
-            git_worktree.create_worktree("/bare", "/wt", "ok-branch", from_branch="--upload-pack=evil")
-
-    def test_cleanup_sandbox_branch_rejects_dash(self):
-        with pytest.raises(ValueError, match="must not start with"):
-            git_worktree.cleanup_sandbox_branch("--upload-pack=evil", "/bare")
+            git.cleanup_sandbox_branch_repo("--upload-pack=evil", "/repo")
 
     def test_ensure_repo_checkout_rejects_dash_branch(self):
         with pytest.raises(ValueError, match="must not start with"):

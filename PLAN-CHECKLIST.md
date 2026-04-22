@@ -72,34 +72,34 @@
 
 ### 4.1 Delete `git_worktree.py`
 
-- [ ] Move `cleanup_sandbox_branch_repo()` (git_worktree.py:484-538) into `git.py`
-- [ ] Delete `foundry_sandbox/git_worktree.py`
-- [ ] Remove imports from `commands/destroy.py`
+- [x] Move `cleanup_sandbox_branch_repo()` (git_worktree.py:484-538) into `git.py`
+- [x] Delete `foundry_sandbox/git_worktree.py`
+- [x] Remove imports from `commands/destroy.py`
 
 ### 4.2 Delete legacy helpers
 
-- [ ] `ensure_bare_repo()` in `git.py`
-- [ ] `fetch_bare_branch()` in `git.py`
-- [ ] `_ensure_fetch_refspec()` in `git.py`
-- [ ] `repo_url_to_bare_path()` in `paths.py`
-- [ ] `get_worktrees_dir()` in `constants.py`
-- [ ] `path_worktree()` in `paths.py` (verify no remaining callers first)
-- [ ] Remove the `workspace_path` read-compat shim in `state.py` from Phase 2.3
+- [x] `ensure_bare_repo()` in `git.py`
+- [x] `fetch_bare_branch()` in `git.py`
+- [x] `_ensure_fetch_refspec()` in `git.py`
+- [x] `repo_url_to_bare_path()` in `paths.py`
+- [x] `get_worktrees_dir()` in `constants.py`
+- [x] `path_worktree()` in `paths.py` (verify no remaining callers first)
+- [x] Remove the `workspace_path` read-compat shim in `state.py` from Phase 2.3
 
 ### 4.3 Simplify dual-dispatch code paths
 
-- [ ] `commands/destroy.py`: drop the `host_worktree_path == ""` branch; delete `remove_worktree` / `cleanup_sandbox_branch` calls
-- [ ] `commands/git_mode.py`: delete `_validate_legacy_layout_paths()` and path-shape fallback
-- [ ] `commands/_helpers.py:auto_detect_sandbox()`: drop the legacy `worktrees/` fallback (current lines 54-65)
-- [ ] `paths.py:resolve_workspace_path()`: drop the `path_worktree(name)` fallback
-- [ ] Drop legacy-sandbox tests that are no longer meaningful
+- [x] `commands/destroy.py`: drop the `host_worktree_path == ""` branch; delete `remove_worktree` / `cleanup_sandbox_branch` calls
+- [x] `commands/git_mode.py`: delete `_validate_legacy_layout_paths()` and path-shape fallback
+- [x] `commands/_helpers.py:auto_detect_sandbox()`: drop the legacy `worktrees/` fallback (current lines 54-65)
+- [x] `paths.py:resolve_workspace_path()`: drop the `path_worktree(name)` fallback
+- [x] Drop legacy-sandbox tests that are no longer meaningful
 
 ### 4.4 Final validation
 
-- [ ] `./scripts/ci-local.sh --all`
+- [x] `./scripts/ci-local.sh --all`
 - [ ] `./tests/redteam-sandbox.sh` inside a freshly created sandbox — all pass
-- [ ] `python -m ruff check foundry_sandbox foundry-git-safety/foundry_git_safety`
-- [ ] `python -m compileall -q foundry_sandbox foundry-git-safety/foundry_git_safety`
+- [x] `python -m ruff check foundry_sandbox foundry-git-safety/foundry_git_safety`
+- [x] `python -m compileall -q foundry_sandbox foundry-git-safety/foundry_git_safety`
 
 ## Phase 5: Minor Cleanups (Optional)
 

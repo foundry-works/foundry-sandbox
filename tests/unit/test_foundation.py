@@ -9,13 +9,13 @@ Covers:
 
 import json
 import os
+from pathlib import Path
 
 import pytest
 
 from foundry_sandbox.constants import (
     get_sandbox_home,
     get_repos_dir,
-    get_worktrees_dir,
     get_claude_configs_dir,
     get_sandbox_debug,
     get_sandbox_verbose,
@@ -32,7 +32,6 @@ from foundry_sandbox.config import (
 from foundry_sandbox.models import SbxSandboxMetadata
 from foundry_sandbox.paths import (
     SandboxPaths,
-    path_worktree,
     path_claude_config,
     path_claude_home,
     path_metadata_file,
@@ -70,10 +69,6 @@ class TestConstantsDirectoryGetters:
     def test_repos_dir(self, monkeypatch):
         monkeypatch.setenv("SANDBOX_HOME", "/tmp/sb")
         assert str(get_repos_dir()) == "/tmp/sb/repos"
-
-    def test_worktrees_dir(self, monkeypatch):
-        monkeypatch.setenv("SANDBOX_HOME", "/tmp/sb")
-        assert str(get_worktrees_dir()) == "/tmp/sb/worktrees"
 
     def test_claude_configs_dir(self, monkeypatch):
         monkeypatch.setenv("SANDBOX_HOME", "/tmp/sb")
@@ -114,9 +109,6 @@ class TestPathDerivation:
     def set_sandbox_home(self, monkeypatch):
         monkeypatch.setenv("SANDBOX_HOME", "/tmp/sb")
 
-    def test_path_worktree(self):
-        assert str(path_worktree("my-sandbox")) == "/tmp/sb/worktrees/my-sandbox"
-
     def test_path_claude_config(self):
         assert str(path_claude_config("my-sandbox")) == "/tmp/sb/claude-config/my-sandbox"
 
@@ -147,19 +139,27 @@ class TestDeriveSandboxPaths:
         monkeypatch.setenv("SANDBOX_HOME", "/tmp/sb")
 
     def test_returns_sandbox_paths_tuple(self):
-        result = derive_sandbox_paths("test-box")
+        from unittest.mock import patch
+        with patch("foundry_sandbox.paths.resolve_host_worktree_path", return_value=Path("/repo/.sbx/test-box-worktrees/br")):
+            result = derive_sandbox_paths("test-box")
         assert isinstance(result, SandboxPaths)
 
-    def test_worktree_path(self):
-        result = derive_sandbox_paths("test-box")
-        assert str(result.worktree_path) == "/tmp/sb/worktrees/test-box"
+    def test_worktree_path_from_metadata(self):
+        from unittest.mock import patch
+        with patch("foundry_sandbox.paths.resolve_host_worktree_path", return_value=Path("/repo/.sbx/test-box-worktrees/br")):
+            result = derive_sandbox_paths("test-box")
+        assert str(result.worktree_path) == "/repo/.sbx/test-box-worktrees/br"
 
     def test_claude_config_path(self):
-        result = derive_sandbox_paths("test-box")
+        from unittest.mock import patch
+        with patch("foundry_sandbox.paths.resolve_host_worktree_path", return_value=Path("/repo/.sbx/test-box-worktrees/br")):
+            result = derive_sandbox_paths("test-box")
         assert str(result.claude_config_path) == "/tmp/sb/claude-config/test-box"
 
     def test_claude_home_path(self):
-        result = derive_sandbox_paths("test-box")
+        from unittest.mock import patch
+        with patch("foundry_sandbox.paths.resolve_host_worktree_path", return_value=Path("/repo/.sbx/test-box-worktrees/br")):
+            result = derive_sandbox_paths("test-box")
         assert str(result.claude_home_path) == "/tmp/sb/claude-config/test-box/claude"
 
 
@@ -179,9 +179,9 @@ class TestPathSafetyAssertions:
         ".",
         "",
     ])
-    def test_path_worktree_rejects_traversal(self, bad_name):
+    def test_path_claude_config_rejects_traversal(self, bad_name):
         with pytest.raises(ValueError):
-            path_worktree(bad_name)
+            path_claude_config(bad_name)
 
     @pytest.mark.parametrize("bad_name", [
         "../evil",
@@ -197,9 +197,11 @@ class TestPathSafetyAssertions:
             derive_sandbox_paths(bad_name)
 
     def test_valid_names_pass(self):
-        path_worktree("my-sandbox")
+        from unittest.mock import patch
+        path_claude_config("my-sandbox")
         path_preset_file("default")
-        derive_sandbox_paths("test-box")
+        with patch("foundry_sandbox.paths.resolve_host_worktree_path", return_value=Path("/repo/.sbx/test-box-worktrees/br")):
+            derive_sandbox_paths("test-box")
 
 
 class TestFilesystemHelpers:
@@ -506,14 +508,13 @@ class TestEnvironmentScope:
 
 
 class TestResolveHostWorktreePath:
-    """Tests for resolve_host_worktree_path — new-layout vs legacy fallback."""
+    """Tests for resolve_host_worktree_path."""
 
     @pytest.fixture(autouse=True)
     def set_sandbox_home(self, monkeypatch):
         monkeypatch.setenv("SANDBOX_HOME", "/tmp/sb")
 
-    def test_new_layout_returns_metadata_host_worktree_path(self, tmp_path, monkeypatch):
-        # Set up metadata directory
+    def test_returns_metadata_host_worktree_path(self, tmp_path, monkeypatch):
         meta_dir = tmp_path / "claude-config" / "my-sandbox"
         meta_dir.mkdir(parents=True)
         metadata_file = meta_dir / "metadata.json"
@@ -534,24 +535,22 @@ class TestResolveHostWorktreePath:
         result = resolve_host_worktree_path("my-sandbox")
         assert str(result) == "/repo/.sbx/my-sandbox-worktrees/br"
 
-    def test_legacy_falls_back_to_worktree_path(self, monkeypatch):
+    def test_raises_when_no_host_worktree_path(self, monkeypatch):
         from unittest.mock import patch as mock_patch
 
-        # load_sandbox_metadata is imported inside resolve_host_worktree_path
-        # so we patch it at the source module
         with mock_patch("foundry_sandbox.state.load_sandbox_metadata", return_value=None):
-            result = resolve_host_worktree_path("my-sandbox")
-        assert str(result) == "/tmp/sb/worktrees/my-sandbox"
+            with pytest.raises(ValueError, match="no host_worktree_path"):
+                resolve_host_worktree_path("my-sandbox")
 
-    def test_empty_host_worktree_path_falls_back(self, monkeypatch):
+    def test_raises_when_empty_host_worktree_path(self, monkeypatch):
         from unittest.mock import patch as mock_patch
 
         with mock_patch(
             "foundry_sandbox.state.load_sandbox_metadata",
             return_value={"host_worktree_path": ""},
         ):
-            result = resolve_host_worktree_path("my-sandbox")
-        assert str(result) == "/tmp/sb/worktrees/my-sandbox"
+            with pytest.raises(ValueError, match="no host_worktree_path"):
+                resolve_host_worktree_path("my-sandbox")
 
 
 class TestFindNextSandboxName:

@@ -194,9 +194,6 @@ def _load_metadata_from_json(json_path: Path) -> dict[str, Any] | None:
     data = load_json(str(json_path))
     if not data:
         return None
-    # Backward compat: migrate legacy "workspace_path" to "host_worktree_path"
-    if "workspace_path" in data and "host_worktree_path" not in data:
-        data["host_worktree_path"] = data.pop("workspace_path")
     try:
         model = SbxSandboxMetadata(**data)
         return model.model_dump()

@@ -277,7 +277,7 @@ def sbx_ls() -> list[dict[str, str]]:
             return []
         data = json.loads(result.stdout)
         if isinstance(data, dict):
-            return data.get("sandboxes", [])
+            return cast(list[dict[str, str]], data.get("sandboxes", []))
         return cast(list[dict[str, str]], data)
     except (json.JSONDecodeError, subprocess.TimeoutExpired) as exc:
         log_warn(f"sbx ls parse error: {exc}")

@@ -19,7 +19,6 @@ from urllib.parse import urlparse
 
 from foundry_sandbox.constants import (
     get_repos_dir,
-    get_worktrees_dir,
     get_claude_configs_dir,
 )
 from foundry_sandbox.paths import ensure_dir
@@ -199,7 +198,6 @@ def validate_environment() -> tuple[bool, str]:
         return False, msg
 
     ensure_dir(get_repos_dir())
-    ensure_dir(get_worktrees_dir())
     ensure_dir(get_claude_configs_dir())
     return True, ""
 

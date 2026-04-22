@@ -11,7 +11,7 @@ from pathlib import Path
 
 import click
 
-from foundry_sandbox.constants import get_claude_configs_dir, get_worktrees_dir
+from foundry_sandbox.constants import get_claude_configs_dir
 from foundry_sandbox.utils import log_debug, log_error
 from foundry_sandbox.validate import validate_existing_sandbox_name
 
@@ -24,9 +24,8 @@ from foundry_sandbox.validate import validate_existing_sandbox_name
 def auto_detect_sandbox() -> str | None:
     """Auto-detect sandbox name from current working directory.
 
-    For new-layout sandboxes, matches cwd against the ``host_worktree_path``
-    stored in each sandbox's metadata. For legacy sandboxes, matches
-    against the old ``~/.sandboxes/worktrees/<name>/`` directory.
+    Matches cwd against the ``host_worktree_path`` stored in each
+    sandbox's metadata.
 
     Returns:
         Sandbox name if detected, None otherwise.
@@ -36,7 +35,6 @@ def auto_detect_sandbox() -> str | None:
     except OSError:
         return None
 
-    # Check new-layout sandboxes via metadata host_worktree_path
     from foundry_sandbox.state import list_sandboxes
 
     try:
@@ -45,26 +43,13 @@ def auto_detect_sandbox() -> str | None:
             if wp:
                 try:
                     cwd.relative_to(Path(wp).resolve())
-                    name = sb.get("name", "")
+                    name = str(sb.get("name", ""))
                     valid, _ = validate_existing_sandbox_name(name)
                     if valid:
                         return name
                 except ValueError:
                     continue
     except OSError:
-        pass
-
-    # Fallback: legacy worktrees/ directory
-    worktrees_dir = get_worktrees_dir()
-    try:
-        relative = cwd.relative_to(worktrees_dir)
-        parts = relative.parts
-        if parts:
-            name = parts[0]
-            valid, _ = validate_existing_sandbox_name(name)
-            if valid and (worktrees_dir / name).is_dir():
-                return name
-    except ValueError:
         pass
 
     return None

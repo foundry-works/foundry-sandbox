@@ -11,8 +11,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **`install_pip_requirements_sbx` deduplicated** — moved from per-command copies in `start.py` and `new_sbx.py` to a single canonical function in `sbx.py`
 - **Shared `resolve_sandbox_name()` helper** — consolidated per-command sandbox name resolution logic (attach, git-mode, refresh-creds, preset) into `commands/_helpers.py`
-- **Metadata field rename: `workspace_path` → `host_worktree_path`** — the on-disk JSON key is now `host_worktree_path`; loading still accepts the legacy `workspace_path` key for backward compatibility (compat shim drops in a future release)
+- **Metadata field rename: `workspace_path` → `host_worktree_path`** — the on-disk JSON key is now `host_worktree_path`; the legacy `workspace_path` read-compat shim has been removed
 - **Command structure cleanup** — collapsed `new_*.py` fan-out from 4 files to 2 (`new.py` + `new_sbx.py`); extracted `start_sandbox()` from `start.py` for direct reuse by `attach.py` (removing `ctx.invoke()` cross-command coupling)
+- **`cast config` no longer displays `WORKTREES_DIR`** — the deprecated worktrees directory is no longer shown since sbx manages worktrees internally
 
 ### Removed
 
@@ -20,6 +21,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **`refresh-credentials` command renamed** — use `cast refresh-creds` (the old `refresh-credentials` name is no longer recognized)
 - **`cast info` command removed** — use `cast config` and `cast status` separately
 - **0.20.x migration path** — `cast migrate-to-sbx` and `cast migrate-from-sbx` are now unknown commands. `foundry_sandbox/commands/migrate.py`, `foundry_sandbox/migration.py`, and all migration tests have been deleted. Users on 0.20.x must downgrade to an older release to migrate before upgrading. `docs/migration/0.20-to-0.21.md` has been removed; the migration guide is available in the 0.22.x release branch.
+- **`git_worktree.py` deleted** — all bare-repo worktree management functions (`create_worktree`, `remove_worktree`, `cleanup_sandbox_branch`, `configure_sparse_checkout`, `worktree_has_changes`) removed; `cleanup_sandbox_branch_repo` moved to `git.py`
+- **Legacy bare-repo helpers removed** — `ensure_bare_repo()`, `fetch_bare_branch()`, `_ensure_fetch_refspec()` from `git.py`; `repo_url_to_bare_path()` from `paths.py`; `get_worktrees_dir()` from `constants.py`; `path_worktree()` from `paths.py`
+- **Dual-dispatch code paths removed** — `destroy.py`, `git_mode.py`, `_helpers.py`, and `paths.py` no longer contain legacy-layout fallback branches; metadata is the sole source of truth
 
 ## [0.21.0] - 2026-04-21
 

@@ -13,7 +13,6 @@ from foundry_sandbox.constants import (
     get_claude_configs_dir,
     get_repos_dir,
     get_sandbox_home,
-    get_worktrees_dir,
 )
 from foundry_sandbox.sbx import sbx_is_installed
 from foundry_sandbox.utils import BOLD, RESET, format_kv
@@ -27,7 +26,6 @@ def config(json_output: bool) -> None:
     """Show sandbox configuration and system checks."""
     sandbox_home = str(get_sandbox_home())
     repos_dir = str(get_repos_dir())
-    worktrees_dir = str(get_worktrees_dir())
     configs_dir = str(get_claude_configs_dir())
     script_dir = str(SCRIPT_DIR)
     debug = os.environ.get("SANDBOX_DEBUG", "false")
@@ -38,7 +36,6 @@ def config(json_output: bool) -> None:
         data = {
             "sandbox_home": sandbox_home,
             "repos_dir": repos_dir,
-            "worktrees_dir": worktrees_dir,
             "claude_configs_dir": configs_dir,
             "script_dir": script_dir,
             "debug": debug in ("true", "1"),
@@ -51,7 +48,6 @@ def config(json_output: bool) -> None:
     click.echo(f"{BOLD}Sandbox config{RESET}")
     click.echo(format_kv("SANDBOX_HOME", sandbox_home))
     click.echo(format_kv("REPOS_DIR", repos_dir))
-    click.echo(format_kv("WORKTREES_DIR", worktrees_dir))
     click.echo(format_kv("CLAUDE_CONFIGS_DIR", configs_dir))
     click.echo(format_kv("SCRIPT_DIR", script_dir))
     click.echo(format_kv("SANDBOX_DEBUG", debug))
