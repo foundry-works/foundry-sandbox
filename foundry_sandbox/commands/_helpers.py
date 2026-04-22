@@ -1,8 +1,6 @@
 """Shared helper functions for sandbox commands.
 
 UI helpers (auto-detect, fzf select, list) live here.
-Domain functions have been moved to their canonical modules;
-backward-compatible re-exports are provided below.
 """
 from __future__ import annotations
 
@@ -104,23 +102,3 @@ def list_sandbox_names() -> list[str]:
         return sorted(entry.name for entry in worktrees_dir.iterdir() if entry.is_dir())
     except OSError:
         return []
-
-
-# ---------------------------------------------------------------------------
-# Backward-compatible re-exports (canonical locations noted)
-# ---------------------------------------------------------------------------
-
-# From foundry_sandbox.paths
-from foundry_sandbox.paths import (  # noqa: F401, E402
-    find_next_sandbox_name,
-    repo_url_to_bare_path,
-    resolve_ssh_agent_sock,
-    sandbox_name,
-    strip_github_url,
-)
-
-# From foundry_sandbox.utils
-from foundry_sandbox.utils import (  # noqa: F401, E402
-    flag_enabled,
-    generate_sandbox_id,
-)

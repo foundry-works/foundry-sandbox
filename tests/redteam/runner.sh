@@ -2,7 +2,7 @@
 # Red team test runner - discovers and executes modules
 # Usage:
 #   runner.sh                           Run all modules
-#   runner.sh --module 03-dns-filtering Run single module
+#   runner.sh --module 09-git-security Run single module
 #   runner.sh --output-format junit     Output JUnit XML
 #   runner.sh --output-format tap       Output TAP format
 #   runner.sh --output-dir ./results    Write structured output here

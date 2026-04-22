@@ -43,6 +43,6 @@ If sbx adds DNS control surfaces in a future release, this decision should be re
 
 ## Consequences
 
-- DNS filtering is listed as deferred in PLAN §5.8 and will not be pursued.
+- DNS filtering is listed as a known gap (see this ADR) and will not be pursued.
 - The old DNS-related shell scripts (`safety/network-firewall.sh`) and red-team module (`tests/redteam/modules/03-dns-filtering.sh`) are legacy artifacts from the old backend.
 - U28 ("Is DNS-level filtering achievable inside sbx networking?") is resolved: **no, not with the current architecture.**

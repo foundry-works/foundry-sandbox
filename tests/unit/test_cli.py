@@ -101,6 +101,18 @@ class TestUnknownCommandValidation:
         assert result.exit_code != 0
         assert "Unknown command" in result.output
 
+    def test_migrate_to_sbx_removed(self, runner: click.testing.CliRunner) -> None:
+        """'cast migrate-to-sbx' was removed in 0.23.0 — must not resolve."""
+        result = runner.invoke(cli, ["migrate-to-sbx"])
+        assert result.exit_code != 0
+        assert "Unknown command" in result.output
+
+    def test_migrate_from_sbx_removed(self, runner: click.testing.CliRunner) -> None:
+        """'cast migrate-from-sbx' was removed in 0.23.0 — must not resolve."""
+        result = runner.invoke(cli, ["migrate-from-sbx"])
+        assert result.exit_code != 0
+        assert "Unknown command" in result.output
+
     def test_all_commands_registered_no_shell_fallback(self) -> None:
         required = {
             "new", "list", "attach", "start", "stop", "destroy",

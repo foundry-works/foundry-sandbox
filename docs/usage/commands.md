@@ -14,8 +14,6 @@ Complete reference for all `cast` commands.
 
 **Maintenance:** [refresh-credentials](#cast-refresh-credentials) | [watchdog](#cast-watchdog) | [git-mode](#cast-git-mode) | [help](#cast-help)
 
-**Migration:** [migrate-to-sbx](#cast-migrate-to-sbx) | [migrate-from-sbx](#cast-migrate-from-sbx)
-
 **Reference:** [Environment Variables](#environment-variables)
 
 ---
@@ -769,96 +767,6 @@ cast help
 cast help
 cast --help
 cast -h
-```
-
----
-
-## Migration
-
-## cast migrate-to-sbx
-
-Migrate 0.20.x docker-compose state to the 0.21.x sbx (microVM) backend. Converts sandbox metadata, presets, and credentials.
-
-### Synopsis
-
-```
-cast migrate-to-sbx [options]
-```
-
-### Options
-
-| Option | Description |
-|--------|-------------|
-| `--plan` | Dry-run: show migration plan without making changes |
-| `-f`, `--force` | Skip confirmation prompts; override migration lock |
-| `--snapshot-dir <path>` | Override snapshot directory location |
-
-### Behavior
-
-1. Scans sandbox directories and classifies them (needs migration, already migrated, empty)
-2. Shows migration plan (or exits with `--plan`)
-3. Creates a full snapshot for rollback
-4. Pushes discovered credentials to sbx
-5. Converts each sandbox's metadata to the new schema
-6. Converts preset files to the new format
-
-A migration lock prevents conflicting runs. If interrupted, re-running warns about the lock (use `--force` to override).
-
-See the [Migration Guide](../migration/0.20-to-0.21.md) for detailed instructions.
-
-### Examples
-
-```bash
-# Preview what would be migrated
-cast migrate-to-sbx --plan
-
-# Run migration
-cast migrate-to-sbx
-
-# Skip confirmation
-cast migrate-to-sbx --force
-```
-
----
-
-## cast migrate-from-sbx
-
-Roll back to 0.20.x state by restoring from the snapshot created by `migrate-to-sbx`.
-
-### Synopsis
-
-```
-cast migrate-from-sbx [options]
-```
-
-### Options
-
-| Option | Description |
-|--------|-------------|
-| `--snapshot-dir <path>` | Explicit snapshot path (auto-discovers latest if omitted) |
-| `-f`, `--force` | Skip confirmation prompt |
-
-### Behavior
-
-1. Locates the snapshot (explicit path or auto-discovery)
-2. Shows snapshot manifest (timestamp, sandbox count, preset count)
-3. Confirms with the user
-4. Restores state from snapshot
-5. Removes migration lock
-
-After rollback, downgrade the package: `pip install foundry-sandbox==0.20.15`
-
-### Examples
-
-```bash
-# Roll back using latest snapshot
-cast migrate-from-sbx
-
-# Roll back from a specific snapshot
-cast migrate-from-sbx --snapshot-dir ~/.sandboxes/.migration-snapshots/2026-04-20T120000
-
-# Skip confirmation
-cast migrate-from-sbx --force
 ```
 
 ---

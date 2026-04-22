@@ -6,8 +6,6 @@
 #   curl -fsSL https://raw.githubusercontent.com/foundry-works/foundry-sandbox/main/install.sh | bash
 #
 # Or with options:
-#   curl -fsSL ... | bash -s -- --no-build
-#   curl -fsSL ... | bash -s -- --no-cache   # Force rebuild without cache
 #   ./install.sh --repo /path/to/foundry-sandbox   # Install from local path (offline)
 #
 
@@ -30,18 +28,6 @@ NC='\033[0m'
 # Parse arguments
 while [[ $# -gt 0 ]]; do
     case "$1" in
-        --no-build)
-            # Accepted for backwards compatibility but no longer needed
-            shift
-            ;;
-        --no-cache)
-            # Accepted for backwards compatibility but no longer needed
-            shift
-            ;;
-        --without-opencode)
-            # Accepted for backwards compatibility but no longer needed
-            shift
-            ;;
         --dir)
             INSTALL_DIR="$2"
             shift 2
@@ -445,31 +431,6 @@ fi
 pip install -e "$INSTALL_DIR" >/dev/null 2>&1 && \
     echo -e "  ${GREEN}✓${NC} cast CLI installed ($(which cast 2>/dev/null || echo 'restart shell to use'))" || \
     echo -e "  ${RED}✗${NC} pip install failed — run manually: pip install -e $INSTALL_DIR"
-
-COMPLETION_LINE="source '$INSTALL_DIR/completion.bash'"
-
-add_to_shell_rc() {
-    local line="$1"
-    local description="$2"
-
-    # Clean up orphaned "# Foundry Sandbox" comment lines (empty blocks from prior installs)
-    if [ -f "$SHELL_RC" ]; then
-        sed -i.bak '/^# Foundry Sandbox$/{ N; /^# Foundry Sandbox\n$/d; /^# Foundry Sandbox\n# Foundry Sandbox$/d; }' "$SHELL_RC"
-        rm -f "${SHELL_RC}.bak"
-    fi
-
-    if grep -qF "$line" "$SHELL_RC" 2>/dev/null; then
-        echo -e "  ${GREEN}✓${NC} $description (already configured)"
-    else
-        echo "" >> "$SHELL_RC"
-        echo "# Foundry Sandbox" >> "$SHELL_RC"
-        echo "$line" >> "$SHELL_RC"
-        echo -e "  ${GREEN}✓${NC} $description (added to $SHELL_RC)"
-    fi
-}
-
-echo -e "${BLUE}Configuring shell...${NC}"
-add_to_shell_rc "$COMPLETION_LINE" "tab completion"
 
 echo ""
 

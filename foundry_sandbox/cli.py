@@ -47,8 +47,6 @@ _LAZY_COMMANDS: dict[str, tuple[str, str]] = {
     "preset": ("foundry_sandbox.commands.preset", "preset"),
     "refresh-credentials": ("foundry_sandbox.commands.refresh_creds", "refresh_creds"),
     "git-mode": ("foundry_sandbox.commands.git_mode", "git_mode"),
-    "migrate-to-sbx": ("foundry_sandbox.commands.migrate", "migrate_to_sbx"),
-    "migrate-from-sbx": ("foundry_sandbox.commands.migrate", "migrate_from_sbx"),
     "start": ("foundry_sandbox.commands.start", "start"),
     "status": ("foundry_sandbox.commands.status", "status"),
     "stop": ("foundry_sandbox.commands.stop", "stop"),

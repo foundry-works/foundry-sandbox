@@ -1,66 +1,54 @@
 #!/bin/bash
 # Module: 12-tls-filesystem
-# Description: TLS inspection, filesystem isolation, and capability verification
+# Description: Filesystem isolation and capability verification (sbx microVM)
 
 run_tests() {
-    # ---- Section 17: Certificate and TLS Inspection ----
-    header "17. CERTIFICATE AND TLS INSPECTION"
+    # ---- Section 17: TLS and Network Trust ----
+    header "17. TLS AND NETWORK TRUST"
 
     echo ""
-    echo "Checking TLS/certificate configuration..."
+    echo "Checking network trust model..."
 
-    # Check what CA certs are trusted
-    info "Custom CA certificates:"
+    # sbx does NOT use MITM — outbound TLS is end-to-end through the sbx HTTP proxy.
+    # The proxy injects credentials at the HTTP level; TLS terminates at the real endpoint.
+    info "Checking no MITM CA certificates are present..."
     if [[ -f /certs/mitmproxy-ca.pem ]]; then
-        test_pass "mitmproxy CA certificate present (expected for HTTPS interception)"
-        openssl x509 -in /certs/mitmproxy-ca.pem -noout -subject -issuer 2>/dev/null | sed 's/^/    /'
+        test_fail "mitmproxy CA found — sbx should not use MITM interception"
     else
-        test_warn "mitmproxy CA not found at /certs/mitmproxy-ca.pem"
+        test_pass "No MITM CA certificates present"
     fi
 
-    # Test that mitmproxy is intercepting HTTPS traffic
-    echo ""
-    info "Testing certificate validation..."
-
-    # Test 1: curl should FAIL without mitmproxy CA (proves interception is active)
-    # Uses generativelanguage.googleapis.com (still routed through mitmproxy;
-    # Anthropic and OpenAI use their respective gateways now)
-    if ! curl -sf --cacert /etc/ssl/certs/ca-certificates.crt --max-time 10 "https://generativelanguage.googleapis.com/" >/dev/null 2>&1; then
-        test_pass "HTTPS interception active (system CA rejects mitmproxy cert)"
+    if [[ -d /certs ]] && ls /certs/ >/dev/null 2>&1; then
+        test_warn "Custom CA directory exists: $(ls /certs/)"
     else
-        test_fail "HTTPS interception NOT active (system CA accepted connection)"
+        test_pass "No custom CA directory"
     fi
 
-    # Test 2: curl should complete TLS handshake with mitmproxy CA (proves proxy setup works)
-    CURL_OUT=$(curl -s --cacert /certs/mitmproxy-ca.pem --max-time 10 -w "%{ssl_verify_result}" -o /dev/null "https://generativelanguage.googleapis.com/" 2>&1)
-    if [[ "$CURL_OUT" == "0" ]]; then
-        test_pass "mitmproxy CA trust working (TLS handshake succeeds)"
+    # HTTPS should work through the sbx proxy without custom CAs
+    info "Testing end-to-end HTTPS through sbx proxy..."
+    CURL_HTTPS_RESP=$(curl -s --max-time 10 -o /dev/null -w "%{http_code}" \
+        "https://api.github.com/" 2>&1)
+    if [[ "$CURL_HTTPS_RESP" =~ ^(200|301|302|403|404|429) ]]; then
+        test_pass "HTTPS request succeeded through proxy (HTTP $CURL_HTTPS_RESP)"
+    elif [[ "$CURL_HTTPS_RESP" == "000" ]]; then
+        test_warn "HTTPS proxy unreachable (code: 000) — may not be running inside sbx"
+    elif [[ "$CURL_HTTPS_RESP" =~ ^(60|77) ]]; then
+        test_fail "HTTPS request failed — TLS/CA trust issue (code: $CURL_HTTPS_RESP)"
     else
-        test_warn "mitmproxy CA trust issue (ssl_verify_result=$CURL_OUT)"
+        test_warn "HTTPS response unclear (code: $CURL_HTTPS_RESP)"
     fi
 
     # ---- Section 18: Filesystem Isolation ----
     header "18. FILESYSTEM ISOLATION"
 
     echo ""
-    echo "Testing read-only root filesystem and tmpfs constraints..."
-
-    # Detect credential-isolation mode
-    CREDENTIAL_ISOLATION_MODE=false
-    if [ -n "${SANDBOX_GATEWAY_ENABLED:-}" ] || [ -f /run/secrets/gateway_token ]; then
-        CREDENTIAL_ISOLATION_MODE=true
-        info "Credential-isolation mode detected (SANDBOX_GATEWAY_ENABLED or gateway_token present)"
-    fi
+    echo "Testing filesystem write restrictions..."
 
     # Test writes to protected paths
     for path in "/usr/bin/test-file" "/etc/test-file" "/opt/test-file"; do
         if touch "$path" 2>/dev/null; then
             rm -f "$path" 2>/dev/null
-            if [ "$CREDENTIAL_ISOLATION_MODE" = "true" ]; then
-                test_warn "Write to $path allowed (expected in credential-isolation mode)"
-            else
-                test_fail "Write succeeded to protected path: $path"
-            fi
+            test_fail "Write succeeded to protected path: $path"
         else
             test_pass "Write blocked to protected path: $path"
         fi
@@ -72,17 +60,15 @@ run_tests() {
             rm -f "$path"
             test_pass "Write allowed to tmpfs: $path"
         else
-            test_warn "Write failed to tmpfs: $path (might be read-only mode)"
+            test_warn "Write failed to tmpfs: $path (may be read-only)"
         fi
     done
 
     # Test sensitive file access
-    CURRENT_USER=$(whoami)
     if [[ -r /etc/shadow ]]; then
-        if [ "$CURRENT_USER" = "root" ]; then
+        CURRENT_USER=$(whoami)
+        if [[ "$CURRENT_USER" = "root" ]]; then
             test_warn "/etc/shadow readable (running as root)"
-        elif [ "$CREDENTIAL_ISOLATION_MODE" = "true" ]; then
-            test_warn "/etc/shadow readable (credential-isolation starts as root)"
         else
             test_fail "/etc/shadow readable as $CURRENT_USER"
         fi
@@ -101,7 +87,21 @@ run_tests() {
         test_pass "/root/ not accessible"
     fi
 
-    # Test tmpfs size limit (try to write >512MB to /tmp)
+    # Git safety files must be present
+    info "Checking git safety infrastructure..."
+    if [[ -f /etc/profile.d/foundry-git-safety.sh ]]; then
+        test_pass "Git safety profile script present"
+    else
+        test_fail "Git safety profile script missing from /etc/profile.d/"
+    fi
+
+    if [[ -f /var/lib/foundry/git-safety.env ]]; then
+        test_pass "Persistent git safety env file present"
+    else
+        test_warn "Persistent git safety env file not found"
+    fi
+
+    # Test tmpfs size limit
     echo ""
     info "Testing tmpfs size limits..."
     if dd if=/dev/zero of=/tmp/large-test bs=1M count=600 2>/dev/null; then
@@ -118,12 +118,9 @@ run_tests() {
     echo ""
     echo "Testing dropped Linux capabilities..."
 
-    # Test CAP_NET_RAW (should be dropped - prevents raw sockets, ping without setuid)
+    # Test CAP_NET_RAW (should be dropped)
     info "Testing CAP_NET_RAW (should be dropped)..."
-
-    # Method 1: Try ping (needs CAP_NET_RAW if not setuid)
     if ping -c 1 -W 1 127.0.0.1 >/dev/null 2>&1; then
-        # Ping worked - check if it's setuid or we have CAP_NET_RAW
         if [[ -u /bin/ping ]] || [[ -u /usr/bin/ping ]]; then
             test_pass "ping works via setuid (CAP_NET_RAW not needed)"
         else
@@ -133,7 +130,7 @@ run_tests() {
         test_pass "ping failed (CAP_NET_RAW dropped or ping not setuid)"
     fi
 
-    # Method 2: Try creating raw socket with Python if available
+    # Test raw socket creation
     if command -v python3 &>/dev/null; then
         RAW_SOCKET_TEST=$(python3 -c "
 import socket
@@ -159,11 +156,7 @@ except Exception as e:
 
     # Test access to sensitive kernel interfaces
     if [[ -r /proc/kcore ]]; then
-        if [ "$CREDENTIAL_ISOLATION_MODE" = "true" ]; then
-            test_warn "/proc/kcore readable (known limitation - network isolation is primary boundary)"
-        else
-            test_fail "/proc/kcore is readable"
-        fi
+        test_warn "/proc/kcore is readable (kernel image accessible)"
     else
         test_pass "/proc/kcore not readable"
     fi

@@ -47,9 +47,7 @@ curl -fsSL https://raw.githubusercontent.com/foundry-works/foundry-sandbox/main/
 ```
 
 This installs to `~/.foundry-sandbox` and:
-- Adds the `cast` alias to your shell
-- Enables tab completion
-- Installs the `foundry-sandbox` Python package
+- Installs the `foundry-sandbox` Python package (provides the `cast` CLI)
 
 After installation, reload your shell:
 

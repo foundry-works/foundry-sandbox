@@ -7,9 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Deprecated
+### Removed
 
-- **0.20.x migration path** — `cast migrate-to-sbx` and `cast migrate-from-sbx` are deprecated and will be removed in 0.23.0 (target: October 2026). Users on 0.20.x should migrate before upgrading past 0.22.x. After removal, 0.20.x metadata and presets will no longer be importable. See `docs/migration/0.20-to-0.21.md` for the migration guide.
+- **0.20.x migration path** — `cast migrate-to-sbx` and `cast migrate-from-sbx` are now unknown commands. `foundry_sandbox/commands/migrate.py`, `foundry_sandbox/migration.py`, and all migration tests have been deleted. Users on 0.20.x must downgrade to an older release to migrate before upgrading. `docs/migration/0.20-to-0.21.md` has been removed; the migration guide is available in the 0.22.x release branch.
 
 ## [0.21.0] - 2026-04-21
 

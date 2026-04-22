@@ -5,13 +5,13 @@ import os
 import pytest
 
 from foundry_git_safety.branch_isolation import (
-    ValidationError,
     _extract_sha_args,
     _is_allowed_ref,
     normalize_pathspec_args,
     resolve_bare_repo_path,
     validate_branch_isolation,
 )
+from foundry_git_safety.branch_types import ValidationError
 
 
 def _make_metadata(

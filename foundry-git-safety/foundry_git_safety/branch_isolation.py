@@ -12,7 +12,6 @@ Security model:
 
 Shared types and constants live in branch_types.py.
 Output filtering functions live in branch_output_filter.py.
-This module re-exports both for backward compatibility.
 """
 
 import logging
@@ -32,12 +31,6 @@ from .branch_types import (
     _is_sha_like,
     _normalize_base_branch,
     get_subcommand_args,
-)
-
-# Re-export output filter functions from branch_output_filter for backward compat.
-from .branch_output_filter import (  # noqa: F401
-    filter_ref_listing_output,
-    filter_stderr_branch_refs,
 )
 
 logger = logging.getLogger(__name__)
@@ -172,10 +165,6 @@ _REF_READING_CMDS: frozenset[str] = frozenset({
     "name-rev", "archive", "format-patch",
     "cat-file", "ls-tree",
 })
-
-# REF_ENUM_CMDS is imported from branch_types (canonical location).
-# Keep local alias for backward compatibility with existing references.
-_REF_ENUM_CMDS = REF_ENUM_CMDS
 
 # Notes sub-subcommands (used in branch isolation for positional arg parsing)
 _NOTES_SUBCMDS: frozenset[str] = frozenset({
@@ -413,7 +402,7 @@ def validate_branch_isolation(
         return None  # branch listing handled by output filtering
 
     # --- ref enum commands (handled by output filtering) ---
-    if subcommand in _REF_ENUM_CMDS:
+    if subcommand in REF_ENUM_CMDS:
         return None
 
     # --- checkout / switch ---

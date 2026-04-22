@@ -122,19 +122,6 @@ def path_metadata_file(name: str) -> Path:
     return path_claude_config(name) / "metadata.json"
 
 
-def path_metadata_legacy_file(name: str) -> Path:
-    """Get the path to a sandbox's legacy metadata file (ENV format).
-
-    Args:
-        name: Sandbox name
-
-    Returns:
-        Path to the metadata.env file (legacy format)
-    """
-    _assert_safe_path_component(name)
-    return path_claude_config(name) / "metadata.env"
-
-
 def path_opencode_plugins_marker(name: str) -> Path:
     """Get the path to a sandbox's OpenCode plugins sync marker file.
 

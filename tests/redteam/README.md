@@ -18,16 +18,20 @@ Adversarial security tests that run **inside** an sbx sandbox to validate isolat
 ./tests/redteam/runner.sh --output-format tap --output-dir /tmp/results
 ```
 
-## Active Modules (9)
+## Active Modules (13)
 
 | # | Module | Category | Description |
 |---|--------|----------|-------------|
 | 01 | `credentials-env` | Credential isolation | Scans env vars for leaked API keys |
 | 02 | `credentials-files` | Credential isolation | Checks filesystem for credential files |
+| 08 | `credential-injection` | Credential isolation | sbx proxy-level injection, HMAC auth, user-services proxy |
 | 09 | `git-security` | Git safety | Hooks, shadow isolation, wrapper, HMAC auth, marketplace access |
+| 10 | `container-escape` | VM boundary | VM isolation, lateral movement, metadata service, mount inspection |
 | 11 | `github-api` | Git safety | GitHub API deep policy, blocked operations, service isolation |
+| 12 | `tls-filesystem` | FS/capability | TLS trust, filesystem write restrictions, capability verification |
 | 13 | `credential-patterns` | Credential isolation | Additional pattern scanning (Slack tokens, private keys, GCP SA) |
 | 15 | `self-merge` | Git safety | Self-merge and self-approval prevention |
+| 16 | `readonly-fs` | FS boundary | Read-only root FS, tmpfs, workspace mount, git wrapper |
 | 17 | `workflow-push` | Git safety | `.github/workflows/` push blocking |
 | 19 | `merge-early-exit` | Git safety | Early-exit merge blocking before identity checks |
 | 20 | `package-install` | Boundary testing | pip/npm install paths, sudo blocking |
@@ -45,15 +49,6 @@ Removed in 0.21.0 — tested the deleted unified-proxy/mitmproxy network stack:
 - `18-ip-encoding-bypass` — Proxy policy engine IP-encoded URL blocking
 
 Network egress control is now covered by `sbx policy` and the chaos test suite.
-
-## Deferred Modules (4)
-
-Located in `tests/redteam/modules/disabled/`. These test valid concepts but need sbx-native rewrites:
-
-- `08-credential-injection` — Gateway credential injection (sbx uses `sbx secret set`)
-- `10-container-escape` — Docker-specific escape tests (needs VM-escape equivalents)
-- `12-tls-filesystem` — Mitmproxy CA and TLS interception tests (sbx doesn't use MITM)
-- `16-readonly-fs` — Proxy HTTPS and CA mode tests (sbx uses different cert model)
 
 ## Prerequisites
 

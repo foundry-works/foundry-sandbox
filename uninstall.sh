@@ -33,8 +33,8 @@ fi
 # Confirm
 echo "This will:"
 echo "  - Remove $INSTALL_DIR"
-echo "  - Remove alias and completion from shell rc files"
-echo "  - Optionally remove Docker image and sandbox data"
+echo "  - Remove cast references from shell rc files"
+echo "  - Optionally remove sandbox data"
 echo ""
 echo -n "Continue? [y/N] "
 read -r response
@@ -64,19 +64,6 @@ echo -e "${BLUE}Removing shell configuration...${NC}"
 remove_from_rc "$HOME/.bashrc"
 remove_from_rc "$HOME/.bash_profile"
 remove_from_rc "$HOME/.zshrc"
-
-echo ""
-
-# Ask about Docker image
-echo -n "Remove Docker image (foundry-sandbox:latest)? [y/N] "
-read -r response
-if [[ "$response" =~ ^[Yy] ]]; then
-    if docker image rm foundry-sandbox:latest 2>/dev/null; then
-        echo -e "  ${GREEN}✓${NC} Removed Docker image"
-    else
-        echo -e "  ${YELLOW}!${NC} Docker image not found or could not be removed"
-    fi
-fi
 
 echo ""
 
