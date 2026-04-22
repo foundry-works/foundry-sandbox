@@ -95,11 +95,11 @@ Legend: `[ ]` todo, `[x]` done, `[~]` partial / accepted risk
 
 ## 3.7 Plan the Post-0.20.x Migration Sunset
 
-- [ ] Pick an EOL release or date for the 0.20.x → 0.21.x migration helper
-- [ ] Add EOL notice to `docs/migration/0.20-to-0.21.md`
-- [ ] Add EOL notice to `CHANGELOG.md` under the next unreleased section
-- [ ] File a tracked issue for the eventual deletion work covering: `foundry_sandbox/migration.py`, `commands/migrate.py`, `cli.py:50-51` entries, `tests/unit/test_migration.py`, `tests/smoke/test_migration_smoke.py`, `docs/migration/0.20-to-0.21.md`
-- [ ] Do **not** delete migration code in this workstream
+- [x] Pick an EOL release or date for the 0.20.x → 0.21.x migration helper
+- [x] Add EOL notice to `docs/migration/0.20-to-0.21.md`
+- [x] Add EOL notice to `CHANGELOG.md` under the next unreleased section
+- [x] File a tracked issue for the eventual deletion work covering: `foundry_sandbox/migration.py`, `commands/migrate.py`, `cli.py:50-51` entries, `tests/unit/test_migration.py`, `tests/smoke/test_migration_smoke.py`, `docs/migration/0.20-to-0.21.md`
+- [x] Do **not** delete migration code in this workstream
 
 ---
 

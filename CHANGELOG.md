@@ -5,6 +5,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Deprecated
+
+- **0.20.x migration path** — `cast migrate-to-sbx` and `cast migrate-from-sbx` are deprecated and will be removed in 0.23.0 (target: October 2026). Users on 0.20.x should migrate before upgrading past 0.22.x. After removal, 0.20.x metadata and presets will no longer be importable. See `docs/migration/0.20-to-0.21.md` for the migration guide.
+
 ## [0.21.0] - 2026-04-21
 
 ### Added
