@@ -113,15 +113,20 @@ def new_sbx_setup(
     except Exception as exc:
         raise SetupError(f"sbx create failed: {exc}") from exc
 
-    # Derive workspace path deterministically and sanity-check against stdout.
-    workspace_path = sbx_worktree_path(repo_root, name, branch)
+    # sbx may truncate the sandbox name internally, so the actual worktree
+    # path can differ from our deterministic formula.  Use the parsed stdout
+    # as ground truth and fall back to the formula only when parsing fails.
     info = sbx_get_workspace_info(result.stdout or "")
-    if info["worktree"] and info["worktree"] != workspace_path:
-        raise SetupError(
-            f"Worktree path mismatch: expected {workspace_path}, "
-            f"sbx reported {info['worktree']}. "
-            "sbx layout may have changed — update sbx_worktree_path()."
-        )
+    if info["worktree"]:
+        workspace_path = info["worktree"]
+        expected = sbx_worktree_path(repo_root, name, branch)
+        if workspace_path != expected:
+            log_warn(
+                f"sbx worktree path differs from deterministic formula: "
+                f"{workspace_path} vs {expected} (sbx may have truncated the name)"
+            )
+    else:
+        workspace_path = sbx_worktree_path(repo_root, name, branch)
 
     # ------------------------------------------------------------------
     # 3. Start git safety server if needed (fail closed)
