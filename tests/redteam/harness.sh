@@ -4,6 +4,20 @@
 
 set -u
 
+# Source git-safety environment when running inside a sandbox.
+# sbx exec creates non-login shells, so /etc/profile.d/ is not sourced.
+if [[ -f /var/lib/foundry/git-safety.env ]]; then
+    while IFS='=' read -r _key _val; do
+        case "$_key" in
+            SANDBOX_ID|WORKSPACE_DIR|GIT_API_HOST|GIT_API_PORT|PIP_USER|PIP_BREAK_SYSTEM_PACKAGES)
+                if [[ -z "${!_key:-}" ]]; then
+                    export "$_key=$_val"
+                fi
+                ;;
+        esac
+    done < /var/lib/foundry/git-safety.env
+fi
+
 # --- Colors ---
 RED='\033[0;31m'
 GREEN='\033[0;32m'

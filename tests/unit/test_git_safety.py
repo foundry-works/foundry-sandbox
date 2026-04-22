@@ -267,8 +267,9 @@ class TestInjectGitWrapper:
             workspace_dir="/workspace",
         )
 
-        # 4 calls: base64 git, base64 proxy-sign, base64 profile.d env, base64 persistent env
-        assert mock_exec.call_count == 4
+        # 6 calls: base64 git, base64 proxy-sign, base64 profile.d env,
+        # bashrc append, base64 persistent env, git hardening
+        assert mock_exec.call_count == 6
 
     @patch("foundry_sandbox.sbx.sbx_exec")
     @patch("foundry_sandbox.git_safety._wrapper_script_path")
@@ -306,8 +307,8 @@ class TestInjectGitWrapper:
         assert "WORKSPACE_DIR=/custom/path" in env_content
         assert 'GIT_HMAC_SECRET_FILE="/run/foundry/hmac-secret"' in env_content
 
-        # The persistent env file is the 4th call (index 3)
-        persistent_call = mock_exec.call_args_list[3]
+        # The persistent env file is the 5th call (index 4)
+        persistent_call = mock_exec.call_args_list[4]
         persistent_cmd = str(persistent_call)
         assert "git-safety.env" in persistent_cmd
         cmd_str_p = persistent_call[0][1][2]

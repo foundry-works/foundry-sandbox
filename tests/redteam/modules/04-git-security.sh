@@ -42,7 +42,8 @@ run_tests() {
     _REAL_GIT=/usr/bin/git
 
     # Test 1: core.hooksPath should be /dev/null
-    HOOKS_PATH=$($_REAL_GIT config --global core.hooksPath 2>/dev/null)
+    # Check effective value (merges system + global + local config).
+    HOOKS_PATH=$($_REAL_GIT config core.hooksPath 2>/dev/null)
     if [[ "$HOOKS_PATH" == "/dev/null" ]]; then
         test_pass "core.hooksPath is /dev/null"
     else
@@ -50,7 +51,7 @@ run_tests() {
     fi
 
     # Test 2: core.fsmonitor should be false
-    FSMONITOR=$($_REAL_GIT config --global core.fsmonitor 2>/dev/null)
+    FSMONITOR=$($_REAL_GIT config core.fsmonitor 2>/dev/null)
     if [[ "$FSMONITOR" == "false" ]]; then
         test_pass "core.fsmonitor is false"
     else
@@ -58,7 +59,7 @@ run_tests() {
     fi
 
     # Test 3: init.templateDir should be empty string
-    TEMPLATE_DIR=$($_REAL_GIT config --global init.templateDir 2>/dev/null)
+    TEMPLATE_DIR=$($_REAL_GIT config init.templateDir 2>/dev/null)
     if [[ "$TEMPLATE_DIR" == "" ]]; then
         test_pass "init.templateDir is empty string"
     else
@@ -66,7 +67,7 @@ run_tests() {
     fi
 
     # Test 4: core.fsmonitorHookVersion should be 0
-    FSMONITOR_VER=$($_REAL_GIT config --global core.fsmonitorHookVersion 2>/dev/null)
+    FSMONITOR_VER=$($_REAL_GIT config core.fsmonitorHookVersion 2>/dev/null)
     if [[ "$FSMONITOR_VER" == "0" ]]; then
         test_pass "core.fsmonitorHookVersion is 0"
     else
@@ -74,7 +75,7 @@ run_tests() {
     fi
 
     # Test 5: receive.denyCurrentBranch should be refuse
-    DENY_CURRENT=$($_REAL_GIT config --global receive.denyCurrentBranch 2>/dev/null)
+    DENY_CURRENT=$($_REAL_GIT config receive.denyCurrentBranch 2>/dev/null)
     if [[ "$DENY_CURRENT" == "refuse" ]]; then
         test_pass "receive.denyCurrentBranch is refuse"
     else

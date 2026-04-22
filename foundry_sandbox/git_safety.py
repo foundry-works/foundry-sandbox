@@ -129,9 +129,9 @@ def write_hmac_secret_to_sandbox(
         ["sh", "-c",
          f"mkdir -p /run/foundry /var/lib/foundry "
          f"&& printf '%s' '{secret}' > /run/foundry/hmac-secret "
-         f"&& chmod 600 /run/foundry/hmac-secret "
+         f"&& chmod 644 /run/foundry/hmac-secret "
          f"&& printf '%s' '{secret}' > /var/lib/foundry/hmac-secret "
-         f"&& chmod 600 /var/lib/foundry/hmac-secret"],
+         f"&& chmod 644 /var/lib/foundry/hmac-secret"],
         user="root",
         quiet=True,
     )
@@ -343,11 +343,36 @@ def inject_git_wrapper(
         f"export GIT_API_HOST={git_api_host}\n"
         f"export GIT_API_PORT={git_api_port}\n"
         f'export GIT_HMAC_SECRET_FILE="/run/foundry/hmac-secret"\n'
+        f"export PIP_USER=1\n"
+        f"export PIP_BREAK_SYSTEM_PACKAGES=1\n"
     )
     env_b64 = base64.b64encode(env_script.encode()).decode()
     sbx_exec(
         sandbox_name,
         ["sh", "-c", f"echo '{env_b64}' | base64 -d > /etc/profile.d/foundry-git-safety.sh && chmod 644 /etc/profile.d/foundry-git-safety.sh"],
+        user="root",
+        quiet=True,
+    )
+
+    # Also write to /etc/bash.bashrc so non-login interactive shells pick up
+    # the env vars.  Wrap in a guard to avoid duplicate sourcing.
+    bashrc_block = (
+        "# >>> foundry-git-safety >>>\n"
+        f"export SANDBOX_ID={sandbox_id}\n"
+        f"export WORKSPACE_DIR={workspace_dir}\n"
+        f"export GIT_API_HOST={git_api_host}\n"
+        f"export GIT_API_PORT={git_api_port}\n"
+        f'export GIT_HMAC_SECRET_FILE="/run/foundry/hmac-secret"\n'
+        f"export PIP_USER=1\n"
+        f"export PIP_BREAK_SYSTEM_PACKAGES=1\n"
+        "# <<< foundry-git-safety <<<\n"
+    )
+    bashrc_b64 = base64.b64encode(bashrc_block.encode()).decode()
+    sbx_exec(
+        sandbox_name,
+        ["sh", "-c",
+         f"if ! grep -q 'foundry-git-safety' /etc/bash.bashrc 2>/dev/null; then "
+         f"echo '{bashrc_b64}' | base64 -d >> /etc/bash.bashrc; fi"],
         user="root",
         quiet=True,
     )
@@ -359,11 +384,37 @@ def inject_git_wrapper(
         f"WORKSPACE_DIR={workspace_dir}\n"
         f"GIT_API_HOST={git_api_host}\n"
         f"GIT_API_PORT={git_api_port}\n"
+        f"PIP_USER=1\n"
+        f"PIP_BREAK_SYSTEM_PACKAGES=1\n"
     )
     env_plain_b64 = base64.b64encode(plain_env.encode()).decode()
     sbx_exec(
         sandbox_name,
         ["sh", "-c", f"mkdir -p /var/lib/foundry && echo '{env_plain_b64}' | base64 -d > /var/lib/foundry/git-safety.env && chmod 644 /var/lib/foundry/git-safety.env"],
+        user="root",
+        quiet=True,
+    )
+
+    # Harden git configuration to prevent hook-based attacks.
+    # Write directly to the agent user's .gitconfig (root FS may be read-only,
+    # so --system won't work).  The git wrapper provides the primary enforcement
+    # layer; these block direct /usr/bin/git invocations that bypass the wrapper.
+    gitconfig_content = (
+        "[core]\n"
+        "\thooksPath = /dev/null\n"
+        "\tfsmonitor = false\n"
+        "\tfsmonitorHookVersion = 0\n"
+        "[receive]\n"
+        "\tdenyCurrentBranch = refuse\n"
+    )
+    gitconfig_b64 = base64.b64encode(gitconfig_content.encode()).decode()
+    sbx_exec(
+        sandbox_name,
+        ["sh", "-c",
+         f"AGENT_HOME=$(getent passwd agent 2>/dev/null | cut -d: -f6 || echo /home/agent) "
+         f"&& mkdir -p \"$AGENT_HOME\" "
+         f"&& echo '{gitconfig_b64}' | base64 -d > \"$AGENT_HOME/.gitconfig\" "
+         f"&& chown agent:agent \"$AGENT_HOME/.gitconfig\""],
         user="root",
         quiet=True,
     )

@@ -148,34 +148,33 @@ class TestWorkspaceInfoMismatch:
     @patch("foundry_sandbox.commands.new_sbx.ensure_foundry_template", return_value=True)
     @patch("foundry_sandbox.commands.new_sbx.sbx_create")
     @patch("foundry_sandbox.commands.new_sbx.sbx_check_available")
-    def test_mismatch_raises_setup_error(
+    def test_mismatch_uses_parsed_path(
         self, mock_check, mock_create, mock_ensure,
         mock_gs_running, mock_provision, mock_metadata, tmp_path,
     ):
-        from foundry_sandbox.commands.new_sbx import SetupError
-
-        # sbx reports a different worktree path than our deterministic formula
+        # sbx reports a different worktree path than our deterministic formula.
+        # The parsed stdout is ground truth; mismatch is a warning, not an error.
         mock_create.return_value = MagicMock(
             returncode=0,
             stdout="Worktree: /unexpected/path\nBranch: feature-x",
         )
         repo_root = str(tmp_path / "repo")
-        with pytest.raises(SetupError, match="Worktree path mismatch"):
-            new_sbx_setup(
-                repo_url="https://github.com/org/repo",
-                repo_root=repo_root,
-                branch="feature-x",
-                from_branch="main",
-                name="test-sandbox",
-                agent="claude",
-                claude_config_path=tmp_path / "config",
-                copies=[],
-                allow_pr=False,
-                pip_requirements="",
-                with_opencode=False,
-                with_zai=False,
-                wd="",
-            )
+        result = new_sbx_setup(
+            repo_url="https://github.com/org/repo",
+            repo_root=repo_root,
+            branch="feature-x",
+            from_branch="main",
+            name="test-sandbox",
+            agent="claude",
+            claude_config_path=tmp_path / "config",
+            copies=[],
+            allow_pr=False,
+            pip_requirements="",
+            with_opencode=False,
+            with_zai=False,
+            wd="",
+        )
+        assert result == "/unexpected/path"
 
     @patch("foundry_sandbox.commands.new_sbx.write_sandbox_metadata")
     @patch("foundry_sandbox.commands.new_sbx.provision_git_safety", return_value=ProvisioningResult(success=True, wrapper_checksum="abc123"))
