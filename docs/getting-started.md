@@ -78,7 +78,7 @@ cast new owner/repo
 ```
 
 This will:
-1. Clone the repository as a bare repo (if not already cloned)
+1. Clone the repository (if not already cloned)
 2. Create a git worktree with a timestamped branch name
 3. Create an sbx microVM sandbox with the worktree synced
 4. Start the git safety server

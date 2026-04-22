@@ -56,6 +56,7 @@ cast new --preset <name>
 | `--with-zai` | Enable ZAI Claude alias (requires `ZHIPU_API_KEY`) |
 | `--skip-key-check` | Skip API key validation |
 | `--wd <path>` | Working directory within repo (relative path) |
+| `--template <tag>` | Template tag for sandbox creation (default: `foundry-git-wrapper:latest`; use `none` to disable) |
 
 ### Examples
 
@@ -112,7 +113,7 @@ API keys are stored on the host via `sbx secret set -g` and injected at the netw
 ### Behavior
 
 1. Validates sbx CLI is available
-2. Clones repository as bare repo (if not already cloned)
+2. Clones repository (if not already cloned)
 3. Creates git worktree with specified branch
 4. Creates sbx microVM sandbox (via `sbx create`)
 5. Starts git safety server (if not already running)
@@ -265,7 +266,7 @@ cast destroy <name> [options]
 3. Unregisters sandbox from git safety server
 4. Removes Claude config directory
 5. Removes git worktree
-6. Cleans up sandbox branch from bare repo (if not used by other worktrees)
+6. Cleans up sandbox branch (if not used by other worktrees)
 
 ### Examples
 

@@ -7,28 +7,28 @@ they land. Run `./scripts/ci-local.sh` before each commit.
 
 ### 1.1 Replace "bare repo" references
 
-- [ ] `docs/usage/commands.md:115` — rewrite "Clones repository as bare repo"
-- [ ] `docs/usage/commands.md:268` — rewrite "Cleans up sandbox branch from bare repo"
-- [ ] `docs/getting-started.md:81` — rewrite "Clone the repository as a bare repo"
-- [ ] `docs/operations.md:65` — update "bare repo branch"
-- [ ] `docs/operations.md:346` — update "stale lock files in the bare repo"
-- [ ] `docs/architecture.md:97,101,109` — fix worktree diagram annotations
-- [ ] `docs/architecture.md:192` — update `repos/ (bare repos)` label
-- [ ] `docs/architecture.md:203,245,343` — update narrative and diagrams
-- [ ] `docs/adr/008-sbx-migration.md:56` — revise "bare repos + worktrees" line
+- [x] `docs/usage/commands.md:115` — rewrite "Clones repository as bare repo"
+- [x] `docs/usage/commands.md:268` — rewrite "Cleans up sandbox branch from bare repo"
+- [x] `docs/getting-started.md:81` — rewrite "Clone the repository as a bare repo"
+- [x] `docs/operations.md:65` — update "bare repo branch"
+- [x] `docs/operations.md:346` — update "stale lock files in the bare repo"
+- [x] `docs/architecture.md:97,101,109` — fix worktree diagram annotations
+- [x] `docs/architecture.md:192` — update `repos/ (bare repos)` label
+- [x] `docs/architecture.md:203,245,343` — update narrative and diagrams
+- [x] `docs/adr/008-sbx-migration.md:56` — revise "bare repos + worktrees" line
 
 ### 1.2 Fix README.md drift
 
-- [ ] `README.md:50` — replace `cast repeat` with `cast new --last`
-- [ ] `README.md:130` — fix or remove `docs/migration/0.20-to-0.21.md` link
+- [x] `README.md:50` — replace `cast repeat` with `cast new --last`
+- [x] `README.md:130` — fix or remove `docs/migration/0.20-to-0.21.md` link
 
 ### 1.3 Sync `cast new` docs with actual flags
 
-- [ ] `docs/usage/commands.md` — add `--template <tag>` row to options table
+- [x] `docs/usage/commands.md` — add `--template <tag>` row to options table
 
 ### 1.4 Orphan doc file
 
-- [ ] `docs/security/audit-5.6.md` — index from `docs/README.md`, or move to `docs/adr/`
+- [x] `docs/security/audit-5.6.md` — already indexed from `docs/README.md` and `docs/operations.md`; no action needed
 
 ## Phase 2 — User-visible consistency
 

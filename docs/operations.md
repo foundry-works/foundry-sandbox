@@ -62,7 +62,7 @@ cast destroy <name> --force   # Skip confirmation
 cast destroy <name> --keep-worktree  # Keep worktree on disk
 ```
 
-Destroy also unregisters the sandbox from the git safety server and cleans up the worktree, bare repo branch, and config directory.
+Destroy also unregisters the sandbox from the git safety server and cleans up the worktree, sandbox branch, and config directory.
 
 ### Removing All Sandboxes
 
@@ -343,7 +343,7 @@ cat /var/lib/foundry-git-safety/sandboxes/<name>.json
 **Git fetch hangs:**
 
 ```bash
-# Check for stale lock files in the bare repo
+# Check for stale lock files in the repo
 ls ~/.sandboxes/repos/*/*/*/repo.git/.fetch-lock 2>/dev/null
 
 # Remove stale locks

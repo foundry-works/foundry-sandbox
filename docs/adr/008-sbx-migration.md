@@ -53,7 +53,7 @@ Migrate the sandbox backend from docker-compose to Docker's `sbx` CLI:
 ### Neutral
 
 - **User-facing CLI unchanged** — `cast new`, `cast attach`, `cast list`, etc. work identically; only the backend changes
-- **Git worktree strategy unchanged** — Still uses bare repos + worktrees on the host
+- **Git worktree strategy unchanged** — Still uses shared repo checkouts + worktrees on the host
 - **Git safety configuration unchanged** — `foundry.yaml` schema is the same
 
 ## Alternatives Considered

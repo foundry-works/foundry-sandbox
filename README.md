@@ -47,7 +47,7 @@ Each sandbox is a git worktree — create one in seconds, destroy it with zero t
 **Developer experience**
 - Claude Code, Gemini CLI, Codex CLI, and OpenCode pre-installed
 - Fast creation: worktrees share git objects, new sandboxes spin up in seconds
-- Presets and history: save configurations, repeat last command with `cast repeat`
+- Presets and history: save configurations, repeat last command with `cast new --last`
 - [claude-foundry](https://github.com/foundry-works/claude-foundry) plugin pre-configured for Claude Code
 
 **Automation**
@@ -127,7 +127,7 @@ Docker sbx, Git 2.x+, Bash 4+, Python 3.10+. Linux and macOS supported natively;
 | [Operations](docs/operations.md) | Operational runbook |
 | [Observability](docs/observability.md) | Metrics and debugging |
 | [sbx Compatibility](docs/sbx-compatibility.md) | Supported versions and drift detection |
-| [Migration Guide](docs/migration/0.20-to-0.21.md) | Upgrading from 0.20.x to 0.21.x |
+| [Migration Guide](https://github.com/foundry-works/foundry-sandbox/tree/0.22.x/docs/migration/0.20-to-0.21.md) | Upgrading from 0.20.x to 0.21.x |
 | [Contributing](docs/development/contributing.md) | For contributors |
 
 ## Support

@@ -49,7 +49,7 @@ This document explains the technical design of Foundry Sandbox: how components f
 │  └──────────────────────────────────────────────────────────┘   │
 │                                                                  │
 │  ~/.sandboxes/                                                   │
-│    ├── repos/       (bare git repositories)                      │
+│    ├── repos/       (git checkouts)                              │
 │    ├── worktrees/   (checked-out code per sandbox)               │
 │    └── claude-config/ (AI tool configs per sandbox)              │
 │                                                                  │
@@ -73,7 +73,7 @@ cast new repo        cast attach       cast stop         cast destroy
 ```
 
 **States:**
-- **Setup** - Bare repo cloned, worktree created, `sbx create` provisions microVM, git wrapper injected
+- **Setup** - Repo cloned, worktree created, `sbx create` provisions microVM, git wrapper injected
 - **Running** - Sandbox active, `sbx exec` available for interactive use
 - **Stopped** - Sandbox stopped via `sbx stop`, worktree preserved on host
 - **Removed** - `sbx rm` removes sandbox, worktree and config cleaned up
@@ -87,18 +87,18 @@ Instead of cloning a full repository for each sandbox, we use git's worktree fea
 ├── repos/
 │   └── github.com/
 │       └── owner/
-│           └── repo.git/          # Bare repository (shared)
-│               ├── HEAD
+│           └── repo/              # Git checkout (shared)
+│               ├── .git
 │               ├── objects/       # All git objects
-│               └── worktrees/     # Worktree metadata
+│               └── (shared repo data)
 │
 └── worktrees/
     ├── repo-sandbox-20240115-1430/   # Sandbox 1
-    │   ├── .git                      # Points to bare repo
+    │   ├── .git                      # Points to shared repo
     │   └── (working files)
     │
     └── repo-feature-branch/          # Sandbox 2
-        ├── .git                      # Points to same bare repo
+        ├── .git                      # Points to same shared repo
         └── (working files)
 ```
 
@@ -106,7 +106,7 @@ Instead of cloning a full repository for each sandbox, we use git's worktree fea
 - **Disk efficiency** - Git objects stored once, shared across sandboxes
 - **Fast creation** - No network clone for subsequent sandboxes
 - **Branch isolation** - Each sandbox has its own branch/working directory
-- **Easy cleanup** - Delete worktree, bare repo stays for other sandboxes
+- **Easy cleanup** - Delete worktree, shared repo stays for other sandboxes
 
 ## sbx Backend
 
@@ -189,7 +189,7 @@ The git safety layer (`foundry-git-safety`) runs as a standalone host-side servi
 │       │                      │     │  └──────────────────────────────┘ │
 │       ▼                      │     │                                    │
 │  Prints output               │     │  ~/.sandboxes/                     │
-│                              │     │    repos/ (bare repos)             │
+│                              │     │    repos/ (git checkouts)          │
 └─────────────────────────────┘     └───────────────────────────────────┘
 ```
 
@@ -200,7 +200,7 @@ The git safety layer (`foundry-git-safety`) runs as a standalone host-side servi
 3. Wrapper serializes arguments as JSON, computes HMAC-SHA256 signature
 4. Wrapper sends request through `gateway.docker.internal:3128` (sbx HTTP proxy) to `host.docker.internal:8083`
 5. Git safety server authenticates HMAC, applies policy checks
-6. If allowed, executes real git binary against the bare repository on the host
+6. If allowed, executes real git binary against the repository on the host
 7. Returns JSON response (exit_code, stdout, stderr) to the wrapper
 8. Wrapper prints output and exits with the correct exit code
 
@@ -233,16 +233,16 @@ The git wrapper is installed into the sandbox during `cast new`:
 
 ```
 ~/.sandboxes/
-├── repos/                              # Bare git clones
+├── repos/                              # Git checkouts (shared)
 │   └── github.com/
 │       └── owner/
-│           └── repo.git/
+│           └── repo/
 │
 ├── worktrees/                          # Git worktrees (one per sandbox)
 │   ├── repo-feature-branch/
 │   │   ├── .foundry/
 │   │   │   └── hmac-secret            # HMAC secret for git safety
-│   │   ├── .git                        # Points to bare repo
+│   │   ├── .git                        # Points to shared repo
 │   │   └── (working files)
 │   └── repo-bugfix-123/
 │       └── ...
@@ -340,7 +340,7 @@ User runs: cast new owner/repo
 ┌─────────────────────────────────┐
 │ commands/new_sbx.py             │
 │  - validate repo URL, API keys  │
-│  - ensure bare repo exists      │
+│  - ensure repo checkout exists  │
 │  - create worktree              │
 │  - sbx create (provisions VM)   │
 │  - start git safety server      │
