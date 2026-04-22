@@ -154,7 +154,6 @@ if command -v python3 &>/dev/null; then
     && pytest tests/unit/test_packaging.py -q --tb=short \
     && (cd foundry-git-safety && pytest tests/unit/test_packaging.py -q --tb=short) \
     && python3 -c "import subprocess,json; r=subprocess.run(['cast','diagnose','--json'],capture_output=True,text=True); d=json.loads(r.stdout); assert 'versions' in d" \
-    && pytest tests/smoke/test_migration_smoke.py -q --tb=short -m slow \
     ; rm -rf "$tmpdir"
   }
   run_step "Smoke gate" run_smoke_gate

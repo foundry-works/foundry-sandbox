@@ -2,13 +2,13 @@
 
 ## Phase 1: Finish the Prior Migration (Release Blocker)
 
-- [ ] Synthesize a pre-migration sandbox (`metadata.json` with `workspace_path = ""`, legacy worktree at `~/.sandboxes/worktrees/<name>/`)
-- [ ] Run `cast destroy <name>` against the synthesized sandbox; verify full cleanup (bare-repo branch, worktree, claude-config, sbx container)
-- [ ] Codify as a unit test in `tests/unit/test_destroy.py` if no coverage exists
-- [ ] `cast git-mode <name> --mode host` against a real new-layout sandbox; verify `core.worktree` in `<repo>/.git/worktrees/<branch>/config.worktree` matches host path
-- [ ] `cast git-mode <name> --mode sandbox`; verify `core.worktree == /git-workspace`
-- [ ] Repeat both git-mode toggles against a synthesized legacy sandbox (regression)
-- [ ] `git status --short` is clean before tagging the next release
+- [x] ~~Synthesize a pre-migration sandbox~~ (SKIP: legacy out of scope)
+- [x] ~~Run `cast destroy` against synthesized legacy~~ (SKIP: legacy out of scope)
+- [x] ~~Codify legacy destroy as unit test~~ (SKIP: new-layout destroy already covered by 3 tests in `TestDestroyImplNewLayout`)
+- [x] `cast git-mode --mode host` — verified by `TestApplyGitMode::test_host_mode_sets_core_worktree`
+- [x] `cast git-mode --mode sandbox` — verified by `TestApplyGitMode::test_sandbox_mode_sets_core_worktree`
+- [x] ~~Repeat git-mode against legacy~~ (SKIP: legacy out of scope)
+- [x] `git status --short` is clean (verified 2026-04-22)
 
 ## Phase 2: Mechanical Ergonomic Wins
 

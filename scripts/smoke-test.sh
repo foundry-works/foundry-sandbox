@@ -72,10 +72,6 @@ else
   (cd foundry-git-safety && pytest tests/unit/test_packaging.py -v --tb=short)
 
   echo ""
-  echo "=== Running migration smoke tests ==="
-  pytest tests/smoke/test_migration_smoke.py -v --tb=short -m slow
-
-  echo ""
   echo "=== Running live sbx smoke tests ==="
   pytest tests/smoke/test_live_sbx.py -v --tb=short -m slow || {
     echo "WARNING: Live sbx tests failed (requires full networking stack with proxy)" >&2

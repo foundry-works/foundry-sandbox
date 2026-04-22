@@ -8,6 +8,7 @@ from unittest.mock import patch
 import pytest
 
 from foundry_sandbox.commands.git_mode import (
+    _apply_git_mode,
     _is_within,
     _resolve_git_paths,
     _validate_git_paths,
@@ -271,4 +272,69 @@ class TestValidateGitPathsDispatch:
         with pytest.raises(RuntimeError, match="Gitdir escapes"):
             _validate_git_paths(
                 "sandbox1", paths["worktree"], rogue, paths["repo_git"]
+            )
+
+
+# ---------------------------------------------------------------------------
+# _apply_git_mode — config write operations
+# ---------------------------------------------------------------------------
+
+
+def _read_git_config(config_file: Path, key: str) -> str | None:
+    """Read a single key from a git config file."""
+    import subprocess
+
+    result = subprocess.run(
+        ["git", "config", "--file", str(config_file), "--get", key],
+        capture_output=True,
+        text=True,
+    )
+    return result.stdout.strip() if result.returncode == 0 else None
+
+
+class TestApplyGitMode:
+    def test_host_mode_sets_core_worktree(self, tmp_path: Path):
+        paths = _setup_new_layout(tmp_path)
+        _apply_git_mode(
+            mode="host",
+            name="sandbox1",
+            worktree_path=paths["worktree"],
+            gitdir=paths["gitdir"],
+            bare_dir=paths["repo_git"],
+        )
+        worktree_config = paths["gitdir"] / "config.worktree"
+        assert _read_git_config(worktree_config, "core.worktree") == str(
+            paths["worktree"]
+        )
+        assert _read_git_config(worktree_config, "core.bare") == "false"
+
+    def test_sandbox_mode_sets_core_worktree(self, tmp_path: Path):
+        paths = _setup_new_layout(tmp_path)
+        _apply_git_mode(
+            mode="sandbox",
+            name="sandbox1",
+            worktree_path=paths["worktree"],
+            gitdir=paths["gitdir"],
+            bare_dir=paths["repo_git"],
+        )
+        worktree_config = paths["gitdir"] / "config.worktree"
+        assert _read_git_config(worktree_config, "core.worktree") == "/git-workspace"
+        assert _read_git_config(worktree_config, "core.bare") == "false"
+
+        bare_config = paths["repo_git"] / "config"
+        assert _read_git_config(bare_config, "extensions.worktreeConfig") == "true"
+        assert (
+            _read_git_config(bare_config, "core.repositoryformatversion") == "1"
+        )
+
+    def test_sandbox_mode_raises_on_missing_bare_config(self, tmp_path: Path):
+        paths = _setup_new_layout(tmp_path)
+        (paths["repo_git"] / "config").unlink()
+        with pytest.raises(RuntimeError, match="Bare config file not found"):
+            _apply_git_mode(
+                mode="sandbox",
+                name="sandbox1",
+                worktree_path=paths["worktree"],
+                gitdir=paths["gitdir"],
+                bare_dir=paths["repo_git"],
             )
