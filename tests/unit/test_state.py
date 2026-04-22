@@ -78,7 +78,6 @@ class TestMetadataWriteRead:
                 repo_url="https://github.com/user/repo.git",
                 branch="main",
                 from_branch="dev",
-                network_profile="balanced",
                 git_safety_enabled=True,
                 working_dir="src",
                 pip_requirements="requirements.txt",
@@ -98,7 +97,6 @@ class TestMetadataWriteRead:
         assert metadata["repo_url"] == "https://github.com/user/repo.git"
         assert metadata["branch"] == "main"
         assert metadata["from_branch"] == "dev"
-        assert metadata["network_profile"] == "balanced"
         assert metadata["git_safety_enabled"] is True
         assert metadata["working_dir"] == "src"
         assert metadata["pip_requirements"] == "requirements.txt"
@@ -126,7 +124,6 @@ class TestMetadataWriteRead:
         assert metadata["repo_url"] == "https://github.com/test/repo.git"
         assert metadata["branch"] == "main"
         assert metadata["from_branch"] == ""
-        assert metadata["network_profile"] == "balanced"
         assert metadata["git_safety_enabled"] is True
         assert metadata["working_dir"] == ""
         assert metadata["pip_requirements"] == ""
@@ -215,13 +212,11 @@ class TestPatchMetadata:
         patch_sandbox_metadata(
             "patch-multi",
             branch="feature-x",
-            network_profile="deny-all",
             allow_pr=True,
         )
 
         metadata = load_sandbox_metadata("patch-multi")
         assert metadata["branch"] == "feature-x"
-        assert metadata["network_profile"] == "deny-all"
         assert metadata["allow_pr"] is True
 
     def test_patch_unknown_field_raises(self, sandbox_home):
@@ -319,7 +314,6 @@ class TestCastNewHistory:
             repo="https://github.com/org/repo",
             agent="claude",
             branch="main",
-            network_profile="balanced",
         )
 
         result = load_last_cast_new()

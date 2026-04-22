@@ -28,9 +28,6 @@ class SbxSandboxMetadata(BaseModel):
     from_branch: str = ""
     """Source branch for PR creation."""
 
-    network_profile: str = "balanced"
-    """Network policy profile: balanced, allow-all, deny-all."""
-
     git_safety_enabled: bool = True
     """Whether git safety server is active for this sandbox."""
 
@@ -97,9 +94,6 @@ class CastNewPreset(BaseModel):
 
     allow_pr: bool = False
     """Whether to allow PR creation."""
-
-    network_profile: str = "balanced"
-    """Network policy profile."""
 
     enable_opencode: bool = False
     """Whether to enable OpenCode."""

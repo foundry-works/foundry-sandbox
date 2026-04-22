@@ -63,7 +63,6 @@ class TestPresetSave:
             "working_dir": "",
             "pip_requirements": "",
             "allow_pr": False,
-            "network_profile": "balanced",
             "enable_opencode": False,
             "enable_zai": False,
             "copies": [],

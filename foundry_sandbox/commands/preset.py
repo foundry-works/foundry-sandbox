@@ -140,7 +140,6 @@ def save(name: str, sandbox_name: str | None) -> None:
         working_dir=metadata.get("working_dir", ""),
         pip_requirements=metadata.get("pip_requirements", ""),
         allow_pr=metadata.get("allow_pr", False),
-        network_profile=metadata.get("network_profile", "balanced"),
         enable_opencode=metadata.get("enable_opencode", False),
         enable_zai=metadata.get("enable_zai", False),
         copies=metadata.get("copies", []),

@@ -34,7 +34,6 @@ class TestSbxSandboxMetadata:
         assert meta.backend == "sbx"
         assert meta.sbx_name == "test-sandbox"
         assert meta.agent == "claude"
-        assert meta.network_profile == "balanced"
         assert meta.git_safety_enabled is True
         assert meta.copies == []
 
@@ -57,7 +56,6 @@ class TestSbxSandboxMetadata:
             repo_url="https://github.com/org/repo",
             branch="feature-x",
             from_branch="main",
-            network_profile="deny-all",
             git_safety_enabled=False,
             working_dir="src",
             pip_requirements="requirements.txt",
@@ -67,7 +65,6 @@ class TestSbxSandboxMetadata:
             copies=["/host/path:/container/path"],
         )
         assert meta.agent == "codex"
-        assert meta.network_profile == "deny-all"
         assert meta.git_safety_enabled is False
         assert meta.copies == ["/host/path:/container/path"]
 
@@ -117,7 +114,6 @@ class TestSbxSandboxMetadata:
             branch="b",
         )
         assert meta.from_branch == ""
-        assert meta.network_profile == "balanced"
         assert meta.git_safety_enabled is True
         assert meta.workspace_dir == "/workspace"
         assert meta.working_dir == ""
@@ -158,7 +154,6 @@ class TestCastNewPreset:
         preset = CastNewPreset(repo="org/repo")
         assert preset.repo == "org/repo"
         assert preset.agent == "claude"
-        assert preset.network_profile == "balanced"
         assert preset.copies == []
 
     def test_full_construction(self):
@@ -170,7 +165,6 @@ class TestCastNewPreset:
             working_dir="src",
             pip_requirements="requirements.txt",
             allow_pr=True,
-            network_profile="deny-all",
             enable_opencode=True,
             enable_zai=True,
             copies=["/src:/dst"],
@@ -197,7 +191,6 @@ class TestCastNewPreset:
         assert dump["allow_pr"] is False
         assert dump["enable_opencode"] is False
         assert dump["enable_zai"] is False
-        assert dump["network_profile"] == "balanced"
         assert dump["agent"] == "claude"
         assert dump["template"] == ""
         assert dump["template_managed"] is False

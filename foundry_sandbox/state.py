@@ -236,7 +236,6 @@ def _build_command_line(
     working_dir: str = "",
     pip_requirements: str = "",
     allow_pr: bool = False,
-    network_profile: str = "balanced",
     enable_opencode: bool = False,
     enable_zai: bool = False,
     copies: list[str] | None = None,
@@ -255,8 +254,6 @@ def _build_command_line(
         parts.extend(["--pip-requirements", pip_requirements])
     if allow_pr:
         parts.append("--allow-pr")
-    if network_profile and network_profile != "balanced":
-        parts.extend(["--network", network_profile])
     if enable_opencode:
         parts.append("--with-opencode")
     if enable_zai:
@@ -276,7 +273,6 @@ def _write_cast_new_json(
     working_dir: str = "",
     pip_requirements: str = "",
     allow_pr: bool = False,
-    network_profile: str = "balanced",
     enable_opencode: bool = False,
     enable_zai: bool = False,
     copies: list[str] | None = None,
@@ -296,7 +292,6 @@ def _write_cast_new_json(
         working_dir=working_dir,
         pip_requirements=pip_requirements,
         allow_pr=allow_pr,
-        network_profile=network_profile,
         enable_opencode=enable_opencode,
         enable_zai=enable_zai,
         copies=copies or [],
@@ -307,7 +302,7 @@ def _write_cast_new_json(
     timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
     command_line = _build_command_line(
         repo, agent, branch, from_branch, working_dir,
-        pip_requirements, allow_pr, network_profile,
+        pip_requirements, allow_pr,
         enable_opencode, enable_zai, copies,
     )
 
@@ -331,7 +326,6 @@ def save_last_cast_new(
     working_dir: str = "",
     pip_requirements: str = "",
     allow_pr: bool = False,
-    network_profile: str = "balanced",
     enable_opencode: bool = False,
     enable_zai: bool = False,
     copies: list[str] | None = None,
@@ -347,7 +341,7 @@ def save_last_cast_new(
     return _write_cast_new_json(
         path, repo=repo, agent=agent, branch=branch, from_branch=from_branch,
         working_dir=working_dir, pip_requirements=pip_requirements,
-        allow_pr=allow_pr, network_profile=network_profile,
+        allow_pr=allow_pr,
         enable_opencode=enable_opencode, enable_zai=enable_zai,
         copies=copies, template=template, template_managed=template_managed,
     )
@@ -363,7 +357,6 @@ def save_cast_preset(
     working_dir: str = "",
     pip_requirements: str = "",
     allow_pr: bool = False,
-    network_profile: str = "balanced",
     enable_opencode: bool = False,
     enable_zai: bool = False,
     copies: list[str] | None = None,
@@ -376,7 +369,7 @@ def save_cast_preset(
     _write_cast_new_json(
         path, repo=repo, agent=agent, branch=branch, from_branch=from_branch,
         working_dir=working_dir, pip_requirements=pip_requirements,
-        allow_pr=allow_pr, network_profile=network_profile,
+        allow_pr=allow_pr,
         enable_opencode=enable_opencode, enable_zai=enable_zai,
         copies=copies, template=template, template_managed=template_managed,
     )
@@ -405,7 +398,6 @@ def _load_cast_new_json(path: str | Path) -> dict[str, Any] | None:
             "working_dir": args.get("working_dir", ""),
             "pip_requirements": args.get("pip_requirements", ""),
             "allow_pr": args.get("allow_pr", False),
-            "network_profile": args.get("network_profile", "balanced"),
             "enable_opencode": args.get("enable_opencode", False),
             "enable_zai": args.get("enable_zai", False),
             "copies": args.get("copies", []),

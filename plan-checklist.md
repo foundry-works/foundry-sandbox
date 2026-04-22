@@ -103,27 +103,27 @@ See `plan.md` for rationale and detail. Check items off as they land. Commit aft
 ## Phase 3 — Drop `network_profile` field
 
 ### `foundry_sandbox/models.py`
-- [ ] Remove `network_profile` from `SbxSandboxMetadata`
-- [ ] Remove `network_profile` from `CastNewPreset`
+- [x] Remove `network_profile` from `SbxSandboxMetadata`
+- [x] Remove `network_profile` from `CastNewPreset`
 
 ### `foundry_sandbox/state.py`
-- [ ] Remove `network_profile` param from `_build_command_line`
-- [ ] Remove `network_profile` param from `_write_cast_new_json`
-- [ ] Remove `network_profile` param from `save_last_cast_new`
-- [ ] Remove `network_profile` param from `save_cast_preset`
-- [ ] Remove `network_profile` from `_load_cast_new_json` fallback dict
+- [x] Remove `network_profile` param from `_build_command_line`
+- [x] Remove `network_profile` param from `_write_cast_new_json`
+- [x] Remove `network_profile` param from `save_last_cast_new`
+- [x] Remove `network_profile` param from `save_cast_preset`
+- [x] Remove `network_profile` from `_load_cast_new_json` fallback dict
 
 ### `foundry_sandbox/commands/preset.py`
-- [ ] Remove `network_profile=metadata.get(...)` from `save` at line 143
+- [x] Remove `network_profile=metadata.get(...)` from `save` at line 143
 
 ### Tests
-- [ ] Update `tests/unit/test_models.py` — drop `network_profile` assertions (lines ~37, 60, 70, 120, 161, 173, 200, etc.)
-- [ ] Update `tests/unit/test_state.py` — drop `network_profile` from test metadata
-- [ ] Update `tests/unit/test_preset_command.py:66` — drop `network_profile` from fixture
+- [x] Update `tests/unit/test_models.py` — drop `network_profile` assertions (lines ~37, 60, 70, 120, 161, 173, 200, etc.)
+- [x] Update `tests/unit/test_state.py` — drop `network_profile` from test metadata
+- [x] Update `tests/unit/test_preset_command.py:66` — drop `network_profile` from fixture
 
 ### Verify
-- [ ] Existing metadata files with `network_profile` still load (forward-compat via Pydantic `extra` handling)
-- [ ] `./scripts/ci-local.sh` passes
+- [x] Existing metadata files with `network_profile` still load (forward-compat via Pydantic `extra` handling)
+- [x] `./scripts/ci-local.sh` passes
 - [ ] `git commit -m "refactor: Phase 3 drop vestigial network_profile field"`
 
 ---
