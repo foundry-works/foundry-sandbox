@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Deep-policy live smoke test** — `test_deep_policy_blocks_github_merge` exercises the deep-policy sidecar end-to-end in a live sbx sandbox: asserts PR merge is blocked (403) and read-only commits path passes policy eval
+- **`deep_policy` parameter** on `git_safety_server_start()` — enables the deep-policy sidecar blueprint when starting the git-safety server from the Python bridge
 - **HMAC secret relocated outside VCS tree** — `write_hmac_secret_to_sandbox()` now writes to `/run/foundry/hmac-secret` (tmpfs) instead of `{worktree}/.foundry/hmac-secret`, preventing accidental VCS exposure
 - **Config-driven decision log path** — `decision_log_dir` field in `GitSafetyServerConfig` threads through `create_git_api()` to `DecisionLogWriter` with singleton reset on path change
 - **Decision-log health checks** — `/ready` reports `decision_log: {ok: true/false}` without triggering 503; `/health` includes a `logging` section with path and writability

@@ -7,6 +7,7 @@ run git commands through the wrapper, verify push blocking, and destroy.
 
 import json
 import subprocess
+import time
 
 import pytest
 
@@ -14,6 +15,7 @@ from foundry_sandbox.git_safety import (
     compute_wrapper_checksum,
     git_safety_server_is_running,
     git_safety_server_start,
+    git_safety_server_stop,
     provision_git_safety,
 )
 from foundry_sandbox.sbx import (
@@ -155,3 +157,66 @@ class TestLiveSbxSmoke:
             sandboxes = data.get("sandboxes", [])
             names = [s.get("name", "") for s in sandboxes]
             assert sandbox not in names, f"Sandbox {sandbox} still in sbx ls"
+
+    def test_deep_policy_blocks_github_merge(self, sandbox, tmp_path):
+        """Deep-policy sidecar blocks PR merge and allows read-only GitHub API paths.
+
+        Restarts the git-safety server with --deep-policy to ensure the blueprint
+        is registered, then exercises both deny and allow policy paths from inside
+        the sandbox using proxy-sign.sh for HMAC authentication.
+        """
+        # Restart server with deep-policy enabled
+        git_safety_server_stop()
+        start_result = git_safety_server_start(deep_policy=True)
+        assert start_result.returncode == 0, (
+            f"Server start with --deep-policy failed: {start_result.stderr}"
+        )
+        time.sleep(1)
+        assert git_safety_server_is_running(), "Server not running after start"
+
+        # Create and provision sandbox
+        _setup_and_provision(sandbox, tmp_path, branch="main")
+
+        # --- Deny path: PR merge should be blocked by policy ---
+        deny_cmd = (
+            'source /var/lib/foundry/git-safety.env && '
+            'eval "$(proxy-sign PUT /deep-policy/github/repos/owner/repo/pulls/1/merge)" && '
+            'curl -s -w \'\\nHTTP_CODE:%{http_code}\\n\' '
+            '-X PUT '
+            '-H "Content-Type: application/json" '
+            '-H "$X_SANDBOX_ID" -H "$X_REQUEST_SIGNATURE" '
+            '-H "$X_REQUEST_TIMESTAMP" -H "$X_REQUEST_NONCE" '
+            '-x http://gateway.docker.internal:3128 '
+            '"http://${GIT_API_HOST}:${GIT_API_PORT}/deep-policy/github/repos/owner/repo/pulls/1/merge"'
+        )
+        deny_result = sbx_exec(sandbox, ["sh", "-c", deny_cmd])
+        deny_output = deny_result.stdout + deny_result.stderr
+
+        assert "HTTP_CODE:403" in deny_output, (
+            f"PR merge should be blocked (403), got: {deny_output}"
+        )
+        assert "BLOCKED" in deny_output, (
+            f"Response should contain BLOCKED, got: {deny_output}"
+        )
+
+        # --- Allow path: GET commits should pass policy eval ---
+        # Will fail at upstream (no real GitHub), but should NOT be a 403 block.
+        allow_cmd = (
+            'source /var/lib/foundry/git-safety.env && '
+            'eval "$(proxy-sign GET /deep-policy/github/repos/owner/repo/commits)" && '
+            'curl -s -w \'\\nHTTP_CODE:%{http_code}\\n\' '
+            '-H "$X_SANDBOX_ID" -H "$X_REQUEST_SIGNATURE" '
+            '-H "$X_REQUEST_TIMESTAMP" -H "$X_REQUEST_NONCE" '
+            '-x http://gateway.docker.internal:3128 '
+            '"http://${GIT_API_HOST}:${GIT_API_PORT}/deep-policy/github/repos/owner/repo/commits"'
+        )
+        allow_result = sbx_exec(sandbox, ["sh", "-c", allow_cmd])
+        allow_output = allow_result.stdout + allow_result.stderr
+
+        assert "HTTP_CODE:403" not in allow_output, (
+            f"GET commits should pass policy eval, got: {allow_output}"
+        )
+
+        # Cleanup
+        sbx_stop(sandbox)
+        sbx_rm(sandbox)

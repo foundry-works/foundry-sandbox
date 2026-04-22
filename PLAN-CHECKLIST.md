@@ -86,12 +86,12 @@ Legend: `[ ]` todo, `[x]` done, `[~]` partial / accepted risk
 
 ## 3.6 Close the Deferred Deep-Policy Live Gate
 
-- [ ] Decide how to stand up the deep-policy sidecar inside the smoke sandbox
-- [ ] Add a live smoke test exercising a blocked GitHub API call (e.g. `PUT /repos/:o/:r/pulls/:n/merge`)
-- [ ] Mark the test with `requires_sbx`
-- [ ] Assert the deep-policy sidecar returns a block response (not a git-safety block)
-- [ ] Flip prior `PLAN-CHECKLIST.md §3.8` item "Prove GitHub API merge/update path is blocked" from `[~]` to `[x]`
-- [ ] Remove the accepted-risk note for GitHub API merge/update blocking from prior checklist / CHANGELOG if stale
+- [x] Decide how to stand up the deep-policy sidecar inside the smoke sandbox
+- [x] Add a live smoke test exercising a blocked GitHub API call (e.g. `PUT /repos/:o/:r/pulls/:n/merge`)
+- [x] Mark the test with `requires_sbx`
+- [x] Assert the deep-policy sidecar returns a block response (not a git-safety block)
+- [x] Flip prior `PLAN-CHECKLIST.md §3.8` item "Prove GitHub API merge/update path is blocked" from `[~]` to `[x]`
+- [x] Remove the accepted-risk note for GitHub API merge/update blocking from prior checklist / CHANGELOG if stale
 
 ## 3.7 Plan the Post-0.20.x Migration Sunset
 

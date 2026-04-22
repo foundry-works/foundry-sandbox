@@ -41,12 +41,14 @@ def git_safety_server_start(
     *,
     port: int | None = None,
     foreground: bool = False,
+    deep_policy: bool = False,
 ) -> subprocess.CompletedProcess[str]:
     """Start the git safety server via its CLI.
 
     Args:
         port: Override server port.
         foreground: Run in foreground instead of daemon mode.
+        deep_policy: Enable the deep-policy sidecar blueprint.
 
     Returns:
         CompletedProcess result.
@@ -56,6 +58,8 @@ def git_safety_server_start(
         cmd.append("--foreground")
     if port is not None:
         cmd.extend(["--port", str(port)])
+    if deep_policy:
+        cmd.append("--deep-policy")
     return subprocess.run(
         cmd,
         capture_output=True,
