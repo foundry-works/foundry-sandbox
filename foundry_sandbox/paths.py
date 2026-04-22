@@ -206,6 +206,28 @@ def derive_sandbox_paths(name: str) -> SandboxPaths:
     )
 
 
+def resolve_workspace_path(name: str) -> Path:
+    """Resolve the host-side workspace path for a sandbox.
+
+    For new-layout sandboxes (sbx-managed worktrees), reads ``workspace_path``
+    from metadata. Falls back to the legacy ``path_worktree(name)`` formula
+    for pre-migration sandboxes.
+
+    Args:
+        name: Sandbox name.
+
+    Returns:
+        Resolved workspace path (may not exist on disk).
+    """
+    from foundry_sandbox.state import load_sandbox_metadata
+
+    _assert_safe_path_component(name)
+    metadata = load_sandbox_metadata(name)
+    if metadata and metadata.get("workspace_path"):
+        return Path(metadata["workspace_path"])
+    return path_worktree(name)
+
+
 # ============================================================================
 # File System Helpers (from lib/fs.sh)
 # ============================================================================
@@ -393,17 +415,19 @@ def sandbox_name(repo_name: str, branch: str) -> str:
 def find_next_sandbox_name(base_name: str) -> str:
     """Find next available sandbox name by appending a numeric suffix.
 
+    Only checks the claude-config directory — it is the authoritative registry
+    covering both old-layout (worktrees/) and new-layout (sbx-managed) sandboxes.
+
     Args:
         base_name: Desired sandbox name.
 
     Returns:
         *base_name* if available, otherwise *base_name*-N.
     """
-    worktrees = get_worktrees_dir()
     configs = get_claude_configs_dir()
 
     def _taken(candidate: str) -> bool:
-        return (worktrees / candidate).exists() or (configs / candidate).exists()
+        return (configs / candidate).exists()
 
     if not _taken(base_name):
         return base_name

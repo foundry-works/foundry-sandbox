@@ -15,17 +15,16 @@ class TestAttachCommand:
     @patch("foundry_sandbox.commands.attach.sbx_exec_streaming")
     @patch("foundry_sandbox.commands.attach.load_sandbox_metadata")
     @patch("foundry_sandbox.commands.attach.save_last_attach")
-    @patch("foundry_sandbox.commands.attach.derive_sandbox_paths")
+    @patch("foundry_sandbox.commands.attach.resolve_workspace_path")
     @patch("foundry_sandbox.commands.attach.validate_existing_sandbox_name")
     def test_attach_running(
-        self, mock_validate, mock_paths, mock_save, mock_meta,
+        self, mock_validate, mock_resolve, mock_save, mock_meta,
         mock_streaming, mock_running, mock_check,
     ):
         mock_validate.return_value = (True, "")
-        mock_path = MagicMock()
-        mock_path.worktree_path = MagicMock()
-        mock_path.worktree_path.is_dir.return_value = True
-        mock_paths.return_value = mock_path
+        mock_workspace = MagicMock()
+        mock_workspace.is_dir.return_value = True
+        mock_resolve.return_value = mock_workspace
         mock_meta.return_value = {"working_dir": ""}
         mock_proc = MagicMock()
         mock_proc.wait.return_value = None
@@ -44,17 +43,16 @@ class TestAttachCommand:
     @patch("foundry_sandbox.commands.attach.sbx_exec_streaming")
     @patch("foundry_sandbox.commands.attach.load_sandbox_metadata")
     @patch("foundry_sandbox.commands.attach.save_last_attach")
-    @patch("foundry_sandbox.commands.attach.derive_sandbox_paths")
+    @patch("foundry_sandbox.commands.attach.resolve_workspace_path")
     @patch("foundry_sandbox.commands.attach.validate_existing_sandbox_name")
     def test_attach_with_working_dir(
-        self, mock_validate, mock_paths, mock_save, mock_meta,
+        self, mock_validate, mock_resolve, mock_save, mock_meta,
         mock_streaming, mock_running, mock_check,
     ):
         mock_validate.return_value = (True, "")
-        mock_path = MagicMock()
-        mock_path.worktree_path = MagicMock()
-        mock_path.worktree_path.is_dir.return_value = True
-        mock_paths.return_value = mock_path
+        mock_workspace = MagicMock()
+        mock_workspace.is_dir.return_value = True
+        mock_resolve.return_value = mock_workspace
         mock_meta.return_value = {"working_dir": "src/subdir"}
         mock_proc = MagicMock()
         mock_proc.wait.return_value = None
@@ -77,17 +75,16 @@ class TestAttachCommand:
     @patch("foundry_sandbox.commands.attach.sbx_exec_streaming")
     @patch("foundry_sandbox.commands.attach.load_sandbox_metadata")
     @patch("foundry_sandbox.commands.attach.save_last_attach")
-    @patch("foundry_sandbox.commands.attach.derive_sandbox_paths")
+    @patch("foundry_sandbox.commands.attach.resolve_workspace_path")
     @patch("foundry_sandbox.commands.attach.validate_existing_sandbox_name")
     def test_attach_auto_starts(
-        self, mock_validate, mock_paths, mock_save, mock_meta,
+        self, mock_validate, mock_resolve, mock_save, mock_meta,
         mock_streaming, mock_running, mock_check, mock_start,
     ):
         mock_validate.return_value = (True, "")
-        mock_path = MagicMock()
-        mock_path.worktree_path = MagicMock()
-        mock_path.worktree_path.is_dir.return_value = True
-        mock_paths.return_value = mock_path
+        mock_workspace = MagicMock()
+        mock_workspace.is_dir.return_value = True
+        mock_resolve.return_value = mock_workspace
         mock_meta.return_value = {"working_dir": ""}
         mock_proc = MagicMock()
         mock_proc.wait.return_value = None
@@ -97,6 +94,22 @@ class TestAttachCommand:
         result = runner.invoke(attach, ["my-sandbox"])
         assert result.exit_code == 0
         mock_start.assert_called_once_with("my-sandbox")
+
+    @patch("foundry_sandbox.commands.attach.sbx_check_available")
+    @patch("foundry_sandbox.commands.attach.resolve_workspace_path")
+    @patch("foundry_sandbox.commands.attach.validate_existing_sandbox_name")
+    def test_attach_not_found(
+        self, mock_validate, mock_resolve, mock_check,
+    ):
+        mock_validate.return_value = (True, "")
+        mock_workspace = MagicMock()
+        mock_workspace.is_dir.return_value = False
+        mock_resolve.return_value = mock_workspace
+
+        runner = CliRunner()
+        result = runner.invoke(attach, ["missing-sandbox"])
+        assert result.exit_code == 1
+        assert "not found" in result.output
 
 
 class TestResolveSandboxName:

@@ -13,8 +13,12 @@ import sys
 import click
 
 from foundry_sandbox.git_safety import unregister_sandbox_from_git_safety
-from foundry_sandbox.git_worktree import cleanup_sandbox_branch, remove_worktree
-from foundry_sandbox.paths import derive_sandbox_paths, repo_url_to_bare_path as _repo_url_to_bare_path
+from foundry_sandbox.git_worktree import cleanup_sandbox_branch, cleanup_sandbox_branch_repo, remove_worktree
+from foundry_sandbox.paths import (
+    derive_sandbox_paths,
+    repo_url_to_bare_path as _repo_url_to_bare_path,
+    resolve_workspace_path,
+)
 from foundry_sandbox.sbx import sbx_check_available, sbx_rm
 from foundry_sandbox.state import load_sandbox_metadata
 from foundry_sandbox.utils import log_info, log_warn
@@ -35,6 +39,13 @@ def destroy_impl(
 
     This is the non-interactive implementation. It never prompts the user.
 
+    For new-layout sandboxes (sbx-managed worktrees, ``workspace_path`` set
+    in metadata), sbx owns worktree cleanup — this function handles branch
+    deletion against the shared repo.
+
+    For legacy sandboxes (``workspace_path`` empty), the old worktree and
+    bare-repo branch cleanup paths are preserved.
+
     Args:
         name: Sandbox name.
         keep_worktree: If True, keep the git worktree and config directory.
@@ -49,7 +60,6 @@ def destroy_impl(
         raise ValueError(f"Invalid sandbox name: {name_error}")
 
     paths = derive_sandbox_paths(name)
-    worktree_path = paths.worktree_path
     claude_config_path = paths.claude_config_path
 
     # ------------------------------------------------------------------
@@ -57,14 +67,18 @@ def destroy_impl(
     # ------------------------------------------------------------------
     destroy_branch = ""
     destroy_repo_url = ""
+    workspace_path = ""
     try:
         metadata = load_sandbox_metadata(name)
         if metadata:
             destroy_branch = metadata.get("branch", "")
             destroy_repo_url = metadata.get("repo_url", "")
+            workspace_path = metadata.get("workspace_path", "")
     except (OSError, ValueError):
         if not best_effort:
             raise
+
+    is_new_layout = bool(workspace_path)
 
     # ------------------------------------------------------------------
     # 2. Remove sandbox via sbx (best effort)
@@ -103,28 +117,45 @@ def destroy_impl(
                 log_warn(f"Could not remove config directory: {exc}")
 
     # ------------------------------------------------------------------
-    # 5. Remove worktree (unless --keep-worktree)
+    # 5. Remove worktree (legacy only) / cleanup branch
     # ------------------------------------------------------------------
-    if not keep_worktree and worktree_path.is_dir():
-        try:
-            log_info("Removing worktree...")
-            remove_worktree(str(worktree_path))
-        except Exception as exc:
-            if not best_effort:
-                raise
-            log_warn(f"Could not remove worktree: {exc}")
+    if not keep_worktree:
+        if is_new_layout:
+            # New layout: sbx owns worktree cleanup.
+            # Branch deletion: sbx rm does NOT delete the branch.
+            # Derive repo_root from workspace_path.
+            if destroy_branch and workspace_path:
+                try:
+                    # workspace_path = <repo_root>/.sbx/<name>-worktrees/<branch>
+                    # repo_root is the first 4 components stripped from the tail
+                    parts = workspace_path.split("/.sbx/")
+                    repo_root = parts[0] if parts else ""
+                    if repo_root:
+                        cleanup_sandbox_branch_repo(destroy_branch, repo_root)
+                except Exception as exc:
+                    if not best_effort:
+                        raise
+                    log_warn(f"Could not cleanup branch: {exc}")
+        else:
+            # Legacy layout: cast owns worktree and bare-repo branch cleanup.
+            worktree_path = paths.worktree_path
+            if worktree_path.is_dir():
+                try:
+                    log_info("Removing worktree...")
+                    remove_worktree(str(worktree_path))
+                except Exception as exc:
+                    if not best_effort:
+                        raise
+                    log_warn(f"Could not remove worktree: {exc}")
 
-    # ------------------------------------------------------------------
-    # 6. Cleanup sandbox branch from bare repo
-    # ------------------------------------------------------------------
-    if destroy_branch and destroy_repo_url:
-        try:
-            bare_path = _repo_url_to_bare_path(destroy_repo_url)
-            cleanup_sandbox_branch(destroy_branch, bare_path)
-        except Exception as exc:
-            if not best_effort:
-                raise
-            log_warn(f"Could not cleanup branch: {exc}")
+            if destroy_branch and destroy_repo_url:
+                try:
+                    bare_path = _repo_url_to_bare_path(destroy_repo_url)
+                    cleanup_sandbox_branch(destroy_branch, bare_path)
+                except Exception as exc:
+                    if not best_effort:
+                        raise
+                    log_warn(f"Could not cleanup branch: {exc}")
 
 
 # ---------------------------------------------------------------------------
@@ -154,10 +185,11 @@ def destroy(name: str, keep_worktree: bool, force: bool, yes: bool) -> None:
 
     if not skip_confirm:
         paths = derive_sandbox_paths(name)
+        workspace = resolve_workspace_path(name)
         click.echo(f"This will destroy sandbox '{name}' including:")
         click.echo("  - Sandbox container (sbx rm)")
         if not keep_worktree:
-            click.echo(f"  - Worktree at {paths.worktree_path}")
+            click.echo(f"  - Worktree at {workspace}")
             click.echo(f"  - Claude config at {paths.claude_config_path}")
         click.echo("")
         try:

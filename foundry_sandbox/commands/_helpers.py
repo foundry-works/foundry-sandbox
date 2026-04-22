@@ -8,7 +8,7 @@ import shutil
 import subprocess
 from pathlib import Path
 
-from foundry_sandbox.constants import get_worktrees_dir
+from foundry_sandbox.constants import get_claude_configs_dir, get_worktrees_dir
 from foundry_sandbox.utils import log_debug
 from foundry_sandbox.validate import validate_existing_sandbox_name
 
@@ -21,8 +21,9 @@ from foundry_sandbox.validate import validate_existing_sandbox_name
 def auto_detect_sandbox() -> str | None:
     """Auto-detect sandbox name from current working directory.
 
-    If the cwd is under the worktrees directory, extracts the first path
-    component as the sandbox name.
+    For new-layout sandboxes, matches cwd against the ``workspace_path``
+    stored in each sandbox's metadata. For legacy sandboxes, matches
+    against the old ``~/.sandboxes/worktrees/<name>/`` directory.
 
     Returns:
         Sandbox name if detected, None otherwise.
@@ -32,8 +33,26 @@ def auto_detect_sandbox() -> str | None:
     except OSError:
         return None
 
-    worktrees_dir = get_worktrees_dir()
+    # Check new-layout sandboxes via metadata workspace_path
+    from foundry_sandbox.state import list_sandboxes
 
+    try:
+        for sb in list_sandboxes():
+            wp = sb.get("workspace_path", "")
+            if wp:
+                try:
+                    cwd.relative_to(Path(wp).resolve())
+                    name = sb.get("name", "")
+                    valid, _ = validate_existing_sandbox_name(name)
+                    if valid:
+                        return name
+                except ValueError:
+                    continue
+    except OSError:
+        pass
+
+    # Fallback: legacy worktrees/ directory
+    worktrees_dir = get_worktrees_dir()
     try:
         relative = cwd.relative_to(worktrees_dir)
         parts = relative.parts
@@ -54,24 +73,14 @@ def fzf_select_sandbox() -> str | None:
     Returns:
         Selected sandbox name, or None if canceled/unavailable.
     """
-    worktrees_dir = get_worktrees_dir()
-
-    if not worktrees_dir.is_dir():
-        return None
-
     if shutil.which("fzf") is None:
         return None
 
+    sandboxes = list_sandbox_names()
+    if not sandboxes:
+        return None
+
     try:
-        sandboxes = sorted(
-            entry.name for entry in worktrees_dir.iterdir()
-            if entry.is_dir()
-        )
-
-        if not sandboxes:
-            return None
-
-        # no timeout: fzf is interactive and waits for user input
         result = subprocess.run(
             ["fzf", "--prompt=Select sandbox: ", "--height=10", "--reverse"],
             input="\n".join(sandboxes),
@@ -89,16 +98,23 @@ def fzf_select_sandbox() -> str | None:
 
 
 def list_sandbox_names() -> list[str]:
-    """List all sandbox names by scanning WORKTREES_DIR.
+    """List all sandbox names by scanning claude-config directories.
+
+    The claude-config directory is the authoritative registry — it covers
+    both old-layout and new-layout sandboxes.
 
     Returns:
         Sorted list of sandbox directory names.
     """
-    worktrees_dir = get_worktrees_dir()
-    if not worktrees_dir.is_dir():
+    configs_dir = get_claude_configs_dir()
+    if not configs_dir.is_dir():
         return []
 
     try:
-        return sorted(entry.name for entry in worktrees_dir.iterdir() if entry.is_dir())
+        return sorted(
+            entry.name
+            for entry in configs_dir.iterdir()
+            if entry.is_dir() and (entry / "metadata.json").exists()
+        )
     except OSError:
         return []

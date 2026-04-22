@@ -35,23 +35,23 @@
 
 ## Phase 2: Update destroy, attach, helpers, paths
 
-- [ ] `destroy.py` — gate cleanup on `metadata.workspace_path`: new layout skips `remove_worktree` + `cleanup_sandbox_branch`; legacy layout keeps both
-- [ ] `destroy.py` — retain `repo_url_to_bare_path` import for the legacy branch
-- [ ] `destroy.py` — if Phase 0 Q1 determines sbx does not delete the branch, add a new-layout branch-delete helper that honors protected-branch patterns
-- [ ] `attach.py` — use `resolve_workspace_path()` for existence check and IDE launch
-- [ ] `_helpers.py` — rewrite `auto_detect_sandbox()` to match cwd against metadata workspace_path (plus legacy `worktrees/` fallback)
-- [ ] `_helpers.py` — rewrite `list_sandbox_names()` to scan `claude-config/` dirs (authoritative registry; covers both old and new sandboxes)
-- [ ] `_helpers.py` — rewrite `fzf_select_sandbox()` to use metadata listing
-- [ ] Confirm `git_mode.py` sandbox resolution still works (it uses the updated `_helpers.py` shared functions)
-- [ ] `paths.py` — keep `path_worktree()` pure (legacy formula); do NOT add metadata I/O to it
-- [ ] `paths.py` — add `resolve_workspace_path(name)` that reads metadata and falls back to `path_worktree(name)`
-- [ ] `paths.py` — update `find_next_sandbox_name()` to only check `claude-config/`
-- [ ] Deprecate `repo_url_to_bare_path()` (keep until all legacy sandboxes are gone)
+- [x] `destroy.py` — gate cleanup on `metadata.workspace_path`: new layout skips `remove_worktree` + `cleanup_sandbox_branch`; legacy layout keeps both
+- [x] `destroy.py` — retain `repo_url_to_bare_path` import for the legacy branch
+- [x] `destroy.py` — if Phase 0 Q1 determines sbx does not delete the branch, add a new-layout branch-delete helper that honors protected-branch patterns
+- [x] `attach.py` — use `resolve_workspace_path()` for existence check and IDE launch
+- [x] `_helpers.py` — rewrite `auto_detect_sandbox()` to match cwd against metadata workspace_path (plus legacy `worktrees/` fallback)
+- [x] `_helpers.py` — rewrite `list_sandbox_names()` to scan `claude-config/` dirs (authoritative registry; covers both old and new sandboxes)
+- [x] `_helpers.py` — rewrite `fzf_select_sandbox()` to use metadata listing
+- [x] Confirm `git_mode.py` sandbox resolution still works (it uses the updated `_helpers.py` shared functions)
+- [x] `paths.py` — keep `path_worktree()` pure (legacy formula); do NOT add metadata I/O to it
+- [x] `paths.py` — add `resolve_workspace_path(name)` that reads metadata and falls back to `path_worktree(name)`
+- [x] `paths.py` — update `find_next_sandbox_name()` to only check `claude-config/`
+- [x] Deprecate `repo_url_to_bare_path()` (keep until all legacy sandboxes are gone)
 - [ ] Verify `cast destroy <name>` cleans up sbx sandbox + config (no orphan worktrees, no leaked branch in shared repo)
 - [ ] Verify `cast destroy` against a synthesized pre-migration sandbox (metadata `workspace_path=""`) still cleans up fully
 - [ ] Verify `cast list` shows correct status for new sandboxes AND legacy sandboxes
 - [ ] Verify `cast attach <name>` connects and opens IDE at correct path for both layouts
-- [ ] Run unit tests: `python -m pytest tests/unit/ -x`
+- [x] Run unit tests: `python -m pytest tests/unit/ -x`
 
 ## Phase 3: Update git_mode (Deferred)
 

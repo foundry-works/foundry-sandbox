@@ -9,7 +9,98 @@ from click.testing import CliRunner
 from foundry_sandbox.commands.destroy import destroy, destroy_impl
 
 
-class TestDestroyImpl:
+class TestDestroyImplNewLayout:
+    """New-layout sandboxes (workspace_path set in metadata)."""
+
+    @patch("foundry_sandbox.commands.destroy.cleanup_sandbox_branch_repo")
+    @patch("foundry_sandbox.commands.destroy.load_sandbox_metadata")
+    @patch("foundry_sandbox.commands.destroy.unregister_sandbox_from_git_safety")
+    @patch("foundry_sandbox.commands.destroy.sbx_rm")
+    @patch("foundry_sandbox.commands.destroy.derive_sandbox_paths")
+    @patch("foundry_sandbox.commands.destroy.validate_existing_sandbox_name")
+    def test_new_layout_cleans_branch_from_repo(
+        self, mock_validate, mock_paths, mock_rm, mock_unregister,
+        mock_metadata, mock_branch_repo,
+    ):
+        mock_validate.return_value = (True, "")
+        mock_path = MagicMock()
+        mock_path.claude_config_path = MagicMock()
+        mock_path.claude_config_path.is_dir.return_value = True
+        mock_paths.return_value = mock_path
+        mock_metadata.return_value = {
+            "branch": "feature-x",
+            "repo_url": "https://github.com/org/repo",
+            "workspace_path": "/home/user/repo/.sbx/test-sandbox-worktrees/feature-x",
+        }
+
+        destroy_impl("test-sandbox")
+
+        mock_rm.assert_called_once_with("test-sandbox")
+        mock_unregister.assert_called_once_with("test-sandbox")
+        # New layout: branch cleanup against repo root
+        mock_branch_repo.assert_called_once_with(
+            "feature-x", "/home/user/repo"
+        )
+
+    @patch("foundry_sandbox.commands.destroy.remove_worktree")
+    @patch("foundry_sandbox.commands.destroy.cleanup_sandbox_branch_repo")
+    @patch("foundry_sandbox.commands.destroy.load_sandbox_metadata")
+    @patch("foundry_sandbox.commands.destroy.unregister_sandbox_from_git_safety")
+    @patch("foundry_sandbox.commands.destroy.sbx_rm")
+    @patch("foundry_sandbox.commands.destroy.derive_sandbox_paths")
+    @patch("foundry_sandbox.commands.destroy.validate_existing_sandbox_name")
+    def test_new_layout_skips_remove_worktree(
+        self, mock_validate, mock_paths, mock_rm, mock_unregister,
+        mock_metadata, mock_branch_repo, mock_worktree,
+    ):
+        mock_validate.return_value = (True, "")
+        mock_path = MagicMock()
+        mock_path.claude_config_path = MagicMock()
+        mock_path.claude_config_path.is_dir.return_value = True
+        mock_path.worktree_path = MagicMock()
+        mock_path.worktree_path.is_dir.return_value = True
+        mock_paths.return_value = mock_path
+        mock_metadata.return_value = {
+            "branch": "feature-x",
+            "repo_url": "https://github.com/org/repo",
+            "workspace_path": "/home/user/repo/.sbx/test-sandbox-worktrees/feature-x",
+        }
+
+        destroy_impl("test-sandbox")
+
+        # New layout should NOT call remove_worktree
+        mock_worktree.assert_not_called()
+
+    @patch("foundry_sandbox.commands.destroy.cleanup_sandbox_branch_repo")
+    @patch("foundry_sandbox.commands.destroy.load_sandbox_metadata")
+    @patch("foundry_sandbox.commands.destroy.unregister_sandbox_from_git_safety")
+    @patch("foundry_sandbox.commands.destroy.sbx_rm")
+    @patch("foundry_sandbox.commands.destroy.derive_sandbox_paths")
+    @patch("foundry_sandbox.commands.destroy.validate_existing_sandbox_name")
+    def test_new_layout_skips_branch_for_protected(
+        self, mock_validate, mock_paths, mock_rm, mock_unregister,
+        mock_metadata, mock_branch_repo,
+    ):
+        mock_validate.return_value = (True, "")
+        mock_path = MagicMock()
+        mock_path.claude_config_path = MagicMock()
+        mock_path.claude_config_path.is_dir.return_value = True
+        mock_paths.return_value = mock_path
+        mock_metadata.return_value = {
+            "branch": "main",
+            "repo_url": "https://github.com/org/repo",
+            "workspace_path": "/home/user/repo/.sbx/test-sandbox-worktrees/main",
+        }
+
+        destroy_impl("test-sandbox")
+
+        # Protected branch — cleanup should be called but will no-op inside
+        mock_branch_repo.assert_called_once_with("main", "/home/user/repo")
+
+
+class TestDestroyImplLegacyLayout:
+    """Legacy sandboxes (workspace_path empty in metadata)."""
+
     @patch("foundry_sandbox.commands.destroy.cleanup_sandbox_branch")
     @patch("foundry_sandbox.commands.destroy.remove_worktree")
     @patch("foundry_sandbox.commands.destroy.load_sandbox_metadata")
@@ -17,7 +108,7 @@ class TestDestroyImpl:
     @patch("foundry_sandbox.commands.destroy.sbx_rm")
     @patch("foundry_sandbox.commands.destroy.derive_sandbox_paths")
     @patch("foundry_sandbox.commands.destroy.validate_existing_sandbox_name")
-    def test_full_destroy(
+    def test_legacy_full_destroy(
         self, mock_validate, mock_paths, mock_rm, mock_unregister,
         mock_metadata, mock_worktree, mock_branch,
     ):
@@ -28,7 +119,7 @@ class TestDestroyImpl:
         mock_path.claude_config_path = MagicMock()
         mock_path.claude_config_path.is_dir.return_value = True
         mock_paths.return_value = mock_path
-        mock_metadata.return_value = {"branch": "feature-x", "repo_url": "https://github.com/org/repo"}
+        mock_metadata.return_value = {"branch": "feature-x", "repo_url": "https://github.com/org/repo", "workspace_path": ""}
 
         destroy_impl("test-sandbox")
 
@@ -37,6 +128,32 @@ class TestDestroyImpl:
         mock_worktree.assert_called_once()
         mock_branch.assert_called_once()
 
+    @patch("foundry_sandbox.commands.destroy.cleanup_sandbox_branch_repo")
+    @patch("foundry_sandbox.commands.destroy.load_sandbox_metadata")
+    @patch("foundry_sandbox.commands.destroy.unregister_sandbox_from_git_safety")
+    @patch("foundry_sandbox.commands.destroy.sbx_rm")
+    @patch("foundry_sandbox.commands.destroy.derive_sandbox_paths")
+    @patch("foundry_sandbox.commands.destroy.validate_existing_sandbox_name")
+    def test_legacy_no_branch_repo_cleanup(
+        self, mock_validate, mock_paths, mock_rm, mock_unregister,
+        mock_metadata, mock_branch_repo,
+    ):
+        mock_validate.return_value = (True, "")
+        mock_path = MagicMock()
+        mock_path.claude_config_path = MagicMock()
+        mock_path.claude_config_path.is_dir.return_value = False
+        mock_path.worktree_path = MagicMock()
+        mock_path.worktree_path.is_dir.return_value = False
+        mock_paths.return_value = mock_path
+        mock_metadata.return_value = {"branch": "feature-x", "repo_url": "https://github.com/org/repo", "workspace_path": ""}
+
+        destroy_impl("test-sandbox")
+
+        # Legacy layout should NOT use cleanup_sandbox_branch_repo
+        mock_branch_repo.assert_not_called()
+
+
+class TestDestroyImplCommon:
     @patch("foundry_sandbox.commands.destroy.load_sandbox_metadata")
     @patch("foundry_sandbox.commands.destroy.unregister_sandbox_from_git_safety")
     @patch("foundry_sandbox.commands.destroy.sbx_rm")
@@ -73,8 +190,7 @@ class TestDestroyImpl:
         except ValueError as e:
             assert "Invalid" in str(e)
 
-    @patch("foundry_sandbox.commands.destroy.cleanup_sandbox_branch")
-    @patch("foundry_sandbox.commands.destroy.remove_worktree")
+    @patch("foundry_sandbox.commands.destroy.cleanup_sandbox_branch_repo")
     @patch("foundry_sandbox.commands.destroy.load_sandbox_metadata")
     @patch("foundry_sandbox.commands.destroy.unregister_sandbox_from_git_safety")
     @patch("foundry_sandbox.commands.destroy.sbx_rm")
@@ -82,7 +198,7 @@ class TestDestroyImpl:
     @patch("foundry_sandbox.commands.destroy.validate_existing_sandbox_name")
     def test_keep_worktree(
         self, mock_validate, mock_paths, mock_rm, mock_unregister,
-        mock_metadata, mock_worktree, mock_branch,
+        mock_metadata, mock_branch_repo,
     ):
         mock_validate.return_value = (True, "")
         mock_path = MagicMock()
@@ -91,12 +207,16 @@ class TestDestroyImpl:
         mock_path.claude_config_path = MagicMock()
         mock_path.claude_config_path.is_dir.return_value = True
         mock_paths.return_value = mock_path
-        mock_metadata.return_value = None
+        mock_metadata.return_value = {
+            "branch": "feature-x",
+            "repo_url": "https://github.com/org/repo",
+            "workspace_path": "/home/user/repo/.sbx/test-sandbox-worktrees/feature-x",
+        }
 
         destroy_impl("test-sandbox", keep_worktree=True)
 
-        # Should NOT remove worktree or config
-        mock_worktree.assert_not_called()
+        # Should NOT clean up branch or remove worktree
+        mock_branch_repo.assert_not_called()
 
 
 class TestDestroyCommand:

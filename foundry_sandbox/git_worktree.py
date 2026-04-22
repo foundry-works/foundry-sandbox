@@ -451,6 +451,63 @@ def cleanup_sandbox_branch(branch: str, bare_path: str | Path) -> None:
         log_info(f"Cleaned up sandbox branch: {branch}")
 
 
+def cleanup_sandbox_branch_repo(branch: str, repo_root: str | Path) -> None:
+    """Delete a sandbox branch from a regular repo checkout.
+
+    Same logic as ``cleanup_sandbox_branch`` but operates against a shared
+    repo's ``.git`` instead of a bare repo. Used for new-layout sandboxes
+    where sbx manages worktrees under ``<repo_root>/.sbx/``.
+
+    Args:
+        branch: Branch name to delete.
+        repo_root: Path to the repository root (non-bare checkout).
+    """
+    if not branch or not repo_root:
+        return
+
+    _assert_safe_ref(branch, "branch")
+
+    protected_patterns = [
+        r"^main$",
+        r"^master$",
+        r"^develop$",
+        r"^production$",
+        r"^release/",
+        r"^hotfix/",
+    ]
+    for pattern in protected_patterns:
+        if re.match(pattern, branch):
+            return
+
+    repo_p = Path(repo_root)
+    if not repo_p.is_dir():
+        return
+
+    # Check if another worktree is using this branch
+    worktree_list = subprocess.run(
+        ["git", "-C", str(repo_p), "worktree", "list", "--porcelain"],
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=TIMEOUT_GIT_QUERY,
+    )
+
+    if worktree_list.returncode == 0:
+        if f"branch refs/heads/{branch}" in worktree_list.stdout:
+            log_info(f"Branch '{branch}' still in use by another worktree, skipping cleanup")
+            return
+
+    result = subprocess.run(
+        ["git", "-C", str(repo_p), "branch", "-D", "--", branch],
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=TIMEOUT_GIT_QUERY,
+    )
+    if result.returncode == 0:
+        log_info(f"Cleaned up sandbox branch: {branch}")
+
+
 def remove_worktree(worktree_path: str | Path) -> None:
     """Remove a git worktree.
 

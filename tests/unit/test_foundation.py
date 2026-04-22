@@ -43,6 +43,8 @@ from foundry_sandbox.paths import (
     derive_sandbox_paths,
     ensure_dir,
     safe_remove,
+    resolve_workspace_path,
+    find_next_sandbox_name,
 )
 
 
@@ -496,6 +498,93 @@ class TestEnvironmentScope:
             assert os.environ["ES_B"] == "2"
         assert "ES_A" not in os.environ
         assert "ES_B" not in os.environ
+
+
+# ============================================================================
+# Phase 2 Path Tests
+# ============================================================================
+
+
+class TestResolveWorkspacePath:
+    """Tests for resolve_workspace_path — new-layout vs legacy fallback."""
+
+    @pytest.fixture(autouse=True)
+    def set_sandbox_home(self, monkeypatch):
+        monkeypatch.setenv("SANDBOX_HOME", "/tmp/sb")
+
+    def test_new_layout_returns_metadata_workspace_path(self, tmp_path, monkeypatch):
+        from foundry_sandbox.paths import path_metadata_file, ensure_dir
+
+        # Set up metadata directory
+        meta_dir = tmp_path / "claude-config" / "my-sandbox"
+        meta_dir.mkdir(parents=True)
+        metadata_file = meta_dir / "metadata.json"
+        metadata_file.write_text(
+            '{"sbx_name":"my-sandbox","repo_url":"url","branch":"br","agent":"claude",'
+            '"workspace_path":"/repo/.sbx/my-sandbox-worktrees/br"}\n'
+        )
+
+        monkeypatch.setattr(
+            "foundry_sandbox.paths.path_claude_config",
+            lambda name: meta_dir,
+        )
+        monkeypatch.setattr(
+            "foundry_sandbox.paths.path_metadata_file",
+            lambda name: metadata_file,
+        )
+
+        result = resolve_workspace_path("my-sandbox")
+        assert str(result) == "/repo/.sbx/my-sandbox-worktrees/br"
+
+    def test_legacy_falls_back_to_worktree_path(self, monkeypatch):
+        from unittest.mock import patch as mock_patch
+
+        # load_sandbox_metadata is imported inside resolve_workspace_path
+        # so we patch it at the source module
+        with mock_patch("foundry_sandbox.state.load_sandbox_metadata", return_value=None):
+            result = resolve_workspace_path("my-sandbox")
+        assert str(result) == "/tmp/sb/worktrees/my-sandbox"
+
+    def test_empty_workspace_path_falls_back(self, monkeypatch):
+        from unittest.mock import patch as mock_patch
+
+        with mock_patch(
+            "foundry_sandbox.state.load_sandbox_metadata",
+            return_value={"workspace_path": ""},
+        ):
+            result = resolve_workspace_path("my-sandbox")
+        assert str(result) == "/tmp/sb/worktrees/my-sandbox"
+
+
+class TestFindNextSandboxName:
+    """Tests for find_next_sandbox_name — only checks claude-config/."""
+
+    @pytest.fixture(autouse=True)
+    def set_sandbox_home(self, monkeypatch, tmp_path):
+        monkeypatch.setenv("SANDBOX_HOME", str(tmp_path))
+
+    def test_returns_base_when_available(self, tmp_path):
+        configs = tmp_path / "claude-config"
+        configs.mkdir()
+        result = find_next_sandbox_name("my-sandbox")
+        assert result == "my-sandbox"
+
+    def test_appends_suffix_on_collision(self, tmp_path):
+        configs = tmp_path / "claude-config"
+        configs.mkdir()
+        (configs / "my-sandbox").mkdir()
+        result = find_next_sandbox_name("my-sandbox")
+        assert result == "my-sandbox-2"
+
+    def test_only_checks_configs_not_worktrees(self, tmp_path):
+        configs = tmp_path / "claude-config"
+        configs.mkdir()
+        worktrees = tmp_path / "worktrees"
+        worktrees.mkdir()
+        (worktrees / "my-sandbox").mkdir()
+        # Worktree exists but config doesn't — name is available
+        result = find_next_sandbox_name("my-sandbox")
+        assert result == "my-sandbox"
 
 
 if __name__ == "__main__":

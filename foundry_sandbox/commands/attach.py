@@ -12,7 +12,7 @@ import sys
 import click
 
 from foundry_sandbox.commands._helpers import auto_detect_sandbox as _auto_detect_sandbox, fzf_select_sandbox as _fzf_select_sandbox_shared
-from foundry_sandbox.paths import derive_sandbox_paths
+from foundry_sandbox.paths import resolve_workspace_path
 from foundry_sandbox.sbx import sbx_check_available, sbx_exec_streaming, sbx_is_running
 from foundry_sandbox.state import load_last_attach, load_sandbox_metadata, save_last_attach
 from foundry_sandbox.utils import log_error
@@ -169,8 +169,7 @@ def attach(
     # 2. Check sandbox exists
     # ------------------------------------------------------------------
     sbx_check_available()
-    paths = derive_sandbox_paths(name)
-    worktree_path = paths.worktree_path
+    worktree_path = resolve_workspace_path(name)
 
     if not worktree_path.is_dir():
         log_error(f"Sandbox '{name}' not found")
