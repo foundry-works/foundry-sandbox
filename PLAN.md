@@ -19,9 +19,15 @@ sbx's `--branch` flag creates its own worktree under `<repo>/.sbx/<name>-worktre
 
 - Cast delegates ALL worktree/git-branch management to sbx.
 - Cast retains: git safety server, HMAC provisioning, wrapper injection, metadata, IDE attach, destroy coordination.
-- Support existing sandboxes created before this change (backward compat).
+- Support existing sandboxes created before this change (backward compat). Legacy teardown paths stay active for any sandbox whose metadata has `workspace_path == ""`.
 - Fail closed on security; no weakening of git safety or isolation.
 - Update tests in the same change that modifies code.
+
+## Open Questions (Resolve Before Phase 1)
+
+1. **Does `sbx rm` delete the feature branch, or only the worktree?** `git_worktree.cleanup_sandbox_branch()` is flagged security-critical today. Under the new layout the branch lives in the user's *real* repo `.git`, so a leak is user-visible. Verify experimentally and either rely on sbx or keep a cast-side fallback that respects the protected-branch patterns.
+2. **Source of truth for `workspace_path`.** Both a deterministic formula (`sbx_worktree_path()`) and a stdout parser (`sbx_get_workspace_info()`) are proposed. Decision: store the **deterministic** path in metadata, use the parsed value as a post-create sanity check. If they disagree, fail the create — sbx's layout changed and the assumption is stale.
+3. **Remote-URL concurrency.** Under the new flow, multiple sandboxes for the same remote share one `.git`. Concurrent `cast new` will race on `git worktree add`. Add a per-repo lock in `ensure_repo_checkout()` (file lock on the repo root).
 
 ## sbx Worktree Facts (Verified)
 
@@ -86,8 +92,8 @@ workspace_path = sbx_worktree_path(repo_root, name, branch)
 
 - Remove `repo_url_to_bare_path` import and `bare_path` computation.
 - `repo_root` comes from `_resolve_repo_input()` (already returns it for local repos).
-- For remote URLs (no local `repo_root`): clone a regular checkout to `~/.sandboxes/repos/<owner>/<repo>/` (non-bare), then pass that path to sbx. Add `ensure_repo_checkout()` if needed, or keep using the existing bare repo as a mirror and clone from it.
-- Sandbox name generation: keep `sandbox_name()` but change input from `bare_path` to a similar deterministic string derived from `repo_url`.
+- For remote URLs (no local `repo_root`): add `ensure_repo_checkout(repo_url) -> str` that clones a regular (non-bare) checkout to `~/.sandboxes/repos/<owner>/<repo>/` if missing, takes a file lock on the repo root during the operation, and returns the path. The same lock is re-acquired for the subsequent `sbx create` call so concurrent `cast new` invocations on the same remote serialize their `git worktree add` steps. Leave the cached checkout in place on rollback (cache semantics, same as the old bare-repo cache).
+- Refactor `sandbox_name()` to take `repo_name: str` directly instead of `bare_path`. Caller derives `repo_name` from `repo_url` (basename of the URL path, stripped of `.git`). No fallback inference inside the helper.
 - Simplify `rollback_new_sbx()` — remove `worktree_path` param; sbx handles worktree cleanup.
 
 ### 1.5 Update `write_sandbox_metadata()` (`state.py`)
@@ -105,9 +111,9 @@ Make all core commands work with sbx-managed worktrees.
 
 ### 2.1 Simplify `destroy.py`
 
-- Remove `remove_worktree()` call — `sbx rm` handles worktree cleanup.
-- Remove `cleanup_sandbox_branch()` call — sbx manages branches.
-- Remove `repo_url_to_bare_path` import.
+- Branch on metadata: if `metadata.workspace_path` is set, the sandbox uses the new layout and `sbx rm` owns worktree cleanup — skip `remove_worktree()` and `cleanup_sandbox_branch()`.
+- If `workspace_path == ""` (legacy sandbox), keep the current calls to `remove_worktree()` and `cleanup_sandbox_branch()` so existing installs still clean up fully. `repo_url_to_bare_path` import stays for this path.
+- Branch deletion under the new layout: if Open Question (1) concludes that `sbx rm` does *not* delete the feature branch, add a new-layout cleanup helper that deletes the branch from the shared repo `.git` (enforcing the same protected-branch patterns). If sbx handles it, drop cast's fallback entirely for new sandboxes.
 - Keep: `sbx_rm`, git safety unregister, claude-config cleanup.
 
 ### 2.2 Update `attach.py`
@@ -123,9 +129,10 @@ Make all core commands work with sbx-managed worktrees.
 
 ### 2.4 Update `paths.py`
 
-- `path_worktree(name)`: add fallback — check metadata `workspace_path` first, fall back to old `get_worktrees_dir() / name` for pre-migration sandboxes.
-- `find_next_sandbox_name()`: only check `claude-config/` for collisions (not `worktrees/`).
-- `repo_url_to_bare_path()`: deprecate but keep for now.
+- **Keep `path_worktree()` pure.** Do NOT make it read JSON — `paths.py` is a pure-path module and every call becoming I/O is a regression. Keep the existing `get_worktrees_dir() / name` formula for legacy sandboxes.
+- Add a new helper `resolve_workspace_path(name: str) -> Path` that reads metadata, returns `workspace_path` if set, otherwise falls back to `path_worktree(name)`. Callers that need the live path (attach, git_mode, IDE launch) use the new helper; pure-path consumers stay on `path_worktree()`.
+- `find_next_sandbox_name()`: only check `claude-config/` for collisions (not `worktrees/`). `claude-config/<name>/` is the authoritative registry.
+- `repo_url_to_bare_path()`: deprecate but keep for legacy destroy path (see §2.1).
 
 ## Phase 3: Update `git_mode` (Deferred)
 
@@ -143,7 +150,12 @@ gitdir/commondir → ../.. (→ <repo>/.git)
 
 ### 3.2 Update `_validate_git_paths()`
 
-Relax trust boundary: allow paths anywhere under the repo root (not just `~/.sandboxes/`). Validate that gitdir is under the repo's `.git/` directory.
+Must accept **both** layouts — do not replace the old check:
+
+- Legacy: worktree under `~/.sandboxes/worktrees/`, gitdir + bare under `~/.sandboxes/repos/`.
+- New: worktree under `<repo_root>/.sbx/<name>-worktrees/<branch>/`, gitdir under `<repo_root>/.git/worktrees/<branch>/`, commondir = `<repo_root>/.git`.
+
+Dispatch on which layout the worktree path matches, then apply the corresponding trust-boundary check. Fail closed if neither matches. Determine the layout by checking `metadata.workspace_path` first; fall back to path-based detection only if metadata is missing.
 
 ### 3.3 Update `_apply_git_mode()`
 
@@ -188,7 +200,12 @@ After each phase:
 1. Run `cast new --agent shell --skip-key-check --template none .` — verify sandbox creation succeeds.
 2. Run `sbx ls` — verify sandbox is running with correct worktree.
 3. Run `sbx exec <name> -- ls /workspace/tests/redteam/` — verify repo is mounted.
-4. Run `cast destroy <name>` — verify full cleanup (sbx sandbox, config dir, no orphan worktrees).
+4. Run `cast destroy <name>` — verify full cleanup (sbx sandbox, config dir, no orphan worktrees, **no leaked branch in the shared repo**).
 5. Run `cast list` — verify sandbox listing works.
 6. Run `python -m pytest tests/unit/ -x` — verify unit tests pass.
 7. Run `python -m ruff check foundry_sandbox` — verify lint passes.
+
+**Backward-compat spot-checks (after Phase 2):**
+
+- Create a sandbox with `workspace_path = ""` in its metadata (simulate a pre-migration sandbox). Confirm `cast destroy`, `cast attach`, `cast list`, and `cast git-mode --mode host` all still work against the legacy `~/.sandboxes/worktrees/<name>/` layout.
+- Run `cast new` twice in parallel against the same remote URL; confirm both succeed (the per-repo lock serializes `git worktree add`).
