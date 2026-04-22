@@ -197,6 +197,8 @@ def sbx_create(
     *,
     branch: str | None = None,
     template: str | None = None,
+    cpus: str | None = None,
+    memory: str | None = None,
 ) -> subprocess.CompletedProcess[str]:
     """Create a new sandbox.
 
@@ -206,6 +208,8 @@ def sbx_create(
         path: Workspace path on host.
         branch: Optional branch name for git worktree.
         template: Optional template tag (e.g. 'foundry-git-wrapper:latest').
+        cpus: Optional CPU limit (e.g. '2', '0.5').
+        memory: Optional memory limit (e.g. '4g', '512m').
 
     Returns:
         CompletedProcess result.
@@ -215,6 +219,10 @@ def sbx_create(
         args.extend(["--branch", branch])
     if template:
         args.extend(["--template", template])
+    if cpus is not None:
+        args.extend(["--cpus", cpus])
+    if memory is not None:
+        args.extend(["--memory", memory])
     args.extend([agent, str(path)])
     return _run_sbx(args, timeout=TIMEOUT_SBX_LIFECYCLE)
 
@@ -459,6 +467,37 @@ def sbx_policy_deny(spec: str) -> subprocess.CompletedProcess[str]:
 
 
 # ============================================================================
+# Ports
+# ============================================================================
+
+
+def sbx_ports_publish(name: str, spec: str) -> subprocess.CompletedProcess[str]:
+    """Publish a port from a sandbox.
+
+    Args:
+        name: Sandbox name.
+        spec: Port specification (e.g. '8080:80', 'tcp://0.0.0.0:8080:80').
+
+    Returns:
+        CompletedProcess result.
+    """
+    return _run_sbx(["ports", "publish", name, spec], timeout=TIMEOUT_SBX_QUERY)
+
+
+def sbx_ports_unpublish(name: str, spec: str) -> subprocess.CompletedProcess[str]:
+    """Unpublish a port from a sandbox.
+
+    Args:
+        name: Sandbox name.
+        spec: Port specification to remove.
+
+    Returns:
+        CompletedProcess result.
+    """
+    return _run_sbx(["ports", "unpublish", name, spec], timeout=TIMEOUT_SBX_QUERY)
+
+
+# ============================================================================
 # Templates
 # ============================================================================
 
@@ -526,13 +565,31 @@ def sbx_template_rm(tag: str) -> subprocess.CompletedProcess[str]:
 # ============================================================================
 
 
-def sbx_diagnose() -> subprocess.CompletedProcess[str]:
+def sbx_diagnose(
+    *, parse: bool = False,
+) -> subprocess.CompletedProcess[str] | dict[str, Any]:
     """Run sbx diagnostics.
 
+    Args:
+        parse: If True, run ``sbx diagnose --json`` and return a parsed
+            dict. If parsing fails, returns ``{"error": ..., "raw": ...}``.
+            If False (default), return the raw CompletedProcess.
+
     Returns:
-        CompletedProcess result.
+        Parsed dict when *parse* is True, otherwise CompletedProcess.
     """
-    return _run_sbx(["diagnose"], timeout=TIMEOUT_SBX_QUERY)
+    if not parse:
+        return _run_sbx(["diagnose"], timeout=TIMEOUT_SBX_QUERY)
+
+    result = _run_sbx(
+        ["diagnose", "--json"], timeout=TIMEOUT_SBX_QUERY, check=False,
+    )
+    if result.returncode != 0:
+        return {"error": result.stderr.strip() or f"exit code {result.returncode}", "raw": result.stdout}
+    try:
+        return cast(dict[str, Any], json.loads(result.stdout))
+    except (json.JSONDecodeError, TypeError) as exc:
+        return {"error": str(exc), "raw": result.stdout}
 
 
 def sbx_is_installed() -> bool:

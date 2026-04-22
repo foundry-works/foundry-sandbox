@@ -55,15 +55,22 @@ def _collect_versions() -> dict[str, str]:
     return versions
 
 
-def _collect_sbx_diagnose() -> dict[str, str]:
+def _collect_sbx_diagnose() -> dict[str, Any]:
     from foundry_sandbox.sbx import sbx_diagnose
 
     try:
-        result = sbx_diagnose()
-        output = result.stdout.strip() if result.stdout else ""
-        if result.returncode != 0:
-            output += f"\n(exit code {result.returncode})"
-        return {"output": _redact_secrets(output)}
+        parsed = sbx_diagnose(parse=True)
+        if isinstance(parsed, dict):
+            if "error" in parsed and "raw" in parsed:
+                # JSON parse failure — return raw output alongside error
+                raw = parsed.get("raw", "")
+                return {
+                    "output": _redact_secrets(raw or ""),
+                    "error": parsed["error"],
+                }
+            return {"parsed": parsed}
+        # Shouldn't happen, but handle gracefully
+        return {"output": str(parsed)}
     except Exception as exc:
         return {"error": str(exc)}
 
@@ -212,10 +219,18 @@ def diagnose(json_output: bool) -> None:
         click.echo(f"  {k}: {v}")
 
     click.echo("\n=== sbx Diagnostics ===")
-    output = data["sbx_diagnose"].get("output", "")
-    error = data["sbx_diagnose"].get("error")
-    if error:
+    sbx_diag = data["sbx_diagnose"]
+    error = sbx_diag.get("error")
+    parsed = sbx_diag.get("parsed")
+    output = sbx_diag.get("output")
+    if error and not parsed:
         click.echo(f"  Error: {error}")
+        if output:
+            for line in output.split("\n"):
+                click.echo(f"  {line}")
+    elif parsed:
+        for key, value in parsed.items():
+            click.echo(f"  {key}: {value}")
     elif output:
         for line in output.split("\n"):
             click.echo(f"  {line}")

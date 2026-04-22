@@ -61,16 +61,16 @@ Legend: `[ ]` todo, `[x]` done, `[~]` partial / accepted risk
 
 ## 3.4 Complete `sbx` CLI Wrapper Surface
 
-- [ ] Add JSON parsing to `sbx_diagnose()` in `foundry_sandbox/sbx.py:529-535`
-- [ ] Update `commands/diagnose.py` to display structured fields
-- [ ] Add `cpus: str | None` parameter to `sbx_create()`
-- [ ] Add `memory: str | None` parameter to `sbx_create()`
-- [ ] Add `sbx_ports_publish(name, spec)` helper to `foundry_sandbox/sbx.py`
-- [ ] Add `sbx_ports_unpublish(name, spec)` helper to `foundry_sandbox/sbx.py`
-- [ ] Add unit tests for JSON diagnose parsing
-- [ ] Add unit tests for cpus/memory argv construction
-- [ ] Add unit tests for ports publish/unpublish argv construction
-- [ ] (Deferred) Decide whether to expose `cast ports` as a user-facing command — not required for this PR
+- [x] Add JSON parsing to `sbx_diagnose()` in `foundry_sandbox/sbx.py:529-535`
+- [x] Update `commands/diagnose.py` to display structured fields
+- [x] Add `cpus: str | None` parameter to `sbx_create()`
+- [x] Add `memory: str | None` parameter to `sbx_create()`
+- [x] Add `sbx_ports_publish(name, spec)` helper to `foundry_sandbox/sbx.py`
+- [x] Add `sbx_ports_unpublish(name, spec)` helper to `foundry_sandbox/sbx.py`
+- [x] Add unit tests for JSON diagnose parsing
+- [x] Add unit tests for cpus/memory argv construction
+- [x] Add unit tests for ports publish/unpublish argv construction
+- [x] (Deferred) Decide whether to expose `cast ports` as a user-facing command — not required for this PR
 
 ## 3.5 Audit and Retire Compose-Era Test Modules
 

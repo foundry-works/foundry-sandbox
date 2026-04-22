@@ -33,6 +33,8 @@ from foundry_sandbox.sbx import (
     sbx_policy_allow,
     sbx_policy_deny,
     sbx_policy_set_default,
+    sbx_ports_publish,
+    sbx_ports_unpublish,
     sbx_rm,
     sbx_run,
     sbx_sandbox_exists,
@@ -195,6 +197,43 @@ class TestSbxCreate:
         sbx_create("test", "codex", Path("/tmp/repo"))
         mock_run.assert_called_once_with(
             ["create", "--name", "test", "codex", "/tmp/repo"],
+            timeout=TIMEOUT_SBX_LIFECYCLE,
+        )
+
+    @patch("foundry_sandbox.sbx._run_sbx")
+    def test_with_cpus(self, mock_run):
+        mock_run.return_value = _mock_completed()
+        sbx_create("test", "claude", "/tmp/ws", cpus="2")
+        mock_run.assert_called_once_with(
+            ["create", "--name", "test", "--cpus", "2", "claude", "/tmp/ws"],
+            timeout=TIMEOUT_SBX_LIFECYCLE,
+        )
+
+    @patch("foundry_sandbox.sbx._run_sbx")
+    def test_with_memory(self, mock_run):
+        mock_run.return_value = _mock_completed()
+        sbx_create("test", "claude", "/tmp/ws", memory="4g")
+        mock_run.assert_called_once_with(
+            ["create", "--name", "test", "--memory", "4g", "claude", "/tmp/ws"],
+            timeout=TIMEOUT_SBX_LIFECYCLE,
+        )
+
+    @patch("foundry_sandbox.sbx._run_sbx")
+    def test_with_cpus_and_memory(self, mock_run):
+        mock_run.return_value = _mock_completed()
+        sbx_create("test", "claude", "/tmp/ws", cpus="0.5", memory="512m")
+        mock_run.assert_called_once_with(
+            ["create", "--name", "test", "--cpus", "0.5", "--memory", "512m",
+             "claude", "/tmp/ws"],
+            timeout=TIMEOUT_SBX_LIFECYCLE,
+        )
+
+    @patch("foundry_sandbox.sbx._run_sbx")
+    def test_cpus_memory_none_omits_flags(self, mock_run):
+        mock_run.return_value = _mock_completed()
+        sbx_create("test", "claude", "/tmp/ws", cpus=None, memory=None)
+        mock_run.assert_called_once_with(
+            ["create", "--name", "test", "claude", "/tmp/ws"],
             timeout=TIMEOUT_SBX_LIFECYCLE,
         )
 
@@ -507,6 +546,40 @@ class TestSbxTemplate:
 
 
 # ============================================================================
+# sbx_ports_*
+# ============================================================================
+
+
+class TestSbxPorts:
+    @patch("foundry_sandbox.sbx._run_sbx")
+    def test_publish(self, mock_run):
+        mock_run.return_value = _mock_completed()
+        sbx_ports_publish("my-sandbox", "8080:80")
+        mock_run.assert_called_once_with(
+            ["ports", "publish", "my-sandbox", "8080:80"],
+            timeout=TIMEOUT_SBX_QUERY,
+        )
+
+    @patch("foundry_sandbox.sbx._run_sbx")
+    def test_unpublish(self, mock_run):
+        mock_run.return_value = _mock_completed()
+        sbx_ports_unpublish("my-sandbox", "8080:80")
+        mock_run.assert_called_once_with(
+            ["ports", "unpublish", "my-sandbox", "8080:80"],
+            timeout=TIMEOUT_SBX_QUERY,
+        )
+
+    @patch("foundry_sandbox.sbx._run_sbx")
+    def test_publish_tcp_spec(self, mock_run):
+        mock_run.return_value = _mock_completed()
+        sbx_ports_publish("my-sandbox", "tcp://0.0.0.0:9090:9090")
+        mock_run.assert_called_once_with(
+            ["ports", "publish", "my-sandbox", "tcp://0.0.0.0:9090:9090"],
+            timeout=TIMEOUT_SBX_QUERY,
+        )
+
+
+# ============================================================================
 # sbx_diagnose
 # ============================================================================
 
@@ -548,6 +621,36 @@ class TestSbxDiagnose:
         result = sbx_diagnose()
         assert result.stdout == "All checks passed"
         mock_run.assert_called_once_with(["diagnose"], timeout=TIMEOUT_SBX_QUERY)
+
+    @patch("foundry_sandbox.sbx._run_sbx")
+    def test_parse_json_success(self, mock_run):
+        data = {"status": "ok", "version": "0.26.1", "daemon": "running"}
+        mock_run.return_value = _mock_completed(stdout=json.dumps(data))
+        result = sbx_diagnose(parse=True)
+        assert isinstance(result, dict)
+        assert result["status"] == "ok"
+        assert result["daemon"] == "running"
+        mock_run.assert_called_once_with(
+            ["diagnose", "--json"], timeout=TIMEOUT_SBX_QUERY, check=False,
+        )
+
+    @patch("foundry_sandbox.sbx._run_sbx")
+    def test_parse_nonzero_exit(self, mock_run):
+        mock_run.return_value = _mock_completed(
+            returncode=1, stderr="sbx daemon not running",
+        )
+        result = sbx_diagnose(parse=True)
+        assert isinstance(result, dict)
+        assert "error" in result
+        assert result["error"] == "sbx daemon not running"
+
+    @patch("foundry_sandbox.sbx._run_sbx")
+    def test_parse_invalid_json(self, mock_run):
+        mock_run.return_value = _mock_completed(stdout="not json at all")
+        result = sbx_diagnose(parse=True)
+        assert isinstance(result, dict)
+        assert "error" in result
+        assert "raw" in result
 
 
 # ============================================================================
