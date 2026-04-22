@@ -1,10 +1,13 @@
 # sbx Worktree Migration Checklist
 
-## Phase 0: Open Questions (block Phase 1 until resolved)
+## Phase 0: Open Questions — RESOLVED
 
-- [ ] Experimentally verify whether `sbx rm` deletes the feature branch from the shared repo (not just the worktree). Record finding in PLAN.md.
-- [ ] Decide source of truth for `workspace_path`: deterministic formula stored, parsed stdout used as post-create sanity check. Document in PLAN.md §1.2/§1.3.
-- [ ] Confirm locking strategy for concurrent `cast new` on the same remote URL (per-repo file lock in `ensure_repo_checkout()`).
+- [x] Experimentally verify whether `sbx rm` deletes the feature branch from the shared repo (not just the worktree). Record finding in PLAN.md.
+  - **Answer: No.** Branch ref, worktree registration, and `.sbx/` dir all persist after `sbx rm`. Cast must keep its own branch cleanup.
+- [x] Decide source of truth for `workspace_path`: deterministic formula stored, parsed stdout used as post-create sanity check. Document in PLAN.md §1.2/§1.3.
+  - **Answer: Deterministic formula as primary, parsed stdout as post-create sanity check.** Fail-closed on mismatch.
+- [x] Confirm locking strategy for concurrent `cast new` on the same remote URL (per-repo file lock in `ensure_repo_checkout()`).
+  - **Answer: Reuse `file_lock()` from `atomic_io.py` (fcntl.flock, 30s timeout, `.castlock` sidecar).** No new dependency needed. Lock covers clone + `sbx create` (serializes `git worktree add`).
 
 ## Phase 1: Fix `cast new`
 

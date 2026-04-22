@@ -23,18 +23,18 @@ sbx's `--branch` flag creates its own worktree under `<repo>/.sbx/<name>-worktre
 - Fail closed on security; no weakening of git safety or isolation.
 - Update tests in the same change that modifies code.
 
-## Open Questions (Resolve Before Phase 1)
+## Open Questions — RESOLVED
 
-1. **Does `sbx rm` delete the feature branch, or only the worktree?** `git_worktree.cleanup_sandbox_branch()` is flagged security-critical today. Under the new layout the branch lives in the user's *real* repo `.git`, so a leak is user-visible. Verify experimentally and either rely on sbx or keep a cast-side fallback that respects the protected-branch patterns.
-2. **Source of truth for `workspace_path`.** Both a deterministic formula (`sbx_worktree_path()`) and a stdout parser (`sbx_get_workspace_info()`) are proposed. Decision: store the **deterministic** path in metadata, use the parsed value as a post-create sanity check. If they disagree, fail the create — sbx's layout changed and the assumption is stale.
-3. **Remote-URL concurrency.** Under the new flow, multiple sandboxes for the same remote share one `.git`. Concurrent `cast new` will race on `git worktree add`. Add a per-repo lock in `ensure_repo_checkout()` (file lock on the repo root).
+1. **Does `sbx rm` delete the feature branch?** — **No.** Verified experimentally (sbx v0.26.1): `sbx rm` removes the Docker container and sbx-internal state, but the branch ref and worktree registration both remain in the repo's `.git`. The branch `test-branch-xyz` persisted after `sbx rm`, `git worktree list` still showed it, and the `.sbx/` directory remained on disk. **Cast must keep its own branch cleanup for new-layout sandboxes**, using `cleanup_sandbox_branch()` logic (protected-branch patterns, in-use check) adapted to work against the shared repo `.git` instead of a bare repo. This is the same security-critical function, just pointing at a different git dir. See Phase 2 §2.1 and §2.2.
+2. **Source of truth for `workspace_path`.** — **Decision: deterministic formula as primary, parsed stdout as post-create sanity check.** Store the deterministic path (`<repo_root>/.sbx/<name>-worktrees/<branch>/`) in metadata. After `sbx create`, parse the stdout for `Worktree:` and compare. If they disagree, fail the create — sbx's layout changed and the assumption is stale. This is fail-closed.
+3. **Remote-URL concurrency.** — **Per-repo file lock using existing `file_lock()` from `atomic_io.py`.** The codebase already has `file_lock(path)` (fcntl.flock, 30s timeout) in `atomic_io.py`, used by `state.py` and `git_mode.py`. Reuse this pattern: in `ensure_repo_checkout()`, acquire an exclusive lock on `<repo_root>/.castlock` during clone + `sbx create`. This serializes concurrent `git worktree add` from the same repo. No new dependency needed. The existing `ensure_bare_repo()` and `fetch_bare_branch()` in `git.py` have **no locking today** (acknowledged in `fetch_bare_branch` docstring), so this is an improvement over the status quo.
 
 ## sbx Worktree Facts (Verified)
 
 - `sbx create --name X --branch <branch> shell <repo-root>` creates worktree at `<repo-root>/.sbx/<name>-worktrees/<branch>/`
 - sbx stdout includes the worktree path: `Worktree: /path/to/.sbx/<name>-worktrees/<branch>`
 - `sbx ls --json` returns `workspaces` array with the git root (not the worktree path directly)
-- `sbx rm` cleans up worktrees automatically
+- `sbx rm` does NOT delete the feature branch or fully remove the worktree (verified experimentally v0.26.1) — branch ref and worktree registration persist in `.git`; cast must handle branch cleanup itself
 - sbx worktrees use standard `git worktree` layout: `.git` points to `<repo>/.git/worktrees/<branch>/`
 - sbx runtime spec at `~/.local/state/sandboxes/sandboxes/sandboxd/runtimes/<name>.json` has `WorkspaceDir` (git root)
 - The worktree path is deterministic: `<repo_root>/.sbx/<sandbox_name>-worktrees/<branch>/`
@@ -113,7 +113,7 @@ Make all core commands work with sbx-managed worktrees.
 
 - Branch on metadata: if `metadata.workspace_path` is set, the sandbox uses the new layout and `sbx rm` owns worktree cleanup — skip `remove_worktree()` and `cleanup_sandbox_branch()`.
 - If `workspace_path == ""` (legacy sandbox), keep the current calls to `remove_worktree()` and `cleanup_sandbox_branch()` so existing installs still clean up fully. `repo_url_to_bare_path` import stays for this path.
-- Branch deletion under the new layout: if Open Question (1) concludes that `sbx rm` does *not* delete the feature branch, add a new-layout cleanup helper that deletes the branch from the shared repo `.git` (enforcing the same protected-branch patterns). If sbx handles it, drop cast's fallback entirely for new sandboxes.
+- Branch deletion under the new layout: since `sbx rm` does NOT delete the feature branch (confirmed experimentally), cast MUST keep a branch cleanup step for new-layout sandboxes. Adapt `cleanup_sandbox_branch()` to work against the shared repo `.git` (use `git -C <repo_root>` instead of `git -C <bare_path>`). The same protected-branch patterns (`main`, `master`, `develop`, `production`, `release/*`, `hotfix/*`) and in-use check still apply.
 - Keep: `sbx_rm`, git safety unregister, claude-config cleanup.
 
 ### 2.2 Update `attach.py`
