@@ -15,7 +15,6 @@ from foundry_sandbox.sbx import (
     TIMEOUT_SBX_LIFECYCLE,
     TIMEOUT_SBX_QUERY,
     TIMEOUT_SBX_SECRET,
-    VALID_NETWORK_PROFILES,
     _is_docker_plugin_path,
     _resolve_sbx_binary,
     _run_standalone_probe,
@@ -30,17 +29,11 @@ from foundry_sandbox.sbx import (
     sbx_is_installed,
     sbx_is_running,
     sbx_ls,
-    sbx_policy_allow,
-    sbx_policy_deny,
-    sbx_policy_set_default,
-    sbx_ports_publish,
-    sbx_ports_unpublish,
     sbx_rm,
     sbx_run,
     sbx_sandbox_exists,
     sbx_secret_set,
     sbx_stop,
-    sbx_template_load,
     sbx_template_rm,
     sbx_template_save,
 )
@@ -471,47 +464,6 @@ class TestSbxSecretSet:
 
 
 # ============================================================================
-# sbx_policy_*
-# ============================================================================
-
-
-class TestSbxPolicy:
-    @patch("foundry_sandbox.sbx._run_sbx")
-    def test_set_default(self, mock_run):
-        mock_run.return_value = _mock_completed()
-        sbx_policy_set_default("balanced")
-        mock_run.assert_called_once_with(
-            ["policy", "set-default", "balanced"],
-            timeout=TIMEOUT_SBX_QUERY,
-        )
-
-    def test_set_default_invalid(self):
-        with pytest.raises(ValueError, match="Invalid network profile"):
-            sbx_policy_set_default("invalid")
-
-    def test_valid_profiles(self):
-        assert VALID_NETWORK_PROFILES == {"balanced", "allow-all", "deny-all"}
-
-    @patch("foundry_sandbox.sbx._run_sbx")
-    def test_allow(self, mock_run):
-        mock_run.return_value = _mock_completed()
-        sbx_policy_allow("api.github.com")
-        mock_run.assert_called_once_with(
-            ["policy", "allow", "network", "api.github.com"],
-            timeout=TIMEOUT_SBX_QUERY,
-        )
-
-    @patch("foundry_sandbox.sbx._run_sbx")
-    def test_deny(self, mock_run):
-        mock_run.return_value = _mock_completed()
-        sbx_policy_deny("evil.com")
-        mock_run.assert_called_once_with(
-            ["policy", "deny", "network", "evil.com"],
-            timeout=TIMEOUT_SBX_QUERY,
-        )
-
-
-# ============================================================================
 # sbx_template_*
 # ============================================================================
 
@@ -527,55 +479,12 @@ class TestSbxTemplate:
         )
 
     @patch("foundry_sandbox.sbx._run_sbx")
-    def test_load(self, mock_run):
-        mock_run.return_value = _mock_completed()
-        sbx_template_load("my-template")
-        mock_run.assert_called_once_with(
-            ["template", "load", "my-template"],
-            timeout=TIMEOUT_SBX_LIFECYCLE,
-        )
-
-    @patch("foundry_sandbox.sbx._run_sbx")
     def test_rm(self, mock_run):
         mock_run.return_value = _mock_completed()
         sbx_template_rm("my-template")
         mock_run.assert_called_once_with(
             ["template", "rm", "my-template"],
             timeout=TIMEOUT_SBX_LIFECYCLE,
-        )
-
-
-# ============================================================================
-# sbx_ports_*
-# ============================================================================
-
-
-class TestSbxPorts:
-    @patch("foundry_sandbox.sbx._run_sbx")
-    def test_publish(self, mock_run):
-        mock_run.return_value = _mock_completed()
-        sbx_ports_publish("my-sandbox", "8080:80")
-        mock_run.assert_called_once_with(
-            ["ports", "publish", "my-sandbox", "8080:80"],
-            timeout=TIMEOUT_SBX_QUERY,
-        )
-
-    @patch("foundry_sandbox.sbx._run_sbx")
-    def test_unpublish(self, mock_run):
-        mock_run.return_value = _mock_completed()
-        sbx_ports_unpublish("my-sandbox", "8080:80")
-        mock_run.assert_called_once_with(
-            ["ports", "unpublish", "my-sandbox", "8080:80"],
-            timeout=TIMEOUT_SBX_QUERY,
-        )
-
-    @patch("foundry_sandbox.sbx._run_sbx")
-    def test_publish_tcp_spec(self, mock_run):
-        mock_run.return_value = _mock_completed()
-        sbx_ports_publish("my-sandbox", "tcp://0.0.0.0:9090:9090")
-        mock_run.assert_called_once_with(
-            ["ports", "publish", "my-sandbox", "tcp://0.0.0.0:9090:9090"],
-            timeout=TIMEOUT_SBX_QUERY,
         )
 
 

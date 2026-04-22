@@ -220,29 +220,6 @@ class TestEnsureRepoCheckout:
         assert mock_retry.call_count >= 1
 
 
-class TestBranchExists:
-    """Tests for branch_exists()."""
-
-    @patch("foundry_sandbox.git.subprocess.run")
-    def test_existing_branch(self, mock_run):
-        """Existing branch should return True."""
-        mock_run.return_value = Mock(returncode=0)
-
-        assert git.branch_exists("/path/to/repo", "main") is True
-
-        args = mock_run.call_args[0][0]
-        assert "show-ref" in args
-        assert "--verify" in args
-        assert "refs/heads/main" in args
-
-    @patch("foundry_sandbox.git.subprocess.run")
-    def test_nonexistent_branch(self, mock_run):
-        """Non-existent branch should return False."""
-        mock_run.return_value = Mock(returncode=1)
-
-        assert git.branch_exists("/path/to/repo", "nonexistent") is False
-
-
 class TestCleanupSandboxBranchRepo:
     """Tests for cleanup_sandbox_branch_repo()."""
 

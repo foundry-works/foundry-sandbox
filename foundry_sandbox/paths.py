@@ -2,7 +2,7 @@
 
 Provides functions for:
   - Resolving sandbox paths (configs, metadata)
-  - Directory and path management (ensure_dir, safe_remove)
+  - Directory and path management (ensure_dir)
   - Sandbox name generation
 """
 
@@ -59,19 +59,6 @@ def path_claude_config(name: str) -> Path:
     return get_claude_configs_dir() / name
 
 
-def path_claude_home(name: str) -> Path:
-    """Get the path to a sandbox's Claude home directory.
-
-    Args:
-        name: Sandbox name
-
-    Returns:
-        Path to the Claude home directory (within Claude config)
-    """
-    _assert_safe_path_component(name)
-    return path_claude_config(name) / "claude"
-
-
 def path_metadata_file(name: str) -> Path:
     """Get the path to a sandbox's metadata file (JSON).
 
@@ -83,19 +70,6 @@ def path_metadata_file(name: str) -> Path:
     """
     _assert_safe_path_component(name)
     return path_claude_config(name) / "metadata.json"
-
-
-def path_opencode_plugins_marker(name: str) -> Path:
-    """Get the path to a sandbox's OpenCode plugins sync marker file.
-
-    Args:
-        name: Sandbox name
-
-    Returns:
-        Path to the opencode-plugins.synced marker file
-    """
-    _assert_safe_path_component(name)
-    return path_claude_config(name) / "opencode-plugins.synced"
 
 
 def path_last_cast_new() -> Path:
@@ -189,53 +163,6 @@ def ensure_dir(path: str | Path) -> Path:
     p = Path(path)
     p.mkdir(parents=True, exist_ok=True)
     return p
-
-
-def _rmtree_no_follow_symlinks(path: Path) -> None:
-    """Remove a directory tree without following symlinks within.
-
-    Walks the tree bottom-up. Symlinks (both files and dirs) are
-    unlinked rather than followed, preventing traversal outside
-    the intended directory.
-
-    Args:
-        path: Directory path to remove.
-    """
-    for child in path.iterdir():
-        if child.is_symlink():
-            child.unlink()
-        elif child.is_dir():
-            _rmtree_no_follow_symlinks(child)
-        else:
-            child.unlink()
-    path.rmdir()
-
-
-def safe_remove(path: str | Path) -> None:
-    """Remove a file or directory tree safely.
-
-    For directories, removes the entire tree without following symlinks
-    inside the tree. Top-level symlinks are unlinked rather than followed.
-
-    For files or symlinks, removes just the entry. Does nothing if path
-    doesn't exist.
-
-    Args:
-        path: File or directory path (string or Path)
-    """
-    p = Path(path)
-    if not p.exists() and not p.is_symlink():
-        return
-
-    # If the path itself is a symlink, just remove the link
-    if p.is_symlink():
-        p.unlink()
-        return
-
-    if p.is_dir():
-        _rmtree_no_follow_symlinks(p)
-    else:
-        p.unlink()
 
 
 # ============================================================================
@@ -356,15 +283,3 @@ def strip_github_url(repo_url: str) -> str:
     if spec.endswith(".git"):
         spec = spec[:-4]
     return spec
-
-
-def resolve_ssh_agent_sock() -> str:
-    """Find SSH agent socket from environment.
-
-    Returns:
-        Socket path if it exists, empty string otherwise.
-    """
-    sock = os.environ.get("SSH_AUTH_SOCK", "")
-    if not sock:
-        return ""
-    return sock if Path(sock).exists() else ""

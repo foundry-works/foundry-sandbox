@@ -6,12 +6,9 @@ the shell scripts lib/utils.sh, lib/format.sh, and lib/runtime.sh.
 
 from __future__ import annotations
 
-import contextlib
-import hashlib
 import os
 import re
 import sys
-from collections.abc import Generator
 
 
 # Color codes - respect TERM environment variable
@@ -93,24 +90,6 @@ def log_step(msg: str) -> None:
 # Formatting helper functions (pure functions, not logging)
 
 
-def flag_enabled(value: object) -> bool:
-    """Parse persisted 0/1/true/false style flag values.
-
-    Args:
-        value: Value to parse (bool, int, or str).
-
-    Returns:
-        True if the value represents an enabled flag.
-    """
-    if isinstance(value, bool):
-        return value
-    if isinstance(value, int):
-        return value != 0
-    if isinstance(value, str):
-        return value.strip().lower() in {"1", "true", "yes", "on"}
-    return False
-
-
 def format_kv(key: str, value: str) -> str:
     """Format a key-value pair with 2 spaces indent.
 
@@ -160,39 +139,3 @@ def sanitize_ref_component(component: str) -> str:
     if text in {"", ".", ".."}:
         return ""
     return text
-
-
-def generate_sandbox_id(seed: str) -> str:
-    """Generate a sandbox ID from a seed string using SHA-256.
-
-    Args:
-        seed: Seed string.
-
-    Returns:
-        32-character hex digest.
-    """
-    return hashlib.sha256(seed.encode("utf-8")).hexdigest()[:32]
-
-
-@contextlib.contextmanager
-def environment_scope(
-    updates: dict[str, str] | None = None,
-) -> Generator[None]:
-    """Save, optionally mutate, and unconditionally restore ``os.environ``.
-
-    Usage::
-
-        with environment_scope({"KEY": "val"}):
-            ...  # KEY is set; on exit the entire env is restored
-
-    Args:
-        updates: Optional env-var dict to apply on entry.
-    """
-    saved = dict(os.environ)
-    if updates:
-        os.environ.update(updates)
-    try:
-        yield
-    finally:
-        os.environ.clear()
-        os.environ.update(saved)

@@ -4,7 +4,6 @@ Handles:
   - Retry wrapper with exponential backoff for git commands
   - Stale lockfile cleanup
   - Working directory checkout with uncommitted change detection
-  - Branch existence checking
   - Sandbox branch cleanup for new-layout sandboxes
 
 Security-critical: ref validation and protected-branch guards preserve
@@ -303,23 +302,3 @@ def cleanup_sandbox_branch_repo(branch: str, repo_root: str | Path) -> None:
     )
     if result.returncode == 0:
         log_info(f"Cleaned up sandbox branch: {branch}")
-
-
-def branch_exists(repo_path: str | Path, branch: str) -> bool:
-    """Check if a branch exists in a repository.
-
-    Args:
-        repo_path: Path to the repository (bare or working).
-        branch: Branch name to check.
-
-    Returns:
-        True if the branch exists, False otherwise.
-    """
-    result = subprocess.run(
-        ["git", "-C", str(repo_path), "show-ref", "--verify", "--quiet",
-         f"refs/heads/{branch}"],
-        capture_output=True,
-        check=False,
-        timeout=TIMEOUT_GIT_QUERY,
-    )
-    return result.returncode == 0

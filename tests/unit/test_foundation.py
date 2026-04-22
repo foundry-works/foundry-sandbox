@@ -16,29 +16,20 @@ from foundry_sandbox.constants import (
     get_sandbox_home,
     get_repos_dir,
     get_claude_configs_dir,
-    get_sandbox_debug,
-    get_sandbox_verbose,
-    get_sandbox_assume_yes,
 )
 from foundry_sandbox.config import (
     load_json,
     write_json,
-    deep_merge,
-    deep_merge_no_overwrite,
-    json_escape,
-    json_array_from_lines,
 )
 from foundry_sandbox.models import SbxSandboxMetadata
 from foundry_sandbox.paths import (
     path_claude_config,
-    path_claude_home,
     path_metadata_file,
     path_last_cast_new,
     path_last_attach,
     path_presets_dir,
     path_preset_file,
     ensure_dir,
-    safe_remove,
     resolve_host_worktree_path,
     find_next_sandbox_name,
 )
@@ -72,27 +63,6 @@ class TestConstantsDirectoryGetters:
         assert str(get_claude_configs_dir()) == "/tmp/sb/claude-config"
 
 
-class TestConstantsRuntimeFlags:
-    """Tests for runtime flag getters with env var defaults and overrides."""
-
-    @pytest.mark.parametrize("getter,env_var,default", [
-        (get_sandbox_debug, "SANDBOX_DEBUG", 0),
-        (get_sandbox_verbose, "SANDBOX_VERBOSE", 0),
-        (get_sandbox_assume_yes, "SANDBOX_ASSUME_YES", 0),
-    ])
-    def test_int_flag_default(self, monkeypatch, getter, env_var, default):
-        monkeypatch.delenv(env_var, raising=False)
-        assert getter() == default
-
-    @pytest.mark.parametrize("getter,env_var", [
-        (get_sandbox_debug, "SANDBOX_DEBUG"),
-        (get_sandbox_verbose, "SANDBOX_VERBOSE"),
-        (get_sandbox_assume_yes, "SANDBOX_ASSUME_YES"),
-    ])
-    def test_int_flag_override(self, monkeypatch, getter, env_var):
-        monkeypatch.setenv(env_var, "1")
-        assert getter() == 1
-
 
 # ============================================================================
 # Paths Tests
@@ -108,9 +78,6 @@ class TestPathDerivation:
 
     def test_path_claude_config(self):
         assert str(path_claude_config("my-sandbox")) == "/tmp/sb/claude-config/my-sandbox"
-
-    def test_path_claude_home(self):
-        assert str(path_claude_home("my-sandbox")) == "/tmp/sb/claude-config/my-sandbox/claude"
 
     def test_path_metadata_file(self):
         assert str(path_metadata_file("my-sandbox")) == "/tmp/sb/claude-config/my-sandbox/metadata.json"
@@ -156,15 +123,9 @@ class TestPathSafetyAssertions:
         with pytest.raises(ValueError):
             path_preset_file(bad_name)
 
-    @pytest.mark.parametrize("bad_name", ["../x", "a/b", ".", "..", ""])
-    def test_path_claude_home_rejects_traversal(self, bad_name):
-        with pytest.raises(ValueError):
-            path_claude_home(bad_name)
-
     def test_valid_names_pass(self):
         path_claude_config("my-sandbox")
         path_preset_file("default")
-        path_claude_home("test-box")
 
 
 class TestFilesystemHelpers:
@@ -184,22 +145,6 @@ class TestFilesystemHelpers:
         target = str(tmp_path / "from_str")
         result = ensure_dir(target)
         assert result.is_dir()
-
-    def test_safe_remove_file(self, tmp_path):
-        f = tmp_path / "file.txt"
-        f.write_text("data")
-        safe_remove(f)
-        assert not f.exists()
-
-    def test_safe_remove_directory(self, tmp_path):
-        d = tmp_path / "subdir"
-        d.mkdir()
-        (d / "file.txt").write_text("data")
-        safe_remove(d)
-        assert not d.exists()
-
-    def test_safe_remove_nonexistent(self, tmp_path):
-        safe_remove(tmp_path / "nope")
 
 
 # ============================================================================
@@ -312,157 +257,6 @@ class TestWriteJson:
         write_json(str(f), {})
         assert f.read_text().endswith("\n")
 
-
-class TestDeepMerge:
-    """Tests for deep_merge."""
-
-    def test_flat_merge(self):
-        assert deep_merge({"a": 1}, {"b": 2}) == {"a": 1, "b": 2}
-
-    def test_overlay_wins(self):
-        assert deep_merge({"a": 1}, {"a": 2}) == {"a": 2}
-
-    def test_nested_merge(self):
-        base = {"x": {"a": 1, "b": 2}}
-        overlay = {"x": {"b": 3, "c": 4}}
-        assert deep_merge(base, overlay) == {"x": {"a": 1, "b": 3, "c": 4}}
-
-    def test_deep_nested(self):
-        base = {"a": {"b": {"c": 1}}}
-        overlay = {"a": {"b": {"d": 2}}}
-        assert deep_merge(base, overlay) == {"a": {"b": {"c": 1, "d": 2}}}
-
-    def test_overlay_replaces_non_dict(self):
-        assert deep_merge({"a": "string"}, {"a": {"nested": True}}) == {"a": {"nested": True}}
-
-    def test_empty_base(self):
-        assert deep_merge({}, {"a": 1}) == {"a": 1}
-
-    def test_empty_overlay(self):
-        assert deep_merge({"a": 1}, {}) == {"a": 1}
-
-
-class TestDeepMergeNoOverwrite:
-    """Tests for deep_merge_no_overwrite."""
-
-    def test_base_wins(self):
-        assert deep_merge_no_overwrite({"a": 1}, {"a": 99}) == {"a": 1}
-
-    def test_fills_missing(self):
-        assert deep_merge_no_overwrite({"a": 1}, {"b": 2}) == {"a": 1, "b": 2}
-
-    def test_nested_base_wins(self):
-        base = {"x": {"a": 1}}
-        overlay = {"x": {"a": 99, "b": 2}}
-        assert deep_merge_no_overwrite(base, overlay) == {"x": {"a": 1, "b": 2}}
-
-    def test_empty_base(self):
-        assert deep_merge_no_overwrite({}, {"a": 1}) == {"a": 1}
-
-
-class TestJsonEscape:
-    """Tests for json_escape."""
-
-    def test_no_special_chars(self):
-        assert json_escape("hello") == "hello"
-
-    def test_backslash(self):
-        assert json_escape("a\\b") == "a\\\\b"
-
-    def test_quotes(self):
-        assert json_escape('say "hi"') == 'say \\"hi\\"'
-
-    def test_newline(self):
-        assert json_escape("line1\nline2") == "line1\\nline2"
-
-    def test_tab(self):
-        assert json_escape("col1\tcol2") == "col1\\tcol2"
-
-    def test_carriage_return(self):
-        assert json_escape("a\rb") == "a\\rb"
-
-    def test_combined(self):
-        assert json_escape('a\\b\n"c"') == 'a\\\\b\\n\\"c\\"'
-
-
-class TestJsonArrayFromLines:
-    """Tests for json_array_from_lines."""
-
-    def test_empty_input(self):
-        assert json_array_from_lines("") == "[]"
-
-    def test_single_line(self):
-        result = json_array_from_lines('"hello"')
-        assert '"hello"' in result
-        assert result.startswith("[")
-        assert result.endswith("]")
-
-    def test_multiple_lines(self):
-        result = json_array_from_lines('"a"\n"b"\n"c"')
-        assert '"a"' in result
-        assert '"b"' in result
-        assert '"c"' in result
-
-    def test_skips_blank_lines(self):
-        result = json_array_from_lines('"a"\n\n"b"\n')
-        assert '"a"' in result
-        assert '"b"' in result
-        lines = [line.strip() for line in result.splitlines() if line.strip() and line.strip() not in ("[", "]")]
-        assert len(lines) == 2
-
-
-# ============================================================================
-# EnvironmentScope Tests
-# ============================================================================
-
-
-class TestEnvironmentScope:
-    """Tests for environment_scope context manager."""
-
-    def test_restores_on_normal_exit(self, monkeypatch):
-        from foundry_sandbox.utils import environment_scope
-
-        monkeypatch.setenv("ES_TEST_KEY", "original")
-        with environment_scope({"ES_TEST_KEY": "modified"}):
-            assert os.environ["ES_TEST_KEY"] == "modified"
-        assert os.environ["ES_TEST_KEY"] == "original"
-
-    def test_restores_on_exception(self, monkeypatch):
-        from foundry_sandbox.utils import environment_scope
-
-        monkeypatch.setenv("ES_TEST_KEY", "original")
-        with pytest.raises(ValueError):
-            with environment_scope({"ES_TEST_KEY": "modified"}):
-                raise ValueError("boom")
-        assert os.environ["ES_TEST_KEY"] == "original"
-
-    def test_removes_vars_added_inside_scope(self, monkeypatch):
-        from foundry_sandbox.utils import environment_scope
-
-        monkeypatch.delenv("ES_NEW_VAR", raising=False)
-        with environment_scope():
-            os.environ["ES_NEW_VAR"] = "injected"
-            assert os.environ["ES_NEW_VAR"] == "injected"
-        assert "ES_NEW_VAR" not in os.environ
-
-    def test_no_updates(self, monkeypatch):
-        from foundry_sandbox.utils import environment_scope
-
-        monkeypatch.setenv("ES_TEST_KEY", "original")
-        with environment_scope():
-            assert os.environ["ES_TEST_KEY"] == "original"
-        assert os.environ["ES_TEST_KEY"] == "original"
-
-    def test_multiple_updates(self, monkeypatch):
-        from foundry_sandbox.utils import environment_scope
-
-        monkeypatch.delenv("ES_A", raising=False)
-        monkeypatch.delenv("ES_B", raising=False)
-        with environment_scope({"ES_A": "1", "ES_B": "2"}):
-            assert os.environ["ES_A"] == "1"
-            assert os.environ["ES_B"] == "2"
-        assert "ES_A" not in os.environ
-        assert "ES_B" not in os.environ
 
 
 # ============================================================================

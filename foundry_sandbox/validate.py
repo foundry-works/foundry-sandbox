@@ -1,7 +1,6 @@
 """Input validation for foundry-sandbox.
 
-Pure validation logic for sandbox names, URLs, SSH modes, environment
-requirements, and git remote credential detection.
+Pure validation logic for sandbox names and git URLs.
 
 Convention:
 - Functions validating user input return (is_valid: bool, error_msg: str).
@@ -13,15 +12,7 @@ from __future__ import annotations
 
 import os
 import re
-import shutil
-from pathlib import Path
 from urllib.parse import urlparse
-
-from foundry_sandbox.constants import (
-    get_repos_dir,
-    get_claude_configs_dir,
-)
-from foundry_sandbox.paths import ensure_dir
 
 
 # ============================================================================
@@ -149,109 +140,3 @@ def validate_git_url(url: str) -> tuple[bool, str]:
         return True, ""
 
     return False, f"Invalid repository URL: {url}"
-
-
-def validate_ssh_mode(mode: str) -> tuple[bool, str]:
-    """Validate an SSH mode value.
-
-    Args:
-        mode: SSH mode to validate (init, always, disabled).
-
-    Returns:
-        Tuple of (is_valid, error_message).
-    """
-    valid_modes = {"init", "always", "disabled"}
-    if mode not in valid_modes:
-        return False, f"Invalid SSH mode: {mode} (use: always, disabled)"
-    return True, ""
-
-
-# ============================================================================
-# Environment Validation
-# ============================================================================
-
-
-def require_command(cmd: str) -> tuple[bool, str]:
-    """Check that a command is available on the system.
-
-    Args:
-        cmd: Command name to check.
-
-    Returns:
-        Tuple of (is_available, error_message).
-    """
-    if shutil.which(cmd) is None:
-        return False, f"Missing required command: {cmd}"
-    return True, ""
-
-
-def validate_environment() -> tuple[bool, str]:
-    """Validate the required environment (git, directories).
-
-    Ensures required commands are available and creates necessary directories.
-
-    Returns:
-        Tuple of (is_valid, error_message).
-    """
-    ok, msg = require_command("git")
-    if not ok:
-        return False, msg
-
-    ensure_dir(get_repos_dir())
-    ensure_dir(get_claude_configs_dir())
-    return True, ""
-
-
-# ============================================================================
-# Git Remote Credential Detection
-# ============================================================================
-
-# Pattern: ://user:password@host (credentials embedded in URL)
-_CREDENTIAL_PATTERN = re.compile(r"://[^/:@]+:[^/:@]+@[^/]+")
-
-
-def validate_git_remotes(git_dir: str = ".git") -> tuple[bool, str]:
-    """Detect embedded credentials in git remote URLs.
-
-    Scans the git config for URLs containing user:password@ patterns.
-
-    Args:
-        git_dir: Path to the .git directory.
-
-    Returns:
-        Tuple of (is_clean, error_message).
-    """
-    config_file = Path(git_dir) / "config"
-    if not config_file.is_file():
-        return True, ""
-
-    try:
-        content = config_file.read_text()
-    except OSError:
-        return True, ""
-
-    offending_lines = []
-    for line in content.splitlines():
-        if _CREDENTIAL_PATTERN.search(line):
-            offending_lines.append(line.strip())
-
-    if not offending_lines:
-        return True, ""
-
-    # Redact passwords in error message
-    redacted = []
-    for line in offending_lines[:3]:
-        redacted.append(
-            re.sub(r"(://[^:]+:)[^@]+(@)", r"\1***\2", line)
-        )
-
-    msg = (
-        f"Embedded credentials detected in git config: {config_file}\n"
-        "Remote URLs must not contain credentials (user:pass@)\n"
-        "Offending lines:\n"
-    )
-    for r in redacted:
-        msg += f"  {r}\n"
-    msg += "Remove credentials from git remote URLs before enabling credential isolation"
-
-    return False, msg

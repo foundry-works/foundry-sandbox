@@ -433,88 +433,6 @@ def sbx_secret_set(
 
 
 # ============================================================================
-# Network Policy
-# ============================================================================
-
-VALID_NETWORK_PROFILES = frozenset({"balanced", "allow-all", "deny-all"})
-
-
-def sbx_policy_set_default(profile: str) -> subprocess.CompletedProcess[str]:
-    """Set the default network policy profile.
-
-    Args:
-        profile: One of 'balanced', 'allow-all', 'deny-all'.
-
-    Returns:
-        CompletedProcess result.
-
-    Raises:
-        ValueError: If profile is not valid.
-    """
-    if profile not in VALID_NETWORK_PROFILES:
-        raise ValueError(
-            f"Invalid network profile {profile!r}; "
-            f"must be one of: {', '.join(sorted(VALID_NETWORK_PROFILES))}"
-        )
-    return _run_sbx(["policy", "set-default", profile], timeout=TIMEOUT_SBX_QUERY)
-
-
-def sbx_policy_allow(spec: str) -> subprocess.CompletedProcess[str]:
-    """Add a network allow rule.
-
-    Args:
-        spec: Network specification (domain or CIDR).
-
-    Returns:
-        CompletedProcess result.
-    """
-    return _run_sbx(["policy", "allow", "network", spec], timeout=TIMEOUT_SBX_QUERY)
-
-
-def sbx_policy_deny(spec: str) -> subprocess.CompletedProcess[str]:
-    """Add a network deny rule.
-
-    Args:
-        spec: Network specification (domain or CIDR).
-
-    Returns:
-        CompletedProcess result.
-    """
-    return _run_sbx(["policy", "deny", "network", spec], timeout=TIMEOUT_SBX_QUERY)
-
-
-# ============================================================================
-# Ports
-# ============================================================================
-
-
-def sbx_ports_publish(name: str, spec: str) -> subprocess.CompletedProcess[str]:
-    """Publish a port from a sandbox.
-
-    Args:
-        name: Sandbox name.
-        spec: Port specification (e.g. '8080:80', 'tcp://0.0.0.0:8080:80').
-
-    Returns:
-        CompletedProcess result.
-    """
-    return _run_sbx(["ports", "publish", name, spec], timeout=TIMEOUT_SBX_QUERY)
-
-
-def sbx_ports_unpublish(name: str, spec: str) -> subprocess.CompletedProcess[str]:
-    """Unpublish a port from a sandbox.
-
-    Args:
-        name: Sandbox name.
-        spec: Port specification to remove.
-
-    Returns:
-        CompletedProcess result.
-    """
-    return _run_sbx(["ports", "unpublish", name, spec], timeout=TIMEOUT_SBX_QUERY)
-
-
-# ============================================================================
 # Templates
 # ============================================================================
 
@@ -530,18 +448,6 @@ def sbx_template_save(name: str, tag: str) -> subprocess.CompletedProcess[str]:
         CompletedProcess result.
     """
     return _run_sbx(["template", "save", name, tag], timeout=TIMEOUT_SBX_LIFECYCLE)
-
-
-def sbx_template_load(tag: str) -> subprocess.CompletedProcess[str]:
-    """Load a saved template.
-
-    Args:
-        tag: Template tag name.
-
-    Returns:
-        CompletedProcess result.
-    """
-    return _run_sbx(["template", "load", tag], timeout=TIMEOUT_SBX_LIFECYCLE)
 
 
 def sbx_template_ls() -> list[str]:

@@ -5,84 +5,84 @@ See `plan.md` for rationale and detail. Check items off as they land. Commit aft
 ## Phase 1 — Delete unused functions
 
 ### `foundry_sandbox/api_keys.py`
-- [ ] Delete `check_any_ai_key`
-- [ ] Delete `has_gemini_key`
-- [ ] Delete `has_codex_key`
-- [ ] Delete `opencode_enabled`
-- [ ] Delete `check_any_search_key`
-- [ ] Delete `warn_claude_auth_conflict`
-- [ ] Delete `get_optional_cli_warnings`
-- [ ] Delete `get_cli_status`
-- [ ] Delete `show_cli_status`
-- [ ] Delete `get_missing_keys_warning`
-- [ ] Delete `check_api_keys_status`
-- [ ] Delete `export_gh_token`
-- [ ] Delete `AI_PROVIDER_KEYS`
-- [ ] Remove `CREDENTIAL_PROXY_PLACEHOLDER` / `CRED_PROXY_` filters from remaining functions
+- [x] Delete `check_any_ai_key`
+- [x] Delete `has_gemini_key`
+- [x] Delete `has_codex_key`
+- [x] Delete `opencode_enabled`
+- [x] Delete `check_any_search_key`
+- [x] Delete `warn_claude_auth_conflict`
+- [x] Delete `get_optional_cli_warnings`
+- [x] Delete `get_cli_status`
+- [x] Delete `show_cli_status`
+- [x] Delete `get_missing_keys_warning`
+- [x] Delete `check_api_keys_status`
+- [x] Delete `export_gh_token`
+- [x] Delete `AI_PROVIDER_KEYS`
+- [x] Remove `CREDENTIAL_PROXY_PLACEHOLDER` / `CRED_PROXY_` filters from remaining functions
 
 ### `foundry_sandbox/validate.py`
-- [ ] Delete `validate_ssh_mode`
-- [ ] Delete `validate_environment`
-- [ ] Delete `require_command`
-- [ ] Delete `validate_git_remotes`
+- [x] Delete `validate_ssh_mode`
+- [x] Delete `validate_environment`
+- [x] Delete `require_command`
+- [x] Delete `validate_git_remotes`
 
 ### `foundry_sandbox/sbx.py`
-- [ ] Delete `sbx_ports_publish`
-- [ ] Delete `sbx_ports_unpublish`
-- [ ] Delete `sbx_template_load`
-- [ ] Delete `sbx_policy_set_default`
-- [ ] Delete `sbx_policy_allow`
-- [ ] Delete `sbx_policy_deny`
-- [ ] Delete `VALID_NETWORK_PROFILES`
+- [x] Delete `sbx_ports_publish`
+- [x] Delete `sbx_ports_unpublish`
+- [x] Delete `sbx_template_load`
+- [x] Delete `sbx_policy_set_default`
+- [x] Delete `sbx_policy_allow`
+- [x] Delete `sbx_policy_deny`
+- [x] Delete `VALID_NETWORK_PROFILES`
 
 ### `foundry_sandbox/constants.py`
-- [ ] Delete `CONTAINER_READY_ATTEMPTS`
-- [ ] Delete `CONTAINER_READY_DELAY`
-- [ ] Delete `TIMEOUT_PIP_INSTALL`
-- [ ] Delete `get_sandbox_debug`
-- [ ] Delete `get_sandbox_assume_yes`
-- [ ] Delete `VALID_NETWORK_MODES`
-- [ ] Delete `get_sandbox_network_mode`
-- [ ] Delete `get_sandbox_sync_on_attach`
-- [ ] Delete `get_sandbox_sync_ssh`
-- [ ] Delete `get_sandbox_ssh_mode`
-- [ ] Delete `get_sandbox_opencode_disable_npm_plugins`
-- [ ] Delete `get_sandbox_opencode_plugin_dir`
-- [ ] Delete `get_sandbox_opencode_prefetch_npm_plugins`
-- [ ] Delete `get_sandbox_opencode_default_model`
-- [ ] Delete `get_sandbox_tmux_scrollback`
-- [ ] Delete `get_sandbox_tmux_mouse`
+- [x] Delete `CONTAINER_READY_ATTEMPTS`
+- [x] Delete `CONTAINER_READY_DELAY`
+- [x] Delete `TIMEOUT_PIP_INSTALL`
+- [x] Delete `get_sandbox_debug`
+- [x] Delete `get_sandbox_assume_yes`
+- [x] Delete `VALID_NETWORK_MODES`
+- [x] Delete `get_sandbox_network_mode`
+- [x] Delete `get_sandbox_sync_on_attach`
+- [x] Delete `get_sandbox_sync_ssh`
+- [x] Delete `get_sandbox_ssh_mode`
+- [x] Delete `get_sandbox_opencode_disable_npm_plugins`
+- [x] Delete `get_sandbox_opencode_plugin_dir`
+- [x] Delete `get_sandbox_opencode_prefetch_npm_plugins`
+- [x] Delete `get_sandbox_opencode_default_model`
+- [x] Delete `get_sandbox_tmux_scrollback`
+- [x] Delete `get_sandbox_tmux_mouse`
 
 ### `foundry_sandbox/paths.py`
-- [ ] Delete `path_opencode_plugins_marker`
-- [ ] Delete `resolve_ssh_agent_sock`
-- [ ] Delete `path_claude_home`
-- [ ] Delete `safe_remove` + `_rmtree_no_follow_symlinks`
+- [x] Delete `path_opencode_plugins_marker`
+- [x] Delete `resolve_ssh_agent_sock`
+- [x] Delete `path_claude_home`
+- [x] Delete `safe_remove` + `_rmtree_no_follow_symlinks`
 
 ### `foundry_sandbox/config.py`
-- [ ] Delete `deep_merge`
-- [ ] Delete `deep_merge_no_overwrite`
-- [ ] Delete `json_escape`
-- [ ] Delete `json_array_from_lines`
+- [x] Delete `deep_merge`
+- [x] Delete `deep_merge_no_overwrite`
+- [x] Delete `json_escape`
+- [x] Delete `json_array_from_lines`
 
 ### `foundry_sandbox/utils.py`
-- [ ] Delete `flag_enabled`
-- [ ] Delete `generate_sandbox_id`
-- [ ] Delete `environment_scope`
+- [x] Delete `flag_enabled`
+- [x] Delete `generate_sandbox_id`
+- [x] Delete `environment_scope`
 
 ### `foundry_sandbox/git.py`
-- [ ] Delete `branch_exists`
+- [x] Delete `branch_exists`
 
 ### Tests
-- [ ] Remove `environment_scope` tests from `test_foundation.py`
-- [ ] Remove `path_claude_home` tests from `test_foundation.py`
-- [ ] Remove `safe_remove` tests from `test_foundation.py`
-- [ ] Remove `get_sandbox_debug` / `get_sandbox_assume_yes` tests from `test_foundation.py`
-- [ ] Remove `branch_exists` tests from `test_git.py`
-- [ ] Remove tests in `test_sbx.py` for deleted `sbx_ports_*`, `sbx_template_load`, `sbx_policy_*` wrappers
+- [x] Remove `environment_scope` tests from `test_foundation.py`
+- [x] Remove `path_claude_home` tests from `test_foundation.py`
+- [x] Remove `safe_remove` tests from `test_foundation.py`
+- [x] Remove `get_sandbox_debug` / `get_sandbox_assume_yes` tests from `test_foundation.py`
+- [x] Remove `branch_exists` tests from `test_git.py`
+- [x] Remove tests in `test_sbx.py` for deleted `sbx_ports_*`, `sbx_template_load`, `sbx_policy_*` wrappers
 
 ### Verify
-- [ ] `./scripts/ci-local.sh` passes
+- [x] `./scripts/ci-local.sh` passes
 - [ ] `git commit -m "refactor: Phase 1 delete unused helpers"`
 
 ---
