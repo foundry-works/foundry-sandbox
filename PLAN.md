@@ -1,162 +1,194 @@
-# Legacy And Dead Code Cleanup Plan
+# Migrate to sbx Worktree Management
 
 Date: 2026-04-22
 
 ## Goal
 
-Remove stale compatibility code, dead modules, obsolete installer behavior, and old test/doc references left after the 0.21.0 migration to Docker `sbx`, while preserving the documented 0.20.x migration path until its planned removal in 0.23.0.
+Replace cast's custom bare-repo + worktree system with sbx's built-in `--branch` worktree management. Currently `cast new` creates a bare repo at `~/.sandboxes/repos/` and a git worktree at `~/.sandboxes/worktrees/<name>/`, then passes both the worktree path AND `--branch` to `sbx create`. sbx rejects this because the cast-created worktree is a detached checkout, not a git repo root.
+
+## Root Cause
+
+`new_sbx.py:86-121` does three things:
+1. `ensure_bare_repo()` — clones bare repo to `~/.sandboxes/repos/`
+2. `create_worktree()` — creates git worktree at `~/.sandboxes/worktrees/<name>/`
+3. `sbx_create(name, agent, worktree_path, branch=branch)` — passes cast worktree as workspace AND `--branch`
+
+sbx's `--branch` flag creates its own worktree under `<repo>/.sbx/<name>-worktrees/<branch>/`. The double worktree creation conflicts. The fix: pass the repo root (not a worktree) to sbx and let sbx manage worktrees entirely.
 
 ## Ground Rules
 
-- Do not remove the 0.20.x migration commands before the deprecation window ends.
-- Keep security behavior fail-closed while deleting compatibility code.
-- Prefer deleting unused compatibility shims over keeping aliases without a current caller.
-- Update tests and docs in the same change that removes code.
-- Run focused unit tests after each cleanup phase, then a broader test/lint pass before release.
+- Cast delegates ALL worktree/git-branch management to sbx.
+- Cast retains: git safety server, HMAC provisioning, wrapper injection, metadata, IDE attach, destroy coordination.
+- Support existing sandboxes created before this change (backward compat).
+- Fail closed on security; no weakening of git safety or isolation.
+- Update tests in the same change that modifies code.
 
-## 0.23.0 Migration Removal Requirement
+## sbx Worktree Facts (Verified)
 
-The 0.20.x migration path is not just general cleanup; it is a scheduled breaking removal for 0.23.0. The release that removes it must delete the user-facing commands, the parser/conversion/rollback implementation, the tests that assert old metadata importability, and the docs that describe rollback to 0.20.x.
+- `sbx create --name X --branch <branch> shell <repo-root>` creates worktree at `<repo-root>/.sbx/<name>-worktrees/<branch>/`
+- sbx stdout includes the worktree path: `Worktree: /path/to/.sbx/<name>-worktrees/<branch>`
+- `sbx ls --json` returns `workspaces` array with the git root (not the worktree path directly)
+- `sbx rm` cleans up worktrees automatically
+- sbx worktrees use standard `git worktree` layout: `.git` points to `<repo>/.git/worktrees/<branch>/`
+- sbx runtime spec at `~/.local/state/sandboxes/sandboxes/sandboxd/runtimes/<name>.json` has `WorkspaceDir` (git root)
+- The worktree path is deterministic: `<repo_root>/.sbx/<sandbox_name>-worktrees/<branch>/`
 
-Removal is complete only when:
+## Phase 1: Fix `cast new` (Unblock Sandbox Creation)
 
-- `cast migrate-to-sbx` and `cast migrate-from-sbx` are unknown commands.
-- 0.20.x `metadata.env` and old `metadata.json` are no longer parsed or imported.
-- Migration snapshots and rollback locks are no longer created or restored.
-- The docs no longer instruct users to migrate from 0.20.x using current commands.
-- The changelog clearly calls out the breaking removal.
+Make `cast new <repo>` produce a working sandbox by delegating worktree creation to sbx.
 
-## Phase 1: Immediate Low-Risk Cleanup
+### 1.1 Add `workspace_path` to metadata (`models.py`)
 
-These items appear stale or broken and do not need to wait for 0.23.0.
+Add field to `SbxSandboxMetadata`:
 
-1. Fix or remove shell completion installation.
-   - `install.sh` adds `source '$INSTALL_DIR/completion.bash'`, but no `completion.bash` exists in the repo.
-   - Decide whether to add generated Click completion support or remove the installer claim and rc-file mutation.
-   - Update `README.md`, `docs/getting-started.md`, and `uninstall.sh` wording if completion is removed.
+```python
+workspace_path: str = ""
+"""Host-side path to the sbx-managed worktree (set after sbx create)."""
+```
 
-2. Remove no-op installer compatibility flags if no longer needed.
-   - Candidates: `--no-build`, `--no-cache`, `--without-opencode`.
-   - If retained for one more release, emit a deprecation warning instead of silently accepting them.
+### 1.2 Add `sbx_get_workspace_info()` to `sbx.py`
 
-3. Remove compose-era Docker image cleanup from `uninstall.sh`.
-   - The prompt to remove `foundry-sandbox:latest` appears to belong to the old Docker image workflow.
-   - Replace it with current sbx-specific cleanup only if there is a real current artifact to remove.
+Parse sbx create stdout to extract worktree path and branch. sbx stdout lines:
+```
+  Worktree: /home/user/repo/.sbx/<name>-worktrees/<branch>
+  Branch: <branch>
+```
 
-4. Clean red-team runner examples.
-   - `tests/redteam/runner.sh` still shows `03-dns-filtering`, which is retired.
-   - Replace with an active module such as `04-git-security`.
+```python
+def sbx_get_workspace_info(sbx_create_stdout: str) -> dict[str, str]:
+    """Extract worktree path and branch from sbx create stdout."""
+```
 
-5. Remove ignored stale Python bytecode and caches from local working trees.
-   - Examples observed: removed modules such as `compose`, `proxy`, `claude_settings`, `new_setup`, and old gateway test pyc files.
-   - This is local hygiene, not tracked code, but it prevents false positives during audits.
+Also add a function to compute the expected worktree path deterministically:
+```python
+def sbx_worktree_path(repo_root: str, sandbox_name: str, branch: str) -> str:
+    """Compute the expected sbx worktree path."""
+    return f"{repo_root}/.sbx/{sandbox_name}-worktrees/{branch}"
+```
 
-## Phase 2: Dead-Code Review And Deletion
+### 1.3 Rewrite `new_sbx_setup()` (`new_sbx.py`)
 
-These require a small reference check before deletion.
+**Remove**: imports of `ensure_bare_repo`, `create_worktree`; parameters `bare_path`, `worktree_path`; steps 2-3 (bare repo clone, worktree creation).
 
-1. Review and likely remove `foundry_sandbox/errors.py`.
-   - It defines `SandboxError`, `ValidationError`, and `SetupError`, but no tracked code imports them.
-   - Existing command code uses local exceptions or direct process exits.
+**Change signature**: `bare_path, worktree_path` → `repo_root: str`
 
-2. Shrink `foundry_sandbox/tui.py`.
-   - Only `_is_noninteractive` appears to be used by tracked code.
-   - Either move `_is_noninteractive` to a small utility module and delete the unused prompt helpers, or wire the prompt helpers into real command flows.
+**Change `sbx_create` call**: pass `repo_root` instead of `worktree_path`:
+```python
+result = sbx_create(name, agent, repo_root, branch=branch, template=use_template)
+workspace_path = sbx_worktree_path(repo_root, name, branch)
+```
 
-3. Remove backward-compatible re-exports from `foundry_sandbox/commands/_helpers.py`.
-   - Keep only the UI helpers currently imported by commands: auto-detect, fzf selection, and sandbox listing.
-   - Update any tests that patch via `_helpers` if direct imports become cleaner.
+**Store workspace_path in metadata** after sbx create succeeds.
 
-4. Decide the fate of `foundry-git-safety/foundry_git_safety/wrapper.sh`.
-   - The installed sbx wrapper is `foundry_sandbox/assets/git-wrapper-sbx.sh`.
-   - If `foundry-git-safety` is meant to be standalone, package and test `wrapper.sh`.
-   - If not, delete it and update the standalone README/security docs accordingly.
+**Update `provision_git_safety` call**: use `workspace_path` as `repo_root`.
 
-5. Remove compatibility re-exports from `foundry_git_safety.branch_isolation`.
-   - Output filtering now lives in `branch_output_filter.py`; shared constants/types live in `branch_types.py`.
-   - Update imports in `operations.py` and tests to use canonical modules.
-   - Delete `_REF_ENUM_CMDS` alias if no caller remains.
+### 1.4 Update `new.py`
 
-## Phase 3: Red-Team Deferred Modules
+- Remove `repo_url_to_bare_path` import and `bare_path` computation.
+- `repo_root` comes from `_resolve_repo_input()` (already returns it for local repos).
+- For remote URLs (no local `repo_root`): clone a regular checkout to `~/.sandboxes/repos/<owner>/<repo>/` (non-bare), then pass that path to sbx. Add `ensure_repo_checkout()` if needed, or keep using the existing bare repo as a mirror and clone from it.
+- Sandbox name generation: keep `sandbox_name()` but change input from `bare_path` to a similar deterministic string derived from `repo_url`.
+- Simplify `rollback_new_sbx()` — remove `worktree_path` param; sbx handles worktree cleanup.
 
-The disabled modules under `tests/redteam/modules/disabled/` still encode old unified-proxy, MITM, or Docker-container assumptions.
+### 1.5 Update `write_sandbox_metadata()` (`state.py`)
 
-1. Rewrite `08-credential-injection` for sbx-native credential checks.
-   - Validate `sbx secret set` behavior and user-services proxy signing where applicable.
+Pass through the new `workspace_path` field to `SbxSandboxMetadata`.
 
-2. Rewrite `10-container-escape` as VM boundary tests.
-   - Remove checks tied to `unified-proxy` DNS names and Docker container networking.
+### 1.6 Update tests
 
-3. Delete or replace `12-tls-filesystem`.
-   - MITM CA tests are obsolete because sbx does not use MITM.
-   - Keep only filesystem/capability checks that apply to the current microVM model.
+- `tests/unit/test_new_sbx.py`: replace `bare_path`/`worktree_path` mocks with `repo_root`.
+- Update any test that asserts on worktree-related paths.
 
-4. Delete or replace `16-readonly-fs`.
-   - Proxy HTTPS and custom CA assumptions are obsolete.
-   - Keep tmpfs and protected-path checks only if they map to current sbx guarantees.
+## Phase 2: Update `destroy`, `attach`, `_helpers`, `paths`
 
-5. Update `tests/redteam/README.md` after deciding which modules are rewritten, deleted, or permanently retired.
+Make all core commands work with sbx-managed worktrees.
 
-## Phase 4: Scheduled 0.23.0 Migration Removal
+### 2.1 Simplify `destroy.py`
 
-This should happen when the documented deprecation window ends: target October 2026.
+- Remove `remove_worktree()` call — `sbx rm` handles worktree cleanup.
+- Remove `cleanup_sandbox_branch()` call — sbx manages branches.
+- Remove `repo_url_to_bare_path` import.
+- Keep: `sbx_rm`, git safety unregister, claude-config cleanup.
 
-1. Remove CLI command registrations.
-   - Delete `migrate-to-sbx` and `migrate-from-sbx` from `_LAZY_COMMANDS` in `foundry_sandbox/cli.py`.
-   - Update CLI tests so these commands are expected to fail as unknown.
+### 2.2 Update `attach.py`
 
-2. Delete migration command and library code.
-   - Remove `foundry_sandbox/commands/migrate.py`.
-   - Remove `foundry_sandbox/migration.py`.
-   - Remove `path_metadata_legacy_file()` if no non-migration caller remains.
-   - Remove imports of `CastNewPreset` or legacy mapping helpers that only existed for conversion.
+- Replace `worktree_path.is_dir()` existence check with metadata check.
+- For IDE launch: use `workspace_path` from metadata instead of derived worktree path.
 
-3. Remove migration tests.
-   - Delete or rewrite `tests/unit/test_migration.py`.
-   - Delete or rewrite `tests/smoke/test_migration_smoke.py`.
-   - Check for duplicated migration smoke tests under `foundry-git-safety/tests/smoke/`.
-   - Add negative CLI coverage proving the migration commands are gone.
+### 2.3 Update `_helpers.py`
 
-4. Remove migration docs.
-   - Delete `docs/migration/0.20-to-0.21.md` or move it to archived release notes.
-   - Remove migration sections from `docs/usage/commands.md`.
-   - Update `docs/README.md`, `CHANGELOG.md`, and any command index references.
-   - Remove the migration command links from any quick-reference command lists.
+- `auto_detect_sandbox()`: iterate all sandboxes via metadata, match cwd against `workspace_path`.
+- `list_sandbox_names()`: scan `~/.sandboxes/claude-config/` dirs (the authoritative registry) instead of `~/.sandboxes/worktrees/`.
+- `fzf_select_sandbox()`: same metadata-based listing.
 
-5. Remove old metadata import support.
-   - Drop `metadata.env` parsing.
-   - Drop old JSON metadata classification.
-   - Drop rollback snapshot/lock support for migration.
-   - Remove migration snapshot constants and any `.migration-in-progress` handling.
+### 2.4 Update `paths.py`
 
-6. Release validation for the breaking change.
-   - Run `cast migrate-to-sbx` and `cast migrate-from-sbx` manually and confirm both fail with the normal unknown-command message.
-   - Run `cast help` and confirm no migration commands are listed.
-   - Verify package metadata and changelog identify the removal as part of 0.23.0.
+- `path_worktree(name)`: add fallback — check metadata `workspace_path` first, fall back to old `get_worktrees_dir() / name` for pre-migration sandboxes.
+- `find_next_sandbox_name()`: only check `claude-config/` for collisions (not `worktrees/`).
+- `repo_url_to_bare_path()`: deprecate but keep for now.
 
-## Phase 5: Documentation Cleanup
+## Phase 3: Update `git_mode` (Deferred)
 
-1. Update ADR references that point at deleted implementation paths.
-   - ADRs can remain historical, but references to removed files should be clearly marked historical.
-   - `docs/adr/012-dns-filtering-deferred.md` mentions `PLAN §5.8`; replace with a stable doc reference or remove it.
+Most complex change — defer until Phase 1-2 are stable.
 
-2. Check user-facing docs for stale unified-proxy, mitmproxy, Squid, docker-compose, gateway token, and custom CA language.
-   - Preserve historical ADR context.
-   - Remove or rewrite current-architecture docs that imply those systems still exist.
+### 3.1 Rewrite `_resolve_git_paths()` (`git_mode.py`)
 
-3. Align `README.md` install/uninstall claims with the actual installer behavior after Phase 1.
+sbx worktrees use `<repo>/.git/worktrees/<branch>/` as gitdir. The `.git` file in the worktree at `<repo>/.sbx/<name>-worktrees/<branch>/.git` points there. The `commondir` in the gitdir points to the main repo's `.git`. This is the standard git worktree layout.
 
-## Validation Strategy
+The path traversal chain:
+```
+worktree/.git → gitdir: <repo>/.git/worktrees/<branch>
+gitdir/commondir → ../.. (→ <repo>/.git)
+```
+
+### 3.2 Update `_validate_git_paths()`
+
+Relax trust boundary: allow paths anywhere under the repo root (not just `~/.sandboxes/`). Validate that gitdir is under the repo's `.git/` directory.
+
+### 3.3 Update `_apply_git_mode()`
+
+The core toggle (host path ↔ `/git-workspace`) still applies. The config files are at:
+- `gitdir/config.worktree` — per-worktree config
+- Main repo `.git/config` — shared config
+
+## Phase 4: Deprecate Dead Code
+
+After all callers are migrated.
+
+### 4.1 Deprecate `git_worktree.py`
+
+Mark for removal: `create_worktree()`, `remove_worktree()`, `cleanup_sandbox_branch()`, `configure_sparse_checkout()`. Keep module with deprecation warnings for one release.
+
+### 4.2 Deprecate bare repo functions in `git.py`
+
+`ensure_bare_repo()`, `fetch_bare_branch()`, `_ensure_fetch_refspec()` — no longer called after Phase 1.
+
+### 4.3 Clean up `constants.py`
+
+`get_worktrees_dir()` returns old path for backward compat. `get_repos_dir()` may still be needed if remote URL cloning is retained.
+
+## Critical Files
+
+| File | Change Size | Description |
+|------|-------------|-------------|
+| `foundry_sandbox/commands/new_sbx.py` | MAJOR | Remove bare_repo + worktree, pass repo_root to sbx |
+| `foundry_sandbox/commands/new.py` | MODERATE | Remove bare_path, simplify params |
+| `foundry_sandbox/sbx.py` | MINOR | Add workspace info helpers |
+| `foundry_sandbox/models.py` | MINOR | Add workspace_path field |
+| `foundry_sandbox/commands/destroy.py` | MODERATE | Remove worktree/branch cleanup |
+| `foundry_sandbox/commands/attach.py` | MINOR | Use metadata workspace_path |
+| `foundry_sandbox/commands/_helpers.py` | MODERATE | Metadata-based sandbox discovery |
+| `foundry_sandbox/paths.py` | MODERATE | Update path_worktree, find_next_sandbox_name |
+| `foundry_sandbox/commands/git_mode.py` | MAJOR (Phase 3) | Rewrite path discovery |
+
+## Validation
 
 After each phase:
 
-- Run targeted unit tests for touched modules.
-- Run `python -m ruff check foundry_sandbox foundry-git-safety/foundry_git_safety`.
-- Run `python -m compileall -q foundry_sandbox foundry-git-safety/foundry_git_safety`.
-
-Before merging the full cleanup:
-
-- Run the full default test suite with `pytest`.
-- Run security-focused tests for `foundry-git-safety`.
-- Run red-team modules in a live sbx sandbox if red-team tests were changed.
-- Confirm `cast help` no longer lists removed commands.
+1. Run `cast new --agent shell --skip-key-check --template none .` — verify sandbox creation succeeds.
+2. Run `sbx ls` — verify sandbox is running with correct worktree.
+3. Run `sbx exec <name> -- ls /workspace/tests/redteam/` — verify repo is mounted.
+4. Run `cast destroy <name>` — verify full cleanup (sbx sandbox, config dir, no orphan worktrees).
+5. Run `cast list` — verify sandbox listing works.
+6. Run `python -m pytest tests/unit/ -x` — verify unit tests pass.
+7. Run `python -m ruff check foundry_sandbox` — verify lint passes.
