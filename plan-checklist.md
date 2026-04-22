@@ -89,13 +89,13 @@ See `plan.md` for rationale and detail. Check items off as they land. Commit aft
 
 ## Phase 2 — Delete obsolete files
 
-- [ ] Delete `scripts/build-foundry-template.sh`
-- [ ] Delete `config/allowlist.yaml`
-- [ ] Delete `config/firewall-allowlist.txt`
-- [ ] Delete `config/policy.yaml.example`
-- [ ] Delete or archive `sbx-analysis.md`
-- [ ] Grep for any remaining references to the deleted files
-- [ ] Verify `./scripts/ci-local.sh` passes
+- [x] Delete `scripts/build-foundry-template.sh`
+- [x] Delete `config/allowlist.yaml`
+- [x] Delete `config/firewall-allowlist.txt`
+- [x] Delete `config/policy.yaml.example`
+- [x] Delete or archive `sbx-analysis.md`
+- [x] Grep for any remaining references to the deleted files
+- [x] Verify `./scripts/ci-local.sh` passes
 - [ ] `git commit -m "refactor: Phase 2 delete obsolete configs and scripts"`
 
 ---

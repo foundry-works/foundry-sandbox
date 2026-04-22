@@ -99,8 +99,7 @@ if command -v shellcheck &>/dev/null; then
     shellcheck -e SC2329,SC2259 foundry_sandbox/assets/git-wrapper-sbx.sh \
     && shellcheck -e SC2163 tests/run.sh \
     && shellcheck -e SC2317,SC2155,SC2034,SC1091,SC2162,SC2064,SC2129 install.sh \
-    && shellcheck -e SC2034 uninstall.sh \
-    && shellcheck -e SC1091,SC2086 scripts/build-foundry-template.sh
+    && shellcheck -e SC2034 uninstall.sh
   }
   run_step "Shellcheck" run_shellcheck
 else
