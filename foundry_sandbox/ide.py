@@ -14,7 +14,7 @@ import time
 
 import click
 
-from foundry_sandbox.tui import _is_noninteractive
+from foundry_sandbox.utils import _is_noninteractive
 
 # IDE commands in preference order (matching lib/ide.sh)
 IDE_COMMANDS = ("cursor", "zed", "code")

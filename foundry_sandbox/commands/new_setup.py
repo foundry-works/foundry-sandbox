@@ -24,7 +24,7 @@ from foundry_sandbox.git_safety import (
 )
 from foundry_sandbox.paths import ensure_dir
 from foundry_sandbox.sbx import (
-    install_pip_requirements_sbx,
+    install_pip_requirements,
     sbx_check_available,
     sbx_create,
     sbx_exec,
@@ -265,7 +265,7 @@ def new_sbx_setup(
 
     if pip_requirements:
         log_section("Dependencies")
-        install_pip_requirements_sbx(name, pip_requirements)
+        install_pip_requirements(name, pip_requirements)
 
     # ------------------------------------------------------------------
     # 7. Final metadata patch (user services)

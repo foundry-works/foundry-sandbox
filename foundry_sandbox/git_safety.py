@@ -259,7 +259,7 @@ def _wrapper_script_path() -> Path:
     """
     from importlib.resources import files
 
-    resource = files("foundry_sandbox.assets").joinpath("git-wrapper-sbx.sh")
+    resource = files("foundry_sandbox.assets").joinpath("git-wrapper.sh")
     path = Path(str(resource))
     if not path.exists():
         raise FileNotFoundError(
@@ -297,7 +297,7 @@ def inject_git_wrapper(
 ) -> None:
     """Inject the git wrapper script into a running sandbox.
 
-    Copies git-wrapper-sbx.sh to /usr/local/bin/git inside the sandbox
+    Copies git-wrapper.sh to /usr/local/bin/git inside the sandbox
     and sets environment variables for the wrapper.
 
     Args:

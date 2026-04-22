@@ -98,7 +98,7 @@ class TestStartCommand:
         assert result.exit_code == 1
         assert "not found" in result.output
 
-    @patch("foundry_sandbox.commands.start.install_pip_requirements_sbx")
+    @patch("foundry_sandbox.commands.start.install_pip_requirements")
     @patch("foundry_sandbox.commands.start.is_template_stale", return_value=False)
     @patch("foundry_sandbox.commands.start.verify_wrapper_integrity", return_value=(True, "abc"))
     @patch("foundry_sandbox.commands.start.sbx_sandbox_exists", return_value=True)

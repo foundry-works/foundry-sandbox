@@ -395,7 +395,7 @@ def sbx_exec_streaming(
 # ============================================================================
 
 
-def install_pip_requirements_sbx(name: str, requirements: str) -> None:
+def install_pip_requirements(name: str, requirements: str) -> None:
     """Install pip requirements inside an sbx sandbox."""
     log_info(f"Installing pip requirements: {requirements}")
     try:

@@ -11,21 +11,21 @@ import re
 class TestWheelAssetPresence:
     """Verify each runtime asset is resolvable from the installed package."""
 
-    def test_git_wrapper_sbx_in_assets(self):
-        """git-wrapper-sbx.sh must be in foundry_sandbox.assets."""
+    def test_git_wrapper_in_assets(self):
+        """git-wrapper.sh must be in foundry_sandbox.assets."""
         from importlib.resources import files
 
-        resource = files("foundry_sandbox.assets").joinpath("git-wrapper-sbx.sh")
+        resource = files("foundry_sandbox.assets").joinpath("git-wrapper.sh")
         assert resource.is_file(), (
-            "git-wrapper-sbx.sh not found in foundry_sandbox.assets. "
+            "git-wrapper.sh not found in foundry_sandbox.assets. "
             "Check pyproject.toml [tool.hatch.build.targets.wheel] artifacts."
         )
 
-    def test_git_wrapper_sbx_readable(self):
+    def test_git_wrapper_readable(self):
         from importlib.resources import files
 
         content = files("foundry_sandbox.assets").joinpath(
-            "git-wrapper-sbx.sh"
+            "git-wrapper.sh"
         ).read_bytes()
         assert content.startswith(b"#!/bin/bash")
 

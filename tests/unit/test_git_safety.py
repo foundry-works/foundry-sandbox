@@ -347,7 +347,7 @@ class TestVerifyGitWrapper:
 class TestComputeWrapperChecksum:
     @patch("foundry_sandbox.git_safety._wrapper_script_path")
     def test_computes_sha256(self, mock_wrapper_fn, tmp_path):
-        script = tmp_path / "git-wrapper-sbx.sh"
+        script = tmp_path / "git-wrapper.sh"
         script.write_text("#!/bin/bash\necho hello\n")
         mock_wrapper_fn.return_value = script
         checksum = compute_wrapper_checksum()
@@ -356,7 +356,7 @@ class TestComputeWrapperChecksum:
 
     @patch("foundry_sandbox.git_safety._wrapper_script_path")
     def test_deterministic(self, mock_wrapper_fn, tmp_path):
-        script = tmp_path / "git-wrapper-sbx.sh"
+        script = tmp_path / "git-wrapper.sh"
         script.write_text("#!/bin/bash\necho hello\n")
         mock_wrapper_fn.return_value = script
         assert compute_wrapper_checksum() == compute_wrapper_checksum()
@@ -530,7 +530,7 @@ class TestWrapperScriptResolution:
 
         path = _wrapper_script_path()
         assert path.exists()
-        assert path.name == "git-wrapper-sbx.sh"
+        assert path.name == "git-wrapper.sh"
 
     def test_wrapper_script_is_readable(self):
         from foundry_sandbox.git_safety import _wrapper_script_path

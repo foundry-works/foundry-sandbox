@@ -21,7 +21,7 @@ from foundry_sandbox.paths import (
     repo_url_to_checkout_path,
     sandbox_name as _helpers_sandbox_name,
 )
-from foundry_sandbox.commands.new_sbx import new_sbx_setup, rollback_new_sbx, _validate_preconditions
+from foundry_sandbox.commands.new_setup import new_sbx_setup, rollback_new_sbx, _validate_preconditions
 from foundry_sandbox.api_keys import has_opencode_key, has_zai_key
 from foundry_sandbox.constants import TIMEOUT_GIT_QUERY, TIMEOUT_LOCAL_CMD
 from foundry_sandbox.paths import path_claude_config

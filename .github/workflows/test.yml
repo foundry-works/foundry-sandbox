@@ -71,7 +71,7 @@ jobs:
         run: |
           sudo apt-get install -y -qq shellcheck 2>/dev/null
           # SC2329: cleanup invoked via trap; SC2259: pipe + heredoc for HMAC body
-          shellcheck -e SC2329,SC2259 foundry_sandbox/assets/git-wrapper-sbx.sh
+          shellcheck -e SC2329,SC2259 foundry_sandbox/assets/git-wrapper.sh
           # SC2163: export -f for functions, not patterns (false positive)
           shellcheck -e SC2163 tests/run.sh
           # SC2317: trap cleanup removal pattern; SC2155: local+assign for readability

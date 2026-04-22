@@ -8,17 +8,17 @@ import pytest
 from click.testing import CliRunner
 
 from foundry_sandbox.commands.new import new
-from foundry_sandbox.commands.new_sbx import new_sbx_setup, rollback_new_sbx
+from foundry_sandbox.commands.new_setup import new_sbx_setup, rollback_new_sbx
 from foundry_sandbox.git_safety import ProvisioningResult
 
 
 class TestNewSbxSetup:
-    @patch("foundry_sandbox.commands.new_sbx.write_sandbox_metadata")
-    @patch("foundry_sandbox.commands.new_sbx.provision_git_safety", return_value=ProvisioningResult(success=True, wrapper_checksum="abc123"))
-    @patch("foundry_sandbox.commands.new_sbx.git_safety_server_is_running", return_value=True)
-    @patch("foundry_sandbox.commands.new_sbx.ensure_foundry_template", return_value=True)
-    @patch("foundry_sandbox.commands.new_sbx.sbx_create")
-    @patch("foundry_sandbox.commands.new_sbx.sbx_check_available")
+    @patch("foundry_sandbox.commands.new_setup.write_sandbox_metadata")
+    @patch("foundry_sandbox.commands.new_setup.provision_git_safety", return_value=ProvisioningResult(success=True, wrapper_checksum="abc123"))
+    @patch("foundry_sandbox.commands.new_setup.git_safety_server_is_running", return_value=True)
+    @patch("foundry_sandbox.commands.new_setup.ensure_foundry_template", return_value=True)
+    @patch("foundry_sandbox.commands.new_setup.sbx_create")
+    @patch("foundry_sandbox.commands.new_setup.sbx_check_available")
     def test_full_setup(
         self, mock_check, mock_create, mock_ensure,
         mock_gs_running, mock_provision, mock_metadata, tmp_path,
@@ -51,9 +51,9 @@ class TestNewSbxSetup:
         mock_provision.assert_called_once()
         mock_metadata.assert_called_once()
 
-    @patch("foundry_sandbox.commands.new_sbx.ensure_foundry_template", return_value=True)
-    @patch("foundry_sandbox.commands.new_sbx.sbx_create", side_effect=Exception("sbx failed"))
-    @patch("foundry_sandbox.commands.new_sbx.sbx_check_available")
+    @patch("foundry_sandbox.commands.new_setup.ensure_foundry_template", return_value=True)
+    @patch("foundry_sandbox.commands.new_setup.sbx_create", side_effect=Exception("sbx failed"))
+    @patch("foundry_sandbox.commands.new_setup.sbx_check_available")
     def test_sbx_create_failure(
         self, mock_check, mock_create, mock_ensure, tmp_path,
     ):
@@ -76,12 +76,12 @@ class TestNewSbxSetup:
                 wd="",
             )
 
-    @patch("foundry_sandbox.commands.new_sbx.write_sandbox_metadata")
-    @patch("foundry_sandbox.commands.new_sbx.provision_git_safety", return_value=ProvisioningResult(success=True, wrapper_checksum="abc123"))
-    @patch("foundry_sandbox.commands.new_sbx.git_safety_server_is_running", return_value=True)
-    @patch("foundry_sandbox.commands.new_sbx.ensure_foundry_template", return_value=True)
-    @patch("foundry_sandbox.commands.new_sbx.sbx_create")
-    @patch("foundry_sandbox.commands.new_sbx.sbx_check_available")
+    @patch("foundry_sandbox.commands.new_setup.write_sandbox_metadata")
+    @patch("foundry_sandbox.commands.new_setup.provision_git_safety", return_value=ProvisioningResult(success=True, wrapper_checksum="abc123"))
+    @patch("foundry_sandbox.commands.new_setup.git_safety_server_is_running", return_value=True)
+    @patch("foundry_sandbox.commands.new_setup.ensure_foundry_template", return_value=True)
+    @patch("foundry_sandbox.commands.new_setup.sbx_create")
+    @patch("foundry_sandbox.commands.new_setup.sbx_check_available")
     def test_host_worktree_path_stored_in_metadata(
         self, mock_check, mock_create, mock_ensure,
         mock_gs_running, mock_provision, mock_metadata, tmp_path,
@@ -107,12 +107,12 @@ class TestNewSbxSetup:
         call_metadata = mock_metadata.call_args[0][1]
         assert call_metadata.host_worktree_path == f"{repo_root}/.sbx/test-sandbox-worktrees/feature-x"
 
-    @patch("foundry_sandbox.commands.new_sbx.write_sandbox_metadata")
-    @patch("foundry_sandbox.commands.new_sbx.provision_git_safety", return_value=ProvisioningResult(success=True, wrapper_checksum="abc123"))
-    @patch("foundry_sandbox.commands.new_sbx.git_safety_server_is_running", return_value=True)
-    @patch("foundry_sandbox.commands.new_sbx.ensure_foundry_template", return_value=True)
-    @patch("foundry_sandbox.commands.new_sbx.sbx_create")
-    @patch("foundry_sandbox.commands.new_sbx.sbx_check_available")
+    @patch("foundry_sandbox.commands.new_setup.write_sandbox_metadata")
+    @patch("foundry_sandbox.commands.new_setup.provision_git_safety", return_value=ProvisioningResult(success=True, wrapper_checksum="abc123"))
+    @patch("foundry_sandbox.commands.new_setup.git_safety_server_is_running", return_value=True)
+    @patch("foundry_sandbox.commands.new_setup.ensure_foundry_template", return_value=True)
+    @patch("foundry_sandbox.commands.new_setup.sbx_create")
+    @patch("foundry_sandbox.commands.new_setup.sbx_check_available")
     def test_provision_git_safety_uses_host_worktree_path(
         self, mock_check, mock_create, mock_ensure,
         mock_gs_running, mock_provision, mock_metadata, tmp_path,
@@ -142,12 +142,12 @@ class TestNewSbxSetup:
 class TestWorkspaceInfoMismatch:
     """Fail-closed when sbx reports a different worktree path than expected."""
 
-    @patch("foundry_sandbox.commands.new_sbx.write_sandbox_metadata")
-    @patch("foundry_sandbox.commands.new_sbx.provision_git_safety", return_value=ProvisioningResult(success=True, wrapper_checksum="abc123"))
-    @patch("foundry_sandbox.commands.new_sbx.git_safety_server_is_running", return_value=True)
-    @patch("foundry_sandbox.commands.new_sbx.ensure_foundry_template", return_value=True)
-    @patch("foundry_sandbox.commands.new_sbx.sbx_create")
-    @patch("foundry_sandbox.commands.new_sbx.sbx_check_available")
+    @patch("foundry_sandbox.commands.new_setup.write_sandbox_metadata")
+    @patch("foundry_sandbox.commands.new_setup.provision_git_safety", return_value=ProvisioningResult(success=True, wrapper_checksum="abc123"))
+    @patch("foundry_sandbox.commands.new_setup.git_safety_server_is_running", return_value=True)
+    @patch("foundry_sandbox.commands.new_setup.ensure_foundry_template", return_value=True)
+    @patch("foundry_sandbox.commands.new_setup.sbx_create")
+    @patch("foundry_sandbox.commands.new_setup.sbx_check_available")
     def test_mismatch_uses_parsed_path(
         self, mock_check, mock_create, mock_ensure,
         mock_gs_running, mock_provision, mock_metadata, tmp_path,
@@ -176,12 +176,12 @@ class TestWorkspaceInfoMismatch:
         )
         assert result == "/unexpected/path"
 
-    @patch("foundry_sandbox.commands.new_sbx.write_sandbox_metadata")
-    @patch("foundry_sandbox.commands.new_sbx.provision_git_safety", return_value=ProvisioningResult(success=True, wrapper_checksum="abc123"))
-    @patch("foundry_sandbox.commands.new_sbx.git_safety_server_is_running", return_value=True)
-    @patch("foundry_sandbox.commands.new_sbx.ensure_foundry_template", return_value=True)
-    @patch("foundry_sandbox.commands.new_sbx.sbx_create")
-    @patch("foundry_sandbox.commands.new_sbx.sbx_check_available")
+    @patch("foundry_sandbox.commands.new_setup.write_sandbox_metadata")
+    @patch("foundry_sandbox.commands.new_setup.provision_git_safety", return_value=ProvisioningResult(success=True, wrapper_checksum="abc123"))
+    @patch("foundry_sandbox.commands.new_setup.git_safety_server_is_running", return_value=True)
+    @patch("foundry_sandbox.commands.new_setup.ensure_foundry_template", return_value=True)
+    @patch("foundry_sandbox.commands.new_setup.sbx_create")
+    @patch("foundry_sandbox.commands.new_setup.sbx_check_available")
     def test_matching_stdout_succeeds(
         self, mock_check, mock_create, mock_ensure,
         mock_gs_running, mock_provision, mock_metadata, tmp_path,
@@ -231,13 +231,13 @@ class TestTemplateValidation:
             wd="",
         )
 
-    @patch("foundry_sandbox.commands.new_sbx.write_sandbox_metadata")
-    @patch("foundry_sandbox.commands.new_sbx.provision_git_safety", return_value=ProvisioningResult(success=True, wrapper_checksum="abc123"))
-    @patch("foundry_sandbox.commands.new_sbx.git_safety_server_is_running", return_value=True)
-    @patch("foundry_sandbox.commands.new_sbx.sbx_template_ls")
-    @patch("foundry_sandbox.commands.new_sbx.ensure_foundry_template", return_value=True)
-    @patch("foundry_sandbox.commands.new_sbx.sbx_create")
-    @patch("foundry_sandbox.commands.new_sbx.sbx_check_available")
+    @patch("foundry_sandbox.commands.new_setup.write_sandbox_metadata")
+    @patch("foundry_sandbox.commands.new_setup.provision_git_safety", return_value=ProvisioningResult(success=True, wrapper_checksum="abc123"))
+    @patch("foundry_sandbox.commands.new_setup.git_safety_server_is_running", return_value=True)
+    @patch("foundry_sandbox.commands.new_setup.sbx_template_ls")
+    @patch("foundry_sandbox.commands.new_setup.ensure_foundry_template", return_value=True)
+    @patch("foundry_sandbox.commands.new_setup.sbx_create")
+    @patch("foundry_sandbox.commands.new_setup.sbx_check_available")
     def test_builtin_template_calls_ensure(
         self, mock_check, mock_create,
         mock_ensure, mock_ls, mock_gs_running, mock_provision,
@@ -253,16 +253,16 @@ class TestTemplateValidation:
         # Custom-template existence check must NOT run for the built-in tag.
         mock_ls.assert_not_called()
 
-    @patch("foundry_sandbox.commands.new_sbx.write_sandbox_metadata")
-    @patch("foundry_sandbox.commands.new_sbx.provision_git_safety", return_value=ProvisioningResult(success=True, wrapper_checksum="abc123"))
-    @patch("foundry_sandbox.commands.new_sbx.git_safety_server_is_running", return_value=True)
-    @patch("foundry_sandbox.commands.new_sbx.ensure_foundry_template")
+    @patch("foundry_sandbox.commands.new_setup.write_sandbox_metadata")
+    @patch("foundry_sandbox.commands.new_setup.provision_git_safety", return_value=ProvisioningResult(success=True, wrapper_checksum="abc123"))
+    @patch("foundry_sandbox.commands.new_setup.git_safety_server_is_running", return_value=True)
+    @patch("foundry_sandbox.commands.new_setup.ensure_foundry_template")
     @patch(
-        "foundry_sandbox.commands.new_sbx.sbx_template_ls",
+        "foundry_sandbox.commands.new_setup.sbx_template_ls",
         return_value=["preset-mysetup:latest"],
     )
-    @patch("foundry_sandbox.commands.new_sbx.sbx_create")
-    @patch("foundry_sandbox.commands.new_sbx.sbx_check_available")
+    @patch("foundry_sandbox.commands.new_setup.sbx_create")
+    @patch("foundry_sandbox.commands.new_setup.sbx_check_available")
     def test_custom_template_skips_ensure(
         self, mock_check, mock_create,
         mock_ls, mock_ensure, mock_gs_running, mock_provision,
@@ -276,10 +276,10 @@ class TestTemplateValidation:
         mock_ensure.assert_not_called()
         mock_ls.assert_called_once()
 
-    @patch("foundry_sandbox.commands.new_sbx.ensure_foundry_template")
-    @patch("foundry_sandbox.commands.new_sbx.sbx_template_ls", return_value=[])
-    @patch("foundry_sandbox.commands.new_sbx.sbx_create")
-    @patch("foundry_sandbox.commands.new_sbx.sbx_check_available")
+    @patch("foundry_sandbox.commands.new_setup.ensure_foundry_template")
+    @patch("foundry_sandbox.commands.new_setup.sbx_template_ls", return_value=[])
+    @patch("foundry_sandbox.commands.new_setup.sbx_create")
+    @patch("foundry_sandbox.commands.new_setup.sbx_check_available")
     def test_missing_custom_template_raises_setup_error(
         self, mock_check, mock_create,
         mock_ls, mock_ensure, tmp_path,
@@ -318,11 +318,11 @@ class TestGitSafetyFailClosed:
             wd="",
         )
 
-    @patch("foundry_sandbox.commands.new_sbx.write_sandbox_metadata")
-    @patch("foundry_sandbox.commands.new_sbx.sbx_create")
-    @patch("foundry_sandbox.commands.new_sbx.sbx_check_available")
-    @patch("foundry_sandbox.commands.new_sbx.git_safety_server_is_running", return_value=False)
-    @patch("foundry_sandbox.commands.new_sbx.git_safety_server_start", side_effect=OSError("not found"))
+    @patch("foundry_sandbox.commands.new_setup.write_sandbox_metadata")
+    @patch("foundry_sandbox.commands.new_setup.sbx_create")
+    @patch("foundry_sandbox.commands.new_setup.sbx_check_available")
+    @patch("foundry_sandbox.commands.new_setup.git_safety_server_is_running", return_value=False)
+    @patch("foundry_sandbox.commands.new_setup.git_safety_server_start", side_effect=OSError("not found"))
     def test_fails_when_git_safety_not_installed(
         self, mock_gs_start, mock_gs_running, mock_check, mock_create, mock_metadata, tmp_path,
     ):
@@ -330,11 +330,11 @@ class TestGitSafetyFailClosed:
         with pytest.raises(RuntimeError, match="not installed"):
             new_sbx_setup(**self._base_kwargs(tmp_path))
 
-    @patch("foundry_sandbox.commands.new_sbx.write_sandbox_metadata")
-    @patch("foundry_sandbox.commands.new_sbx.sbx_create")
-    @patch("foundry_sandbox.commands.new_sbx.sbx_check_available")
-    @patch("foundry_sandbox.commands.new_sbx.git_safety_server_is_running", return_value=False)
-    @patch("foundry_sandbox.commands.new_sbx.git_safety_server_start")
+    @patch("foundry_sandbox.commands.new_setup.write_sandbox_metadata")
+    @patch("foundry_sandbox.commands.new_setup.sbx_create")
+    @patch("foundry_sandbox.commands.new_setup.sbx_check_available")
+    @patch("foundry_sandbox.commands.new_setup.git_safety_server_is_running", return_value=False)
+    @patch("foundry_sandbox.commands.new_setup.git_safety_server_start")
     def test_fails_when_server_unhealthy_after_start(
         self, mock_gs_start, mock_gs_running, mock_check, mock_create, mock_metadata, tmp_path,
     ):
@@ -344,12 +344,12 @@ class TestGitSafetyFailClosed:
         with pytest.raises(RuntimeError, match="did not become healthy"):
             new_sbx_setup(**self._base_kwargs(tmp_path))
 
-    @patch("foundry_sandbox.commands.new_sbx.write_sandbox_metadata")
-    @patch("foundry_sandbox.commands.new_sbx.provision_git_safety", return_value=ProvisioningResult(success=False, error="Wrapper injection failed: OSError"))
-    @patch("foundry_sandbox.commands.new_sbx.git_safety_server_is_running", return_value=True)
-    @patch("foundry_sandbox.commands.new_sbx.ensure_foundry_template", return_value=True)
-    @patch("foundry_sandbox.commands.new_sbx.sbx_create")
-    @patch("foundry_sandbox.commands.new_sbx.sbx_check_available")
+    @patch("foundry_sandbox.commands.new_setup.write_sandbox_metadata")
+    @patch("foundry_sandbox.commands.new_setup.provision_git_safety", return_value=ProvisioningResult(success=False, error="Wrapper injection failed: OSError"))
+    @patch("foundry_sandbox.commands.new_setup.git_safety_server_is_running", return_value=True)
+    @patch("foundry_sandbox.commands.new_setup.ensure_foundry_template", return_value=True)
+    @patch("foundry_sandbox.commands.new_setup.sbx_create")
+    @patch("foundry_sandbox.commands.new_setup.sbx_check_available")
     def test_fails_closed_on_provisioning_failure(
         self, mock_check, mock_create,
         mock_ensure, mock_gs_running, mock_provision, mock_metadata, tmp_path,
@@ -359,12 +359,12 @@ class TestGitSafetyFailClosed:
         with pytest.raises(RuntimeError, match="provisioning failed"):
             new_sbx_setup(**self._base_kwargs(tmp_path))
 
-    @patch("foundry_sandbox.commands.new_sbx.write_sandbox_metadata")
-    @patch("foundry_sandbox.commands.new_sbx.provision_git_safety", return_value=ProvisioningResult(success=False, error="Checksum computation failed: FileNotFoundError"))
-    @patch("foundry_sandbox.commands.new_sbx.git_safety_server_is_running", return_value=True)
-    @patch("foundry_sandbox.commands.new_sbx.ensure_foundry_template", return_value=True)
-    @patch("foundry_sandbox.commands.new_sbx.sbx_create")
-    @patch("foundry_sandbox.commands.new_sbx.sbx_check_available")
+    @patch("foundry_sandbox.commands.new_setup.write_sandbox_metadata")
+    @patch("foundry_sandbox.commands.new_setup.provision_git_safety", return_value=ProvisioningResult(success=False, error="Checksum computation failed: FileNotFoundError"))
+    @patch("foundry_sandbox.commands.new_setup.git_safety_server_is_running", return_value=True)
+    @patch("foundry_sandbox.commands.new_setup.ensure_foundry_template", return_value=True)
+    @patch("foundry_sandbox.commands.new_setup.sbx_create")
+    @patch("foundry_sandbox.commands.new_setup.sbx_check_available")
     def test_fails_closed_on_checksum_failure(
         self, mock_check, mock_create,
         mock_ensure, mock_gs_running, mock_provision, mock_metadata, tmp_path,
@@ -374,7 +374,7 @@ class TestGitSafetyFailClosed:
         with pytest.raises(RuntimeError, match="provisioning failed"):
             new_sbx_setup(**self._base_kwargs(tmp_path))
 
-    @patch("foundry_sandbox.commands.new_sbx.sbx_rm")
+    @patch("foundry_sandbox.commands.new_setup.sbx_rm")
     def test_rollback(self, mock_rm, tmp_path):
         config_dir = tmp_path / "config"
         config_dir.mkdir()

@@ -143,33 +143,33 @@ See `plan.md` for rationale and detail. Check items off as they land. Commit aft
 ## Phase 5 — Drop `_sbx` naming suffix + fold `tui.py`
 
 ### Code renames
-- [ ] `foundry_sandbox/commands/new_sbx.py` → `foundry_sandbox/commands/new_setup.py`
-- [ ] Update import in `foundry_sandbox/commands/new.py:24`
-- [ ] `foundry_sandbox/assets/git-wrapper-sbx.sh` → `foundry_sandbox/assets/git-wrapper.sh`
-- [ ] Update reference in `foundry_sandbox/git_safety.py::_wrapper_script_path` (line 262)
-- [ ] Rename `sbx.py::install_pip_requirements_sbx` → `install_pip_requirements`
-- [ ] Update callers in `commands/new_setup.py` and `commands/start.py`
+- [x] `foundry_sandbox/commands/new_sbx.py` → `foundry_sandbox/commands/new_setup.py`
+- [x] Update import in `foundry_sandbox/commands/new.py:24`
+- [x] `foundry_sandbox/assets/git-wrapper-sbx.sh` → `foundry_sandbox/assets/git-wrapper.sh`
+- [x] Update reference in `foundry_sandbox/git_safety.py::_wrapper_script_path` (line 262)
+- [x] Rename `sbx.py::install_pip_requirements_sbx` → `install_pip_requirements`
+- [x] Update callers in `commands/new_setup.py` and `commands/start.py`
 
 ### Test renames
-- [ ] `tests/unit/test_attach_sbx.py` → `test_attach.py`
-- [ ] `tests/unit/test_chaos_sbx.py` → `test_chaos.py`
-- [ ] `tests/unit/test_destroy_sbx.py` → `test_destroy.py`
-- [ ] `tests/unit/test_list_sbx.py` → `test_list.py`
-- [ ] `tests/unit/test_new_sbx.py` → `test_new.py`
-- [ ] `tests/unit/test_refresh_creds_sbx.py` → `test_refresh_creds.py`
-- [ ] `tests/unit/test_sbx_identity.py` → `test_identity.py`
-- [ ] `tests/unit/test_start_sbx.py` → `test_start.py`
-- [ ] `tests/unit/test_status_sbx.py` → `test_status.py`
-- [ ] `tests/unit/test_stop_sbx.py` → `test_stop.py`
-- [ ] Keep `tests/unit/test_sbx.py` (tests the `sbx.py` wrapper module)
+- [x] `tests/unit/test_attach_sbx.py` → `test_attach.py`
+- [x] `tests/unit/test_chaos_sbx.py` → `test_chaos.py`
+- [x] `tests/unit/test_destroy_sbx.py` → `test_destroy.py`
+- [x] `tests/unit/test_list_sbx.py` → `test_list.py`
+- [x] `tests/unit/test_new_sbx.py` → `test_new.py`
+- [x] `tests/unit/test_refresh_creds_sbx.py` → `test_refresh_creds.py`
+- [x] `tests/unit/test_sbx_identity.py` → `test_identity.py`
+- [x] `tests/unit/test_start_sbx.py` → `test_start.py`
+- [x] `tests/unit/test_status_sbx.py` → `test_status.py`
+- [x] `tests/unit/test_stop_sbx.py` → `test_stop.py`
+- [x] Keep `tests/unit/test_sbx.py` (tests the `sbx.py` wrapper module)
 
 ### Fold `tui.py`
-- [ ] Move `_is_noninteractive()` from `foundry_sandbox/tui.py` into `foundry_sandbox/utils.py`
-- [ ] Update import in `foundry_sandbox/ide.py:17`
-- [ ] Delete `foundry_sandbox/tui.py`
+- [x] Move `_is_noninteractive()` from `foundry_sandbox/tui.py` into `foundry_sandbox/utils.py`
+- [x] Update import in `foundry_sandbox/ide.py:17`
+- [x] Delete `foundry_sandbox/tui.py`
 
 ### Verify
-- [ ] `./scripts/ci-local.sh` passes
+- [x] `./scripts/ci-local.sh` passes
 - [ ] `git commit -m "refactor: Phase 5 drop _sbx naming suffix and fold tui.py"`
 
 ---
