@@ -1,278 +1,157 @@
-# Cleanup Plan Checklist
+# Post-sbx cleanup round 2 — checklist
 
-See `plan.md` for rationale and detail. Check items off as they land. Commit after each phase.
+Actionable checklist for the phases described in `plan.md`. Check items as
+they land. Run `./scripts/ci-local.sh` before each commit.
 
-## Phase 1 — Delete unused functions
+## Phase 1 — Doc correctness
 
-### `foundry_sandbox/api_keys.py`
-- [x] Delete `check_any_ai_key`
-- [x] Delete `has_gemini_key`
-- [x] Delete `has_codex_key`
-- [x] Delete `opencode_enabled`
-- [x] Delete `check_any_search_key`
-- [x] Delete `warn_claude_auth_conflict`
-- [x] Delete `get_optional_cli_warnings`
-- [x] Delete `get_cli_status`
-- [x] Delete `show_cli_status`
-- [x] Delete `get_missing_keys_warning`
-- [x] Delete `check_api_keys_status`
-- [x] Delete `export_gh_token`
-- [x] Delete `AI_PROVIDER_KEYS`
-- [x] Remove `CREDENTIAL_PROXY_PLACEHOLDER` / `CRED_PROXY_` filters from remaining functions
+### 1.1 Replace "bare repo" references
 
-### `foundry_sandbox/validate.py`
-- [x] Delete `validate_ssh_mode`
-- [x] Delete `validate_environment`
-- [x] Delete `require_command`
-- [x] Delete `validate_git_remotes`
+- [ ] `docs/usage/commands.md:115` — rewrite "Clones repository as bare repo"
+- [ ] `docs/usage/commands.md:268` — rewrite "Cleans up sandbox branch from bare repo"
+- [ ] `docs/getting-started.md:81` — rewrite "Clone the repository as a bare repo"
+- [ ] `docs/operations.md:65` — update "bare repo branch"
+- [ ] `docs/operations.md:346` — update "stale lock files in the bare repo"
+- [ ] `docs/architecture.md:97,101,109` — fix worktree diagram annotations
+- [ ] `docs/architecture.md:192` — update `repos/ (bare repos)` label
+- [ ] `docs/architecture.md:203,245,343` — update narrative and diagrams
+- [ ] `docs/adr/008-sbx-migration.md:56` — revise "bare repos + worktrees" line
 
-### `foundry_sandbox/sbx.py`
-- [x] Delete `sbx_ports_publish`
-- [x] Delete `sbx_ports_unpublish`
-- [x] Delete `sbx_template_load`
-- [x] Delete `sbx_policy_set_default`
-- [x] Delete `sbx_policy_allow`
-- [x] Delete `sbx_policy_deny`
-- [x] Delete `VALID_NETWORK_PROFILES`
+### 1.2 Fix README.md drift
 
-### `foundry_sandbox/constants.py`
-- [x] Delete `CONTAINER_READY_ATTEMPTS`
-- [x] Delete `CONTAINER_READY_DELAY`
-- [x] Delete `TIMEOUT_PIP_INSTALL`
-- [x] Delete `get_sandbox_debug`
-- [x] Delete `get_sandbox_assume_yes`
-- [x] Delete `VALID_NETWORK_MODES`
-- [x] Delete `get_sandbox_network_mode`
-- [x] Delete `get_sandbox_sync_on_attach`
-- [x] Delete `get_sandbox_sync_ssh`
-- [x] Delete `get_sandbox_ssh_mode`
-- [x] Delete `get_sandbox_opencode_disable_npm_plugins`
-- [x] Delete `get_sandbox_opencode_plugin_dir`
-- [x] Delete `get_sandbox_opencode_prefetch_npm_plugins`
-- [x] Delete `get_sandbox_opencode_default_model`
-- [x] Delete `get_sandbox_tmux_scrollback`
-- [x] Delete `get_sandbox_tmux_mouse`
+- [ ] `README.md:50` — replace `cast repeat` with `cast new --last`
+- [ ] `README.md:130` — fix or remove `docs/migration/0.20-to-0.21.md` link
 
-### `foundry_sandbox/paths.py`
-- [x] Delete `path_opencode_plugins_marker`
-- [x] Delete `resolve_ssh_agent_sock`
-- [x] Delete `path_claude_home`
-- [x] Delete `safe_remove` + `_rmtree_no_follow_symlinks`
+### 1.3 Sync `cast new` docs with actual flags
 
-### `foundry_sandbox/config.py`
-- [x] Delete `deep_merge`
-- [x] Delete `deep_merge_no_overwrite`
-- [x] Delete `json_escape`
-- [x] Delete `json_array_from_lines`
+- [ ] `docs/usage/commands.md` — add `--template <tag>` row to options table
 
-### `foundry_sandbox/utils.py`
-- [x] Delete `flag_enabled`
-- [x] Delete `generate_sandbox_id`
-- [x] Delete `environment_scope`
+### 1.4 Orphan doc file
 
-### `foundry_sandbox/git.py`
-- [x] Delete `branch_exists`
+- [ ] `docs/security/audit-5.6.md` — index from `docs/README.md`, or move to `docs/adr/`
 
-### Tests
-- [x] Remove `environment_scope` tests from `test_foundation.py`
-- [x] Remove `path_claude_home` tests from `test_foundation.py`
-- [x] Remove `safe_remove` tests from `test_foundation.py`
-- [x] Remove `get_sandbox_debug` / `get_sandbox_assume_yes` tests from `test_foundation.py`
-- [x] Remove `branch_exists` tests from `test_git.py`
-- [x] Remove tests in `test_sbx.py` for deleted `sbx_ports_*`, `sbx_template_load`, `sbx_policy_*` wrappers
+## Phase 2 — User-visible consistency
 
-### Verify
-- [x] `./scripts/ci-local.sh` passes
-- [ ] `git commit -m "refactor: Phase 1 delete unused helpers"`
+### 2.1 Unify "microVM" vs "sandbox" wording
 
----
+- [ ] `foundry_sandbox/commands/destroy.py:154` — change to `"  - Sandbox (sbx rm)"`
+- [ ] `foundry_sandbox/cli.py:111` — update group docstring
+- [ ] `pyproject.toml:8` — update package description
+- [ ] `pyproject.toml:15` — swap `"docker"` for `"sbx"` in keywords
 
-## Phase 2 — Delete obsolete files
+### 2.2 Trim migration-era docstring breadcrumbs
 
-- [x] Delete `scripts/build-foundry-template.sh`
-- [x] Delete `config/allowlist.yaml`
-- [x] Delete `config/firewall-allowlist.txt`
-- [x] Delete `config/policy.yaml.example`
-- [x] Delete or archive `sbx-analysis.md`
-- [x] Grep for any remaining references to the deleted files
-- [x] Verify `./scripts/ci-local.sh` passes
-- [ ] `git commit -m "refactor: Phase 2 delete obsolete configs and scripts"`
+- [ ] `foundry_sandbox/commands/stop.py:3`
+- [ ] `foundry_sandbox/commands/new_setup.py:3`
+- [ ] `foundry_sandbox/models.py:9`
+- [ ] `foundry_sandbox/commands/refresh_creds.py:4`
+- [ ] `foundry_sandbox/constants.py:3`
+- [ ] `foundry_sandbox/commands/help_cmd.py:3`
+- [ ] `foundry_sandbox/utils.py:3`
 
----
+### 2.3 Collapse dead branches in `install.sh`
 
-## Phase 3 — Drop `network_profile` field
+- [ ] Delete `install.sh:200-203` (source `lib/api_keys.sh` branch)
+- [ ] Delete `install.sh:282-284` (probe for `check_api_keys_with_prompt`)
+- [ ] Verify `install.sh` still runs end-to-end against a local checkout
 
-### `foundry_sandbox/models.py`
-- [x] Remove `network_profile` from `SbxSandboxMetadata`
-- [x] Remove `network_profile` from `CastNewPreset`
+## Phase 3 — Dead code removal
 
-### `foundry_sandbox/state.py`
-- [x] Remove `network_profile` param from `_build_command_line`
-- [x] Remove `network_profile` param from `_write_cast_new_json`
-- [x] Remove `network_profile` param from `save_last_cast_new`
-- [x] Remove `network_profile` param from `save_cast_preset`
-- [x] Remove `network_profile` from `_load_cast_new_json` fallback dict
+### 3.1 Unused symbols
 
-### `foundry_sandbox/commands/preset.py`
-- [x] Remove `network_profile=metadata.get(...)` from `save` at line 143
+- [ ] Delete `inspect_sandbox()` at `foundry_sandbox/state.py:211`
+- [ ] Delete its test block in `tests/unit/test_state.py` (around line 281)
+- [ ] Delete `log_step()` at `foundry_sandbox/utils.py:81`
+- [ ] Delete `RED`, `BLUE`, `GREEN` at `foundry_sandbox/utils.py:28,30,31`
+- [ ] Run `./scripts/ci-local.sh`
 
-### Tests
-- [x] Update `tests/unit/test_models.py` — drop `network_profile` assertions (lines ~37, 60, 70, 120, 161, 173, 200, etc.)
-- [x] Update `tests/unit/test_state.py` — drop `network_profile` from test metadata
-- [x] Update `tests/unit/test_preset_command.py:66` — drop `network_profile` from fixture
+### 3.2 Dead tamper-event counter
 
-### Verify
-- [x] Existing metadata files with `network_profile` still load (forward-compat via Pydantic `extra` handling)
-- [x] `./scripts/ci-local.sh` passes
-- [ ] `git commit -m "refactor: Phase 3 drop vestigial network_profile field"`
+- [ ] Decide: wire into `cast diagnose` or delete
+- [ ] If wiring in: surface `get_tamper_event_fallback_count()` via `commands/diagnose.py`
+- [ ] If deleting: remove counter, accessor, and `tests/unit/test_git_safety.py:955` test class
 
----
+### 3.3 `SbxSandboxMetadata.backend` field
 
-## Phase 4 — User-facing fixes
+- [ ] Delete `backend: str = "sbx"` at `foundry_sandbox/models.py:13`
+- [ ] Remove from any `model_dump` assertions in tests
+- [ ] Confirm `load_sandbox_metadata` still loads old JSON (Pydantic ignores extra fields only if configured; may need `model_config = ConfigDict(extra="ignore")`)
 
-- [x] `foundry_sandbox/version_check.py:158` — replace `cast upgrade` with `pip install -U foundry-sandbox`
-- [x] `foundry_sandbox/cli.py:111` — docstring "Docker sandbox manager" → "microVM sandbox manager"
-- [x] `foundry_sandbox/commands/destroy.py:154` — "Sandbox container (sbx rm)" → "Sandbox microVM (sbx rm)"
-- [x] `foundry_sandbox/commands/help_cmd.py:38` — `--copy` help: "into container" → "into sandbox" (until Phase 6 deletes this file)
-- [x] `foundry_sandbox/commands/new.py:300` — `--copy` help: "into container" → "into sandbox"
-- [x] Verify `./scripts/ci-local.sh` passes
-- [ ] `git commit -m "fix: Phase 4 correct post-sbx user-facing wording and upgrade hint"`
+### 3.4 Drop `SCRIPT_DIR` from `cast config`
 
----
+- [ ] Remove `SCRIPT_DIR` constant at `foundry_sandbox/commands/config.py:20`
+- [ ] Remove `script_dir` JSON field (`config.py:40`)
+- [ ] Remove `SCRIPT_DIR` human row (`config.py:52`)
+- [ ] Update `tests/unit/test_cli.py` assertions that check for the field
 
-## Phase 5 — Drop `_sbx` naming suffix + fold `tui.py`
+### 3.5 Hidden preset aliases
 
-### Code renames
-- [x] `foundry_sandbox/commands/new_sbx.py` → `foundry_sandbox/commands/new_setup.py`
-- [x] Update import in `foundry_sandbox/commands/new.py:24`
-- [x] `foundry_sandbox/assets/git-wrapper-sbx.sh` → `foundry_sandbox/assets/git-wrapper.sh`
-- [x] Update reference in `foundry_sandbox/git_safety.py::_wrapper_script_path` (line 262)
-- [x] Rename `sbx.py::install_pip_requirements_sbx` → `install_pip_requirements`
-- [x] Update callers in `commands/new_setup.py` and `commands/start.py`
+- [ ] Delete `@preset.command("rm", hidden=True)` at `preset.py:203`
+- [ ] Delete `@preset.command("remove", hidden=True)` at `preset.py:210`
+- [ ] Update `tests/unit/test_preset_command.py` if it exercises the aliases
 
-### Test renames
-- [x] `tests/unit/test_attach_sbx.py` → `test_attach.py`
-- [x] `tests/unit/test_chaos_sbx.py` → `test_chaos.py`
-- [x] `tests/unit/test_destroy_sbx.py` → `test_destroy.py`
-- [x] `tests/unit/test_list_sbx.py` → `test_list.py`
-- [x] `tests/unit/test_new_sbx.py` → `test_new.py`
-- [x] `tests/unit/test_refresh_creds_sbx.py` → `test_refresh_creds.py`
-- [x] `tests/unit/test_sbx_identity.py` → `test_identity.py`
-- [x] `tests/unit/test_start_sbx.py` → `test_start.py`
-- [x] `tests/unit/test_status_sbx.py` → `test_status.py`
-- [x] `tests/unit/test_stop_sbx.py` → `test_stop.py`
-- [x] Keep `tests/unit/test_sbx.py` (tests the `sbx.py` wrapper module)
+## Phase 4 — `cast help` consolidation
 
-### Fold `tui.py`
-- [x] Move `_is_noninteractive()` from `foundry_sandbox/tui.py` into `foundry_sandbox/utils.py`
-- [x] Update import in `foundry_sandbox/ide.py:17`
-- [x] Delete `foundry_sandbox/tui.py`
+- [ ] Decide: delete `help_cmd` or rewrite as a dispatch to `cli.main(["--help"])`
+- [ ] If rewriting: update `foundry_sandbox/commands/help_cmd.py` to call Click
+- [ ] Remove the hand-maintained HEREDOC in `help_cmd.py:11-60`
+- [ ] Update `tests/unit/test_cli.py` help-command tests
 
-### Verify
-- [x] `./scripts/ci-local.sh` passes
-- [ ] `git commit -m "refactor: Phase 5 drop _sbx naming suffix and fold tui.py"`
+## Phase 5 — Structural simplification
 
----
+### 5.1 Consolidate `cast list` and `cast status`
 
-## Phase 6 — Command consolidation
+- [ ] Extract `collect_sandbox_list()` helper into `foundry_sandbox/state.py`
+- [ ] Refactor `commands/status.py:_collect_all_sandboxes` to call it
+- [ ] Refactor `commands/list_cmd.py:_collect_sandbox_info` to call it
+- [ ] Decide: remove `cast list` entirely, or keep as thin alias to `cast status`
+- [ ] Update `commands.md` and CHANGELOG accordingly
 
-### Delete `cast help`
-- [ ] Delete `foundry_sandbox/commands/help_cmd.py`
-- [ ] Remove `"help"` entry from `_LAZY_COMMANDS` in `foundry_sandbox/cli.py:26`
-- [ ] Remove `test_cli.py` assertions that reference `cast help` (if any)
-- [ ] Update `docs/usage/commands.md` if it mentions `cast help`
+### 5.2 Factor triple env-var write in `inject_git_wrapper`
 
-### Merge `list` + `status` overlap
-- [ ] Extract shared `(sbx_ls + metadata merge)` logic to `state.py::list_sandboxes_with_status()` (or similar)
-- [ ] Update `commands/list_cmd.py` to use the shared function
-- [ ] Update `commands/status.py` to use the shared function
-- [ ] Make `cast status` (no args) either redirect to `cast list` or require a name (choose one — recommend requiring a name)
-- [ ] Update help strings on both commands
+- [ ] Build single `env_vars: dict[str, str]` in `git_safety.py:inject_git_wrapper`
+- [ ] Extract `_emit_profile_d(sandbox_name, env_vars)`
+- [ ] Extract `_emit_bashrc_block(sandbox_name, env_vars)`
+- [ ] Extract `_emit_plain_env(sandbox_name, env_vars)`
+- [ ] Verify wrapper reads env from `/var/lib/foundry/git-safety.env` unchanged (`assets/git-wrapper.sh:40-50`)
+- [ ] Run integration test via `./scripts/ci-local.sh --all`
 
-### Verify
-- [ ] `./scripts/ci-local.sh` passes
-- [ ] Manual check: `cast --help`, `cast list`, `cast status` (and `cast status <name>`) all work as expected
-- [ ] `git commit -m "refactor: Phase 6 consolidate status/list and drop custom help"`
+### 5.3 `destroy-all` should see orphaned registry entries
 
----
+- [ ] In `commands/destroy_all.py:27`, union `sbx_ls()` names with `list_sandbox_names()` from `commands/_helpers.py`
+- [ ] Add a test that exercises the orphan case
+- [ ] Update `commands.md` description
 
-## Phase 7 — Docs refresh
+### 5.4 Re-evaluate `git-mode` shim
 
-### `docs/architecture.md`
-- [ ] Rewrite "Host State Layout" section (lines ~232-295) — correct worktree path to `<repo_root>/.sbx/<name>-worktrees/<branch>/` and HMAC location to `/run/foundry/hmac-secret`
-- [ ] Remove `sbx_policy_*` and `sbx_template_load` rows from "Supported Operations" table (lines ~127-132)
-- [ ] Remove/correct `GH_TOKEN` placeholder claim at line ~164
-- [ ] Remove ASCII worktree diagram at lines 85-103 (or update to reflect new layout)
+- [ ] Run `git log --all --oneline -- foundry_sandbox/commands/git_mode.py` to find the shim's origin
+- [ ] Confirm no real consumer (search `gh` source or issue tracker if uncertain)
+- [ ] If removing: drop `[project.scripts]` entry in `pyproject.toml:47`
+- [ ] If removing: drop `git_mode_shim` function at `git_mode.py:216`
+- [ ] If keeping: document the rationale in the docstring
 
-### `docs/operations.md`
-- [ ] Fix `ls -la ~/.sandboxes/worktrees/<name>` at line 297
+### 5.5 Command-name suggestions (optional)
 
-### `AGENTS.md` (repo root)
-- [ ] Align "Development" section structure with `CLAUDE.md`'s version
+- [ ] Evaluate `click-didyoumean` dependency weight
+- [ ] If adopting: add to `pyproject.toml` deps and wire into `CastGroup`
 
-### ADR supersession banners
-Add to each of these ADRs, at the top:
-```markdown
-> **Status:** Superseded by [ADR-008](008-sbx-migration.md). Kept for historical context.
-```
-- [ ] `docs/adr/001-consolidation.md`
-- [ ] `docs/adr/002-container-identity.md`
-- [ ] `docs/adr/003-policy-engine.md`
-- [ ] `docs/adr/004-dns-integration.md`
-- [ ] `docs/adr/005-failure-modes.md`
-- [ ] `docs/adr/006-allowlist-layering.md`
-- [ ] `docs/adr/007-api-gateways.md`
+## Phase 6 — Rename `claude-config/` (breaking, 0.22.x)
 
-### `docs/usage/commands.md`
-- [ ] Re-read against current flag set; fix any drift
-- [ ] Remove `cast help` reference (Phase 6)
+### 6.1 Symbol renames
 
-### Verify
-- [ ] `./scripts/ci-local.sh` passes
-- [ ] `git commit -m "docs: Phase 7 refresh architecture, operations, and ADR supersession notes"`
+- [ ] `foundry_sandbox/constants.py:51` — `get_claude_configs_dir` → `get_sandbox_configs_dir`
+- [ ] `foundry_sandbox/paths.py:49` — `path_claude_config` → `path_sandbox_config`
+- [ ] Update all callers: `commands/_helpers.py`, `state.py`, `commands/config.py`, `commands/destroy.py`, `commands/new.py`, `paths.py`
+- [ ] Update `cast config` label `CLAUDE_CONFIGS_DIR` → `SANDBOX_CONFIGS_DIR` (both human + JSON)
 
----
+### 6.2 On-disk migration
 
-## Phase 8 (optional) — `new.py` refactor
+- [ ] Add one-shot rename `$SANDBOX_HOME/claude-config/` → `$SANDBOX_HOME/sandboxes/` on first run
+- [ ] Create compatibility symlink for one minor release
+- [ ] Update tests that hardcode `claude-config` paths
 
-### Extract `foundry_sandbox/repo.py`
-- [ ] Create `foundry_sandbox/repo.py`
-- [ ] Move `_resolve_repo_input` → `resolve_repo_input`
-- [ ] Move `_branch_exists_on_remote` → `branch_exists_on_remote`
-- [ ] Move `_detect_remote_default_branch` → `detect_remote_default_branch`
-- [ ] Move `_generate_branch_name` → `generate_branch_name`
-- [ ] Move `_ensure_repo_root` → `ensure_repo_root`
-- [ ] Add `git_query(repo_root, *args) -> str | None` to `git.py`
-- [ ] Switch `repo.py` helpers to use `git_query` instead of inline subprocess.run
+### 6.3 Release
 
-### Simplify defaults merge
-- [ ] Replace `NewDefaults` + `_STR_FIELDS` + `_BOOL_FIELDS` + `_apply_saved_new_defaults` with a `CastNewPreset.model_copy(update=...)` pattern
-- [ ] Delete the dataclass and tables; target ~15 lines total
-
-### Extract name claim loop
-- [ ] Extract `new.py:470-493` to `_claim_unique_name(base_name, allow_increment: bool) -> tuple[str, str]`
-- [ ] Home it in `state.py` or `paths.py`
-
-### Verify
-- [ ] `./scripts/ci-local.sh` passes
-- [ ] `git commit -m "refactor: Phase 8 extract repo.py and simplify new.py defaults"`
-
----
-
-## Phase 9 (optional) — `git_safety.py` split
-
-- [ ] Create `foundry_sandbox/git_safety/` package directory
-- [ ] Split into `server.py`, `hmac.py`, `wrapper.py`, `template.py`, `provisioning.py`, `tamper.py`
-- [ ] Write `__init__.py` that re-exports all names callers currently import
-- [ ] Delete original `foundry_sandbox/git_safety.py`
-- [ ] Run full test suite; fix any import or circular-import issues
-- [ ] Verify `./scripts/ci-local.sh` passes
-- [ ] `git commit -m "refactor: Phase 9 split git_safety into submodules"`
-
----
-
-## Done-done
-
-- [ ] All phases complete
-- [ ] `CHANGELOG.md` updated with user-visible changes (Phase 4 wording, Phase 6 command behavior)
-- [ ] Delete `plan.md` and `plan-checklist.md` (or move to `docs/archive/`)
+- [ ] Add "Breaking" entry to `CHANGELOG.md`
+- [ ] Add migration notes to release body (not a separate `docs/migration/` file — CHANGELOG + release notes only)
+- [ ] Bump minor version in `pyproject.toml`

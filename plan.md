@@ -1,249 +1,305 @@
-# Cleanup Plan: post-sbx-migration residue
+# Post-sbx cleanup — round 2
 
-**Goal:** finish the sbx migration cleanup. Remove vestigial docker-era code, drop naming that made sense when two backends coexisted, fix one user-facing bug, and refresh docs. Each phase is independently committable and independently revertable.
+Follow-up work identified after the five-phase post-migration cleanup. Evidence
+for every item is linked with `file:line` references so each phase can be
+executed without re-doing the audit.
 
-**Out of scope:** behavior changes, new features, and any changes to the git safety package (`foundry-git-safety/`). The sbx backend continues to be the only backend.
-
-**Verification per phase:**
-- `./scripts/ci-local.sh` passes
-- `cast --help`, `cast new --help`, `cast list`, `cast status` still render
-- Existing sandbox metadata (`SbxSandboxMetadata`) deserializes as before (schema-compatible changes only)
+Six phases, ordered by reversibility and blast radius.
 
 ---
 
-## Phase 1 — Delete unused functions
+## Phase 1 — Doc correctness
 
-Pure deletions of functions with zero non-test callers. Nothing here changes CLI behavior.
+Docs are currently the least-reliable source of truth in the repo. They
+describe the pre-sbx bare-repo architecture and have broken links/commands.
+This phase is pure documentation; no runtime risk.
 
-### `foundry_sandbox/api_keys.py`
-Keep: `check_claude_key_required`, `has_opencode_key`, `has_zai_key` (the only imports).
-Delete: `check_any_ai_key`, `has_gemini_key`, `has_codex_key`, `opencode_enabled`, `check_any_search_key`, `warn_claude_auth_conflict`, `get_optional_cli_warnings`, `get_cli_status`, `show_cli_status`, `get_missing_keys_warning`, `check_api_keys_status`, `export_gh_token`, `AI_PROVIDER_KEYS`.
-Also remove the `CREDENTIAL_PROXY_PLACEHOLDER` / `CRED_PROXY_` prefix filters in `has_gemini_key` and `has_zai_key` — those placeholders don't exist under sbx.
+### 1.1 Replace "bare repo" references
 
-### `foundry_sandbox/validate.py`
-Delete: `validate_ssh_mode`, `validate_environment`, `require_command`, `validate_git_remotes`, `_SSH_HOST_PATTERN` guard usage only in deleted funcs (keep if still referenced).
+`ensure_repo_checkout` at `foundry_sandbox/git.py:180` does a regular clone
+(`git clone --branch <branch> <url> <path>`), not `git clone --bare`.
+`foundry_sandbox/paths.py:173` explicitly documents this. Multiple docs still
+claim bare-repo behavior:
 
-### `foundry_sandbox/sbx.py`
-Delete: `sbx_ports_publish`, `sbx_ports_unpublish`, `sbx_template_load`, `sbx_policy_set_default`, `sbx_policy_allow`, `sbx_policy_deny`, `VALID_NETWORK_PROFILES`.
+- `docs/usage/commands.md:115` ("Clones repository as bare repo")
+- `docs/usage/commands.md:268` ("Cleans up sandbox branch from bare repo")
+- `docs/getting-started.md:81`
+- `docs/operations.md:65`, `docs/operations.md:346`
+- `docs/architecture.md:97`, `:101`, `:109`, `:192`, `:203`, `:245`, `:343`
+  (including the ASCII diagram labels pointing at `repos/ (bare repos)`)
+- `docs/adr/008-sbx-migration.md:56` ("Still uses bare repos + worktrees")
 
-### `foundry_sandbox/constants.py`
-Delete: `CONTAINER_READY_ATTEMPTS`, `CONTAINER_READY_DELAY`, `TIMEOUT_PIP_INSTALL`, `get_sandbox_debug`, `get_sandbox_assume_yes`, `VALID_NETWORK_MODES`, `get_sandbox_network_mode`, `get_sandbox_sync_on_attach`, `get_sandbox_sync_ssh`, `get_sandbox_ssh_mode`, `get_sandbox_opencode_disable_npm_plugins`, `get_sandbox_opencode_plugin_dir`, `get_sandbox_opencode_prefetch_npm_plugins`, `get_sandbox_opencode_default_model`, `get_sandbox_tmux_scrollback`, `get_sandbox_tmux_mouse`.
-Keep: `get_sandbox_home`, `get_repos_dir`, `get_claude_configs_dir`, `get_sandbox_verbose`, `SANDBOX_NAME_MAX_LENGTH`, `TIMEOUT_GIT_TRANSFER`, `TIMEOUT_GIT_QUERY`, `TIMEOUT_LOCAL_CMD`.
+Replace with the actual behavior: sbx owns the worktree layout under
+`<repo_root>/.sbx/<sandbox-name>-worktrees/<branch>/`; cast only ensures a
+regular working checkout exists.
 
-### `foundry_sandbox/paths.py`
-Delete: `path_opencode_plugins_marker`, `resolve_ssh_agent_sock`, `path_claude_home` (only tests use it), `safe_remove` (only tests use it).
+### 1.2 Fix README.md drift
 
-### `foundry_sandbox/config.py`
-Delete: `deep_merge`, `deep_merge_no_overwrite`, `json_escape`, `json_array_from_lines`.
-Keep: `load_json`, `write_json`.
+- `README.md:50` advertises `cast repeat`. Alias was removed (see
+  `CHANGELOG.md:20`). Replace with `cast new --last`.
+- `README.md:130` links `docs/migration/0.20-to-0.21.md`. File was deleted
+  per `CHANGELOG.md:23`; the directory no longer exists. Either link to the
+  release branch that still hosts the guide or drop the row from the
+  documentation table.
 
-### `foundry_sandbox/utils.py`
-Delete: `flag_enabled`, `generate_sandbox_id`, `environment_scope` (only tests).
+### 1.3 Sync `cast new` docs with actual flags
 
-### `foundry_sandbox/git.py`
-Delete: `branch_exists` (only tests).
+`docs/usage/commands.md` options table (around `:43`) is missing
+`--template <tag>` (defined in `foundry_sandbox/commands/new.py:309`). Add it
+with the same default/behavior the Click option declares.
 
-### Test cleanup
-Delete tests that exclusively exercise deleted functions: sections of `tests/unit/test_foundation.py` covering `environment_scope`, `path_claude_home`, `safe_remove`, `get_sandbox_debug`, `get_sandbox_assume_yes`; `test_git.py` sections for `branch_exists`; anything in `test_sbx.py` testing the deleted `sbx_*` wrappers.
+### 1.4 Orphan doc file
 
-**Commit:** `refactor: Phase 1 delete unused helpers`
-
----
-
-## Phase 2 — Delete obsolete files
-
-Full-file deletes. No code references remain.
-
-### Scripts
-- `scripts/build-foundry-template.sh` (116 lines) — duplicates `ensure_foundry_template()` in `git_safety.py:513`; the Python version is the one `cast new` invokes.
-
-### Config
-- `config/allowlist.yaml` (259 lines) — unified-proxy allowlist; sbx network policy replaces it. No code references.
-- `config/firewall-allowlist.txt` — same story.
-- `config/policy.yaml.example` — legacy proxy policy example.
-Keep: `config/user-services.yaml.example`, `config/push-file-restrictions.yaml` (both still referenced).
-
-### Repo root
-- `sbx-analysis.md` (832 lines) — pre-migration analysis doc from 2026-04-18. The migration it analyzed is now done (ADR-008). Either delete or move to `docs/archive/`.
-
-**Commit:** `refactor: Phase 2 delete obsolete configs and scripts`
+`docs/security/audit-5.6.md` is not referenced from `docs/README.md` or the
+main `README.md`. Either index it or move it under `docs/adr/` if it records
+a decision.
 
 ---
 
-## Phase 3 — Drop vestigial `network_profile`
+## Phase 2 — User-visible consistency
 
-This field is written, read, round-tripped through presets and `--last`, serialized in metadata, and tested — but never applied to sbx. `cast new` has no `--network` flag, and the `sbx_policy_*` wrappers (being removed in Phase 1) were never called from cast.
+Small code changes to make the CLI speak with one voice. All changes are
+local to a single file each.
 
-### Changes
-- `foundry_sandbox/models.py`: remove `network_profile` from `SbxSandboxMetadata` and `CastNewPreset`.
-- `foundry_sandbox/state.py`: drop `network_profile` param from `_build_command_line`, `_write_cast_new_json`, `save_last_cast_new`, `save_cast_preset`, and `_load_cast_new_json` fallback dict.
-- `foundry_sandbox/commands/preset.py:143`: drop `network_profile=metadata.get(...)` from `save`.
-- Tests: update `test_models.py`, `test_state.py`, `test_preset_command.py` — remove `network_profile` assertions.
+### 2.1 Unify "microVM" vs "sandbox" wording
 
-### Backward-compat
-Metadata written by older versions will still have `network_profile`; Pydantic will ignore unknown fields (the `extra_forbidden` fallback in `_load_metadata_from_json` already tolerates this). No migration needed.
+Pick one term. "sandbox" is already the dominant choice in CLI output and
+docstrings. Touch points:
 
-**Commit:** `refactor: Phase 3 drop vestigial network_profile field`
+- `foundry_sandbox/commands/destroy.py:154` — confirmation line reads
+  `"  - Sandbox microVM (sbx rm)"`. Change to `"  - Sandbox (sbx rm)"`.
+- `foundry_sandbox/cli.py:111` — group docstring `"""Cast - microVM sandbox
+  manager for Claude Code."""` is shown in `--help`. Change to `"""Cast -
+  sandbox manager for Claude Code."""`.
+- `pyproject.toml:8` — `description = "MicroVM-based sandbox environment..."`.
+  Match the chosen wording.
+- `pyproject.toml:15` — `keywords` still lists `"docker"`. Replace with `"sbx"`.
 
----
+### 2.2 Trim migration-era docstring breadcrumbs
 
-## Phase 4 — User-facing fixes
+Each of these docstrings describes what the module *replaces* rather than
+what it does. Rewrite each as a one-line description of the current
+behavior:
 
-Small but visible correctness fixes.
+- `foundry_sandbox/commands/stop.py:3` — drop `"instead of docker-compose"`.
+- `foundry_sandbox/commands/new_setup.py:3` — rewrite without the "replaces
+  new_setup.py" backward reference.
+- `foundry_sandbox/models.py:9` — drop `"Replaces the docker-compose-based
+  SandboxMetadata."`.
+- `foundry_sandbox/commands/refresh_creds.py:4` — drop `"No more
+  direct/isolation mode distinction."`.
+- `foundry_sandbox/constants.py:3` — drop the `"replaces lib/constants.sh"`
+  reference.
+- `foundry_sandbox/commands/help_cmd.py:3` — drop `"Migrated from
+  commands/help.sh (60 lines)."`.
+- `foundry_sandbox/utils.py:3` — drop the `"replace the shell scripts
+  lib/utils.sh, lib/format.sh, and lib/runtime.sh."` reference.
 
-### `foundry_sandbox/version_check.py:158`
-Currently prints `Run cast upgrade to update`. `cast upgrade` was removed in ADR-008. Change to `Run pip install -U foundry-sandbox to update`.
+### 2.3 Collapse dead branches in `install.sh`
 
-### Docker-era wording
-- `foundry_sandbox/cli.py:111`: docstring `"""Cast - Docker sandbox manager for Claude Code."""` → `"""Cast - microVM sandbox manager for Claude Code."""`.
-- `foundry_sandbox/commands/destroy.py:154`: `"Sandbox container (sbx rm)"` → `"Sandbox microVM (sbx rm)"`.
-- `foundry_sandbox/commands/help_cmd.py:38`: `--copy, -c src:dst ... Copy host path into container` → `Copy host path into sandbox`.
-- Wording in `--copy` help in `new.py:300`.
-
-**Commit:** `fix: Phase 4 correct post-sbx user-facing wording and upgrade hint`
-
----
-
-## Phase 5 — Naming cleanup: drop `_sbx` suffix
-
-Historical suffix from when both docker-compose and sbx backends coexisted. There is no other backend now; the suffix is noise.
-
-### Code renames
-- `foundry_sandbox/commands/new_sbx.py` → `foundry_sandbox/commands/new_setup.py` (intent: "parameter resolution in `new.py`, setup logic here").
-- `foundry_sandbox/assets/git-wrapper-sbx.sh` → `foundry_sandbox/assets/git-wrapper.sh`.
-- `foundry_sandbox/sbx.py::install_pip_requirements_sbx` → `install_pip_requirements`.
-
-### Test renames
-- `tests/unit/test_attach_sbx.py` → `test_attach.py`
-- `tests/unit/test_chaos_sbx.py` → `test_chaos.py`
-- `tests/unit/test_destroy_sbx.py` → `test_destroy.py`
-- `tests/unit/test_list_sbx.py` → `test_list.py`
-- `tests/unit/test_new_sbx.py` → `test_new.py`
-- `tests/unit/test_refresh_creds_sbx.py` → `test_refresh_creds.py`
-- `tests/unit/test_sbx_identity.py` → `test_identity.py`
-- `tests/unit/test_start_sbx.py` → `test_start.py`
-- `tests/unit/test_status_sbx.py` → `test_status.py`
-- `tests/unit/test_stop_sbx.py` → `test_stop.py`
-
-Keep `test_sbx.py` (tests the sbx CLI wrapper module) and `test_new_sbx.py` test contents but rename imports/paths.
-
-### Fold `tui.py`
-17-line file containing only `_is_noninteractive()`. Name is misleading (no TUI). Move the function into `utils.py`, update the one import in `ide.py:17`, delete `tui.py`.
-
-### `pyproject.toml::hatch.build.targets.wheel.artifacts`
-Asset pattern is `foundry_sandbox/assets/*.sh` — rename alone suffices.
-
-**Commit:** `refactor: Phase 5 drop _sbx naming suffix and fold tui.py`
+The script tries to source `lib/api_keys.sh` at `install.sh:200-203` and
+probes for `check_api_keys_with_prompt` at `install.sh:282-284`. `lib/` no
+longer exists in the repo; only the inline `_check_api_keys_inline` path at
+`install.sh:207` ever runs. Delete the two dead branches.
 
 ---
 
-## Phase 6 — Command consolidation
+## Phase 3 — Dead code removal
 
-Remove duplication between commands and with Click's built-in help.
+Safe deletions once Phases 1–2 land. Each removal should be verified by
+running `./scripts/ci-local.sh`.
 
-### Merge `list` and `status`
-Both scan `sbx_ls()` + metadata; both support `--json`; `list` adds a wrapper-drift marker; `status NAME` shows detail. Consolidate:
-- **Keep `cast list`** as the all-sandbox view (with drift marker, as today).
-- **Keep `cast status NAME`** as the single-sandbox detail view.
-- **Drop `cast status` with no argument** — redirect to `cast list` with a one-line notice, or just make `status` require a name.
-- Extract the shared `(sbx_ls + metadata merge)` loop into `foundry_sandbox/state.py::list_sandboxes_with_status()` or similar.
+### 3.1 Unused symbols
 
-### Delete `cast help`
-`commands/help_cmd.py` hand-maintains a 50-line help string that duplicates Click's auto-generated `--help`. Delete the file, drop from `_LAZY_COMMANDS`, and rely on `cast --help`. Update any docs that say `cast help`.
+- `foundry_sandbox/state.py:211` — `inspect_sandbox()` has no non-test
+  callers (`grep -R inspect_sandbox foundry_sandbox/` shows only the
+  definition). Delete the function and its test(s) in
+  `tests/unit/test_state.py`.
+- `foundry_sandbox/utils.py:81` — `log_step()` has zero callers anywhere.
+  Delete.
+- `foundry_sandbox/utils.py:28,30,31` — `RED`, `BLUE`, `GREEN` ANSI
+  constants are unused (only `YELLOW`, `BOLD`, `RESET` are referenced).
+  Delete the three constants.
 
-### Delete `commands/tui.py`
-Already covered in Phase 5.
+### 3.2 Dead tamper-event counter
 
-**Commit:** `refactor: Phase 6 consolidate status/list and drop custom help`
+`foundry_sandbox/git_safety.py:626` defines the module-level
+`_tamper_event_fallback_count`; `git_safety.py:697` exposes
+`get_tamper_event_fallback_count()`. Only tests read it. Either:
 
----
+- wire it into `cast diagnose` (`commands/diagnose.py`) so it surfaces
+  alongside the server-side counter, **or**
+- delete the counter, the accessor, and the test in
+  `tests/unit/test_git_safety.py:955`.
 
-## Phase 7 — Docs refresh
+Recommendation: wire into `diagnose` — it's the observability story the
+counter was created for.
 
-### Architecture paths
-- `docs/architecture.md:95-102, 241-262`: worktree layout shows `~/.sandboxes/worktrees/<name>/` with internal `.foundry/`. Actual path is `<repo_root>/.sbx/<name>-worktrees/<branch>/`. HMAC secret lives at `/run/foundry/hmac-secret` (tmpfs) + `/var/lib/foundry/hmac-secret` (persistent), not in the worktree. Rewrite the Host State Layout section.
-- `docs/architecture.md:127-132`: the `sbx_policy_*` and `sbx_template_load` rows describe functions being removed in Phase 1. Delete those rows from the "Supported Operations" table.
-- `docs/architecture.md:164`: `GH_TOKEN` placeholder claim is wrong — delete.
+### 3.3 `SbxSandboxMetadata.backend` field
 
-### Operations
-- `docs/operations.md:297`: `ls -la ~/.sandboxes/worktrees/<name>` → `ls -la <repo_root>/.sbx/<name>-worktrees/`.
+`foundry_sandbox/models.py:13` declares `backend: str = "sbx"`. No non-test
+code reads it. Two options:
 
-### Top-level guidance
-- `AGENTS.md` (repo root) structure description is out of sync with `CLAUDE.md`. Align the "Development" section on `CLAUDE.md`'s version.
+- Delete the field (simplest; there is only one backend).
+- Promote to `backend: Literal["sbx-v1"]` and gate future schema migrations
+  on it.
 
-### Superseded ADRs
-ADRs 001, 002, 003, 004, 005, 006, 007 are all superseded by 008. Add a single-line status banner at the top of each:
-```markdown
-> **Status:** Superseded by [ADR-008](008-sbx-migration.md). Kept for historical context.
-```
+Recommendation: delete now; add back as a schema-version sentinel when a
+real migration is queued.
 
-### Help text
-`commands/help_cmd.py` deleted in Phase 6 — no more maintenance burden here. But docs in `docs/usage/commands.md` should still be reviewed for accuracy against current flags.
+### 3.4 Drop `SCRIPT_DIR` from `cast config`
 
-**Commit:** `docs: Phase 7 refresh architecture, operations, and ADR supersession notes`
+`foundry_sandbox/commands/config.py:20` computes
+`SCRIPT_DIR = Path(__file__).resolve().parent.parent.parent` and prints it
+in both human and JSON output. In pipx or wheel installs this resolves
+inside site-packages and conveys nothing. Remove from:
 
----
+- `commands/config.py:30` (variable definition)
+- `commands/config.py:40` (JSON field `script_dir`)
+- `commands/config.py:52` (human row `SCRIPT_DIR`)
 
-## Phase 8 (optional) — `new.py` refactor
+Update any asserts in `tests/unit/test_cli.py` / wherever it's tested.
 
-`foundry_sandbox/commands/new.py` is 576 lines and mixes three concerns. This phase extracts helpers; it changes structure but not behavior. Skip if appetite is low — everything above stands on its own.
+### 3.5 Hidden preset aliases
 
-### Extract `foundry_sandbox/repo.py`
-Move these pure helpers (currently in `new.py`) into a new module:
-- `_resolve_repo_input` → `resolve_repo_input`
-- `_branch_exists_on_remote` → `branch_exists_on_remote`
-- `_detect_remote_default_branch` → `detect_remote_default_branch`
-- `_generate_branch_name` → `generate_branch_name`
-- `_ensure_repo_root` → `ensure_repo_root`
+`foundry_sandbox/commands/preset.py:203,210` define hidden `rm` and
+`remove` aliases for `delete`. If the project is trending toward fewer
+aliases (per `CHANGELOG.md:20` which removed `repeat`/`reattach`), remove
+these too. Otherwise, make them visible so help stays honest.
 
-Add a `git_query(repo_root, *args) -> str | None` helper to `git.py` and use it inside these functions so they stop doing `subprocess.run(["git", "-C", ...])` inline.
-
-### Simplify saved-defaults merge
-`_apply_saved_new_defaults` (lines 68-109) + `_STR_FIELDS`/`_BOOL_FIELDS` tables + `NewDefaults` dataclass reimplement a `caller > saved > default` merge. Replace with a `CastNewPreset(...).model_copy(update={...})` pattern, driven from `CastNewPreset.model_fields`. Target: ~40 lines → ~15.
-
-### Extract name claim loop
-`new.py:470-493` is a `for...else` with nested collision handling. Extract to `_claim_unique_name(base_name, allow_increment: bool) -> (name, branch)` in `state.py` or `paths.py`.
-
-**Commit:** `refactor: Phase 8 extract repo.py and simplify new.py defaults`
+Recommendation: remove both. The canonical verb is `delete`.
 
 ---
 
-## Phase 9 (optional) — `git_safety.py` split
+## Phase 4 — `cast help` consolidation
 
-927 lines mixing server lifecycle, HMAC, registration, wrapper injection, template build, tamper events, connectivity check, and provisioning orchestration. Split into a package:
+`foundry_sandbox/commands/help_cmd.py` is a 60-line HEREDOC enumerating
+commands and flags. It already drifts from the real Click tree: no mention
+of `--template`, `watchdog`, or `diagnose`. Click generates correct help
+from the command definitions.
 
-```
-foundry_sandbox/git_safety/
-├── __init__.py          # re-exports for backward compat
-├── server.py            # start/stop/status/health/readiness
-├── hmac.py              # generate_hmac_secret, write_hmac_* 
-├── wrapper.py           # inject_git_wrapper, verify_*, compute_wrapper_checksum
-├── template.py          # ensure_foundry_template, is_template_stale, digest
-├── provisioning.py      # provision_git_safety, repair_git_safety, ProvisioningResult
-└── tamper.py            # emit_wrapper_tamper_event
-```
+Options, in order of preference:
 
-`__init__.py` re-exports everything other modules import, so `from foundry_sandbox.git_safety import ...` continues to work. This is a risky-ish refactor because the current module is tightly tested; do last.
+1. Delete `help_cmd.py`, drop it from `_LAZY_COMMANDS` in `cli.py:26`, and
+   rely on `cast --help` / `cast <subcommand> --help`.
+2. Make `cast help` dispatch to `cli.main(["--help"])` so it stays in
+   sync but the command name is preserved.
 
-**Commit:** `refactor: Phase 9 split git_safety into submodules`
+Recommendation: option 2 — users already type `cast help`, keep the verb
+but let Click generate the content.
 
 ---
 
-## Risk summary
+## Phase 5 — Structural simplification
 
-| Phase | Risk | Reversibility |
-|---|---|---|
-| 1 Delete unused funcs | Low (tests catch) | `git revert` |
-| 2 Delete obsolete files | Low | `git revert` |
-| 3 Drop `network_profile` | Low (metadata is forward-compat) | `git revert` + re-add field |
-| 4 User-facing wording | Trivial | `git revert` |
-| 5 Renames | Medium (import churn) | `git revert` |
-| 6 Command consolidation | Medium (changes UX) | `git revert` + restore command |
-| 7 Docs | None | `git revert` |
-| 8 `new.py` refactor | Medium-high (behavioral paths) | Careful `git revert` |
-| 9 `git_safety` split | High (wide import surface) | Full rollback of phase |
+Higher-impact refactors. Each is a self-contained change but touches
+multiple files.
 
-## Estimated impact
+### 5.1 Consolidate `cast list` and `cast status`
 
-- Phases 1–7 complete: ~1,500 lines of Python deleted, ~325 lines of config deleted, ~832 lines of analysis doc removed or archived, one user-facing bug fixed, doc accuracy restored. Zero behavior changes visible to users other than Phase 4's wording fixes and Phase 6's help/status UX.
-- Phases 8–9 optional: further ~200 line reduction in `new.py`, ~900 line reshuffle of `git_safety.py` for maintainability.
+`commands/list_cmd.py:_collect_sandbox_info` and
+`commands/status.py:_collect_all_sandboxes` differ by one field
+(`wrapper_checksum`). `cast list` and `cast status` without a name
+argument produce near-identical output.
+
+Plan:
+
+- Extract one `collect_sandbox_list()` helper into `state.py`.
+- Make `cast status [name]` list-when-bare, detail-when-named (it almost
+  is today).
+- Either remove `cast list` or keep it as a thin alias that calls
+  `cast status` with no args. Preference: remove; it's one less command to
+  explain.
+
+### 5.2 Factor the triple env-var write in `inject_git_wrapper`
+
+`foundry_sandbox/git_safety.py:339-396` writes the same six env vars to
+three destinations (`/etc/profile.d/foundry-git-safety.sh`,
+`/etc/bash.bashrc` block, `/var/lib/foundry/git-safety.env`) via three
+base64-encoded `sbx exec` calls. Changes must be made in all three places.
+
+Plan:
+
+- Extract a single `dict[str, str]` of env vars near the top of
+  `inject_git_wrapper`.
+- Add three small helpers — `_emit_profile_d`, `_emit_bashrc_block`,
+  `_emit_plain_env` — that each consume the dict.
+- Keep the three destinations (they serve distinct shell modes, as the
+  existing comments explain); only the source of truth consolidates.
+
+### 5.3 `destroy-all` should see orphaned registry entries
+
+`commands/destroy_all.py:27` enumerates sandboxes only via `sbx_ls()`. The
+`claude-config/` registry is treated as authoritative elsewhere
+(`commands/_helpers.py:88`, `state.py:195`). Sandboxes that exist in the
+registry but not in sbx (the exact drift `commands/start.py:151` warns
+about) can't be cleaned up via `destroy-all`.
+
+Plan:
+
+- Union `sbx_ls()` names with `list_sandbox_names()` from `_helpers.py`.
+- Pass the unioned names to `destroy_impl`, which is already best-effort
+  and handles missing sbx entries gracefully.
+
+### 5.4 Re-evaluate `git-mode` shim entry point
+
+`pyproject.toml:47` installs a second binary `git-mode` whose
+implementation is `git_mode_shim()` at
+`foundry_sandbox/commands/git_mode.py:216`. The rationale in the
+docstring — "GitHub CLI may call `git mode`" — is uncorroborated; `gh`
+does not shell out to `git mode`.
+
+Plan:
+
+- Confirm with `git log --all --oneline -- foundry_sandbox/commands/git_mode.py`
+  why the shim was added.
+- If no concrete consumer, remove the `[project.scripts]` entry and the
+  `git_mode_shim` function; keep only the Click command registered via
+  `_LAZY_COMMANDS`.
+
+### 5.5 Command-name suggestions
+
+`cli.py:95` (`CastGroup.resolve_command`) fails hard on unknown commands
+with no "did you mean" hint. Click-didyoumean is a small, well-scoped
+dependency. Optional quality-of-life win; skip if avoiding new deps.
+
+---
+
+## Phase 6 — Rename `claude-config/` (breaking)
+
+The directory `$SANDBOX_HOME/claude-config/` is the authoritative sandbox
+registry for **every** agent — claude, codex, gemini, opencode, shell — yet
+the name implies Claude-only scope.
+
+Files and symbols to rename:
+
+- `foundry_sandbox/constants.py:51` — `get_claude_configs_dir()` →
+  `get_sandbox_configs_dir()`
+- `foundry_sandbox/paths.py:49` — `path_claude_config()` →
+  `path_sandbox_config()`
+- Every caller (`commands/_helpers.py`, `state.py`, `commands/config.py`,
+  `commands/destroy.py`, `commands/new.py`, `paths.py`)
+- `cast config` output labels (`CLAUDE_CONFIGS_DIR` → `SANDBOX_CONFIGS_DIR`)
+
+On-disk migration:
+
+- One-shot rename of `$SANDBOX_HOME/claude-config/` →
+  `$SANDBOX_HOME/sandboxes/` on first run of the new version.
+- Keep a symlink for one minor release for forgiving rollback.
+
+This is a 0.22.x-scope change; ship after Phases 1–5 land. Include a
+CHANGELOG "Breaking" entry and a migration note in the release body.
+
+---
+
+## Ordering and sequencing
+
+Phases 1–3 are independent and can land as three PRs in any order.
+
+Phase 4 should follow Phase 1 (so regenerated help matches the fixed
+docs).
+
+Phase 5 should follow Phases 2 and 3 (fewer distractions when touching
+structural code).
+
+Phase 6 gates on all prior phases and ships in a minor release bump.
