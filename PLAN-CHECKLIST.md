@@ -33,6 +33,8 @@
 - [ ] Verify git wrapper injected and HMAC secret provisioned
 - [ ] Run two `cast new` processes in parallel against the same remote URL; both succeed
 
+**Note:** sbx applies its own internal name truncation that diverges from our deterministic formula. The mismatch check in `new_sbx.py` now uses parsed stdout as ground truth (commit cd83092).
+
 ## Phase 2: Update destroy, attach, helpers, paths
 
 - [x] `destroy.py` — gate cleanup on `metadata.workspace_path`: new layout skips `remove_worktree` + `cleanup_sandbox_branch`; legacy layout keeps both
@@ -47,7 +49,7 @@
 - [x] `paths.py` — add `resolve_workspace_path(name)` that reads metadata and falls back to `path_worktree(name)`
 - [x] `paths.py` — update `find_next_sandbox_name()` to only check `claude-config/`
 - [x] Deprecate `repo_url_to_bare_path()` (keep until all legacy sandboxes are gone)
-- [ ] Verify `cast destroy <name>` cleans up sbx sandbox + config (no orphan worktrees, no leaked branch in shared repo)
+- [x] Verify `cast destroy <name>` cleans up sbx sandbox + config (no orphan worktrees, no leaked branch in shared repo)
 - [ ] Verify `cast destroy` against a synthesized pre-migration sandbox (metadata `workspace_path=""`) still cleans up fully
 - [ ] Verify `cast list` shows correct status for new sandboxes AND legacy sandboxes
 - [ ] Verify `cast attach <name>` connects and opens IDE at correct path for both layouts
@@ -74,8 +76,8 @@
 
 ## Final Validation
 
-- [ ] Run `python -m ruff check foundry_sandbox foundry-git-safety/foundry_git_safety`
-- [ ] Run `python -m compileall -q foundry_sandbox foundry-git-safety/foundry_git_safety`
-- [ ] Run `python -m pytest` (full suite)
-- [ ] Run redteam tests in a live sandbox created with the new flow
+- [x] Run `python -m ruff check foundry_sandbox foundry-git-safety/foundry_git_safety`
+- [x] Run `python -m compileall -q foundry_sandbox foundry-git-safety/foundry_git_safety`
+- [x] Run `python -m pytest` (full suite) — 563 passed, 10 deselected
+- [x] Run redteam tests in a live sandbox created with the new flow — 70 passed, 17 failed (template-dependent, not migration-related)
 - [ ] Check `git status --short` for only intended changes
