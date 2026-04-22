@@ -1,83 +1,122 @@
-# sbx Worktree Migration Checklist
+# Post-sbx-Migration Cleanup Checklist
 
-## Phase 0: Open Questions — RESOLVED
+## Phase 1: Finish the Prior Migration (Release Blocker)
 
-- [x] Experimentally verify whether `sbx rm` deletes the feature branch from the shared repo (not just the worktree). Record finding in PLAN.md.
-  - **Answer: No.** Branch ref, worktree registration, and `.sbx/` dir all persist after `sbx rm`. Cast must keep its own branch cleanup.
-- [x] Decide source of truth for `workspace_path`: deterministic formula stored, parsed stdout used as post-create sanity check. Document in PLAN.md §1.2/§1.3.
-  - **Answer: Deterministic formula as primary, parsed stdout as post-create sanity check.** Fail-closed on mismatch.
-- [x] Confirm locking strategy for concurrent `cast new` on the same remote URL (per-repo file lock in `ensure_repo_checkout()`).
-  - **Answer: Reuse `file_lock()` from `atomic_io.py` (fcntl.flock, 30s timeout, `.castlock` sidecar).** No new dependency needed. Lock covers clone + `sbx create` (serializes `git worktree add`).
+- [ ] Synthesize a pre-migration sandbox (`metadata.json` with `workspace_path = ""`, legacy worktree at `~/.sandboxes/worktrees/<name>/`)
+- [ ] Run `cast destroy <name>` against the synthesized sandbox; verify full cleanup (bare-repo branch, worktree, claude-config, sbx container)
+- [ ] Codify as a unit test in `tests/unit/test_destroy.py` if no coverage exists
+- [ ] `cast git-mode <name> --mode host` against a real new-layout sandbox; verify `core.worktree` in `<repo>/.git/worktrees/<branch>/config.worktree` matches host path
+- [ ] `cast git-mode <name> --mode sandbox`; verify `core.worktree == /git-workspace`
+- [ ] Repeat both git-mode toggles against a synthesized legacy sandbox (regression)
+- [ ] `git status --short` is clean before tagging the next release
 
-## Phase 1: Fix `cast new`
+## Phase 2: Mechanical Ergonomic Wins
 
-- [ ] Add `workspace_path: str = ""` field to `SbxSandboxMetadata` in `models.py`
-- [ ] Add `sbx_worktree_path(repo_root, name, branch)` to `sbx.py` (deterministic path)
-- [ ] Add `sbx_get_workspace_info()` to parse sbx create stdout for worktree/branch
-- [ ] Rewrite `new_sbx_setup()` — remove `bare_path`/`worktree_path` params, use `repo_root`
-- [ ] Remove `ensure_bare_repo()` and `create_worktree()` calls from `new_sbx.py`
-- [ ] Pass `repo_root` (not worktree) to `sbx_create()`, keep `--branch`
-- [ ] Store `workspace_path` in metadata after sbx create
-- [ ] Update `provision_git_safety()` call to use sbx worktree path
-- [ ] Update `new.py` — remove `bare_path` computation, derive `repo_root` from input
-- [ ] Simplify `rollback_new_sbx()` — remove `worktree_path` param
-- [ ] Update `write_sandbox_metadata()` / `patch_sandbox_metadata()` in `state.py`
-- [ ] Refactor `sandbox_name()` to take `repo_name: str` (not `bare_path`); update callers to pass the derived name
-- [ ] Add `ensure_repo_checkout(repo_url) -> str` with per-repo file lock for remote URL inputs
-- [ ] Re-acquire the per-repo lock around `sbx create` to serialize concurrent `git worktree add`
-- [ ] Rollback leaves cached repo checkout intact (cache semantics)
-- [ ] Update `tests/unit/test_new_sbx.py` — replace bare_path/worktree mocks with repo_root
-- [ ] Add a parse-vs-deterministic mismatch test for `sbx_get_workspace_info()` (fail-closed behavior)
+### 2.1 Dedup `_install_pip_requirements_sbx`
+
+- [ ] Move function to `foundry_sandbox/sbx.py`
+- [ ] Delete copy at `commands/new_sbx.py:40`
+- [ ] Delete copy at `commands/start.py:32`
+- [ ] Update import at `tests/unit/test_start_sbx.py:101`
+- [ ] Run `python -m pytest tests/unit/ -x`
+
+### 2.2 Extract `resolve_sandbox_name()` to `_helpers.py`
+
+- [ ] Add `resolve_sandbox_name(name, *, use_last, last_key)` to `commands/_helpers.py`
+- [ ] Replace in-command helper at `commands/attach.py:47-74`
+- [ ] Replace in `commands/git_mode.py`
+- [ ] Replace in `commands/refresh_creds.py`
+- [ ] Replace in `commands/preset.py`
+- [ ] Add unit test for the shared helper
+- [ ] Verify `cast attach --last`, `cast attach` (auto-detect), `cast attach` (fzf) all still work
+
+### 2.3 Rename `workspace_path` → `host_worktree_path`
+
+- [ ] Rename field in `models.py:SbxSandboxMetadata`
+- [ ] Update `state.py:write_sandbox_metadata()` to write the new name
+- [ ] `state.py:load_sandbox_metadata()` reads either `host_worktree_path` or `workspace_path` (compat shim)
+- [ ] Update all in-code references (`paths.py`, `_helpers.py`, `commands/destroy.py`, `commands/attach.py`, `commands/git_mode.py`)
+- [ ] Update tests that reference `workspace_path` in metadata fixtures
+- [ ] Document the rename in `CHANGELOG.md`
+
+## Phase 3: Command Structure Cleanup
+
+### 3.1 Collapse `new_*.py` fan-out
+
+- [ ] Fold `new_validation.py` helpers into `new_sbx.py` as private functions
+- [ ] Fold `new_resolver.py` helpers into `new.py` (or split between `new.py` and `new_sbx.py` by concern)
+- [ ] Delete `new_validation.py` and `new_resolver.py`
+- [ ] Update imports
+- [ ] Update/move related tests in `tests/unit/`
 - [ ] Run `cast new --agent shell --skip-key-check --template none .` and verify success
-- [ ] Verify sbx worktree created at `<repo>/.sbx/<name>-worktrees/<branch>/`
-- [ ] Verify git wrapper injected and HMAC secret provisioned
-- [ ] Run two `cast new` processes in parallel against the same remote URL; both succeed
 
-**Note:** sbx applies its own internal name truncation that diverges from our deterministic formula. The mismatch check in `new_sbx.py` now uses parsed stdout as ground truth (commit cd83092).
+### 3.2 Replace `ctx.invoke()` cross-command calls
 
-## Phase 2: Update destroy, attach, helpers, paths
+- [ ] Replace `attach.py:31` (`list_cmd` invocation) with inline listing or a pointer message
+- [ ] Extract startup logic from `start.py` into a plain function; call it from both `start.py` and `attach.py:44`
+- [ ] Replace `info.py:46,48,62` (`config` + `status` chain) — inline or drop the `info` command
+- [ ] Verify `cast attach <name>` against a stopped sandbox still auto-starts
+- [ ] Verify `cast info` output is preserved (if kept)
 
-- [x] `destroy.py` — gate cleanup on `metadata.workspace_path`: new layout skips `remove_worktree` + `cleanup_sandbox_branch`; legacy layout keeps both
-- [x] `destroy.py` — retain `repo_url_to_bare_path` import for the legacy branch
-- [x] `destroy.py` — if Phase 0 Q1 determines sbx does not delete the branch, add a new-layout branch-delete helper that honors protected-branch patterns
-- [x] `attach.py` — use `resolve_workspace_path()` for existence check and IDE launch
-- [x] `_helpers.py` — rewrite `auto_detect_sandbox()` to match cwd against metadata workspace_path (plus legacy `worktrees/` fallback)
-- [x] `_helpers.py` — rewrite `list_sandbox_names()` to scan `claude-config/` dirs (authoritative registry; covers both old and new sandboxes)
-- [x] `_helpers.py` — rewrite `fzf_select_sandbox()` to use metadata listing
-- [x] Confirm `git_mode.py` sandbox resolution still works (it uses the updated `_helpers.py` shared functions)
-- [x] `paths.py` — keep `path_worktree()` pure (legacy formula); do NOT add metadata I/O to it
-- [x] `paths.py` — add `resolve_workspace_path(name)` that reads metadata and falls back to `path_worktree(name)`
-- [x] `paths.py` — update `find_next_sandbox_name()` to only check `claude-config/`
-- [x] Deprecate `repo_url_to_bare_path()` (keep until all legacy sandboxes are gone)
-- [x] Verify `cast destroy <name>` cleans up sbx sandbox + config (no orphan worktrees, no leaked branch in shared repo)
-- [ ] Verify `cast destroy` against a synthesized pre-migration sandbox (metadata `workspace_path=""`) still cleans up fully
-- [ ] Verify `cast list` shows correct status for new sandboxes AND legacy sandboxes
-- [ ] Verify `cast attach <name>` connects and opens IDE at correct path for both layouts
-- [x] Run unit tests: `python -m pytest tests/unit/ -x`
+### 3.3 CLI alias cleanup
 
-## Phase 3: Update git_mode (Deferred)
+- [ ] Decide: promote aliases to canonical, or drop aliases entirely
+- [ ] Apply the decision in `cli.py:24-28`
+- [ ] Document the rename in `CHANGELOG.md`
+- [ ] Update `docs/usage/` and `README.md` for any renamed commands
 
-- [x] Inspect sbx worktree `.git` file → gitdir → commondir chain
-- [x] Rewrite `_resolve_git_paths()` for sbx worktree layout
-- [x] `_validate_git_paths()` dispatches on layout: accept BOTH legacy (`~/.sandboxes/...`) and new (`<repo>/.git/...`); fail closed if neither matches
-- [x] Layout dispatch prefers `metadata.workspace_path`; falls back to path-shape detection when metadata is absent
-- [x] Update `_apply_git_mode()` — config file locations may differ
-- [ ] Verify `cast git-mode <name> --mode host` sets correct core.worktree (new layout)
-- [ ] Verify `cast git-mode <name> --mode sandbox` sets `/git-workspace` (new layout)
-- [ ] Verify `cast git-mode` still works against a legacy sandbox (regression)
+## Phase 4: Delete Legacy Code (Next Release)
 
-## Phase 4: Deprecate Dead Code
+**Prerequisite:** at least one release has shipped with Phase 1-3; release notes instruct users to destroy and recreate any pre-migration sandbox.
 
-- [x] Add deprecation warnings to `git_worktree.py` functions
-- [x] Add deprecation warnings to bare repo functions in `git.py`
-- [x] Mark `get_worktrees_dir()` as deprecated in `constants.py`
-- [ ] After one release: remove `git_worktree.py` entirely
-- [ ] After one release: remove `ensure_bare_repo()`, `fetch_bare_branch()`
+### 4.1 Delete `git_worktree.py`
 
-## Final Validation
+- [ ] Move `cleanup_sandbox_branch_repo()` (git_worktree.py:484-538) into `git.py`
+- [ ] Delete `foundry_sandbox/git_worktree.py`
+- [ ] Remove imports from `commands/destroy.py`
 
-- [x] Run `python -m ruff check foundry_sandbox foundry-git-safety/foundry_git_safety`
-- [x] Run `python -m compileall -q foundry_sandbox foundry-git-safety/foundry_git_safety`
-- [x] Run `python -m pytest` (full suite) — 563 passed, 10 deselected
-- [x] Run redteam tests in a live sandbox created with the new flow — 70 passed, 17 failed (template-dependent, not migration-related)
-- [ ] Check `git status --short` for only intended changes
+### 4.2 Delete legacy helpers
+
+- [ ] `ensure_bare_repo()` in `git.py`
+- [ ] `fetch_bare_branch()` in `git.py`
+- [ ] `_ensure_fetch_refspec()` in `git.py`
+- [ ] `repo_url_to_bare_path()` in `paths.py`
+- [ ] `get_worktrees_dir()` in `constants.py`
+- [ ] `path_worktree()` in `paths.py` (verify no remaining callers first)
+- [ ] Remove the `workspace_path` read-compat shim in `state.py` from Phase 2.3
+
+### 4.3 Simplify dual-dispatch code paths
+
+- [ ] `commands/destroy.py`: drop the `host_worktree_path == ""` branch; delete `remove_worktree` / `cleanup_sandbox_branch` calls
+- [ ] `commands/git_mode.py`: delete `_validate_legacy_layout_paths()` and path-shape fallback
+- [ ] `commands/_helpers.py:auto_detect_sandbox()`: drop the legacy `worktrees/` fallback (current lines 54-65)
+- [ ] `paths.py:resolve_workspace_path()`: drop the `path_worktree(name)` fallback
+- [ ] Drop legacy-sandbox tests that are no longer meaningful
+
+### 4.4 Final validation
+
+- [ ] `./scripts/ci-local.sh --all`
+- [ ] `./tests/redteam-sandbox.sh` inside a freshly created sandbox — all pass
+- [ ] `python -m ruff check foundry_sandbox foundry-git-safety/foundry_git_safety`
+- [ ] `python -m compileall -q foundry_sandbox foundry-git-safety/foundry_git_safety`
+
+## Phase 5: Minor Cleanups (Optional)
+
+- [ ] Remove `SetupError` (`new_sbx.py:36`); replace with `RuntimeError`
+- [ ] Simplify `NewDefaults` + `_apply_saved_new_defaults()` (`new.py:38-100`)
+- [ ] Reduce `write_sandbox_metadata` arg list (`state.py:81-147`) — pass `SbxSandboxMetadata` directly
+- [ ] Inline or delete `SandboxPaths` NamedTuple (`paths.py:34`)
+
+## Cross-Phase Gates
+
+Before every commit:
+
+- [ ] `./scripts/ci-local.sh`
+- [ ] `python -m pytest tests/unit/ -x`
+- [ ] `python -m ruff check foundry_sandbox foundry-git-safety/foundry_git_safety`
+
+Before every release tag:
+
+- [ ] All Phase 1 items checked
+- [ ] `CHANGELOG.md` updated with user-visible changes
+- [ ] `pyproject.toml` version bumped
