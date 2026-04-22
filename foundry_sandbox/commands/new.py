@@ -297,7 +297,7 @@ def _generate_branch_name(repo_url: str, from_branch: str) -> str:
 @click.option("--last", is_flag=True, help="Repeat last sandbox creation")
 @click.option("--preset", metavar="NAME", help="Use saved preset")
 @click.option("--agent", default="claude", help="Agent type (claude, codex, copilot, gemini, kiro, opencode, shell)")
-@click.option("--copy", "-c", "copies", multiple=True, help="Copy host:container (once at creation)")
+@click.option("--copy", "-c", "copies", multiple=True, help="Copy host path into sandbox (once at creation)")
 @click.option("--allow-pr", "--with-pr", is_flag=True, help="Allow PR operations")
 @click.option("--pip-requirements", "-r", metavar="PATH", help="Install Python packages from requirements.txt")
 @click.option("--wd", metavar="PATH", help="Working directory (relative)")

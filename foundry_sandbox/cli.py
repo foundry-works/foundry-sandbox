@@ -108,7 +108,7 @@ class CastGroup(click.Group):
 )
 @click.pass_context
 def cli(ctx: click.Context) -> None:
-    """Cast - Docker sandbox manager for Claude Code."""
+    """Cast - microVM sandbox manager for Claude Code."""
     ctx.ensure_object(dict)
 
     # Store the non-interactive flag for subcommands to inspect.

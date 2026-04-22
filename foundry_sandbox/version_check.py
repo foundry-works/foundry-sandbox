@@ -155,6 +155,6 @@ def _print_update_notice(latest: str, current: str) -> None:
         f"\n{YELLOW}{BOLD}Update available:{RESET} "
         f"foundry-sandbox {BOLD}{latest}{RESET} "
         f"(current: {current}). "
-        f"Run {BOLD}cast upgrade{RESET} to update.",
+        f"Run {BOLD}pip install -U foundry-sandbox{RESET} to update.",
         file=sys.stderr,
     )

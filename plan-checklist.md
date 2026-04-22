@@ -130,12 +130,12 @@ See `plan.md` for rationale and detail. Check items off as they land. Commit aft
 
 ## Phase 4 — User-facing fixes
 
-- [ ] `foundry_sandbox/version_check.py:158` — replace `cast upgrade` with `pip install -U foundry-sandbox`
-- [ ] `foundry_sandbox/cli.py:111` — docstring "Docker sandbox manager" → "microVM sandbox manager"
-- [ ] `foundry_sandbox/commands/destroy.py:154` — "Sandbox container (sbx rm)" → "Sandbox microVM (sbx rm)"
-- [ ] `foundry_sandbox/commands/help_cmd.py:38` — `--copy` help: "into container" → "into sandbox" (until Phase 6 deletes this file)
-- [ ] `foundry_sandbox/commands/new.py:300` — `--copy` help: "into container" → "into sandbox"
-- [ ] Verify `./scripts/ci-local.sh` passes
+- [x] `foundry_sandbox/version_check.py:158` — replace `cast upgrade` with `pip install -U foundry-sandbox`
+- [x] `foundry_sandbox/cli.py:111` — docstring "Docker sandbox manager" → "microVM sandbox manager"
+- [x] `foundry_sandbox/commands/destroy.py:154` — "Sandbox container (sbx rm)" → "Sandbox microVM (sbx rm)"
+- [x] `foundry_sandbox/commands/help_cmd.py:38` — `--copy` help: "into container" → "into sandbox" (until Phase 6 deletes this file)
+- [x] `foundry_sandbox/commands/new.py:300` — `--copy` help: "into container" → "into sandbox"
+- [x] Verify `./scripts/ci-local.sh` passes
 - [ ] `git commit -m "fix: Phase 4 correct post-sbx user-facing wording and upgrade hint"`
 
 ---

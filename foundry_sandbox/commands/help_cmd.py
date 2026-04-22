@@ -35,7 +35,7 @@ Commands:
 
 New sandbox options:
   --agent <type>                        Agent type (claude, codex, copilot, gemini, kiro, opencode, shell)
-  --copy, -c src:dst                    Copy host path into container (once at creation)
+  --copy, -c src:dst                    Copy host path into sandbox (once at creation)
   --wd <path>                           Working directory within repo
   --pip-requirements, -r <path>         Install Python packages
   --allow-pr                            Allow PR operations

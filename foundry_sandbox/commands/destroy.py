@@ -151,7 +151,7 @@ def destroy(name: str, keep_worktree: bool, force: bool, yes: bool) -> None:
         workspace = resolve_host_worktree_path(name)
         config_path = path_claude_config(name)
         click.echo(f"This will destroy sandbox '{name}' including:")
-        click.echo("  - Sandbox container (sbx rm)")
+        click.echo("  - Sandbox microVM (sbx rm)")
         if not keep_worktree:
             click.echo(f"  - Worktree at {workspace}")
             click.echo(f"  - Claude config at {config_path}")
