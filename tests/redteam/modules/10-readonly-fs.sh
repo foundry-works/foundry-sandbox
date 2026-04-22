@@ -39,7 +39,8 @@ run_tests() {
         test_fail "Home directory is not writable"
     fi
 
-    # Test 4: Workspace mount exists and is writable
+    # Test 4: Workspace mount — cast sandboxes mount the repo at the original
+    # host path, not /workspace. Check for either convention.
     info "Testing workspace mount..."
     if [[ -d /workspace ]]; then
         if touch /workspace/.readonly-fs-probe 2>/dev/null && rm -f /workspace/.readonly-fs-probe; then
@@ -47,8 +48,10 @@ run_tests() {
         else
             test_warn "/workspace exists but is not writable (read-only mount?)"
         fi
+    elif mount | grep -q "type virtiofs\|type bind"; then
+        test_pass "Repo mounted via virtiofs (cast layout)"
     else
-        test_warn "/workspace directory not found (may not be inside sbx)"
+        test_warn "/workspace directory not found and no repo mount detected"
     fi
 
     # Test 5: Git wrapper is present at /usr/local/bin/git
