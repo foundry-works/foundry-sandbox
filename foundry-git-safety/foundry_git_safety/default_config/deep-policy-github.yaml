@@ -261,6 +261,14 @@ services:
         reason: "gh pr reopen: reopening closed PRs requires human approval"
         priority: 95
 
+      - method: POST
+        path_pattern: "^/repos/[^/]+/[^/]+/pulls/\\d+/reviews$"
+        body_jsonpath: "event"
+        body_value: "APPROVE"
+        action: deny
+        reason: "Self-approving pull requests is blocked by policy"
+        priority: 95
+
       # ── GraphQL mutation blocklist (priority 90) ───────────────
 
       - method: POST

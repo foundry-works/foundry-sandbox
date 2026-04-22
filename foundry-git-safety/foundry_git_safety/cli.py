@@ -44,6 +44,15 @@ def start(config_path: str | None, foreground: bool, port: int | None, pid_file:
     cfg = load_foundry_config(config_path)
     if deep_policy:
         cfg.git_safety.deep_policy.enabled = True
+        if not cfg.git_safety.deep_policy.services and not cfg.git_safety.deep_policy.policy_file:
+            from .schemas.foundry_yaml import DeepPolicyServiceConfig
+            cfg.git_safety.deep_policy.services.append(
+                DeepPolicyServiceConfig(
+                    slug="github",
+                    host="api.github.com",
+                    policy_file="bundled://github-default",
+                )
+            )
     setup_logging()
 
     server_port = port or cfg.git_safety.server.port

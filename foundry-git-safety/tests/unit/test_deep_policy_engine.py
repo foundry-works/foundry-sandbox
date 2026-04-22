@@ -257,6 +257,26 @@ class TestPolicySetEvaluate:
         allowed, reason = ps.evaluate("POST", "/graphql", body=body)
         assert allowed is False
 
+    def test_pr_review_approve_blocked(self):
+        svc = _make_service([
+            {"method": "POST", "path_pattern": r"^/repos/[^/]+/[^/]+/pulls/\d+/reviews$",
+             "action": "deny", "priority": 95,
+             "body_jsonpath": "event", "body_value": "APPROVE",
+             "reason": "Self-approving pull requests is blocked by policy"},
+            {"method": "POST", "path_pattern": r"^/repos/[^/]+/[^/]+/pulls/\d+/reviews$",
+             "action": "allow", "priority": 10},
+        ])
+        ps = PolicySet("test-svc", svc)
+        # APPROVE event blocked
+        body = json.dumps({"event": "APPROVE", "body": "LGTM"}).encode()
+        allowed, reason = ps.evaluate("POST", "/repos/o/r/pulls/1/reviews", body=body)
+        assert allowed is False
+        assert "Self-approving" in reason
+        # COMMENT event allowed (deny rule doesn't match)
+        body2 = json.dumps({"event": "COMMENT", "body": "nit"}).encode()
+        allowed2, _ = ps.evaluate("POST", "/repos/o/r/pulls/1/reviews", body=body2)
+        assert allowed2 is True
+
     def test_condition_skips_rule(self):
         svc = _make_service([
             {"method": "POST", "path_pattern": r"^/pulls$", "action": "deny",

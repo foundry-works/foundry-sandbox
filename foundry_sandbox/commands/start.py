@@ -45,7 +45,7 @@ def _ensure_git_safety_server() -> None:
 
     click.echo("Starting git safety server...")
     try:
-        git_safety_server_start()
+        git_safety_server_start(deep_policy=True)
     except OSError:
         click.echo(
             "Error: foundry-git-safety is not installed. "

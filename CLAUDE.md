@@ -21,6 +21,8 @@ Always run `./scripts/ci-local.sh` before committing to catch CI failures locall
 
 Run `./scripts/ci-local.sh` before pushing to catch CI failures early.
 
+Redteam tests **must** be run inside a sandbox — see `docs/security/redteam-testing.md` for setup and usage.
+
 ## Documentation
 
 - `docs/README.md` - Documentation index

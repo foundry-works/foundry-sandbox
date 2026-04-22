@@ -44,6 +44,7 @@ claude
 | Document | Description |
 |----------|-------------|
 | [Security Model](security/security-model.md) | Threats, defenses, hardening, and security assumptions — organized by pillar |
+| [Red Team Testing](security/redteam-testing.md) | How to run redteam security tests inside a sandbox |
 | [Wrapper Integrity](security/wrapper-integrity.md) | Wrapper tamper detection and watchdog design |
 | [Security Audit 5.6](security/audit-5.6.md) | Internal security audit findings and remediation |
 

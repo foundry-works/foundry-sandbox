@@ -135,7 +135,7 @@ def new_sbx_setup(
     if not git_safety_server_is_running():
         log_info("Starting git safety server...")
         try:
-            git_safety_server_start()
+            git_safety_server_start(deep_policy=True)
         except OSError as exc:
             raise SetupError(
                 "foundry-git-safety is not installed. "
