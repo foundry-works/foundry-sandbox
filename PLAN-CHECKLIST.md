@@ -55,11 +55,11 @@
 
 ## Phase 3: Update git_mode (Deferred)
 
-- [ ] Inspect sbx worktree `.git` file → gitdir → commondir chain
-- [ ] Rewrite `_resolve_git_paths()` for sbx worktree layout
-- [ ] `_validate_git_paths()` dispatches on layout: accept BOTH legacy (`~/.sandboxes/...`) and new (`<repo>/.git/...`); fail closed if neither matches
-- [ ] Layout dispatch prefers `metadata.workspace_path`; falls back to path-shape detection when metadata is absent
-- [ ] Update `_apply_git_mode()` — config file locations may differ
+- [x] Inspect sbx worktree `.git` file → gitdir → commondir chain
+- [x] Rewrite `_resolve_git_paths()` for sbx worktree layout
+- [x] `_validate_git_paths()` dispatches on layout: accept BOTH legacy (`~/.sandboxes/...`) and new (`<repo>/.git/...`); fail closed if neither matches
+- [x] Layout dispatch prefers `metadata.workspace_path`; falls back to path-shape detection when metadata is absent
+- [x] Update `_apply_git_mode()` — config file locations may differ
 - [ ] Verify `cast git-mode <name> --mode host` sets correct core.worktree (new layout)
 - [ ] Verify `cast git-mode <name> --mode sandbox` sets `/git-workspace` (new layout)
 - [ ] Verify `cast git-mode` still works against a legacy sandbox (regression)

@@ -19,7 +19,8 @@ from foundry_sandbox.commands._helpers import (
 )
 from foundry_sandbox.constants import TIMEOUT_GIT_QUERY, get_repos_dir, get_worktrees_dir
 from foundry_sandbox.git import remove_stale_git_locks
-from foundry_sandbox.paths import derive_sandbox_paths
+from foundry_sandbox.paths import resolve_workspace_path
+from foundry_sandbox.state import load_sandbox_metadata
 from foundry_sandbox.utils import log_error
 from foundry_sandbox.validate import validate_existing_sandbox_name
 
@@ -111,8 +112,74 @@ def _resolve_git_paths(worktree_path: Path) -> tuple[Path, Path]:
     return gitdir, bare_dir
 
 
-def _validate_git_paths(worktree_path: Path, gitdir: Path, bare_dir: Path) -> None:
-    """Enforce trust boundaries for git config writes."""
+def _validate_git_paths(
+    name: str, worktree_path: Path, gitdir: Path, bare_dir: Path
+) -> None:
+    """Enforce trust boundaries for git config writes.
+
+    Accepts both legacy (``~/.sandboxes/worktrees/``) and sbx-managed
+    (``<repo>/.sbx/<name>-worktrees/<branch>/``) layouts. Dispatches on
+    ``metadata.workspace_path`` first, falls back to path-shape detection
+    when metadata is absent. Fails closed on unrecognised layouts.
+    """
+    metadata = load_sandbox_metadata(name)
+    workspace_path = metadata.get("workspace_path", "") if metadata else ""
+
+    if workspace_path:
+        _validate_new_layout_paths(worktree_path, gitdir, bare_dir, workspace_path)
+        return
+
+    if metadata is not None:
+        # Metadata exists but workspace_path is empty → legacy sandbox.
+        _validate_legacy_layout_paths(worktree_path, gitdir, bare_dir)
+        return
+
+    # No metadata — fall back to path-shape detection.
+    worktrees_root = get_worktrees_dir().resolve()
+    if _is_within(worktree_path, worktrees_root):
+        _validate_legacy_layout_paths(worktree_path, gitdir, bare_dir)
+    else:
+        raise RuntimeError(
+            f"Cannot determine layout for sandbox '{name}' "
+            f"(no metadata, worktree not under {worktrees_root}): {worktree_path}"
+        )
+
+
+def _validate_new_layout_paths(
+    worktree_path: Path, gitdir: Path, bare_dir: Path, workspace_path: str
+) -> None:
+    """Validate paths for sbx-managed (new-layout) worktrees."""
+    ws_resolved = Path(workspace_path).resolve()
+    wt_resolved = worktree_path.resolve()
+
+    if wt_resolved != ws_resolved:
+        raise RuntimeError(
+            f"Worktree {wt_resolved} doesn't match metadata workspace_path {ws_resolved}"
+        )
+
+    # Derive repo root from workspace_path: <repo_root>/.sbx/<name>-worktrees/<branch>/
+    parts = ws_resolved.parts
+    try:
+        sbx_idx = parts.index(".sbx")
+    except ValueError:
+        raise RuntimeError(f"New-layout workspace missing .sbx component: {ws_resolved}")
+
+    repo_root = Path(*parts[:sbx_idx]).resolve()
+
+    if not _is_within(gitdir, (repo_root / ".git" / "worktrees").resolve()):
+        raise RuntimeError(f"Gitdir escapes repo .git/worktrees: {gitdir}")
+
+    expected_git_dir = (repo_root / ".git").resolve()
+    if bare_dir.resolve() != expected_git_dir:
+        raise RuntimeError(
+            f"Commondir doesn't point to repo .git: {bare_dir} (expected {expected_git_dir})"
+        )
+
+
+def _validate_legacy_layout_paths(
+    worktree_path: Path, gitdir: Path, bare_dir: Path
+) -> None:
+    """Validate paths for legacy (cast-managed) worktrees."""
     repos_root = get_repos_dir().resolve()
     worktrees_root = get_worktrees_dir().resolve()
 
@@ -188,16 +255,15 @@ def git_mode(name: str | None, mode: str) -> None:
     mode = mode.lower()
     name = _resolve_sandbox_name(name)
 
-    paths = derive_sandbox_paths(name)
-    worktree_path = paths.worktree_path
+    worktree_path = resolve_workspace_path(name)
 
     if not worktree_path.is_dir():
-        log_error(f"Sandbox '{name}' not found")
+        log_error(f"Sandbox '{name}' not found at {worktree_path}")
         sys.exit(1)
 
     try:
         gitdir, bare_dir = _resolve_git_paths(worktree_path)
-        _validate_git_paths(worktree_path, gitdir, bare_dir)
+        _validate_git_paths(name, worktree_path, gitdir, bare_dir)
         _apply_git_mode(
             mode=mode,
             name=name,
