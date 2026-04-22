@@ -1,15 +1,16 @@
 """SBX-specific sandbox creation logic.
 
 Replaces new_setup.py's docker-compose-based creation with sbx-based creation.
+Delegates worktree management to sbx — cast passes the repo root and sbx
+creates the worktree under ``<repo_root>/.sbx/<name>-worktrees/<branch>/``.
 """
 
 from __future__ import annotations
 
 import os
-import shutil
 from pathlib import Path
 
-from foundry_sandbox.git import ensure_bare_repo
+from foundry_sandbox.atomic_io import file_lock
 from foundry_sandbox.git_safety import (
     FOUNDRY_TEMPLATE_TAG,
     ensure_foundry_template,
@@ -17,14 +18,15 @@ from foundry_sandbox.git_safety import (
     git_safety_server_start,
     provision_git_safety,
 )
-from foundry_sandbox.git_worktree import create_worktree
 from foundry_sandbox.paths import ensure_dir
 from foundry_sandbox.sbx import (
     sbx_check_available,
     sbx_create,
     sbx_exec,
+    sbx_get_workspace_info,
     sbx_rm,
     sbx_template_ls,
+    sbx_worktree_path,
 )
 from foundry_sandbox.state import write_sandbox_metadata
 from foundry_sandbox.utils import log_info, log_section, log_warn
@@ -46,8 +48,7 @@ def _install_pip_requirements_sbx(name: str, requirements: str) -> None:
 def new_sbx_setup(
     *,
     repo_url: str,
-    bare_path: str,
-    worktree_path: Path,
+    repo_root: str,
     branch: str,
     from_branch: str,
     name: str,
@@ -60,19 +61,20 @@ def new_sbx_setup(
     with_zai: bool,
     wd: str,
     template: str | None = FOUNDRY_TEMPLATE_TAG,
-) -> None:
+) -> str:
     """Create a new sbx-based sandbox.
 
     Steps:
     1. Check sbx available
-    2. Clone/fetch bare repo
-    3. Create worktree
-    4. Ensure template + create sbx sandbox
-    5. Start git safety server if needed
-    6. Generate HMAC secret and register with git safety
-    7. Inject git wrapper env vars
-    8. Copy files, install pip requirements
-    9. Write metadata
+    2. Ensure template + create sbx sandbox (sbx manages worktree)
+    3. Start git safety server if needed
+    4. Generate HMAC secret and register with git safety
+    5. Inject git wrapper env vars
+    6. Copy files, install pip requirements
+    7. Write metadata
+
+    Returns:
+        The workspace_path (host-side path to the sbx-managed worktree).
     """
     # ------------------------------------------------------------------
     # 1. Check sbx
@@ -80,22 +82,7 @@ def new_sbx_setup(
     sbx_check_available()
 
     # ------------------------------------------------------------------
-    # 2. Clone/fetch bare repo
-    # ------------------------------------------------------------------
-    log_section("Repository")
-    ensure_bare_repo(repo_url, bare_path)
-
-    # ------------------------------------------------------------------
-    # 3. Create worktree
-    # ------------------------------------------------------------------
-    log_info(f"Creating worktree for branch: {branch}")
-    create_worktree(bare_path, str(worktree_path), branch, from_branch)
-
-    if not worktree_path.is_dir():
-        raise SetupError(f"Worktree creation failed: {worktree_path}")
-
-    # ------------------------------------------------------------------
-    # 4. Ensure template exists, then create sbx sandbox
+    # 2. Ensure template exists, then create sbx sandbox
     # ------------------------------------------------------------------
     log_section("Sandbox")
     use_template = template if template and template.lower() != "none" else None
@@ -117,14 +104,27 @@ def new_sbx_setup(
                 )
     log_info(f"Creating sbx sandbox: {name}")
     try:
-        sbx_create(
-            name, agent, str(worktree_path), branch=branch, template=use_template
-        )
+        # Acquire per-repo lock to serialize concurrent git worktree add.
+        repo_lock_path = Path(repo_root)
+        with file_lock(repo_lock_path):
+            result = sbx_create(
+                name, agent, repo_root, branch=branch, template=use_template
+            )
     except Exception as exc:
         raise SetupError(f"sbx create failed: {exc}") from exc
 
+    # Derive workspace path deterministically and sanity-check against stdout.
+    workspace_path = sbx_worktree_path(repo_root, name, branch)
+    info = sbx_get_workspace_info(result.stdout or "")
+    if info["worktree"] and info["worktree"] != workspace_path:
+        raise SetupError(
+            f"Worktree path mismatch: expected {workspace_path}, "
+            f"sbx reported {info['worktree']}. "
+            "sbx layout may have changed — update sbx_worktree_path()."
+        )
+
     # ------------------------------------------------------------------
-    # 5. Start git safety server if needed (fail closed)
+    # 3. Start git safety server if needed (fail closed)
     # ------------------------------------------------------------------
     log_section("Git Safety")
     if not git_safety_server_is_running():
@@ -147,7 +147,7 @@ def new_sbx_setup(
     log_info("Git safety server running.")
 
     # ------------------------------------------------------------------
-    # 6. Write initial metadata (git safety not yet provisioned)
+    # 4. Write initial metadata (git safety not yet provisioned)
     # ------------------------------------------------------------------
     ensure_dir(claude_config_path)
     write_sandbox_metadata(
@@ -166,14 +166,15 @@ def new_sbx_setup(
         enable_zai=with_zai,
         copies=copies,
         template=use_template or "",
+        workspace_path=workspace_path,
     )
 
     # ------------------------------------------------------------------
-    # 7. Provision git safety (helper writes git_safety_enabled=True)
+    # 5. Provision git safety (helper writes git_safety_enabled=True)
     # ------------------------------------------------------------------
     log_info("Provisioning git safety...")
     repo_spec = strip_github_url(repo_url)
-    result = provision_git_safety(
+    prov_result = provision_git_safety(
         name,
         sandbox_id=name,
         workspace_dir="/workspace",
@@ -181,16 +182,16 @@ def new_sbx_setup(
         repo_spec=repo_spec,
         from_branch=from_branch,
         allow_pr=allow_pr,
-        repo_root=str(worktree_path),
+        repo_root=workspace_path,
     )
-    if not result.success:
+    if not prov_result.success:
         raise SetupError(
-            f"Git safety provisioning failed: {result.error}. "
+            f"Git safety provisioning failed: {prov_result.error}. "
             "Sandbox creation aborted — git safety cannot be enforced."
         )
 
     # ------------------------------------------------------------------
-    # 7.5. Inject user service environment overrides
+    # 5.5. Inject user service environment overrides
     # ------------------------------------------------------------------
     user_service_overrides: dict[str, str] = {}
     try:
@@ -218,7 +219,7 @@ def new_sbx_setup(
         log_warn(f"User service env injection failed: {exc}")
 
     # ------------------------------------------------------------------
-    # 8. Copy files and install pip requirements
+    # 6. Copy files and install pip requirements
     # ------------------------------------------------------------------
     if copies:
         log_section("Files")
@@ -242,15 +243,16 @@ def new_sbx_setup(
         _install_pip_requirements_sbx(name, pip_requirements)
 
     # ------------------------------------------------------------------
-    # 9. Final metadata patch (user services)
+    # 7. Final metadata patch (user services)
     # ------------------------------------------------------------------
     if user_service_overrides:
         from foundry_sandbox.state import patch_sandbox_metadata
         patch_sandbox_metadata(name, user_services=user_service_overrides)
 
+    return workspace_path
+
 
 def rollback_new_sbx(
-    worktree_path: Path,
     claude_config_path: Path,
     name: str,
 ) -> None:
@@ -261,16 +263,10 @@ def rollback_new_sbx(
     except Exception:
         pass
 
-    # Remove worktree
-    if worktree_path.is_dir():
-        try:
-            shutil.rmtree(worktree_path)
-        except OSError:
-            pass
-
     # Remove config directory
     if claude_config_path.is_dir():
         try:
+            import shutil
             shutil.rmtree(claude_config_path)
         except OSError:
             pass

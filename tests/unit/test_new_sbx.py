@@ -18,23 +18,16 @@ class TestNewSbxSetup:
     @patch("foundry_sandbox.commands.new_sbx.git_safety_server_is_running", return_value=True)
     @patch("foundry_sandbox.commands.new_sbx.ensure_foundry_template", return_value=True)
     @patch("foundry_sandbox.commands.new_sbx.sbx_create")
-    @patch("foundry_sandbox.commands.new_sbx.create_worktree")
-    @patch("foundry_sandbox.commands.new_sbx.ensure_bare_repo")
     @patch("foundry_sandbox.commands.new_sbx.sbx_check_available")
     def test_full_setup(
-        self, mock_check, mock_bare, mock_worktree, mock_create, mock_ensure,
+        self, mock_check, mock_create, mock_ensure,
         mock_gs_running, mock_provision, mock_metadata, tmp_path,
     ):
-        from pathlib import Path
-        mock_create.return_value = MagicMock(returncode=0)
-        # Create a mock worktree path that returns True for is_dir
-        wt = MagicMock(spec=Path)
-        wt.is_dir.return_value = True
-        wt.__str__ = lambda s: str(tmp_path / "worktree")
-        new_sbx_setup(
+        mock_create.return_value = MagicMock(returncode=0, stdout="")
+        repo_root = str(tmp_path / "repo")
+        workspace_path = new_sbx_setup(
             repo_url="https://github.com/org/repo",
-            bare_path=str(tmp_path / "bare"),
-            worktree_path=wt,
+            repo_root=repo_root,
             branch="feature-x",
             from_branch="main",
             name="test-sandbox",
@@ -51,29 +44,25 @@ class TestNewSbxSetup:
         call_args = mock_create.call_args
         assert call_args[0][0] == "test-sandbox"
         assert call_args[0][1] == "claude"
+        assert call_args[0][2] == repo_root
         assert call_args[1]["branch"] == "feature-x"
+        assert workspace_path == f"{repo_root}/.sbx/test-sandbox-worktrees/feature-x"
         # Shared helper was called
         mock_provision.assert_called_once()
         mock_metadata.assert_called_once()
 
     @patch("foundry_sandbox.commands.new_sbx.ensure_foundry_template", return_value=True)
     @patch("foundry_sandbox.commands.new_sbx.sbx_create", side_effect=Exception("sbx failed"))
-    @patch("foundry_sandbox.commands.new_sbx.create_worktree")
-    @patch("foundry_sandbox.commands.new_sbx.ensure_bare_repo")
     @patch("foundry_sandbox.commands.new_sbx.sbx_check_available")
     def test_sbx_create_failure(
-        self, mock_check, mock_bare, mock_worktree, mock_create, mock_ensure, tmp_path,
+        self, mock_check, mock_create, mock_ensure, tmp_path,
     ):
         from foundry_sandbox.commands.new_sbx import SetupError
-        from pathlib import Path
-        wt = MagicMock(spec=Path)
-        wt.is_dir.return_value = True
-        wt.__str__ = lambda s: str(tmp_path / "worktree")
+        repo_root = str(tmp_path / "repo")
         with pytest.raises(SetupError, match="sbx create failed"):
             new_sbx_setup(
                 repo_url="https://github.com/org/repo",
-                bare_path=str(tmp_path / "bare"),
-                worktree_path=wt,
+                repo_root=repo_root,
                 branch="feature-x",
                 from_branch="main",
                 name="test-sandbox",
@@ -87,19 +76,149 @@ class TestNewSbxSetup:
                 wd="",
             )
 
+    @patch("foundry_sandbox.commands.new_sbx.write_sandbox_metadata")
+    @patch("foundry_sandbox.commands.new_sbx.provision_git_safety", return_value=ProvisioningResult(success=True, wrapper_checksum="abc123"))
+    @patch("foundry_sandbox.commands.new_sbx.git_safety_server_is_running", return_value=True)
+    @patch("foundry_sandbox.commands.new_sbx.ensure_foundry_template", return_value=True)
+    @patch("foundry_sandbox.commands.new_sbx.sbx_create")
+    @patch("foundry_sandbox.commands.new_sbx.sbx_check_available")
+    def test_workspace_path_stored_in_metadata(
+        self, mock_check, mock_create, mock_ensure,
+        mock_gs_running, mock_provision, mock_metadata, tmp_path,
+    ):
+        mock_create.return_value = MagicMock(returncode=0, stdout="")
+        repo_root = str(tmp_path / "myrepo")
+        new_sbx_setup(
+            repo_url="https://github.com/org/repo",
+            repo_root=repo_root,
+            branch="feature-x",
+            from_branch="main",
+            name="test-sandbox",
+            agent="claude",
+            claude_config_path=tmp_path / "config",
+            copies=[],
+            allow_pr=False,
+            pip_requirements="",
+            with_opencode=False,
+            with_zai=False,
+            wd="",
+        )
+        mock_metadata.assert_called_once()
+        call_kwargs = mock_metadata.call_args[1]
+        assert call_kwargs["workspace_path"] == f"{repo_root}/.sbx/test-sandbox-worktrees/feature-x"
+
+    @patch("foundry_sandbox.commands.new_sbx.write_sandbox_metadata")
+    @patch("foundry_sandbox.commands.new_sbx.provision_git_safety", return_value=ProvisioningResult(success=True, wrapper_checksum="abc123"))
+    @patch("foundry_sandbox.commands.new_sbx.git_safety_server_is_running", return_value=True)
+    @patch("foundry_sandbox.commands.new_sbx.ensure_foundry_template", return_value=True)
+    @patch("foundry_sandbox.commands.new_sbx.sbx_create")
+    @patch("foundry_sandbox.commands.new_sbx.sbx_check_available")
+    def test_provision_git_safety_uses_workspace_path(
+        self, mock_check, mock_create, mock_ensure,
+        mock_gs_running, mock_provision, mock_metadata, tmp_path,
+    ):
+        mock_create.return_value = MagicMock(returncode=0, stdout="")
+        repo_root = str(tmp_path / "repo")
+        new_sbx_setup(
+            repo_url="https://github.com/org/repo",
+            repo_root=repo_root,
+            branch="feature-x",
+            from_branch="main",
+            name="test-sandbox",
+            agent="claude",
+            claude_config_path=tmp_path / "config",
+            copies=[],
+            allow_pr=False,
+            pip_requirements="",
+            with_opencode=False,
+            with_zai=False,
+            wd="",
+        )
+        mock_provision.assert_called_once()
+        prov_kwargs = mock_provision.call_args[1]
+        assert prov_kwargs["repo_root"] == f"{repo_root}/.sbx/test-sandbox-worktrees/feature-x"
+
+
+class TestWorkspaceInfoMismatch:
+    """Fail-closed when sbx reports a different worktree path than expected."""
+
+    @patch("foundry_sandbox.commands.new_sbx.write_sandbox_metadata")
+    @patch("foundry_sandbox.commands.new_sbx.provision_git_safety", return_value=ProvisioningResult(success=True, wrapper_checksum="abc123"))
+    @patch("foundry_sandbox.commands.new_sbx.git_safety_server_is_running", return_value=True)
+    @patch("foundry_sandbox.commands.new_sbx.ensure_foundry_template", return_value=True)
+    @patch("foundry_sandbox.commands.new_sbx.sbx_create")
+    @patch("foundry_sandbox.commands.new_sbx.sbx_check_available")
+    def test_mismatch_raises_setup_error(
+        self, mock_check, mock_create, mock_ensure,
+        mock_gs_running, mock_provision, mock_metadata, tmp_path,
+    ):
+        from foundry_sandbox.commands.new_sbx import SetupError
+
+        # sbx reports a different worktree path than our deterministic formula
+        mock_create.return_value = MagicMock(
+            returncode=0,
+            stdout="Worktree: /unexpected/path\nBranch: feature-x",
+        )
+        repo_root = str(tmp_path / "repo")
+        with pytest.raises(SetupError, match="Worktree path mismatch"):
+            new_sbx_setup(
+                repo_url="https://github.com/org/repo",
+                repo_root=repo_root,
+                branch="feature-x",
+                from_branch="main",
+                name="test-sandbox",
+                agent="claude",
+                claude_config_path=tmp_path / "config",
+                copies=[],
+                allow_pr=False,
+                pip_requirements="",
+                with_opencode=False,
+                with_zai=False,
+                wd="",
+            )
+
+    @patch("foundry_sandbox.commands.new_sbx.write_sandbox_metadata")
+    @patch("foundry_sandbox.commands.new_sbx.provision_git_safety", return_value=ProvisioningResult(success=True, wrapper_checksum="abc123"))
+    @patch("foundry_sandbox.commands.new_sbx.git_safety_server_is_running", return_value=True)
+    @patch("foundry_sandbox.commands.new_sbx.ensure_foundry_template", return_value=True)
+    @patch("foundry_sandbox.commands.new_sbx.sbx_create")
+    @patch("foundry_sandbox.commands.new_sbx.sbx_check_available")
+    def test_matching_stdout_succeeds(
+        self, mock_check, mock_create, mock_ensure,
+        mock_gs_running, mock_provision, mock_metadata, tmp_path,
+    ):
+        repo_root = str(tmp_path / "repo")
+        expected = f"{repo_root}/.sbx/test-sandbox-worktrees/feature-x"
+        mock_create.return_value = MagicMock(
+            returncode=0,
+            stdout=f"Worktree: {expected}\nBranch: feature-x",
+        )
+        # Should not raise
+        new_sbx_setup(
+            repo_url="https://github.com/org/repo",
+            repo_root=repo_root,
+            branch="feature-x",
+            from_branch="main",
+            name="test-sandbox",
+            agent="claude",
+            claude_config_path=tmp_path / "config",
+            copies=[],
+            allow_pr=False,
+            pip_requirements="",
+            with_opencode=False,
+            with_zai=False,
+            wd="",
+        )
+
 
 class TestTemplateValidation:
     """Custom/managed templates must exist; built-in falls back on build failure."""
 
     def _base_kwargs(self, tmp_path):
-        from pathlib import Path
-        wt = MagicMock(spec=Path)
-        wt.is_dir.return_value = True
-        wt.__str__ = lambda s: str(tmp_path / "worktree")
+        repo_root = str(tmp_path / "repo")
         return dict(
             repo_url="https://github.com/org/repo",
-            bare_path=str(tmp_path / "bare"),
-            worktree_path=wt,
+            repo_root=repo_root,
             branch="feature-x",
             from_branch="main",
             name="test-sandbox",
@@ -119,16 +238,14 @@ class TestTemplateValidation:
     @patch("foundry_sandbox.commands.new_sbx.sbx_template_ls")
     @patch("foundry_sandbox.commands.new_sbx.ensure_foundry_template", return_value=True)
     @patch("foundry_sandbox.commands.new_sbx.sbx_create")
-    @patch("foundry_sandbox.commands.new_sbx.create_worktree")
-    @patch("foundry_sandbox.commands.new_sbx.ensure_bare_repo")
     @patch("foundry_sandbox.commands.new_sbx.sbx_check_available")
     def test_builtin_template_calls_ensure(
-        self, mock_check, mock_bare, mock_worktree, mock_create,
+        self, mock_check, mock_create,
         mock_ensure, mock_ls, mock_gs_running, mock_provision,
         mock_metadata, tmp_path,
     ):
         """FOUNDRY_TEMPLATE_TAG goes through ensure_foundry_template()."""
-        mock_create.return_value = MagicMock(returncode=0)
+        mock_create.return_value = MagicMock(returncode=0, stdout="")
         from foundry_sandbox.git_safety import FOUNDRY_TEMPLATE_TAG
 
         new_sbx_setup(template=FOUNDRY_TEMPLATE_TAG, **self._base_kwargs(tmp_path))
@@ -146,16 +263,14 @@ class TestTemplateValidation:
         return_value=["preset-mysetup:latest"],
     )
     @patch("foundry_sandbox.commands.new_sbx.sbx_create")
-    @patch("foundry_sandbox.commands.new_sbx.create_worktree")
-    @patch("foundry_sandbox.commands.new_sbx.ensure_bare_repo")
     @patch("foundry_sandbox.commands.new_sbx.sbx_check_available")
     def test_custom_template_skips_ensure(
-        self, mock_check, mock_bare, mock_worktree, mock_create,
+        self, mock_check, mock_create,
         mock_ls, mock_ensure, mock_gs_running, mock_provision,
         mock_metadata, tmp_path,
     ):
         """Custom/managed tags do not call ensure_foundry_template()."""
-        mock_create.return_value = MagicMock(returncode=0)
+        mock_create.return_value = MagicMock(returncode=0, stdout="")
 
         new_sbx_setup(template="preset-mysetup:latest", **self._base_kwargs(tmp_path))
 
@@ -165,11 +280,9 @@ class TestTemplateValidation:
     @patch("foundry_sandbox.commands.new_sbx.ensure_foundry_template")
     @patch("foundry_sandbox.commands.new_sbx.sbx_template_ls", return_value=[])
     @patch("foundry_sandbox.commands.new_sbx.sbx_create")
-    @patch("foundry_sandbox.commands.new_sbx.create_worktree")
-    @patch("foundry_sandbox.commands.new_sbx.ensure_bare_repo")
     @patch("foundry_sandbox.commands.new_sbx.sbx_check_available")
     def test_missing_custom_template_raises_setup_error(
-        self, mock_check, mock_bare, mock_worktree, mock_create,
+        self, mock_check, mock_create,
         mock_ls, mock_ensure, tmp_path,
     ):
         """Missing custom/managed template surfaces as SetupError, not opaque sbx failure."""
@@ -189,14 +302,10 @@ class TestGitSafetyFailClosed:
     """cast new must abort when git safety is unavailable (fail-closed)."""
 
     def _base_kwargs(self, tmp_path):
-        from pathlib import Path
-        wt = MagicMock(spec=Path)
-        wt.is_dir.return_value = True
-        wt.__str__ = lambda s: str(tmp_path / "worktree")
+        repo_root = str(tmp_path / "repo")
         return dict(
             repo_url="https://github.com/org/repo",
-            bare_path=str(tmp_path / "bare"),
-            worktree_path=wt,
+            repo_root=repo_root,
             branch="feature-x",
             from_branch="main",
             name="test-sandbox",
@@ -212,13 +321,11 @@ class TestGitSafetyFailClosed:
 
     @patch("foundry_sandbox.commands.new_sbx.write_sandbox_metadata")
     @patch("foundry_sandbox.commands.new_sbx.sbx_create")
-    @patch("foundry_sandbox.commands.new_sbx.create_worktree")
-    @patch("foundry_sandbox.commands.new_sbx.ensure_bare_repo")
     @patch("foundry_sandbox.commands.new_sbx.sbx_check_available")
     @patch("foundry_sandbox.commands.new_sbx.git_safety_server_is_running", return_value=False)
     @patch("foundry_sandbox.commands.new_sbx.git_safety_server_start", side_effect=OSError("not found"))
     def test_fails_when_git_safety_not_installed(
-        self, mock_gs_start, mock_gs_running, mock_check, mock_bare, mock_worktree, mock_create, mock_metadata, tmp_path,
+        self, mock_gs_start, mock_gs_running, mock_check, mock_create, mock_metadata, tmp_path,
     ):
         from foundry_sandbox.commands.new_sbx import SetupError
         with pytest.raises(SetupError, match="not installed"):
@@ -226,13 +333,11 @@ class TestGitSafetyFailClosed:
 
     @patch("foundry_sandbox.commands.new_sbx.write_sandbox_metadata")
     @patch("foundry_sandbox.commands.new_sbx.sbx_create")
-    @patch("foundry_sandbox.commands.new_sbx.create_worktree")
-    @patch("foundry_sandbox.commands.new_sbx.ensure_bare_repo")
     @patch("foundry_sandbox.commands.new_sbx.sbx_check_available")
     @patch("foundry_sandbox.commands.new_sbx.git_safety_server_is_running", return_value=False)
     @patch("foundry_sandbox.commands.new_sbx.git_safety_server_start")
     def test_fails_when_server_unhealthy_after_start(
-        self, mock_gs_start, mock_gs_running, mock_check, mock_bare, mock_worktree, mock_create, mock_metadata, tmp_path,
+        self, mock_gs_start, mock_gs_running, mock_check, mock_create, mock_metadata, tmp_path,
     ):
         from foundry_sandbox.commands.new_sbx import SetupError
         # Server starts without error but is_running still returns False
@@ -245,86 +350,69 @@ class TestGitSafetyFailClosed:
     @patch("foundry_sandbox.commands.new_sbx.git_safety_server_is_running", return_value=True)
     @patch("foundry_sandbox.commands.new_sbx.ensure_foundry_template", return_value=True)
     @patch("foundry_sandbox.commands.new_sbx.sbx_create")
-    @patch("foundry_sandbox.commands.new_sbx.create_worktree")
-    @patch("foundry_sandbox.commands.new_sbx.ensure_bare_repo")
     @patch("foundry_sandbox.commands.new_sbx.sbx_check_available")
     def test_fails_closed_on_provisioning_failure(
-        self, mock_check, mock_bare, mock_worktree, mock_create,
+        self, mock_check, mock_create,
         mock_ensure, mock_gs_running, mock_provision, mock_metadata, tmp_path,
     ):
-        from pathlib import Path
-
         from foundry_sandbox.commands.new_sbx import SetupError
-        mock_create.return_value = MagicMock(returncode=0)
-        wt = MagicMock(spec=Path)
-        wt.is_dir.return_value = True
-        wt.__str__ = lambda s: str(tmp_path / "worktree")
+        mock_create.return_value = MagicMock(returncode=0, stdout="")
         with pytest.raises(SetupError, match="provisioning failed"):
-            new_sbx_setup(
-                repo_url="https://github.com/org/repo",
-                bare_path=str(tmp_path / "bare"),
-                worktree_path=wt,
-                branch="feature-x",
-                from_branch="main",
-                name="test-sandbox",
-                agent="claude",
-                claude_config_path=tmp_path / "config",
-                copies=[],
-                allow_pr=False,
-                pip_requirements="",
-                with_opencode=False,
-                with_zai=False,
-                wd="",
-            )
+            new_sbx_setup(**self._base_kwargs(tmp_path))
 
     @patch("foundry_sandbox.commands.new_sbx.write_sandbox_metadata")
     @patch("foundry_sandbox.commands.new_sbx.provision_git_safety", return_value=ProvisioningResult(success=False, error="Checksum computation failed: FileNotFoundError"))
     @patch("foundry_sandbox.commands.new_sbx.git_safety_server_is_running", return_value=True)
     @patch("foundry_sandbox.commands.new_sbx.ensure_foundry_template", return_value=True)
     @patch("foundry_sandbox.commands.new_sbx.sbx_create")
-    @patch("foundry_sandbox.commands.new_sbx.create_worktree")
-    @patch("foundry_sandbox.commands.new_sbx.ensure_bare_repo")
     @patch("foundry_sandbox.commands.new_sbx.sbx_check_available")
     def test_fails_closed_on_checksum_failure(
-        self, mock_check, mock_bare, mock_worktree, mock_create,
+        self, mock_check, mock_create,
         mock_ensure, mock_gs_running, mock_provision, mock_metadata, tmp_path,
     ):
-        from pathlib import Path
-
         from foundry_sandbox.commands.new_sbx import SetupError
-        mock_create.return_value = MagicMock(returncode=0)
-        wt = MagicMock(spec=Path)
-        wt.is_dir.return_value = True
-        wt.__str__ = lambda s: str(tmp_path / "worktree")
+        mock_create.return_value = MagicMock(returncode=0, stdout="")
         with pytest.raises(SetupError, match="provisioning failed"):
-            new_sbx_setup(
-                repo_url="https://github.com/org/repo",
-                bare_path=str(tmp_path / "bare"),
-                worktree_path=wt,
-                branch="feature-x",
-                from_branch="main",
-                name="test-sandbox",
-                agent="claude",
-                claude_config_path=tmp_path / "config",
-                copies=[],
-                allow_pr=False,
-                pip_requirements="",
-                with_opencode=False,
-                with_zai=False,
-                wd="",
-            )
+            new_sbx_setup(**self._base_kwargs(tmp_path))
 
-    @patch("foundry_sandbox.commands.new_sbx.shutil.rmtree")
     @patch("foundry_sandbox.commands.new_sbx.sbx_rm")
-    def test_rollback(self, mock_rm, mock_rmtree):
-        mock_worktree = MagicMock()
-        mock_worktree.is_dir.return_value = True
-        mock_config = MagicMock()
-        mock_config.is_dir.return_value = True
+    def test_rollback(self, mock_rm, tmp_path):
+        config_dir = tmp_path / "config"
+        config_dir.mkdir()
 
-        rollback_new_sbx(mock_worktree, mock_config, "test-sandbox")
+        rollback_new_sbx(config_dir, "test-sandbox")
 
         mock_rm.assert_called_once_with("test-sandbox")
+        # Config directory should be cleaned up
+        assert not config_dir.exists()
+
+
+class TestSbxWorkspaceInfo:
+    """Tests for sbx_get_workspace_info and sbx_worktree_path helpers."""
+
+    def test_parse_worktree_and_branch(self):
+        from foundry_sandbox.sbx import sbx_get_workspace_info
+        stdout = "Worktree: /home/user/repo/.sbx/test-worktrees/feature\nBranch: feature\n"
+        info = sbx_get_workspace_info(stdout)
+        assert info["worktree"] == "/home/user/repo/.sbx/test-worktrees/feature"
+        assert info["branch"] == "feature"
+
+    def test_parse_empty_stdout(self):
+        from foundry_sandbox.sbx import sbx_get_workspace_info
+        info = sbx_get_workspace_info("")
+        assert info["worktree"] == ""
+        assert info["branch"] == ""
+
+    def test_parse_partial_stdout(self):
+        from foundry_sandbox.sbx import sbx_get_workspace_info
+        info = sbx_get_workspace_info("Branch: main\n")
+        assert info["worktree"] == ""
+        assert info["branch"] == "main"
+
+    def test_deterministic_worktree_path(self):
+        from foundry_sandbox.sbx import sbx_worktree_path
+        path = sbx_worktree_path("/home/user/repo", "mysandbox", "feature-x")
+        assert path == "/home/user/repo/.sbx/mysandbox-worktrees/feature-x"
 
 
 class TestNewCommand:
@@ -333,20 +421,18 @@ class TestNewCommand:
     @patch("foundry_sandbox.commands.new._validate_preconditions")
     @patch("foundry_sandbox.commands.new._resolve_repo_input")
     @patch("foundry_sandbox.commands.new.validate_sandbox_name")
-    @patch("foundry_sandbox.commands.new.repo_url_to_bare_path")
     def test_basic_new(
-        self, mock_bare, mock_validate_name, mock_resolve, mock_precond,
+        self, mock_validate_name, mock_resolve, mock_precond,
         mock_paths, mock_setup,
     ):
-        mock_bare.return_value = "/tmp/repos/org-repo"
         mock_validate_name.return_value = (True, "")
-        mock_resolve.return_value = ("https://github.com/org/repo", None, "org/repo", "main")
+        mock_resolve.return_value = ("https://github.com/org/repo", "/home/user/repo", "org/repo", "main")
         mock_precond.return_value = None
         mock_path = MagicMock()
-        mock_path.worktree_path = MagicMock()
         mock_path.claude_config_path = MagicMock()
         mock_path.claude_config_path.__truediv__ = MagicMock()
         mock_paths.return_value = mock_path
+        mock_setup.return_value = "/home/user/repo/.sbx/test-worktrees/feature-x"
 
         runner = CliRunner()
         with patch("foundry_sandbox.commands.new.os.makedirs"):

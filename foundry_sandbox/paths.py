@@ -320,20 +320,68 @@ def repo_url_to_bare_path(repo_url: str) -> str:
     return f"{repos_dir}/{path}.git"
 
 
-def sandbox_name(bare_path: str, branch: str) -> str:
-    """Generate a sandbox name from bare repo path and branch.
+def repo_url_to_checkout_path(repo_url: str) -> str:
+    """Convert a repository URL to a local checkout path under REPOS_DIR.
+
+    Unlike ``repo_url_to_bare_path``, this returns a regular (non-bare)
+    checkout path for sbx-managed worktrees.
 
     Args:
-        bare_path: Path to bare repository.
+        repo_url: Repository URL or local path.
+
+    Returns:
+        Absolute path string for the checkout directory.
+    """
+    repos_dir = str(get_repos_dir())
+
+    if not repo_url:
+        return f"{repos_dir}/unknown"
+
+    # Local filesystem path — use the path directly
+    if repo_url.startswith(("~/", "/", "./", "../")):
+        expanded = repo_url
+        if expanded.startswith("~/"):
+            expanded = str(Path.home()) + expanded[1:]
+        return expanded
+
+    # HTTPS, HTTP, or git@ URL
+    path = repo_url
+    path = path.removeprefix("https://")
+    path = path.removeprefix("http://")
+    path = path.removeprefix("git@")
+    path = path.replace(":", "/", 1) if ":" in path else path
+    if path.endswith(".git"):
+        path = path[:-4]
+    return f"{repos_dir}/{path}"
+
+
+def repo_name_from_url(repo_url: str) -> str:
+    """Extract the repository name from a URL or local path.
+
+    Args:
+        repo_url: Full repository URL or local path.
+
+    Returns:
+        Repository name (e.g. 'repo' from 'https://github.com/org/repo').
+    """
+    name = repo_url.rstrip("/")
+    if name.endswith(".git"):
+        name = name[:-4]
+    name = os.path.basename(name)
+    return name or "repo"
+
+
+def sandbox_name(repo_name: str, branch: str) -> str:
+    """Generate a sandbox name from repo name and branch.
+
+    Args:
+        repo_name: Repository name (e.g. 'repo' from owner/repo URL).
         branch: Branch name.
 
     Returns:
         Sanitised sandbox name.
     """
-    repo = Path(bare_path).name
-    if repo.endswith(".git"):
-        repo = repo[:-4]
-    repo = sanitize_ref_component(repo) or "repo"
+    repo = sanitize_ref_component(repo_name) or "repo"
     branch_part = sanitize_ref_component(branch) or "branch"
     name = f"{repo}-{branch_part}".lower()
     if len(name) > SANDBOX_NAME_MAX_LENGTH:

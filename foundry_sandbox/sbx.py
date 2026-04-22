@@ -670,3 +670,51 @@ def sbx_check_available() -> None:
             file=sys.stderr,
         )
         raise SystemExit(1)
+
+
+# ============================================================================
+# Workspace Info Parsing
+# ============================================================================
+
+
+def sbx_worktree_path(repo_root: str, sandbox_name: str, branch: str) -> str:
+    """Compute the expected sbx worktree path.
+
+    sbx creates worktrees at ``<repo_root>/.sbx/<name>-worktrees/<branch>/``.
+
+    Args:
+        repo_root: Absolute path to the repository root on host.
+        sandbox_name: Sandbox name as known to sbx.
+        branch: Branch name.
+
+    Returns:
+        Deterministic worktree path string.
+    """
+    return f"{repo_root}/.sbx/{sandbox_name}-worktrees/{branch}"
+
+
+def sbx_get_workspace_info(sbx_create_stdout: str) -> dict[str, str]:
+    """Extract worktree path and branch from ``sbx create`` stdout.
+
+    sbx prints lines like::
+
+        Worktree: /home/user/repo/.sbx/<name>-worktrees/<branch>
+        Branch: <branch>
+
+    Args:
+        sbx_create_stdout: Raw stdout from ``sbx create``.
+
+    Returns:
+        Dict with ``worktree`` and ``branch`` keys (empty string if not found).
+
+    Raises:
+        ValueError: If stdout contains a Worktree line but it cannot be parsed.
+    """
+    info: dict[str, str] = {"worktree": "", "branch": ""}
+    for line in sbx_create_stdout.splitlines():
+        stripped = line.strip()
+        if stripped.startswith("Worktree:"):
+            info["worktree"] = stripped[len("Worktree:"):].strip()
+        elif stripped.startswith("Branch:"):
+            info["branch"] = stripped[len("Branch:"):].strip()
+    return info

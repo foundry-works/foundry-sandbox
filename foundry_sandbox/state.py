@@ -99,6 +99,7 @@ def write_sandbox_metadata(
     user_services: dict[str, str] | None = None,
     wrapper_checksum: str = "",
     wrapper_last_verified: str = "",
+    workspace_path: str = "",
 ) -> None:
     """Write sandbox metadata to a JSON file.
 
@@ -121,6 +122,7 @@ def write_sandbox_metadata(
         template: Template tag used for sandbox creation.
         wrapper_checksum: SHA-256 hex digest of the expected wrapper.
         wrapper_last_verified: ISO 8601 UTC timestamp of last verification.
+        workspace_path: Host-side path to the sbx-managed worktree.
     """
     model = SbxSandboxMetadata(
         sbx_name=sbx_name,
@@ -141,6 +143,7 @@ def write_sandbox_metadata(
         user_services=user_services or {},
         wrapper_checksum=wrapper_checksum,
         wrapper_last_verified=wrapper_last_verified,
+        workspace_path=workspace_path,
     )
     data = model.model_dump()
 

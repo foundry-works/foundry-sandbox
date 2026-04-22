@@ -1,6 +1,6 @@
 """New command - create a new sandbox with sbx.
 
-Creates a worktree, launches an sbx sandbox, starts git safety server,
+Creates an sbx sandbox with sbx-managed worktree, starts git safety server,
 and injects the git wrapper for authenticated git operations.
 """
 
@@ -15,7 +15,8 @@ from click.core import ParameterSource
 
 from foundry_sandbox.paths import (
     find_next_sandbox_name,
-    repo_url_to_bare_path,
+    repo_name_from_url,
+    repo_url_to_checkout_path,
     sandbox_name as _helpers_sandbox_name,
 )
 from foundry_sandbox.commands.new_sbx import new_sbx_setup, rollback_new_sbx, SetupError
@@ -133,6 +134,37 @@ def _load_and_apply_defaults(
     )
 
 
+def _ensure_repo_root(repo_url: str) -> str:
+    """Ensure a local repo checkout exists for a remote URL.
+
+    For remote URLs, clones a regular (non-bare) checkout to
+    ``~/.sandboxes/repos/<owner>/<repo>/`` if missing. Uses a per-repo
+    file lock to serialize concurrent ``git worktree add`` operations.
+
+    Args:
+        repo_url: Remote repository URL.
+
+    Returns:
+        Absolute path to the local checkout.
+    """
+    from pathlib import Path
+
+    from foundry_sandbox.atomic_io import file_lock
+    from foundry_sandbox.git import ensure_repo_checkout
+
+    checkout_path = repo_url_to_checkout_path(repo_url)
+    checkout_dir = Path(os.path.dirname(checkout_path) or checkout_path)
+
+    with file_lock(checkout_dir):
+        ensure_repo_checkout(
+            repo_url,
+            checkout_path,
+            branch="main",
+        )
+
+    return checkout_path
+
+
 # ---------------------------------------------------------------------------
 # Command
 # ---------------------------------------------------------------------------
@@ -242,9 +274,13 @@ def new(
         log_error(f"Not a git repository: {repo}")
         sys.exit(1)
 
+    # For remote URLs, ensure a local checkout exists
+    if not repo_root:
+        repo_root = _ensure_repo_root(repo_url)
+
     # Handle local repo defaults
-    if repo_root:
-        if not current_branch or current_branch == "HEAD":
+    if repo_root and current_branch:
+        if current_branch == "HEAD":
             log_error("Repository is in a detached HEAD state; specify a base branch.")
             sys.exit(1)
 
@@ -287,12 +323,12 @@ def new(
         log_error("--with-zai requires ZHIPU_API_KEY to be set in your environment.")
         sys.exit(1)
 
-    # Generate sandbox name
-    bare_path = repo_url_to_bare_path(repo_url)
+    # Generate sandbox name from repo name and branch
+    repo_name = repo_name_from_url(repo_url)
     if name_override:
         name = name_override
     else:
-        name = _helpers_sandbox_name(bare_path, branch)
+        name = _helpers_sandbox_name(repo_name, branch)
 
     valid_name, name_error = validate_sandbox_name(name)
     if not valid_name:
@@ -310,7 +346,6 @@ def new(
 
     # Atomically claim the sandbox name
     paths = derive_sandbox_paths(name)
-    worktree_path = paths.worktree_path
     claude_config_path = paths.claude_config_path
 
     _MAX_NAME_RETRIES = 5
@@ -334,7 +369,6 @@ def new(
             else:
                 branch = base_branch
             paths = derive_sandbox_paths(name)
-            worktree_path = paths.worktree_path
             claude_config_path = paths.claude_config_path
     else:
         log_error(f"Could not claim a unique sandbox name after {_MAX_NAME_RETRIES} attempts")
@@ -345,10 +379,9 @@ def new(
     click.echo(f"Setting up your sandbox: {name}")
 
     try:
-        new_sbx_setup(
+        workspace_path = new_sbx_setup(
             repo_url=repo_url,
-            bare_path=bare_path,
-            worktree_path=worktree_path,
+            repo_root=repo_root,
             branch=branch,
             from_branch=from_branch or "",
             name=name,
@@ -365,14 +398,14 @@ def new(
     except SetupError as exc:
         log_error(str(exc))
         log_info("Cleaning up partial sandbox resources...")
-        rollback_new_sbx(worktree_path, claude_config_path, name)
+        rollback_new_sbx(claude_config_path, name)
         sys.exit(1)
     except SystemExit:
         raise
     except Exception as exc:
         log_error(f"Sandbox creation failed: {exc}")
         log_info("Cleaning up partial sandbox resources...")
-        rollback_new_sbx(worktree_path, claude_config_path, name)
+        rollback_new_sbx(claude_config_path, name)
         sys.exit(1)
 
     # Save state
@@ -414,7 +447,7 @@ def new(
     click.echo("Sandbox is ready!")
     click.echo()
     click.echo(f"  Sandbox    {name}")
-    click.echo(f"  Worktree   {worktree_path}")
+    click.echo(f"  Worktree   {workspace_path}")
     click.echo(f"  Agent      {agent}")
     click.echo()
     click.echo("  Commands:")
