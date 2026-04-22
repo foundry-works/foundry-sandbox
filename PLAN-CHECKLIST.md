@@ -43,27 +43,28 @@
 
 ### 3.1 Collapse `new_*.py` fan-out
 
-- [ ] Fold `new_validation.py` helpers into `new_sbx.py` as private functions
-- [ ] Fold `new_resolver.py` helpers into `new.py` (or split between `new.py` and `new_sbx.py` by concern)
-- [ ] Delete `new_validation.py` and `new_resolver.py`
-- [ ] Update imports
-- [ ] Update/move related tests in `tests/unit/`
+- [x] Fold `new_validation.py` helpers into `new_sbx.py` as private functions
+- [x] Fold `new_resolver.py` helpers into `new.py` (or split between `new.py` and `new_sbx.py` by concern)
+- [x] Delete `new_validation.py` and `new_resolver.py`
+- [x] Update imports
+- [x] Update/move related tests in `tests/unit/`
 - [ ] Run `cast new --agent shell --skip-key-check --template none .` and verify success
 
 ### 3.2 Replace `ctx.invoke()` cross-command calls
 
-- [ ] Replace `attach.py:31` (`list_cmd` invocation) with inline listing or a pointer message
-- [ ] Extract startup logic from `start.py` into a plain function; call it from both `start.py` and `attach.py:44`
-- [ ] Replace `info.py:46,48,62` (`config` + `status` chain) — inline or drop the `info` command
+- [x] ~~Replace `attach.py:31` (`list_cmd` invocation) with inline listing or a pointer message~~ (attach.py does not invoke list_cmd)
+- [x] Extract startup logic from `start.py` into a plain function; call it from both `start.py` and `attach.py`
+- [x] Drop the `info` command entirely (users run `cast config` + `cast status`)
+- [x] Delete `foundry_sandbox/commands/info.py` and remove from CLI registration
 - [ ] Verify `cast attach <name>` against a stopped sandbox still auto-starts
-- [ ] Verify `cast info` output is preserved (if kept)
 
 ### 3.3 CLI alias cleanup
 
-- [ ] Decide: promote aliases to canonical, or drop aliases entirely
-- [ ] Apply the decision in `cli.py:24-28`
-- [ ] Document the rename in `CHANGELOG.md`
-- [ ] Update `docs/usage/` and `README.md` for any renamed commands
+- [x] Promote `refresh-creds` to canonical, drop `repeat`/`reattach` aliases
+- [x] Remove ALIASES machinery from `cli.py`
+- [x] Rename `refresh-credentials` → `refresh-creds` in `_LAZY_COMMANDS` and `@click.command()`
+- [x] Update help text, success message, docs, and CHANGELOG
+- [x] Update tests (delete `TestAliasResolution`, update command name assertions)
 
 ## Phase 4: Delete Legacy Code (Next Release)
 

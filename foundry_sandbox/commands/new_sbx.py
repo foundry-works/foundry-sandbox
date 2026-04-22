@@ -8,9 +8,13 @@ creates the worktree under ``<repo_root>/.sbx/<name>-worktrees/<branch>/``.
 from __future__ import annotations
 
 import os
+import sys
 from pathlib import Path
 
+from foundry_sandbox.api_keys import check_claude_key_required
+from foundry_sandbox.validate import validate_git_url
 from foundry_sandbox.atomic_io import file_lock
+from foundry_sandbox.utils import log_error, log_info, log_section, log_warn
 from foundry_sandbox.git_safety import (
     FOUNDRY_TEMPLATE_TAG,
     ensure_foundry_template,
@@ -30,8 +34,31 @@ from foundry_sandbox.sbx import (
     sbx_worktree_path,
 )
 from foundry_sandbox.state import write_sandbox_metadata
-from foundry_sandbox.utils import log_info, log_section, log_warn
 from foundry_sandbox.paths import strip_github_url
+
+
+def _validate_preconditions(
+    repo_url: str,
+    copies: tuple[str, ...],
+    skip_key_check: bool,
+) -> None:
+    """Validate API keys and copy sources before sandbox creation."""
+    ok, msg = validate_git_url(repo_url)
+    if not ok:
+        log_error(msg)
+        sys.exit(1)
+
+    if not skip_key_check:
+        ok, msg = check_claude_key_required()
+        if not ok:
+            log_error("Sandbox creation cancelled - Claude authentication required.")
+            sys.exit(1)
+
+    for copy_spec in copies:
+        src, _, _ = copy_spec.partition(":")
+        if not os.path.exists(src):
+            log_error(f"Copy source does not exist: {src}")
+            sys.exit(1)
 
 
 class SetupError(Exception):

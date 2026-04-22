@@ -17,7 +17,6 @@ Commands:
   new <repo> [branch] [from] [options]  Create sandbox from repo
   new --last                            Repeat last cast new command
   new --preset <name>                   Use a saved preset
-  repeat                                Alias for 'new --last'
   preset list                           List saved presets
   preset show <name>                    Show preset details
   preset save <name> [--sandbox <name>] Save preset with filesystem snapshot
@@ -30,8 +29,7 @@ Commands:
   destroy-all                           Destroy all sandboxes (double confirmation)
   config [--json]                       Show config and checks
   status [name] [--json]                Show sandbox status
-  info [--json]                         Show config + status
-  refresh-credentials [name]            Refresh credentials in running sandbox
+  refresh-creds [name]                  Refresh credentials in running sandbox
   git-mode [name] --mode <host|sandbox> Toggle git path mode for host/sandbox
   help                                  Show this help
 
@@ -58,7 +56,6 @@ Examples:
   cast preset save mysetup --sandbox my-sandbox   # save preset with snapshot
   cast new --preset myproject                     # use saved preset
   cast new --last                                 # repeat last command
-  cast repeat                                     # same as above
   cast attach repo-feature-branch
   cast list"""
 

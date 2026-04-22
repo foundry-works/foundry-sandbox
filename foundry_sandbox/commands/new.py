@@ -7,8 +7,10 @@ and injects the git wrapper for authenticated git operations.
 from __future__ import annotations
 
 import os
+import subprocess
 import sys
 from dataclasses import dataclass
+from datetime import datetime
 
 import click
 from click.core import ParameterSource
@@ -19,18 +21,12 @@ from foundry_sandbox.paths import (
     repo_url_to_checkout_path,
     sandbox_name as _helpers_sandbox_name,
 )
-from foundry_sandbox.commands.new_sbx import new_sbx_setup, rollback_new_sbx, SetupError
-from foundry_sandbox.commands.new_resolver import (
-    _resolve_repo_input,
-    _generate_branch_name,
-    _branch_exists_on_remote,
-    _detect_remote_default_branch,
-)
-from foundry_sandbox.commands.new_validation import _validate_preconditions
+from foundry_sandbox.commands.new_sbx import new_sbx_setup, rollback_new_sbx, SetupError, _validate_preconditions
 from foundry_sandbox.api_keys import has_opencode_key, has_zai_key
+from foundry_sandbox.constants import TIMEOUT_GIT_QUERY, TIMEOUT_LOCAL_CMD
 from foundry_sandbox.paths import derive_sandbox_paths
 from foundry_sandbox.state import save_last_cast_new, save_cast_preset, load_last_cast_new, load_cast_preset, save_last_attach
-from foundry_sandbox.utils import log_error, log_info, log_warn
+from foundry_sandbox.utils import log_debug, log_error, log_info, log_warn, sanitize_ref_component
 from foundry_sandbox.validate import validate_sandbox_name
 
 
@@ -163,6 +159,134 @@ def _ensure_repo_root(repo_url: str) -> str:
         )
 
     return checkout_path
+
+
+# ---------------------------------------------------------------------------
+# Repo resolution helpers
+# ---------------------------------------------------------------------------
+
+
+def _resolve_repo_input(repo_input: str) -> tuple[str, str, str, str]:
+    """Resolve repo input to URL, root path, display name, and current branch."""
+    if repo_input in (".", "/", "./", "../", "~/") or repo_input.startswith(("/", "./", "../", "~/")):
+        expanded = os.path.expanduser(repo_input)
+        result = subprocess.run(
+            ["git", "-C", expanded, "rev-parse", "--show-toplevel"],
+            capture_output=True, text=True, check=False,
+            timeout=TIMEOUT_GIT_QUERY,
+        )
+        if result.returncode != 0:
+            return ("", "", "", "")
+
+        repo_root = result.stdout.strip()
+        origin_result = subprocess.run(
+            ["git", "-C", repo_root, "remote", "get-url", "origin"],
+            capture_output=True, text=True, check=False,
+            timeout=TIMEOUT_GIT_QUERY,
+        )
+
+        if origin_result.returncode == 0 and origin_result.stdout.strip():
+            repo_url = origin_result.stdout.strip()
+        else:
+            repo_url = repo_root
+
+        branch_result = subprocess.run(
+            ["git", "-C", repo_root, "rev-parse", "--abbrev-ref", "HEAD"],
+            capture_output=True, text=True, check=False,
+            timeout=TIMEOUT_GIT_QUERY,
+        )
+        current_branch = branch_result.stdout.strip() if branch_result.returncode == 0 else ""
+
+        return (repo_url, repo_root, repo_url, current_branch)
+
+    if repo_input.startswith(("http://", "https://", "git@")) or "://" in repo_input:
+        repo_url = repo_input
+    else:
+        repo_url = f"https://github.com/{repo_input}"
+
+    return (repo_url, "", repo_url, "")
+
+
+def _branch_exists_on_remote(repo_root: str, branch: str) -> bool:
+    """Check if a branch exists on the remote (origin)."""
+    result = subprocess.run(
+        ["git", "-C", repo_root, "rev-parse", "--verify", f"refs/remotes/origin/{branch}"],
+        capture_output=True, check=False,
+        timeout=TIMEOUT_GIT_QUERY,
+    )
+    return result.returncode == 0
+
+
+def _detect_remote_default_branch(repo_root: str) -> str:
+    """Detect the remote's default branch from a local repo."""
+    result = subprocess.run(
+        ["git", "-C", repo_root, "symbolic-ref", "refs/remotes/origin/HEAD"],
+        capture_output=True, text=True, check=False,
+        timeout=TIMEOUT_GIT_QUERY,
+    )
+    if result.returncode == 0:
+        ref = result.stdout.strip()
+        prefix = "refs/remotes/origin/"
+        if ref.startswith(prefix):
+            return ref[len(prefix):]
+
+    for candidate in ("main", "master"):
+        if _branch_exists_on_remote(repo_root, candidate):
+            return candidate
+
+    log_warn(
+        "Could not detect remote default branch (neither 'main' nor 'master' found); "
+        "falling back to 'main'."
+    )
+    return "main"
+
+
+def _generate_branch_name(repo_url: str, from_branch: str) -> str:
+    """Generate a branch name for a new sandbox."""
+    timestamp = datetime.now().strftime("%Y%m%d-%H%M")
+    repo_name = os.path.basename(repo_url.removesuffix(".git"))
+
+    user_segment = os.environ.get("USER", "")
+    if not user_segment:
+        try:
+            user_segment = subprocess.run(
+                ["id", "-un"],
+                capture_output=True, text=True, check=False,
+                timeout=TIMEOUT_LOCAL_CMD,
+            ).stdout.strip()
+        except (OSError, subprocess.TimeoutExpired):
+            log_debug("Failed to get username from id command")
+
+    if not user_segment:
+        user_segment = "user"
+
+    user_segment = sanitize_ref_component(user_segment)
+    safe_repo_name = sanitize_ref_component(repo_name)
+
+    if not safe_repo_name:
+        safe_repo_name = "repo"
+
+    branch = f"{user_segment}/{safe_repo_name}-{timestamp}"
+
+    check_result = subprocess.run(
+        ["git", "check-ref-format", "--branch", branch],
+        capture_output=True, check=False,
+        timeout=TIMEOUT_GIT_QUERY,
+    )
+
+    if check_result.returncode != 0:
+        fallback_branch = f"{safe_repo_name}-{timestamp}"
+        check_fallback = subprocess.run(
+            ["git", "check-ref-format", "--branch", fallback_branch],
+            capture_output=True, check=False,
+            timeout=TIMEOUT_GIT_QUERY,
+        )
+        if check_fallback.returncode == 0:
+            branch = fallback_branch
+        else:
+            branch = f"sandbox-{timestamp}"
+
+    return branch
 
 
 # ---------------------------------------------------------------------------
@@ -308,7 +432,7 @@ def new(
         repo_url = f"https://github.com/{repo_url}"
 
     # Validate preconditions: git URL, API keys, copies
-    _validate_preconditions(ctx, repo_url, copies, skip_key_check)
+    _validate_preconditions(repo_url, copies, skip_key_check)
 
     # Validate agent
     valid_agents = {"claude", "codex", "copilot", "gemini", "kiro", "opencode", "shell"}
@@ -454,5 +578,5 @@ def new(
     click.echo(f"    cast attach {name}   - reconnect later")
     click.echo(f"    cast stop {name}     - pause the sandbox")
     click.echo(f"    cast destroy {name}  - remove completely")
-    click.echo("    cast repeat         - repeat this setup")
+    click.echo("    cast new --last     - repeat this setup")
     click.echo()

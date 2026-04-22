@@ -105,7 +105,7 @@ def _refresh_all() -> None:
         sys.exit(1)
 
 
-@click.command("refresh-credentials")
+@click.command("refresh-creds")
 @click.argument("name", required=False, default=None)
 @click.option("--last", "-l", is_flag=True, help="Refresh last attached sandbox")
 @click.option("--all", "all_sandboxes", is_flag=True, help="Refresh all running sandboxes")

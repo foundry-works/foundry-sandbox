@@ -58,34 +58,11 @@ def _ensure_git_safety_server() -> None:
 
 
 
-@click.command()
-@click.argument("name")
-@click.option("--watchdog", is_flag=True, help="Start wrapper integrity watchdog")
-def start(name: str, watchdog: bool) -> None:
-    """Start a stopped sandbox."""
-    sbx_check_available()
+def start_sandbox(name: str, watchdog: bool = False) -> None:
+    """Start a stopped sandbox (core logic, no CLI validation).
 
-    valid_name, name_error = validate_existing_sandbox_name(name)
-    if not valid_name:
-        click.echo(f"Error: {name_error}", err=True)
-        sys.exit(1)
-
-    metadata = load_sandbox_metadata(name) or {}
-    sandbox_exists = sbx_sandbox_exists(name)
-
-    if not sandbox_exists:
-        if not metadata:
-            click.echo(f"Error: Sandbox '{name}' not found", err=True)
-            sys.exit(1)
-        # Metadata exists but sbx sandbox is missing — corrupted or pre-sbx state.
-        click.echo(
-            f"Error: Sandbox '{name}' has metadata but no sbx sandbox. "
-            "This indicates a corrupted or pre-0.21 state. "
-            f"Destroy and recreate: cast destroy {name} && cast new <repo>",
-            err=True,
-        )
-        sys.exit(1)
-
+    Callers must ensure the sandbox name is valid and the sandbox exists.
+    """
     # Ensure git safety server is running (fail closed)
     _ensure_git_safety_server()
 
@@ -98,6 +75,7 @@ def start(name: str, watchdog: bool) -> None:
         sys.exit(1)
 
     # Verify git wrapper integrity; re-inject on checksum mismatch or absence
+    metadata = load_sandbox_metadata(name) or {}
     expected_checksum = metadata.get("wrapper_checksum", "")
     needs_repair = False
     if is_template_stale():
@@ -148,3 +126,33 @@ def start(name: str, watchdog: bool) -> None:
         from foundry_sandbox.watchdog import start_watchdog
         start_watchdog()
         click.echo("Wrapper integrity watchdog started (30s poll interval).")
+
+
+@click.command()
+@click.argument("name")
+@click.option("--watchdog", is_flag=True, help="Start wrapper integrity watchdog")
+def start(name: str, watchdog: bool) -> None:
+    """Start a stopped sandbox."""
+    sbx_check_available()
+
+    valid_name, name_error = validate_existing_sandbox_name(name)
+    if not valid_name:
+        click.echo(f"Error: {name_error}", err=True)
+        sys.exit(1)
+
+    metadata = load_sandbox_metadata(name) or {}
+    sandbox_exists = sbx_sandbox_exists(name)
+
+    if not sandbox_exists:
+        if not metadata:
+            click.echo(f"Error: Sandbox '{name}' not found", err=True)
+            sys.exit(1)
+        click.echo(
+            f"Error: Sandbox '{name}' has metadata but no sbx sandbox. "
+            "This indicates a corrupted or pre-0.21 state. "
+            f"Destroy and recreate: cast destroy {name} && cast new <repo>",
+            err=True,
+        )
+        sys.exit(1)
+
+    start_sandbox(name, watchdog=watchdog)

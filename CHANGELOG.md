@@ -10,11 +10,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 
 - **`install_pip_requirements_sbx` deduplicated** — moved from per-command copies in `start.py` and `new_sbx.py` to a single canonical function in `sbx.py`
-- **Shared `resolve_sandbox_name()` helper** — consolidated per-command sandbox name resolution logic (attach, git-mode, refresh-credentials, preset) into `commands/_helpers.py`
+- **Shared `resolve_sandbox_name()` helper** — consolidated per-command sandbox name resolution logic (attach, git-mode, refresh-creds, preset) into `commands/_helpers.py`
 - **Metadata field rename: `workspace_path` → `host_worktree_path`** — the on-disk JSON key is now `host_worktree_path`; loading still accepts the legacy `workspace_path` key for backward compatibility (compat shim drops in a future release)
+- **Command structure cleanup** — collapsed `new_*.py` fan-out from 4 files to 2 (`new.py` + `new_sbx.py`); extracted `start_sandbox()` from `start.py` for direct reuse by `attach.py` (removing `ctx.invoke()` cross-command coupling)
 
 ### Removed
 
+- **CLI aliases** — `repeat` and `reattach` aliases removed; use `cast new --last` and `cast attach --last` instead
+- **`refresh-credentials` command renamed** — use `cast refresh-creds` (the old `refresh-credentials` name is no longer recognized)
+- **`cast info` command removed** — use `cast config` and `cast status` separately
 - **0.20.x migration path** — `cast migrate-to-sbx` and `cast migrate-from-sbx` are now unknown commands. `foundry_sandbox/commands/migrate.py`, `foundry_sandbox/migration.py`, and all migration tests have been deleted. Users on 0.20.x must downgrade to an older release to migrate before upgrading. `docs/migration/0.20-to-0.21.md` has been removed; the migration guide is available in the 0.22.x release branch.
 
 ## [0.21.0] - 2026-04-21

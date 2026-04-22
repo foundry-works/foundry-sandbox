@@ -1,6 +1,6 @@
 """Unit tests for the Click-based CLI entrypoint.
 
-Tests command registration, alias resolution, unknown command rejection,
+Tests command registration, unknown command rejection,
 help output, and basic option parsing using Click's CliRunner.
 """
 from __future__ import annotations
@@ -11,7 +11,7 @@ import sys
 import click.testing
 import pytest
 
-from foundry_sandbox.cli import ALIASES, cli
+from foundry_sandbox.cli import cli
 
 
 @pytest.fixture()
@@ -41,41 +41,12 @@ class TestCLIGroup:
     def test_all_migrated_commands_registered(self) -> None:
         expected = {
             "attach", "config", "destroy", "destroy-all",
-            "help", "info", "list", "new", "preset",
-            "refresh-credentials", "git-mode", "start", "status", "stop",
+            "help", "list", "new", "preset",
+            "refresh-creds", "git-mode", "start", "status", "stop",
         }
         ctx = click.Context(cli)
         registered = set(cli.list_commands(ctx))
         assert expected.issubset(registered), f"Missing: {expected - registered}"
-
-
-# ---------------------------------------------------------------------------
-# Alias resolution tests
-# ---------------------------------------------------------------------------
-
-
-class TestAliasResolution:
-    """Tests for alias rewriting in CastGroup.resolve_command."""
-
-    def test_aliases_dict_has_expected_entries(self) -> None:
-        assert "repeat" in ALIASES
-        assert "reattach" in ALIASES
-        assert "refresh-creds" in ALIASES
-
-    def test_repeat_resolves_to_new_last(self) -> None:
-        canonical, prepended = ALIASES["repeat"]
-        assert canonical == "new"
-        assert "--last" in prepended
-
-    def test_reattach_resolves_to_attach_last(self) -> None:
-        canonical, prepended = ALIASES["reattach"]
-        assert canonical == "attach"
-        assert "--last" in prepended
-
-    def test_refresh_creds_resolves_to_refresh_credentials(self) -> None:
-        canonical, prepended = ALIASES["refresh-creds"]
-        assert canonical == "refresh-credentials"
-        assert prepended == []
 
 
 # ---------------------------------------------------------------------------
@@ -116,8 +87,8 @@ class TestUnknownCommandValidation:
     def test_all_commands_registered_no_shell_fallback(self) -> None:
         required = {
             "new", "list", "attach", "start", "stop", "destroy",
-            "help", "status", "config", "info",
-            "preset", "refresh-credentials", "git-mode", "destroy-all",
+            "help", "status", "config",
+            "preset", "refresh-creds", "git-mode", "destroy-all",
         }
         ctx = click.Context(cli)
         registered = set(cli.list_commands(ctx))

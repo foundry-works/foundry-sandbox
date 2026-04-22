@@ -6,13 +6,13 @@ Complete reference for all `cast` commands.
 
 ## Contents
 
-**Lifecycle:** [new](#cast-new) | [repeat](#cast-repeat) | [attach](#cast-attach) | [reattach](#cast-reattach) | [start](#cast-start) | [stop](#cast-stop) | [destroy](#cast-destroy) | [destroy-all](#cast-destroy-all)
+**Lifecycle:** [new](#cast-new) | [attach](#cast-attach) | [start](#cast-start) | [stop](#cast-stop) | [destroy](#cast-destroy) | [destroy-all](#cast-destroy-all)
 
 **Presets:** [preset](#cast-preset)
 
-**Status & Info:** [list](#cast-list) | [status](#cast-status) | [info](#cast-info) | [config](#cast-config) | [diagnose](#cast-diagnose)
+**Status & Info:** [list](#cast-list) | [status](#cast-status) | [config](#cast-config) | [diagnose](#cast-diagnose)
 
-**Maintenance:** [refresh-credentials](#cast-refresh-credentials) | [watchdog](#cast-watchdog) | [git-mode](#cast-git-mode) | [help](#cast-help)
+**Maintenance:** [refresh-creds](#cast-refresh-creds) | [watchdog](#cast-watchdog) | [git-mode](#cast-git-mode) | [help](#cast-help)
 
 **Reference:** [Environment Variables](#environment-variables)
 
@@ -96,7 +96,6 @@ cast new --preset myproject
 
 # Repeat the last cast new command
 cast new --last
-cast repeat  # shorthand alias
 
 # Enable optional tools
 cast new owner/repo feature --with-opencode  # requires ~/.local/share/opencode/auth.json
@@ -125,28 +124,6 @@ API keys are stored on the host via `sbx secret set -g` and injected at the netw
 If `repo` is `.` and no branch is provided, the sandbox branch is created from your current branch.
 
 Running `cast new` with no arguments launches the guided wizard (gum if available, read-based fallback).
-
----
-
-## cast repeat
-
-Alias for `cast new --last`. Repeats the previous `cast new` command.
-
-### Synopsis
-
-```
-cast repeat
-```
-
-### Examples
-
-```bash
-# Create a sandbox
-cast new owner/repo feature --wd packages/app
-
-# Later, repeat the same setup
-cast repeat
-```
 
 ---
 
@@ -192,28 +169,6 @@ cast attach
 # Reattach to the last sandbox
 cast attach --last
 cast reattach  # shorthand alias
-```
-
----
-
-## cast reattach
-
-Alias for `cast attach --last`. Reattaches to the last attached sandbox.
-
-### Synopsis
-
-```
-cast reattach
-```
-
-### Examples
-
-```bash
-# Attach to a sandbox
-cast attach repo-feature-branch
-
-# Later, reattach to the same sandbox
-cast reattach
 ```
 
 ---
@@ -518,32 +473,6 @@ cast status --json
 
 ---
 
-## cast info
-
-Show combined config and status.
-
-### Synopsis
-
-```
-cast info [--json]
-```
-
-### Options
-
-| Option | Description |
-|--------|-------------|
-| `--json` | Output in JSON format |
-
-### Examples
-
-```bash
-cast info
-
-cast info --json
-```
-
----
-
 ## cast config
 
 Show configuration and environment checks.
@@ -664,16 +593,16 @@ cast watchdog --interval 30
 
 ---
 
-## cast refresh-credentials
+## cast refresh-creds
 
 Push API keys from host environment to sbx-managed secrets.
 
 ### Synopsis
 
 ```
-cast refresh-credentials [name]
-cast refresh-credentials --last
-cast refresh-credentials --all
+cast refresh-creds [name]
+cast refresh-creds --last
+cast refresh-creds --all
 ```
 
 ### Arguments
@@ -699,16 +628,16 @@ cast refresh-credentials --all
 
 ```bash
 # Refresh credentials for a specific sandbox
-cast refresh-credentials repo-feature-branch
+cast refresh-creds repo-feature-branch
 
 # Refresh last attached sandbox
-cast refresh-credentials --last
+cast refresh-creds --last
 
 # Refresh all running sandboxes
-cast refresh-credentials --all
+cast refresh-creds --all
 
 # Auto-detect from current directory
-cast refresh-credentials
+cast refresh-creds
 ```
 
 ---

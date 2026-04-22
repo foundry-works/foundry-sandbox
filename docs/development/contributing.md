@@ -32,7 +32,7 @@ foundry-sandbox/
 │       ├── destroy_all.py  # cast destroy-all
 │       ├── list_cmd.py     # cast list (sbx ls enrichment)
 │       ├── config.py       # cast config
-│       ├── refresh_creds.py # cast refresh-credentials (sbx secret)
+│       ├── refresh_creds.py # cast refresh-creds (sbx secret)
 │       ├── help_cmd.py     # cast help
 │       └── git_mode.py     # cast git-mode
 │

@@ -12,23 +12,6 @@ import sys
 
 import click
 
-from foundry_sandbox.utils import log_debug
-
-# ---------------------------------------------------------------------------
-# Aliases
-# ---------------------------------------------------------------------------
-# Each alias maps to (canonical_command, prepended_args).  When the CLI
-# encounters an alias it rewrites the invocation *before* dispatch, so
-# the canonical command (whether migrated or shell-backed) handles it.
-
-ALIASES: dict[str, tuple[str, list[str]]] = {
-    "repeat": ("new", ["--last"]),
-    "reattach": ("attach", ["--last"]),
-    "refresh-creds": ("refresh-credentials", []),
-}
-
-# All known commands (used for typo detection and alias resolution).
-
 # ---------------------------------------------------------------------------
 # Custom Click Group
 # ---------------------------------------------------------------------------
@@ -41,11 +24,10 @@ _LAZY_COMMANDS: dict[str, tuple[str, str]] = {
     "destroy-all": ("foundry_sandbox.commands.destroy_all", "destroy_all"),
     "diagnose": ("foundry_sandbox.commands.diagnose", "diagnose"),
     "help": ("foundry_sandbox.commands.help_cmd", "help_cmd"),
-    "info": ("foundry_sandbox.commands.info", "info"),
     "list": ("foundry_sandbox.commands.list_cmd", "list_cmd"),
     "new": ("foundry_sandbox.commands.new", "new"),
     "preset": ("foundry_sandbox.commands.preset", "preset"),
-    "refresh-credentials": ("foundry_sandbox.commands.refresh_creds", "refresh_creds"),
+    "refresh-creds": ("foundry_sandbox.commands.refresh_creds", "refresh_creds"),
     "git-mode": ("foundry_sandbox.commands.git_mode", "git_mode"),
     "start": ("foundry_sandbox.commands.start", "start"),
     "status": ("foundry_sandbox.commands.status", "status"),
@@ -99,33 +81,17 @@ class CastGroup(click.Group):
     def resolve_command(
         self, ctx: click.Context, args: list[str]
     ) -> tuple[str | None, click.Command | None, list[str]]:
-        """Resolve a command name, handling aliases and shell fallback.
-
-        Order of operations:
-        1. If the token is an alias, rewrite to canonical name + prepend args.
-        2. Try normal Click resolution (registered subcommands).
-        3. If not found, raise an error.
-        """
-        # Nothing to resolve — let Click handle the empty case.
+        """Resolve a command name via lazy loading."""
         if not args:
             return super().resolve_command(ctx, args)
 
         cmd_name = args[0]
         remaining = list(args[1:])
 
-        # Step 1: Alias resolution ----------------------------------------
-        if cmd_name in ALIASES:
-            canonical, prepended = ALIASES[cmd_name]
-            log_debug(f"Alias '{cmd_name}' -> '{canonical}' with args {prepended}")
-            cmd_name = canonical
-            remaining = prepended + remaining
-
-        # Step 2: Try registered subcommands --------------------------------
         cmd_obj = self.get_command(ctx, cmd_name)
         if cmd_obj is not None:
             return cmd_name, cmd_obj, remaining
 
-        # Step 3: Unknown command -------------------------------------------
         ctx.fail(
             f"Unknown command '{cmd_name}'. Run 'cast help' for available commands."
         )

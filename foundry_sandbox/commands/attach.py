@@ -26,9 +26,8 @@ from foundry_sandbox.utils import log_error
 def _start_sandbox(name: str) -> None:
     """Start a sandbox via sbx run."""
     click.echo("Sandbox not running. Starting...")
-    from foundry_sandbox.commands.start import start as start_cmd
-    ctx = click.Context(start_cmd, info_name="start")
-    ctx.invoke(start_cmd, name=name)
+    from foundry_sandbox.commands.start import start_sandbox
+    start_sandbox(name)
 
 
 def _handle_ide_options(
