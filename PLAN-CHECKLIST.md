@@ -66,9 +66,9 @@
 
 ## Phase 4: Deprecate Dead Code
 
-- [ ] Add deprecation warnings to `git_worktree.py` functions
-- [ ] Add deprecation warnings to bare repo functions in `git.py`
-- [ ] Mark `get_worktrees_dir()` as deprecated in `constants.py`
+- [x] Add deprecation warnings to `git_worktree.py` functions
+- [x] Add deprecation warnings to bare repo functions in `git.py`
+- [x] Mark `get_worktrees_dir()` as deprecated in `constants.py`
 - [ ] After one release: remove `git_worktree.py` entirely
 - [ ] After one release: remove `ensure_bare_repo()`, `fetch_bare_branch()`
 

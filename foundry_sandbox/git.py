@@ -14,6 +14,7 @@ from __future__ import annotations
 import re
 import subprocess
 import time
+import warnings
 from pathlib import Path
 from typing import Callable
 
@@ -139,12 +140,21 @@ def remove_stale_git_locks(repo_path: str | Path) -> None:
 def _ensure_fetch_refspec(bare_path: Path) -> None:
     """Add a standard fetch refspec to a bare repo if missing.
 
+    .. deprecated::
+        Removed in next release. Bare repo functions are no longer used.
+
     ``git clone --bare`` does not configure ``remote.origin.fetch``, so
     subsequent ``git fetch origin`` never updates ``refs/remotes/origin/*``.
     This causes worktrees to see a stale ``origin/main`` tracking ref.
 
     Silently returns if the path is not a valid git repository.
     """
+    warnings.warn(
+        "_ensure_fetch_refspec() is deprecated and will be removed in the next release; "
+        "bare repo functions are no longer used.",
+        DeprecationWarning,
+        stacklevel=2,
+    )
     result = subprocess.run(
         ["git", "-C", str(bare_path), "config", "--get", "remote.origin.fetch"],
         capture_output=True,
@@ -170,6 +180,9 @@ def _ensure_fetch_refspec(bare_path: Path) -> None:
 def ensure_bare_repo(repo_url: str, bare_path: str | Path) -> None:
     """Clone or update a bare repository.
 
+    .. deprecated::
+        Removed in next release. Bare repo functions are no longer used.
+
     If *bare_path* does not exist, clones *repo_url* as a bare repo.
     After ensuring the fetch refspec is configured, fetches all remote
     refs so ``refs/remotes/origin/*`` stays current for worktrees.
@@ -183,6 +196,13 @@ def ensure_bare_repo(repo_url: str, bare_path: str | Path) -> None:
         bare_path: Local path for the bare clone.
     """
     bp = Path(bare_path)
+
+    warnings.warn(
+        "ensure_bare_repo() is deprecated and will be removed in the next release; "
+        "bare repo functions are no longer used.",
+        DeprecationWarning,
+        stacklevel=2,
+    )
 
     fresh_clone = not bp.is_dir()
     if fresh_clone:
@@ -216,6 +236,9 @@ _VALID_BRANCH_RE = re.compile(
 def fetch_bare_branch(bare_path: str | Path, branch: str) -> str:
     """Fetch a single branch into a bare repo, updating refs/heads/<branch>.
 
+    .. deprecated::
+        Removed in next release. Bare repo functions are no longer used.
+
     ``git clone --bare`` omits the fetch refspec and ``git fetch`` refuses
     to update a ref that is checked out in any worktree.  This function
     works around both issues by fetching to ``FETCH_HEAD`` and then using
@@ -237,6 +260,13 @@ def fetch_bare_branch(bare_path: str | Path, branch: str) -> str:
     """
     if not _VALID_BRANCH_RE.match(branch):
         raise ValueError(f"Invalid branch name: {branch!r}")
+
+    warnings.warn(
+        "fetch_bare_branch() is deprecated and will be removed in the next release; "
+        "bare repo functions are no longer used.",
+        DeprecationWarning,
+        stacklevel=2,
+    )
     bp = str(bare_path)
 
     # Fetch the branch — this always writes FETCH_HEAD regardless of

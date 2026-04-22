@@ -15,6 +15,7 @@ import re
 import subprocess
 import shutil
 import time
+import warnings
 from pathlib import Path
 
 from foundry_sandbox.constants import TIMEOUT_GIT_QUERY, TIMEOUT_GIT_TRANSFER
@@ -49,6 +50,9 @@ def configure_sparse_checkout(
 ) -> None:
     """Configure sparse checkout for a worktree using cone mode.
 
+    .. deprecated::
+        Removed in next release. sbx now manages worktrees internally.
+
     Enables per-worktree sparse checkout config and sets cone patterns
     to include only root files, .github/, and the specified working_dir.
 
@@ -60,6 +64,12 @@ def configure_sparse_checkout(
     Raises:
         RuntimeError: If gitdir cannot be read or checkout fails.
     """
+    warnings.warn(
+        "configure_sparse_checkout() is deprecated and will be removed in the next release; "
+        "sbx now manages worktrees internally.",
+        DeprecationWarning,
+        stacklevel=2,
+    )
     bare_p = Path(bare_path)
     wt_p = Path(worktree_path)
 
@@ -201,6 +211,9 @@ def create_worktree(
 ) -> None:
     """Create or update a git worktree.
 
+    .. deprecated::
+        Removed in next release. sbx now manages worktrees internally.
+
     If the worktree doesn't exist, creates it from the specified branch.
     If from_branch is provided, fetches it and creates a new branch.
     If the worktree exists, pulls latest changes (skipping if dirty).
@@ -219,6 +232,13 @@ def create_worktree(
     _assert_safe_ref(branch, "branch")
     if from_branch:
         _assert_safe_ref(from_branch, "from_branch")
+
+    warnings.warn(
+        "create_worktree() is deprecated and will be removed in the next release; "
+        "sbx now manages worktrees internally.",
+        DeprecationWarning,
+        stacklevel=2,
+    )
 
     bare_p = Path(bare_path)
     wt_p = Path(worktree_path)
@@ -394,6 +414,9 @@ def create_worktree(
 def cleanup_sandbox_branch(branch: str, bare_path: str | Path) -> None:
     """Delete a sandbox branch if it's not in use and not protected.
 
+    .. deprecated::
+        Removed in next release. Use ``cleanup_sandbox_branch_repo()`` for new-layout sandboxes.
+
     Skips deletion if:
       - Branch or bare_path is empty
       - Branch is protected (main, master, develop, production, release/*, hotfix/*)
@@ -407,6 +430,13 @@ def cleanup_sandbox_branch(branch: str, bare_path: str | Path) -> None:
         return
 
     _assert_safe_ref(branch, "branch")
+
+    warnings.warn(
+        "cleanup_sandbox_branch() is deprecated and will be removed in the next release; "
+        "use cleanup_sandbox_branch_repo() for new-layout sandboxes.",
+        DeprecationWarning,
+        stacklevel=2,
+    )
 
     # Skip protected branches
     protected_patterns = [
@@ -511,6 +541,9 @@ def cleanup_sandbox_branch_repo(branch: str, repo_root: str | Path) -> None:
 def remove_worktree(worktree_path: str | Path) -> None:
     """Remove a git worktree.
 
+    .. deprecated::
+        Removed in next release. sbx now manages worktrees internally.
+
     Attempts to use git worktree remove --force, falls back to rm -rf.
 
     Args:
@@ -519,6 +552,13 @@ def remove_worktree(worktree_path: str | Path) -> None:
     wt_p = Path(worktree_path)
     if not wt_p.exists():
         return
+
+    warnings.warn(
+        "remove_worktree() is deprecated and will be removed in the next release; "
+        "sbx now manages worktrees internally.",
+        DeprecationWarning,
+        stacklevel=2,
+    )
 
     # Try to get git-dir to derive bare_path
     git_dir_result = subprocess.run(

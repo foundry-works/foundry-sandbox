@@ -7,6 +7,7 @@ for all sandbox configuration constants.
 from __future__ import annotations
 
 import os
+import warnings
 from pathlib import Path
 
 
@@ -50,9 +51,18 @@ def get_repos_dir() -> Path:
 def get_worktrees_dir() -> Path:
     """Get the Git worktrees directory.
 
+    .. deprecated::
+        Removed in next release. sbx now manages worktrees internally.
+
     Returns:
         Path to worktrees directory ($SANDBOX_HOME/worktrees)
     """
+    warnings.warn(
+        "get_worktrees_dir() is deprecated and will be removed in the next release; "
+        "sbx now manages worktrees internally.",
+        DeprecationWarning,
+        stacklevel=2,
+    )
     return get_sandbox_home() / "worktrees"
 
 
