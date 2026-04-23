@@ -11,16 +11,14 @@ MicroVM-based sandbox environment for running Claude Code with isolated credenti
 ## Testing
 
 ```bash
-./tests/redteam-sandbox.sh  # Security validation (run inside sandbox)
+./tests/redteam/runner.sh  # Security validation (run inside sandbox)
 ```
 
 ## Documentation
 
-- `docs/README.md` - Documentation index
-- `docs/architecture.md` - System architecture
 - `docs/configuration.md` - Configuration options
 - `docs/getting-started.md` - Setup guide
 - `docs/usage/` - Commands and workflows
-- `docs/security/` - Security model and threat analysis
+- `docs/security/security-model.md` - Threat model and security boundaries
 
 **Important:** Read `docs/security/security-model.md` to understand the threat model and security boundaries before making changes to sandbox isolation.

@@ -53,7 +53,7 @@ foundry-git-safety validate
 foundry-git-safety start --foreground --port 8083
 
 # Start as daemon
-foundry-git-safety start --port 8083 --pid-file /run/foundry-git-safety.pid
+foundry-git-safety start --port 8083 --pid-file /tmp/foundry-git-safety.pid
 
 # Check status
 foundry-git-safety status
@@ -72,8 +72,8 @@ git_safety:
   server:
     host: "127.0.0.1"
     port: 8083
-    secrets_path: "/run/secrets/sandbox-hmac"
-    data_dir: "/var/lib/foundry-git-safety"
+    secrets_path: "~/.foundry/secrets/sandbox-hmac"
+    data_dir: "~/.foundry/data/git-safety"
 
   protected_branches:
     enabled: true
@@ -118,9 +118,9 @@ git_safety:
 | `GIT_PROTECTED_BRANCHES_PATTERNS` | Comma-separated protected branch patterns |
 | `FOUNDRY_CONFIG_PATH` | Path to `foundry.yaml` |
 | `FOUNDRY_FILE_RESTRICTIONS_PATH` | Path to `push-file-restrictions.yaml` |
-| `FOUNDRY_DATA_DIR` | Data directory for server state |
+| `FOUNDRY_DATA_DIR` | Data directory for server state (defaults to `~/.foundry/data/git-safety`) |
 | `GIT_CLIENT_WORKSPACE_ROOT` | Override workspace root path for git operations |
-| `GIT_API_SECRETS_PATH` | Path to HMAC secrets directory |
+| `GIT_API_SECRETS_PATH` | Path to HMAC secrets directory (defaults to `~/.foundry/secrets/sandbox-hmac`) |
 | `LOG_LEVEL` | Log level (`DEBUG`, `INFO`, `WARNING`, `ERROR`) |
 | `LOG_FORMAT` | Log format (`json` or `text`) |
 

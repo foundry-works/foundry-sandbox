@@ -22,8 +22,8 @@ git_safety:
 |-------|------|---------|-------------|
 | `host` | string | `127.0.0.1` | Server bind address |
 | `port` | integer | `8083` | Server bind port (1-65535) |
-| `secrets_path` | string | `/run/secrets/sandbox-hmac` | Directory containing per-sandbox HMAC secret files |
-| `data_dir` | string | `/var/lib/foundry-git-safety` | Directory for server state (metadata files) |
+| `secrets_path` | string | `~/.foundry/secrets/sandbox-hmac` | Directory containing per-sandbox HMAC secret files |
+| `data_dir` | string | `~/.foundry/data/git-safety` | Directory for server state (metadata files) |
 
 ### protected_branches
 
@@ -67,8 +67,8 @@ git_safety:
 |----------|---------|-------------|
 | `FOUNDRY_CONFIG_PATH` | (none) | Path to `foundry.yaml` |
 | `FOUNDRY_FILE_RESTRICTIONS_PATH` | (none) | Path to `push-file-restrictions.yaml` |
-| `FOUNDRY_DATA_DIR` | `/var/lib/foundry-git-safety` | Server state directory |
-| `GIT_API_SECRETS_PATH` | `/run/secrets/sandbox-hmac` | HMAC secrets directory |
+| `FOUNDRY_DATA_DIR` | `~/.foundry/data/git-safety` | Server state directory |
+| `GIT_API_SECRETS_PATH` | `~/.foundry/secrets/sandbox-hmac` | HMAC secrets directory |
 | `GIT_PROTECTED_BRANCHES_ENABLED` | (none) | Override protected branch enforcement |
 | `GIT_PROTECTED_BRANCHES_PATTERNS` | (none) | Comma-separated protected patterns |
 | `GIT_CLIENT_WORKSPACE_ROOT` | (none) | Client-side workspace root for path translation |
@@ -76,6 +76,8 @@ git_safety:
 | `LOG_FORMAT` | `json` | Logging format (`json` or `text`) |
 | `LOG_INCLUDE_TIMESTAMP` | `true` | Include timestamp in log output |
 | `LOG_INCLUDE_LOCATION` | `true` | Include source location in log output |
+
+These defaults assume standalone host usage. Containerized deployments can still override them with `FOUNDRY_DATA_DIR` and `GIT_API_SECRETS_PATH`.
 
 ## Protected Branch Pattern Syntax
 

@@ -125,7 +125,7 @@ def start_sandbox(name: str, watchdog: bool = False) -> None:
     if watchdog:
         from foundry_sandbox.watchdog import start_watchdog
         start_watchdog()
-        click.echo("Wrapper integrity watchdog started (30s poll interval).")
+        click.echo("Wrapper integrity watchdog started (default poll interval).")
 
 
 @click.command()

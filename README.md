@@ -5,136 +5,79 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Built for Claude Code](https://img.shields.io/badge/Built_for-Claude_Code-cc785c)](https://docs.anthropic.com/en/docs/claude-code)
 
-Ephemeral, batteries-included microVM workspaces that isolate AI coding agents from your credentials and host system.
+Ephemeral microVM workspaces that isolate AI coding agents from your host system, credentials, and git history.
 
 ## What It Does
 
-Foundry Sandbox runs your code and AI assistants inside ephemeral Docker sbx microVMs where **credentials never enter the sandbox**. A host-side git safety server and sbx proxy hold your real API keys and tokens, injecting them into outbound requests only after policy validation. Code running inside — whether an AI assistant, a build script, or a malicious dependency — never sees the actual credentials.
+Foundry Sandbox runs your code and AI assistants inside Docker `sbx` microVMs. Real credentials stay on the host. Git operations are proxied through `foundry-git-safety`, and outbound API credentials are injected by the host-side proxy instead of being exposed inside the VM.
 
-```
-+------------------+     +---------------------------+     +------------------+
-|    Sandbox       |     |     Host Services         |     |  External APIs   |
-|  (microVM)       |     |                           |     |                  |
-|  AI assistants,  |---->|  sbx proxy (credentials)  |---->|  GitHub, Claude, |
-|  build scripts,  |     |  git safety (policy)      |     |  OpenAI, Gemini  |
-|  your code       |     |  HMAC auth, branch guard  |     |                  |
-|                  |     |                           |     |                  |
-|  [no real creds] |     |  [all credentials]        |     |                  |
-+------------------+     +---------------------------+     +------------------+
-```
-
-Multiple independent security layers provide defense in depth:
-
-| Layer | What it does |
-|-------|-------------|
-| MicroVM isolation | Sandbox runs in a lightweight VM with its own kernel |
-| Credential injection | API keys stored by sbx; injected at network level, never entering the VM |
-| Git safety | All git operations proxied through authenticated API with policy enforcement |
-| Branch isolation | Each sandbox sees only its own branch; other branches are hidden |
-| Network policy | sbx controls egress; no raw network access from sandbox |
-| Wrapper integrity | Watchdog detects tampering with the git wrapper |
-
-Each sandbox is a git worktree — create one in seconds, destroy it with zero trace.
-
-## Key Features
-
-**Security**
-- Credential isolation via sbx proxy (enabled by default)
-- Git safety: protected branches, force-push blocking, GitHub API controls
-- Wrapper integrity watchdog with HMAC-SHA256 authentication
-- Branch isolation between concurrent sandboxes
-
-**Developer experience**
-- Claude Code, Gemini CLI, Codex CLI, and OpenCode pre-installed
-- Fast creation: worktrees share git objects, new sandboxes spin up in seconds
-- Presets and history: save configurations, repeat last command with `cast new --last`
-- [claude-foundry](https://github.com/foundry-works/claude-foundry) plugin pre-configured for Claude Code
-
-**Automation**
-- All commands support `--json` for scripting
+The goal is practical blast-radius reduction: agents can work freely in an isolated workspace while host state, secrets, and protected git operations stay behind policy boundaries.
 
 ## Quick Start
 
-**1. Install**
+1. Install standalone `sbx` and the `cast` CLI. See [Getting Started](docs/getting-started.md).
+2. Authenticate on the host:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/foundry-works/foundry-sandbox/main/install.sh | bash
+export CLAUDE_CODE_OAUTH_TOKEN="..."   # or ANTHROPIC_API_KEY
+gh auth login                          # for private repos and push
 ```
 
-Clones to `~/.foundry-sandbox`, adds the `cast` command. Also available on [PyPI](https://pypi.org/project/foundry-sandbox/) (`pipx install foundry-sandbox`). See [Getting Started](docs/getting-started.md) for manual install, uninstall, and prerequisites.
-
-**2. Set up credentials**
+3. Create a sandbox:
 
 ```bash
-claude setup-token              # Claude Code
-codex login                     # Codex CLI (ChatGPT subscription)
-gh auth login                   # GitHub (for private repos and push)
-gemini auth                     # Gemini CLI (if using)
+cast new owner/repo feature-login main
 ```
 
-Credentials stay on the host — sbx injects them into requests so they never enter the sandbox. See [Configuration](docs/configuration.md) for all supported API keys.
-
-**3. Create a sandbox**
-
-Use the guided wizard to create a new sandbox.
+4. Attach to it:
 
 ```bash
-cast new
+cast attach repo-feature-login
 ```
 
-**4. Work inside**
-
-Launch your favorite AI agent.
+5. Work inside `/workspace`, then destroy it when done:
 
 ```bash
-claude              # Claude Code
-gemini              # Gemini CLI
-codex               # Codex CLI
+cast destroy repo-feature-login --yes
 ```
 
-**5. Commit, push**
+`cast new` creates the sandbox and prints the follow-up commands. It does not open an interactive shell automatically.
 
-Ask your AI agent to commit and push changes.
-
-**6. Destroy**
-
-CTRL+D to exit the sandbox, then from host:
+## Core Commands
 
 ```bash
-cast destroy <sandbox-name> --yes   # Remove worktree and sandbox
+cast new owner/repo feature-login main
+cast attach repo-feature-login
+cast list
+cast status repo-feature-login
+cast stop repo-feature-login
+cast start repo-feature-login
+cast refresh-creds --all
+cast diagnose
+cast destroy repo-feature-login --yes
 ```
-
-## Prerequisites
-
-Docker sbx, Git 2.x+, Bash 4+, Python 3.10+. Linux and macOS supported natively; Windows requires WSL2. See [sbx Compatibility](docs/sbx-compatibility.md) for supported sbx versions.
-
-## Limitations
-
-- **Not a targeted-attack boundary** — defends against supply-chain attacks and AI mistakes, not a determined human attacker with host-level access
-- **Requires Docker sbx** — no native process isolation without it
-- **Linux/macOS** — Windows requires WSL2
 
 ## Documentation
 
+The maintained docs for the current product surface are:
+
 | Document | Description |
 |----------|-------------|
-| [Getting Started](docs/getting-started.md) | Installation and first sandbox |
-| [Commands](docs/usage/commands.md) | Full command reference |
-| [Workflows](docs/usage/workflows.md) | Common patterns and recipes |
-| [Configuration](docs/configuration.md) | API keys, plugins, and config files |
-| [Architecture](docs/architecture.md) | Technical design and diagrams |
-| [Security Model](docs/security/security-model.md) | Threat model, defenses, and hardening |
-| [Operations](docs/operations.md) | Operational runbook |
-| [Observability](docs/observability.md) | Metrics and debugging |
-| [sbx Compatibility](docs/sbx-compatibility.md) | Supported versions and drift detection |
-| [Migration Guide](https://github.com/foundry-works/foundry-sandbox/tree/0.22.x/docs/migration/0.20-to-0.21.md) | Upgrading from 0.20.x to 0.21.x |
-| [Contributing](docs/development/contributing.md) | For contributors |
+| [Getting Started](docs/getting-started.md) | Install, authenticate, create, attach |
+| [Commands](docs/usage/commands.md) | Current CLI reference |
+| [Configuration](docs/configuration.md) | Environment variables, credentials, user services |
+| [Operations](docs/operations.md) | Runbook and troubleshooting |
+| [Security Model](docs/security/security-model.md) | Threat model and enforcement boundaries |
+| [Workflows](docs/usage/workflows.md) | Common day-to-day patterns |
 
-## Support
+The docs set is intentionally small and current-state focused.
 
-- **Issues**: [GitHub Issues](https://github.com/foundry-works/foundry-sandbox/issues)
-- **Discussions**: [GitHub Discussions](https://github.com/foundry-works/foundry-sandbox/discussions)
+## Limitations
+
+- Designed for accidental damage, misconfigured automation, and supply-chain risk, not a determined host-level attacker
+- Requires standalone Docker `sbx`
+- Linux and macOS work natively; Windows requires WSL2
 
 ## License
 
-MIT License. See [LICENSE](LICENSE) for details.
+MIT. See [LICENSE](LICENSE).
