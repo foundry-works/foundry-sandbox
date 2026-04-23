@@ -1,0 +1,275 @@
+"""Dev command — create or reuse a sandbox, start, open IDE, and attach.
+
+The single-command local-dev workflow. Resolves repo, finds an existing
+sandbox by repo + profile, and either reuses it (up-flow) or creates a
+new one (new-flow) before attaching.
+"""
+
+from __future__ import annotations
+
+import os
+import sys
+
+import click
+
+from foundry_sandbox.commands.new import (
+    _branch_exists_on_remote,
+    _detect_remote_default_branch,
+    _ensure_repo_root,
+    _generate_branch_name,
+    _resolve_repo_input,
+)
+from foundry_sandbox.commands.new_setup import _validate_preconditions, new_sbx_setup
+from foundry_sandbox.foundry_config import load_user_ide_config
+from foundry_sandbox.ide import launch_ide
+from foundry_sandbox.paths import (
+    find_next_sandbox_name,
+    path_sandbox_config,
+    repo_name_from_url,
+    resolve_host_worktree_path,
+    sandbox_name as _helpers_sandbox_name,
+)
+from foundry_sandbox.sbx import sbx_check_available, sbx_is_running
+from foundry_sandbox.state import (
+    find_sandbox_by_profile,
+    load_sandbox_metadata,
+    save_last_attach,
+    save_last_cast_new,
+)
+from foundry_sandbox.utils import log_error, log_warn
+from foundry_sandbox.validate import validate_sandbox_name
+
+
+def _up_flow(
+    name: str,
+    *,
+    no_ide: bool = False,
+    ide_value: str = "",
+    ide_config: object | None = None,
+) -> None:
+    """Start sandbox if stopped, optionally launch IDE, then attach.
+
+    Shared between the reuse and create paths.
+    """
+    from foundry_sandbox.commands.attach import _sbx_attach
+    from foundry_sandbox.commands.start import start_sandbox
+    from foundry_sandbox.commands._ide_helpers import get_ide_args, maybe_auto_git_mode
+    from foundry_sandbox.commands.up import _resolve_ide_for_up
+
+    # Start if not running
+    if not sbx_is_running(name):
+        click.echo("Sandbox not running. Starting...")
+        start_sandbox(name)
+
+    metadata = load_sandbox_metadata(name)
+    working_dir = str(metadata.get("working_dir", "")) if metadata else ""
+
+    save_last_attach(name)
+
+    # IDE launch
+    if not no_ide and os.isatty(0):
+        spec = _resolve_ide_for_up(ide_value or None, ide_config, metadata)
+        if spec is not None:
+            worktree_path = resolve_host_worktree_path(name)
+            extra_args = get_ide_args(ide_config)
+            ok = launch_ide(spec, str(worktree_path), extra_args)
+            if ok:
+                maybe_auto_git_mode(name, ide_config)
+            elif ide_value:
+                log_error(f"IDE '{ide_value}' launch failed")
+        elif ide_value:
+            log_error(f"IDE '{ide_value}' could not be resolved")
+
+    _sbx_attach(name, working_dir)
+
+
+@click.command()
+@click.argument("repo", required=False, default=".")
+@click.option("--profile", "-p", default="default", help="Named dev profile for reuse matching")
+@click.option("--branch", "-b", default="", help="Target branch (auto-generated if omitted)")
+@click.option("--fresh", is_flag=True, help="Force new sandbox, skip reuse lookup")
+@click.option("--agent", default="claude", help="Agent type (claude, codex, copilot, gemini, kiro, opencode, shell)")
+@click.option("--ide", default="", help="Override IDE (alias, path, or command)")
+@click.option("--no-ide", is_flag=True, help="Skip IDE launch")
+@click.option("--name", "name_override", default="", help="Override auto-generated sandbox name")
+@click.option("--wd", default="", help="Working directory (relative)")
+@click.option("--pip-requirements", "-r", default="", help="Install Python packages from requirements file")
+@click.option("--template", default="foundry-git-wrapper:latest", show_default=True, help="Template tag")
+@click.option("--plan", "dry_run_plan", is_flag=True, help="Dry-run: show resolved config without creating")
+def dev(
+    repo: str,
+    profile: str,
+    branch: str,
+    fresh: bool,
+    agent: str,
+    ide: str,
+    no_ide: bool,
+    name_override: str,
+    wd: str,
+    pip_requirements: str,
+    template: str,
+    dry_run_plan: bool,
+) -> None:
+    """Create or reuse a dev sandbox, open IDE, and attach.
+
+    Defaults to the current directory. Reuses an existing sandbox matching
+    the repo and profile unless --fresh is given.
+    """
+    sbx_check_available()
+    ide_config = load_user_ide_config()
+
+    # Resolve repo input
+    if not repo:
+        repo = "."
+    repo_url, repo_root, _, current_branch = _resolve_repo_input(repo)
+
+    if not repo_url:
+        log_error(f"Not a git repository: {repo}")
+        sys.exit(1)
+
+    # For remote URLs, ensure a local checkout exists
+    if not repo_root:
+        repo_root = _ensure_repo_root(repo_url)
+
+    # --plan: dry-run mode
+    if dry_run_plan:
+        from foundry_sandbox.foundry_config import render_plan_text, resolve_foundry_config
+        from pathlib import Path
+
+        try:
+            config = resolve_foundry_config(Path(repo_root or repo_url))
+            click.echo(render_plan_text(config))
+        except Exception as exc:
+            log_error(f"Foundry config error: {exc}")
+            sys.exit(1)
+        return
+
+    # Reuse path: look for an existing sandbox matching repo + profile
+    if not fresh:
+        existing = find_sandbox_by_profile(repo_url, profile)
+        if existing:
+            click.echo(f"Reusing sandbox: {existing}")
+            _up_flow(existing, no_ide=no_ide, ide_value=ide, ide_config=ide_config)
+            return
+
+    # Create path: resolve branch, build sandbox, attach
+    click.echo("Creating new sandbox...")
+
+    # Validate agent
+    valid_agents = {"claude", "codex", "copilot", "gemini", "kiro", "opencode", "shell"}
+    if agent not in valid_agents:
+        log_error(f"Invalid agent '{agent}'. Must be one of: {', '.join(sorted(valid_agents))}")
+        sys.exit(1)
+
+    # Resolve branch
+    from_branch = ""
+    if repo_root and current_branch:
+        if current_branch == "HEAD":
+            log_error("Repository is in a detached HEAD state; specify a base branch.")
+            sys.exit(1)
+
+        if not branch:
+            if _branch_exists_on_remote(repo_root, current_branch):
+                from_branch = current_branch
+            else:
+                from_branch = _detect_remote_default_branch(repo_root)
+                log_warn(
+                    f"Current branch '{current_branch}' not found on remote; "
+                    f"using '{from_branch}' as base."
+                )
+
+    if not branch:
+        branch = _generate_branch_name(repo_url, from_branch or "main")
+        from_branch = from_branch or "main"
+
+    # Validate working directory
+    if wd:
+        wd = wd.lstrip("./")
+
+    # Validate preconditions
+    _validate_preconditions(repo_url, (), False)
+
+    # Generate sandbox name
+    repo_name = repo_name_from_url(repo_url)
+    if name_override:
+        name = name_override
+    else:
+        name = _helpers_sandbox_name(repo_name, branch)
+
+    valid_name, name_error = validate_sandbox_name(name)
+    if not valid_name:
+        log_error(f"Invalid sandbox name '{name}': {name_error}")
+        sys.exit(1)
+
+    # Atomically claim the sandbox name
+    sandbox_config_path = path_sandbox_config(name)
+    try:
+        os.makedirs(sandbox_config_path, exist_ok=False)
+    except FileExistsError:
+        name = find_next_sandbox_name(name)
+        suffix = name[len(_helpers_sandbox_name(repo_name, branch)):]
+        if suffix:
+            branch = f"{branch}{suffix}"
+        sandbox_config_path = path_sandbox_config(name)
+        try:
+            os.makedirs(sandbox_config_path, exist_ok=False)
+        except FileExistsError:
+            log_error(f"Sandbox name collision: '{name}' already exists")
+            sys.exit(1)
+
+    click.echo()
+    click.echo(f"Setting up your sandbox: {name}")
+
+    try:
+        host_worktree_path = new_sbx_setup(
+            repo_url=repo_url,
+            repo_root=repo_root,
+            branch=branch,
+            from_branch=from_branch,
+            name=name,
+            agent=agent,
+            sandbox_config_path=sandbox_config_path,
+            copies=[],
+            allow_pr=False,
+            pip_requirements=pip_requirements,
+            with_opencode=False,
+            with_zai=False,
+            wd=wd,
+            template=template,
+            ide=ide,
+        )
+    except RuntimeError as exc:
+        log_error(str(exc))
+        sys.exit(1)
+    except SystemExit:
+        raise
+    except Exception as exc:
+        log_error(f"Sandbox creation failed: {exc}")
+        sys.exit(1)
+
+    # Persist profile in metadata
+    from foundry_sandbox.state import patch_sandbox_metadata
+    patch_sandbox_metadata(name, profile=profile)
+
+    # Save state
+    save_last_cast_new(
+        repo=repo_url,
+        agent=agent,
+        branch=branch,
+        from_branch=from_branch,
+        working_dir=wd,
+        pip_requirements=pip_requirements,
+        template=template,
+        ide=ide,
+    )
+    save_last_attach(name)
+
+    click.echo()
+    click.echo(f"Created sandbox: {name}")
+    click.echo(f"  Worktree   {host_worktree_path}")
+    click.echo(f"  Agent      {agent}")
+    click.echo(f"  Profile    {profile}")
+    click.echo()
+
+    # Attach
+    _up_flow(name, no_ide=no_ide, ide_value=ide, ide_config=ide_config)

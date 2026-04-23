@@ -210,6 +210,22 @@ def list_sandboxes() -> list[dict[str, Any]]:
     return results
 
 
+def find_sandbox_by_profile(repo_url: str, profile: str) -> str | None:
+    """Find an existing sandbox matching repo_url + profile.
+
+    Args:
+        repo_url: Repository URL to match.
+        profile: Profile name to match.
+
+    Returns:
+        Sandbox name if found, None otherwise.
+    """
+    for sb in list_sandboxes():
+        if sb.get("repo_url") == repo_url and sb.get("profile") == profile:
+            return sb.get("sbx_name") or sb.get("name")
+    return None
+
+
 def collect_sandbox_list(
     name: str | None = None,
 ) -> list[dict[str, str]]:

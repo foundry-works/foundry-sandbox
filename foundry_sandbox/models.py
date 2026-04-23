@@ -66,6 +66,9 @@ class SbxSandboxMetadata(BaseModel):
     ide: str = ""
     """Preferred IDE for this sandbox (alias, path, or command)."""
 
+    profile: str = ""
+    """Named dev profile used to create or reuse this sandbox."""
+
 
 class CastNewPreset(BaseModel):
     """Structured representation of cast-new preset arguments."""
