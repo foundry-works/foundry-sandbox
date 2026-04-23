@@ -686,7 +686,7 @@ def emit_wrapper_tamper_event(
     )
 
     try:
-        from foundry_git_safety.decision_log import write_decision  # type: ignore[import-not-found]
+        from foundry_git_safety.decision_log import write_decision  # type: ignore[import-untyped]
 
         write_decision(
             sandbox=sandbox,

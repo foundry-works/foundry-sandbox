@@ -27,7 +27,7 @@ class TestFoundryYamlIntegration:
     def test_load_complete_foundry_yaml(self, tmp_path):
         """A complete foundry.yaml file is parsed into a FoundryConfig."""
         config_data = {
-            "version": "1.0",
+            "version": "1",
             "git_safety": {
                 "server": {
                     "host": "0.0.0.0",
@@ -64,7 +64,7 @@ class TestFoundryYamlIntegration:
         config = load_foundry_config(str(config_path))
 
         assert isinstance(config, FoundryConfig)
-        assert config.version == "1.0"
+        assert config.version == "1"
         assert config.git_safety.server.host == "0.0.0.0"
         assert config.git_safety.server.port == 9090
         assert config.git_safety.server.secrets_path == "/custom/secrets"
@@ -76,7 +76,7 @@ class TestFoundryYamlIntegration:
         """When the config file does not exist, defaults are returned."""
         config = load_foundry_config(str(tmp_path / "nonexistent.yaml"))
         assert isinstance(config, FoundryConfig)
-        assert config.version == "1.0"
+        assert config.version == "1"
         # Default server port
         assert config.git_safety.server.port == 8083
         # Default rate limits
@@ -85,7 +85,7 @@ class TestFoundryYamlIntegration:
     def test_partial_config_merges_with_defaults(self, tmp_path):
         """A partial config file merges with defaults for missing sections."""
         config_data = {
-            "version": "1.0",
+            "version": "1",
             "git_safety": {
                 "rate_limits": {
                     "burst": 999,
@@ -106,7 +106,7 @@ class TestFoundryYamlIntegration:
     def test_invalid_warn_action_raises(self, tmp_path):
         """An invalid warn_action value raises ConfigError."""
         config_data = {
-            "version": "1.0",
+            "version": "1",
             "git_safety": {
                 "file_restrictions": {
                     "warn_action": "invalid",
