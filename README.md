@@ -5,11 +5,26 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Built for Claude Code](https://img.shields.io/badge/Built_for-Claude_Code-cc785c)](https://docs.anthropic.com/en/docs/claude-code)
 
-Ephemeral microVM workspaces that isolate AI coding agents from your host system, credentials, and git history.
+Git policy and workflow layer for AI coding agents running in Docker `sbx` microVMs.
+
+## Why Foundry vs. plain sbx
+
+`sbx` provides the microVM, network policy, and host-side credential injection. Foundry adds the controls `sbx` does not:
+
+| Layer | Provided by |
+|-------|-------------|
+| MicroVM isolation, network policy, credential injection | `sbx` |
+| Git policy: branch isolation, protected branches, file-pattern blocks | Foundry |
+| GitHub API filtering: blocks PR merges, release creation, webhook/secret access | Foundry |
+| HMAC-authenticated git wrapper with SHA-256 integrity watchdog | Foundry |
+| Proxy-URL injection for user-defined services (`TAVILY_API_KEY`, …) | Foundry |
+| `cast` CLI: clone → worktree → sandbox → wrapper → metadata in one command | Foundry |
+
+Use `sbx` alone for an ephemeral microVM. Use Foundry when you also want the agent to be unable to push to `main`, merge its own PR, exfiltrate via `.github/workflows/`, or silently replace `/usr/local/bin/git`.
 
 ## What It Does
 
-Foundry Sandbox runs your code and AI assistants inside Docker `sbx` microVMs. Real credentials stay on the host. Git operations are proxied through `foundry-git-safety`, and outbound API credentials are injected by the host-side proxy instead of being exposed inside the VM.
+Foundry installs a git wrapper at `/usr/local/bin/git` in each sandbox. Every git command routes through `foundry-git-safety` on the host, which validates refs, enforces branch isolation, blocks pushes to protected branches and sensitive file patterns, filters GitHub API calls, and logs decisions for audit. A host-side watchdog checksums the wrapper and re-injects it if a process inside the sandbox tampers with it.
 
 The goal is practical blast-radius reduction: agents can work freely in an isolated workspace while host state, secrets, and protected git operations stay behind policy boundaries.
 

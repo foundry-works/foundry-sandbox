@@ -93,11 +93,11 @@ What `cast new` does:
 1. Validates `sbx` and required auth.
 2. Ensures a local repo checkout exists.
 3. Creates an `sbx` sandbox and repo-local worktree.
-4. Starts `foundry-git-safety` if needed.
-5. Provisions git safety and writes sandbox metadata.
+4. Starts `foundry-git-safety` if needed — the host-side policy server that validates git commands from the sandbox.
+5. Generates a per-sandbox HMAC secret, registers the sandbox with the policy server, injects the git wrapper at `/usr/local/bin/git`, and writes sandbox metadata.
 6. Prints the sandbox name, worktree path, and next commands.
 
-It does not attach automatically.
+Steps 4 and 5 are what Foundry adds on top of `sbx`; steps 1–3 are ordinary `sbx` operations. `cast new` does not attach automatically.
 
 ## Attach
 

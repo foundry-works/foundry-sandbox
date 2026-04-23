@@ -5,7 +5,7 @@ build-backend = "hatchling.build"
 [project]
 name = "foundry-sandbox"
 version = "0.21.0"
-description = "Sandbox environment for running Claude Code with isolated credentials"
+description = "Git policy and workflow layer for AI coding agents running in Docker sbx microVMs"
 requires-python = ">=3.10"
 license = "MIT"
 readme = "README.md"

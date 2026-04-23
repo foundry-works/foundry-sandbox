@@ -1,4 +1,4 @@
-"""foundry-sandbox - MicroVM-based sandbox environment for running Claude Code."""
+"""foundry-sandbox - Git policy and workflow layer for AI coding agents in Docker sbx microVMs."""
 
 from importlib.metadata import PackageNotFoundError, version as _pkg_version
 

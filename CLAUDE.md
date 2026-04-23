@@ -1,6 +1,6 @@
 # foundry-sandbox
 
-MicroVM-based sandbox environment for running Claude Code with isolated credentials.
+Git policy and workflow layer for AI coding agents running in Docker `sbx` microVMs. `sbx` provides the microVM, network policy, and credential injection; foundry-sandbox adds the git wrapper, policy server (`foundry-git-safety`), and `cast` CLI workflows.
 
 ## Development
 
