@@ -31,6 +31,7 @@ from foundry_sandbox.paths import (
     ensure_dir,
     path_last_attach,
     path_last_cast_new,
+    path_last_ide,
     path_metadata_file,
     path_preset_file,
     path_presets_dir,
@@ -256,6 +257,7 @@ def _build_command_line(
     enable_opencode: bool = False,
     enable_zai: bool = False,
     copies: list[str] | None = None,
+    ide: str = "",
 ) -> str:
     """Build a display-friendly command line string from cast-new arguments."""
     parts = ["cast new", repo]
@@ -277,6 +279,8 @@ def _build_command_line(
         parts.append("--with-zai")
     for copy in (copies or []):
         parts.extend(["--copy", copy])
+    if ide:
+        parts.extend(["--ide", ide])
     return " ".join(parts)
 
 
@@ -295,6 +299,7 @@ def _write_cast_new_json(
     copies: list[str] | None = None,
     template: str = "",
     template_managed: bool = False,
+    ide: str = "",
 ) -> str:
     """Write cast-new JSON to a file.
 
@@ -314,13 +319,14 @@ def _write_cast_new_json(
         copies=copies or [],
         template=template,
         template_managed=template_managed,
+        ide=ide,
     )
 
     timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
     command_line = _build_command_line(
         repo, agent, branch, from_branch, working_dir,
         pip_requirements, allow_pr,
-        enable_opencode, enable_zai, copies,
+        enable_opencode, enable_zai, copies, ide,
     )
 
     data = {
@@ -348,6 +354,7 @@ def save_last_cast_new(
     copies: list[str] | None = None,
     template: str = "",
     template_managed: bool = False,
+    ide: str = "",
 ) -> str:
     """Save the most recent cast-new command.
 
@@ -361,6 +368,7 @@ def save_last_cast_new(
         allow_pr=allow_pr,
         enable_opencode=enable_opencode, enable_zai=enable_zai,
         copies=copies, template=template, template_managed=template_managed,
+        ide=ide,
     )
 
 
@@ -379,6 +387,7 @@ def save_cast_preset(
     copies: list[str] | None = None,
     template: str = "",
     template_managed: bool = False,
+    ide: str = "",
 ) -> None:
     """Save a named cast-new preset."""
     ensure_dir(path_presets_dir())
@@ -389,6 +398,7 @@ def save_cast_preset(
         allow_pr=allow_pr,
         enable_opencode=enable_opencode, enable_zai=enable_zai,
         copies=copies, template=template, template_managed=template_managed,
+        ide=ide,
     )
 
 
@@ -532,3 +542,26 @@ def load_last_attach() -> str | None:
     data = load_json(str(path))
     name = data.get("sandbox_name", "")
     return name if name else None
+
+
+def save_last_ide(ide_name: str) -> None:
+    """Save the last successfully launched IDE name."""
+    path = path_last_ide()
+    timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    data = {"ide": ide_name, "timestamp": timestamp}
+    content = json.dumps(data, indent=2) + "\n"
+    _secure_write(path, content)
+
+
+def load_last_ide() -> str | None:
+    """Load the last successfully launched IDE name.
+
+    Returns:
+        IDE name string, or None if not found or empty.
+    """
+    path = path_last_ide()
+    if not path.exists():
+        return None
+    data = load_json(str(path))
+    ide = data.get("ide", "")
+    return ide if ide else None

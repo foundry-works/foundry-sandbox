@@ -26,12 +26,14 @@ class TestIdeConfig:
         assert cfg.preferred == ""
         assert cfg.args == []
         assert cfg.auto_open_on_attach is False
+        assert cfg.auto_git_mode_host is False
 
     def test_valid_config(self):
-        cfg = IdeConfig(preferred="cursor", args=["--reuse-window"], auto_open_on_attach=True)
+        cfg = IdeConfig(preferred="cursor", args=["--reuse-window"], auto_open_on_attach=True, auto_git_mode_host=True)
         assert cfg.preferred == "cursor"
         assert cfg.args == ["--reuse-window"]
         assert cfg.auto_open_on_attach is True
+        assert cfg.auto_git_mode_host is True
 
     def test_rejects_unknown_keys(self):
         with pytest.raises(Exception, match="Extra inputs are not permitted"):
@@ -191,3 +193,55 @@ class TestLaunchIde:
         assert result is True
         call_args = mock_cli.call_args[0]
         assert call_args[2] == []  # extra_args is empty list
+
+
+# ---------------------------------------------------------------------------
+# New aliases (Phase 2)
+# ---------------------------------------------------------------------------
+
+
+class TestNewAliases:
+    @patch("shutil.which", return_value="/usr/bin/code")
+    def test_vscode_alias_resolves(self, mock_which):
+        spec = resolve_ide("vscode")
+        assert spec is not None
+        assert spec.kind == "alias"
+        assert spec.display == "VS Code"
+
+    @patch("shutil.which", return_value="/usr/bin/code-insiders")
+    def test_code_insiders_alias_resolves(self, mock_which):
+        spec = resolve_ide("code-insiders")
+        assert spec is not None
+        assert spec.kind == "alias"
+        assert spec.display == "VS Code Insiders"
+
+    @patch("shutil.which", return_value="/usr/bin/windsurf")
+    def test_windsurf_alias_resolves(self, mock_which):
+        spec = resolve_ide("windsurf")
+        assert spec is not None
+        assert spec.kind == "alias"
+        assert spec.display == "Windsurf"
+
+
+# ---------------------------------------------------------------------------
+# Last IDE persistence (Phase 2)
+# ---------------------------------------------------------------------------
+
+
+class TestLastIde:
+    @patch("foundry_sandbox.ide._launch_via_cli", return_value=True)
+    @patch("foundry_sandbox.state.save_last_ide")
+    def test_launch_saves_last_ide(self, mock_save, mock_cli):
+        spec = IdeSpec(kind="alias", name="cursor", display="Cursor", executable="/usr/bin/cursor")
+        result = launch_ide(spec, "/some/path")
+        assert result is True
+        mock_save.assert_called_once_with("cursor")
+
+    @patch("foundry_sandbox.ide._launch_via_cli", return_value=False)
+    @patch("foundry_sandbox.ide._try_macos_open", return_value=False)
+    @patch("foundry_sandbox.state.save_last_ide")
+    def test_failed_launch_does_not_save(self, mock_save, mock_macos, mock_cli):
+        spec = IdeSpec(kind="alias", name="cursor", display="Cursor", executable="/usr/bin/cursor")
+        result = launch_ide(spec, "/some/path")
+        assert result is False
+        mock_save.assert_not_called()

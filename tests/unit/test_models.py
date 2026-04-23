@@ -237,6 +237,33 @@ class TestModelEdgeCases:
         assert "?" in meta.repo_url
         assert "/" in meta.branch
 
+    def test_cast_new_preset_ide_default(self):
+        preset = CastNewPreset(repo="org/repo")
+        assert preset.ide == ""
+
+    def test_cast_new_preset_ide_explicit(self):
+        preset = CastNewPreset(repo="org/repo", ide="cursor")
+        assert preset.ide == "cursor"
+
+    def test_sbx_metadata_ide_default(self):
+        meta = SbxSandboxMetadata(
+            sbx_name="test",
+            agent="claude",
+            repo_url="https://github.com/org/repo",
+            branch="main",
+        )
+        assert meta.ide == ""
+
+    def test_sbx_metadata_ide_explicit(self):
+        meta = SbxSandboxMetadata(
+            sbx_name="test",
+            agent="claude",
+            repo_url="https://github.com/org/repo",
+            branch="main",
+            ide="zed",
+        )
+        assert meta.ide == "zed"
+
 
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])

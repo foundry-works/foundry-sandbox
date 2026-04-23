@@ -20,13 +20,16 @@ import click
 from foundry_sandbox.utils import _is_noninteractive
 
 # Known IDE aliases in preference order
-IDE_COMMANDS = ("cursor", "zed", "code")
+IDE_COMMANDS = ("cursor", "zed", "code", "vscode", "code-insiders", "windsurf")
 
 # Display names for known IDEs
 _DISPLAY_NAMES: dict[str, str] = {
     "cursor": "Cursor",
     "zed": "Zed",
     "code": "VS Code",
+    "vscode": "VS Code",
+    "code-insiders": "VS Code Insiders",
+    "windsurf": "Windsurf",
 }
 
 # macOS application names for `open -a` fallback
@@ -34,6 +37,9 @@ _MACOS_APP_NAMES: dict[str, str] = {
     "cursor": "Cursor",
     "zed": "Zed",
     "code": "Visual Studio Code",
+    "vscode": "Visual Studio Code",
+    "code-insiders": "Visual Studio Code - Insiders",
+    "windsurf": "Windsurf",
 }
 
 
@@ -162,6 +168,15 @@ def _launch_via_cli(executable: str, path: str, extra_args: list[str], display: 
         return False
 
 
+def _save_last_ide(name: str) -> None:
+    """Persist the last successfully launched IDE name."""
+    try:
+        from foundry_sandbox.state import save_last_ide as _save
+        _save(name)
+    except Exception:
+        pass  # non-critical — never block IDE launch
+
+
 def launch_ide(spec: IdeSpec, path: str, extra_args: list[str] | None = None) -> bool:
     """Launch an IDE given a resolved IdeSpec.
 
@@ -175,10 +190,12 @@ def launch_ide(spec: IdeSpec, path: str, extra_args: list[str] | None = None) ->
 
     # macOS alias: try open -a first
     if _try_macos_open(spec, path, args):
+        _save_last_ide(spec.name)
         return True
 
     # CLI launch (all platforms)
     if _launch_via_cli(spec.executable, path, args, spec.display):
+        _save_last_ide(spec.name)
         return True
 
     click.echo(f"Failed to launch {spec.display}.", err=True)

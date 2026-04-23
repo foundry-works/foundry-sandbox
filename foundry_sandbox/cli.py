@@ -31,6 +31,7 @@ _LAZY_COMMANDS: dict[str, tuple[str, str]] = {
     "git-mode": ("foundry_sandbox.commands.git_mode", "git_mode"),
     "open": ("foundry_sandbox.commands.open_cmd", "open_cmd"),
     "start": ("foundry_sandbox.commands.start", "start"),
+    "up": ("foundry_sandbox.commands.up", "up"),
     "status": ("foundry_sandbox.commands.status", "status"),
     "stop": ("foundry_sandbox.commands.stop", "stop"),
     "watchdog": ("foundry_sandbox.commands.watchdog_cmd", "watchdog_cmd"),

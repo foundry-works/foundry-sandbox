@@ -16,8 +16,9 @@ from foundry_sandbox.utils import log_error
 def _resolve_ide_for_open(
     ide_value: str | None,
     ide_config: object | None,
+    metadata: dict[str, object] | None = None,
 ) -> IdeSpec | None:
-    """Resolve IDE for open: CLI override > config preferred > auto-detect."""
+    """Resolve IDE for open: CLI override > config > metadata > last IDE > auto-detect."""
     # CLI override
     if ide_value:
         return resolve_ide(ide_value)
@@ -26,6 +27,22 @@ def _resolve_ide_for_open(
     preferred = getattr(ide_config, "preferred", "") if ide_config else ""
     if preferred:
         spec = resolve_ide(preferred)
+        if spec is not None:
+            return spec
+
+    # Sandbox metadata IDE (from preset)
+    from foundry_sandbox.state import load_last_ide
+
+    sandbox_ide = str(metadata.get("ide", "")) if metadata else ""
+    if sandbox_ide:
+        spec = resolve_ide(sandbox_ide)
+        if spec is not None:
+            return spec
+
+    # Last successful IDE
+    last_ide = load_last_ide()
+    if last_ide:
+        spec = resolve_ide(last_ide)
         if spec is not None:
             return spec
 
@@ -38,9 +55,8 @@ def _resolve_ide_for_open(
 
 
 def _get_ide_args(ide_config: object | None) -> list[str]:
-    if ide_config:
-        return list(getattr(ide_config, "args", []))
-    return []
+    from foundry_sandbox.commands._ide_helpers import get_ide_args
+    return get_ide_args(ide_config)
 
 
 @click.command()
@@ -66,8 +82,12 @@ def open_cmd(name: str | None, use_last: bool, ide_value: str | None) -> None:
         log_error(f"Sandbox '{name}' worktree not found at {worktree_path}")
         sys.exit(1)
 
+    # Load metadata for preset IDE resolution
+    from foundry_sandbox.state import load_sandbox_metadata
+    metadata = load_sandbox_metadata(name)
+
     # Resolve IDE
-    spec = _resolve_ide_for_open(ide_value, ide_config)
+    spec = _resolve_ide_for_open(ide_value, ide_config, metadata)
     if spec is None:
         if ide_value:
             log_error(f"IDE '{ide_value}' could not be resolved")
@@ -79,3 +99,6 @@ def open_cmd(name: str | None, use_last: bool, ide_value: str | None) -> None:
     ok = launch_ide(spec, str(worktree_path), extra_args)
     if not ok:
         sys.exit(1)
+
+    from foundry_sandbox.commands._ide_helpers import maybe_auto_git_mode
+    maybe_auto_git_mode(name, ide_config)

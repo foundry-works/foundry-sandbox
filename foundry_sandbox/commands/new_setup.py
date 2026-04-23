@@ -74,6 +74,7 @@ def new_sbx_setup(
     with_zai: bool,
     wd: str,
     template: str | None = FOUNDRY_TEMPLATE_TAG,
+    ide: str = "",
 ) -> str:
     """Create a new sbx-based sandbox.
 
@@ -186,6 +187,7 @@ def new_sbx_setup(
             copies=copies,
             template=use_template or "",
             host_worktree_path=host_worktree_path,
+            ide=ide,
         ),
     )
 

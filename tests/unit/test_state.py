@@ -22,6 +22,8 @@ from foundry_sandbox.state import (
     delete_cast_preset,
     save_last_attach,
     load_last_attach,
+    save_last_ide,
+    load_last_ide,
 )
 from foundry_sandbox.models import SbxSandboxMetadata
 
@@ -477,3 +479,19 @@ class TestLastAttach:
         save_last_attach("first")
         save_last_attach("second")
         assert load_last_attach() == "second"
+
+
+class TestLastIde:
+    """Tests for save_last_ide() and load_last_ide()."""
+
+    def test_save_and_load(self, sandbox_home):
+        save_last_ide("cursor")
+        assert load_last_ide() == "cursor"
+
+    def test_load_nonexistent(self, sandbox_home):
+        assert load_last_ide() is None
+
+    def test_overwrites_previous(self, sandbox_home):
+        save_last_ide("code")
+        save_last_ide("zed")
+        assert load_last_ide() == "zed"

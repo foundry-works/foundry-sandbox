@@ -145,6 +145,7 @@ def save(name: str, sandbox_name: str | None) -> None:
         copies=metadata.get("copies", []),
         template=managed_tag,
         template_managed=True,
+        ide=metadata.get("ide", ""),
     )
     click.echo(f"Saved preset '{name}' with template '{managed_tag}'")
 

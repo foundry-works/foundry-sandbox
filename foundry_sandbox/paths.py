@@ -90,6 +90,15 @@ def path_last_attach() -> Path:
     return get_sandbox_home() / ".last-attach.json"
 
 
+def path_last_ide() -> Path:
+    """Get the path to the last successful IDE state file.
+
+    Returns:
+        Path to .last-ide.json in sandbox home
+    """
+    return get_sandbox_home() / ".last-ide.json"
+
+
 def path_version_check() -> Path:
     """Get the path to the version-check cache file.
 

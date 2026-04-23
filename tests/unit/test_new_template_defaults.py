@@ -64,6 +64,7 @@ class TestNewDefaultsDataclass:
             repo="r", branch="b", from_branch="", copies=(), agent="claude",
             with_opencode=False, with_zai=False, wd="", pip_requirements="",
             allow_pr=False, template="my-tag:latest", template_managed=True,
+            ide="",
         )
         assert d.template == "my-tag:latest"
         assert d.template_managed is True

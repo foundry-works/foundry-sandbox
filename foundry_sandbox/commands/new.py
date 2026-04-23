@@ -47,6 +47,7 @@ class NewDefaults:
     allow_pr: bool
     template: str
     template_managed: bool
+    ide: str
 
 
 # (NewDefaults field, saved-data key, type coerce)
@@ -58,6 +59,7 @@ _STR_FIELDS: list[tuple[str, str]] = [
     ("wd", "working_dir"),
     ("pip_requirements", "pip_requirements"),
     ("template", "template"),
+    ("ide", "ide"),
 ]
 _BOOL_FIELDS: list[tuple[str, str]] = [
     ("with_opencode", "enable_opencode"),
@@ -311,6 +313,8 @@ def _generate_branch_name(repo_url: str, from_branch: str) -> str:
               help="Template tag for sandbox creation. Use 'none' to disable.")
 @click.option("--plan", "dry_run_plan", is_flag=True,
               help="Dry-run: show resolved foundry.yaml config without creating sandbox")
+@click.option("--ide", "ide", default="", metavar="IDE",
+              help="Preferred IDE for this sandbox (alias, path, or command)")
 @click.pass_context
 def new(
     ctx: click.Context,
@@ -331,6 +335,7 @@ def new(
     name_override: str,
     template: str,
     dry_run_plan: bool,
+    ide: str,
 ) -> None:
     """Create a new sandbox with sbx."""
 
@@ -341,7 +346,7 @@ def new(
     explicit_param_names = {
         "repo", "branch", "from_branch", "copies", "agent",
         "with_opencode", "with_zai", "wd", "pip_requirements", "allow_pr",
-        "template",
+        "template", "ide",
     }
     explicit_params = {
         name for name in explicit_param_names
@@ -373,6 +378,7 @@ def new(
             allow_pr=allow_pr,
             template=template,
             template_managed=False,
+            ide=ide,
         )
         repo = _defaults.repo
         branch = _defaults.branch
@@ -386,6 +392,7 @@ def new(
         allow_pr = _defaults.allow_pr
         template = _defaults.template
         effective_template_managed = _defaults.template_managed
+        ide = _defaults.ide
 
     # Resolve repo input
     if not repo:
@@ -528,6 +535,7 @@ def new(
             with_zai=with_zai,
             wd=wd or "",
             template=template,
+            ide=ide or "",
         )
     except RuntimeError as exc:
         log_error(str(exc))
@@ -556,6 +564,7 @@ def new(
         copies=list(copies),
         template=template,
         template_managed=effective_template_managed,
+        ide=ide or "",
     )
     save_last_attach(name)
 
@@ -574,6 +583,7 @@ def new(
             copies=list(copies),
             template=template,
             template_managed=effective_template_managed,
+            ide=ide or "",
         )
 
     # Success message

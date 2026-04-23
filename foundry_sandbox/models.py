@@ -63,6 +63,9 @@ class SbxSandboxMetadata(BaseModel):
     host_worktree_path: str = ""
     """Host-side path to the sbx-managed worktree (set after sbx create)."""
 
+    ide: str = ""
+    """Preferred IDE for this sandbox (alias, path, or command)."""
+
 
 class CastNewPreset(BaseModel):
     """Structured representation of cast-new preset arguments."""
@@ -102,3 +105,6 @@ class CastNewPreset(BaseModel):
 
     template_managed: bool = False
     """True if the template was created by cast preset save and eligible for auto-cleanup."""
+
+    ide: str = ""
+    """Preferred IDE override for sandboxes created from this preset."""

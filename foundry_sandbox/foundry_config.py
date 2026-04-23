@@ -167,6 +167,7 @@ class IdeConfig(_Strict):
     preferred: str = ""
     args: list[str] = Field(default_factory=list)
     auto_open_on_attach: bool = False
+    auto_git_mode_host: bool = False
 
 
 # ---------------------------------------------------------------------------

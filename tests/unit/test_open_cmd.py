@@ -116,3 +116,44 @@ class TestOpenCommand:
         runner = CliRunner()
         result = runner.invoke(open_cmd, ["my-sandbox"])
         assert result.exit_code != 0
+
+    @patch("foundry_sandbox.ide._launch_via_cli", return_value=True)
+    @patch("foundry_sandbox.ide._try_macos_open", return_value=False)
+    @patch("foundry_sandbox.commands.open_cmd.resolve_host_worktree_path")
+    @patch("foundry_sandbox.commands._helpers.validate_existing_sandbox_name")
+    @patch("foundry_sandbox.foundry_config.load_user_ide_config")
+    @patch("shutil.which", return_value="/usr/bin/zed")
+    @patch("foundry_sandbox.state.load_sandbox_metadata",
+           return_value={"ide": "zed"})
+    @patch("foundry_sandbox.state.load_last_ide", return_value=None)
+    def test_open_uses_sandbox_metadata_ide(
+        self, mock_last_ide, mock_metadata, mock_which, mock_ide_config,
+        mock_validate, mock_resolve, mock_macos, mock_cli,
+    ):
+        """Sandbox metadata ide field is used when no user config preferred."""
+        mock_ide_config.return_value = None
+        _mock_sandbox(mock_validate, mock_resolve)
+
+        runner = CliRunner()
+        result = runner.invoke(open_cmd, ["my-sandbox"])
+        assert result.exit_code == 0
+
+    @patch("foundry_sandbox.ide._launch_via_cli", return_value=True)
+    @patch("foundry_sandbox.ide._try_macos_open", return_value=False)
+    @patch("foundry_sandbox.commands.open_cmd.resolve_host_worktree_path")
+    @patch("foundry_sandbox.commands._helpers.validate_existing_sandbox_name")
+    @patch("foundry_sandbox.foundry_config.load_user_ide_config")
+    @patch("shutil.which", return_value="/usr/bin/code")
+    @patch("foundry_sandbox.state.load_sandbox_metadata", return_value={})
+    @patch("foundry_sandbox.state.load_last_ide", return_value="code")
+    def test_open_uses_last_ide(
+        self, mock_last_ide, mock_metadata, mock_which, mock_ide_config,
+        mock_validate, mock_resolve, mock_macos, mock_cli,
+    ):
+        """Last IDE is used when no user config or metadata IDE."""
+        mock_ide_config.return_value = None
+        _mock_sandbox(mock_validate, mock_resolve)
+
+        runner = CliRunner()
+        result = runner.invoke(open_cmd, ["my-sandbox"])
+        assert result.exit_code == 0
