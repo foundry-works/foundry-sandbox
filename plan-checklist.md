@@ -14,12 +14,12 @@
 
 ## Phase 2: Profile Schema
 
-- [ ] Add profile models to the config layer.
-- [ ] Decide where profiles are allowed: user config only, or user config plus repo config with safe merge rules.
-- [ ] Define merge and precedence behavior for profiles.
-- [ ] Add validation for unknown profile names.
-- [ ] Add plan rendering support so `--plan` can show the selected profile.
-- [ ] Document the profile schema with examples.
+- [x] Add profile models to the config layer.
+- [x] Decide where profiles are allowed: user config only, or user config plus repo config with safe merge rules.
+- [x] Define merge and precedence behavior for profiles.
+- [x] Add validation for unknown profile names.
+- [x] Add plan rendering support so `--plan` can show the selected profile.
+- [x] Document the profile schema with examples.
 
 ## Phase 3: Package Bootstrap
 

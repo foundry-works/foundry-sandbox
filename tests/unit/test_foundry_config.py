@@ -9,6 +9,7 @@ from pydantic import ValidationError
 
 from foundry_sandbox.foundry_config import (
     ClaudeCodeConfig,
+    DevProfile,
     FileRestrictionsAdd,
     FoundryConfig,
     GitSafetyOverlay,
@@ -29,6 +30,7 @@ from foundry_sandbox.foundry_config import (
     compile_user_services,
     render_plan_text,
     resolve_foundry_config,
+    resolve_profile,
 )
 
 
@@ -845,3 +847,202 @@ class TestCompileClaudeCodePlanRenderer:
         text = render_plan_text(config)
         assert "post_steps (1):" in text
         assert "git clone" in text
+
+
+# ---------------------------------------------------------------------------
+# Dev profiles
+# ---------------------------------------------------------------------------
+
+
+class TestDevProfile:
+    def test_empty_profile_valid(self):
+        p = DevProfile()
+        assert p.agent is None
+        assert p.wd is None
+        assert p.ide is None
+        assert p.pip_requirements is None
+        assert p.template is None
+
+    def test_profile_with_all_fields(self):
+        p = DevProfile(
+            agent="claude",
+            wd="packages/api",
+            ide="cursor",
+            pip_requirements="requirements-dev.txt",
+            template="custom:latest",
+        )
+        assert p.agent == "claude"
+        assert p.wd == "packages/api"
+        assert p.ide == "cursor"
+        assert p.pip_requirements == "requirements-dev.txt"
+        assert p.template == "custom:latest"
+
+    def test_strict_mode_rejects_unknown(self):
+        with pytest.raises(ValidationError, match="Extra inputs are not permitted"):
+            DevProfile(agent="claude", packages={"pip": "req.txt"})
+
+    def test_partial_profile(self):
+        p = DevProfile(agent="codex", wd="src")
+        assert p.agent == "codex"
+        assert p.wd == "src"
+        assert p.ide is None
+
+
+class TestFoundryConfigProfiles:
+    def test_config_accepts_profiles(self):
+        cfg = FoundryConfig(
+            version="1",
+            profiles={"my-profile": DevProfile(agent="claude")},
+        )
+        assert "my-profile" in cfg.profiles
+        assert cfg.profiles["my-profile"].agent == "claude"
+
+    def test_config_without_profiles(self):
+        cfg = FoundryConfig(version="1")
+        assert cfg.profiles == {}
+
+    def test_multiple_profiles(self):
+        cfg = FoundryConfig(
+            version="1",
+            profiles={
+                "work": DevProfile(agent="claude"),
+                "api": DevProfile(agent="codex"),
+            },
+        )
+        assert len(cfg.profiles) == 2
+
+    def test_strict_rejects_unknown_profile_field(self):
+        with pytest.raises(ValidationError):
+            FoundryConfig(
+                version="1",
+                profiles={"bad": {"agent": "claude", "unknown": True}},
+            )
+
+
+class TestProfileMerge:
+    def test_different_names_both_available(self):
+        a = FoundryConfig(version="1", profiles={"work": DevProfile(agent="claude")})
+        b = FoundryConfig(version="1", profiles={"api": DevProfile(agent="codex")})
+        result = _merge([a, b])
+        assert len(result.profiles) == 2
+        assert result.profiles["work"].agent == "claude"
+        assert result.profiles["api"].agent == "codex"
+
+    def test_same_name_later_layer_wins(self):
+        a = FoundryConfig(version="1", profiles={"work": DevProfile(agent="claude")})
+        b = FoundryConfig(version="1", profiles={"work": DevProfile(agent="codex")})
+        result = _merge([a, b])
+        assert result.profiles["work"].agent == "codex"
+
+    def test_empty_profiles_merge_to_empty(self):
+        a = FoundryConfig(version="1")
+        b = FoundryConfig(version="1")
+        result = _merge([a, b])
+        assert result.profiles == {}
+
+    def test_mixed_layers_some_empty(self):
+        a = FoundryConfig(version="1", profiles={"work": DevProfile(agent="claude")})
+        b = FoundryConfig(version="1")
+        result = _merge([a, b])
+        assert "work" in result.profiles
+
+
+class TestResolveProfile:
+    def test_found_profile(self):
+        config = FoundryConfig(version="1", profiles={"work": DevProfile(agent="claude")})
+        result = resolve_profile(config, "work")
+        assert result.agent == "claude"
+
+    def test_default_returns_empty_when_not_defined(self):
+        config = FoundryConfig(version="1")
+        result = resolve_profile(config, "default")
+        assert result.agent is None
+        assert result.wd is None
+
+    def test_default_returns_defined_profile(self):
+        config = FoundryConfig(version="1", profiles={"default": DevProfile(agent="codex")})
+        result = resolve_profile(config, "default")
+        assert result.agent == "codex"
+
+    def test_unknown_name_raises_with_available(self):
+        config = FoundryConfig(version="1", profiles={"work": DevProfile(agent="claude")})
+        with pytest.raises(ValueError, match="Unknown profile 'missing'"):
+            resolve_profile(config, "missing")
+
+    def test_unknown_name_raises_no_profiles(self):
+        config = FoundryConfig(version="1")
+        with pytest.raises(ValueError, match="No profiles are defined"):
+            resolve_profile(config, "custom")
+
+    def test_available_profiles_listed_in_error(self):
+        config = FoundryConfig(
+            version="1",
+            profiles={
+                "work": DevProfile(agent="claude"),
+                "api": DevProfile(agent="codex"),
+            },
+        )
+        with pytest.raises(ValueError, match="work"):
+            resolve_profile(config, "missing")
+
+
+class TestRepoProfileIdeStripping:
+    def test_repo_profile_ide_stripped(self, tmp_path):
+        (tmp_path / "foundry.yaml").write_text(
+            'version: "1"\n'
+            'profiles:\n'
+            '  work:\n'
+            '    agent: claude\n'
+            '    ide: cursor\n'
+        )
+        config = resolve_foundry_config(tmp_path)
+        assert config.profiles["work"].ide is None
+        assert config.profiles["work"].agent == "claude"
+
+    def test_repo_profile_without_ide_preserved(self, tmp_path):
+        (tmp_path / "foundry.yaml").write_text(
+            'version: "1"\n'
+            'profiles:\n'
+            '  work:\n'
+            '    agent: claude\n'
+        )
+        config = resolve_foundry_config(tmp_path)
+        assert config.profiles["work"].agent == "claude"
+
+    def test_no_profiles_in_repo(self, tmp_path):
+        (tmp_path / "foundry.yaml").write_text('version: "1"\n')
+        config = resolve_foundry_config(tmp_path)
+        assert config.profiles == {}
+
+
+class TestRenderPlanProfile:
+    def test_plan_shows_selected_profile(self):
+        config = FoundryConfig(
+            version="1",
+            profiles={"work": DevProfile(agent="claude", wd="packages/api")},
+        )
+        text = render_plan_text(config, profile_name="work")
+        assert "Profile: work" in text
+        assert "agent: claude" in text
+        assert "wd: packages/api" in text
+
+    def test_plan_shows_empty_profile(self):
+        config = FoundryConfig(version="1")
+        text = render_plan_text(config, profile_name="default")
+        assert "Profile: default" in text
+        assert "empty" in text
+
+    def test_plan_shows_all_profiles_when_no_selection(self):
+        config = FoundryConfig(
+            version="1",
+            profiles={"work": DevProfile(agent="claude")},
+        )
+        text = render_plan_text(config)
+        assert "Profiles defined" in text
+        assert "work" in text
+
+    def test_plan_no_profile_section_when_empty(self):
+        config = FoundryConfig(version="1")
+        text = render_plan_text(config)
+        assert "Profiles defined" not in text
+        assert "Profile:" not in text

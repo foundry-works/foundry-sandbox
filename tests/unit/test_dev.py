@@ -19,6 +19,8 @@ _CREATE_MOCKS = [
     patch("foundry_sandbox.ide._try_macos_open", return_value=False),
     patch("foundry_sandbox.commands.dev.resolve_host_worktree_path"),
     patch("foundry_sandbox.foundry_config.load_user_ide_config"),
+    patch("foundry_sandbox.commands.dev.resolve_foundry_config"),
+    patch("foundry_sandbox.commands.dev.resolve_profile"),
     patch("foundry_sandbox.commands.dev.new_sbx_setup"),
     patch("foundry_sandbox.commands.dev._validate_preconditions"),
     patch("foundry_sandbox.commands.dev._generate_branch_name", return_value="user/repo-20260423-1200"),
@@ -60,6 +62,13 @@ def _setup_repo_and_worktree(mock_resolve, mock_worktree, mock_setup):
     mock_setup.return_value = "/fake/worktree"
 
 
+def _setup_profile_mocks(mock_resolve_config, mock_resolve_profile):
+    """Set up profile resolution mocks with an empty default profile."""
+    from foundry_sandbox.foundry_config import DevProfile, FoundryConfig
+    mock_resolve_config.return_value = FoundryConfig(version="1")
+    mock_resolve_profile.return_value = DevProfile()
+
+
 class TestDevCreatePath:
     """Tests for the create path (no existing sandbox)."""
 
@@ -69,12 +78,14 @@ class TestDevCreatePath:
         mock_patch, mock_makedirs, mock_sandbox_name, mock_repo_name,
         mock_validate_name, mock_find, mock_resolve_repo, mock_branch_exists,
         mock_detect_branch, mock_gen_branch, mock_validate, mock_setup,
+        mock_resolve_profile, mock_resolve_config,
         mock_ide_config, mock_worktree, mock_macos, mock_cli,
         mock_check, mock_running, mock_exec,
     ):
         from foundry_sandbox.foundry_config import IdeConfig
         mock_ide_config.return_value = IdeConfig(preferred="code")
         _setup_repo_and_worktree(mock_resolve_repo, mock_worktree, mock_setup)
+        _setup_profile_mocks(mock_resolve_config, mock_resolve_profile)
 
         runner = CliRunner()
         result = runner.invoke(dev, ["."])
@@ -89,11 +100,13 @@ class TestDevCreatePath:
         mock_patch, mock_makedirs, mock_sandbox_name, mock_repo_name,
         mock_validate_name, mock_find, mock_resolve_repo, mock_branch_exists,
         mock_detect_branch, mock_gen_branch, mock_validate, mock_setup,
+        mock_resolve_profile, mock_resolve_config,
         mock_ide_config, mock_worktree, mock_macos, mock_cli,
         mock_check, mock_running, mock_exec,
     ):
         mock_ide_config.return_value = None
         _setup_repo_and_worktree(mock_resolve_repo, mock_worktree, mock_setup)
+        _setup_profile_mocks(mock_resolve_config, mock_resolve_profile)
 
         runner = CliRunner()
         result = runner.invoke(dev, [".", "--profile", "my-profile"])
@@ -108,11 +121,13 @@ class TestDevCreatePath:
         mock_patch, mock_makedirs, mock_sandbox_name, mock_repo_name,
         mock_validate_name, mock_find, mock_resolve_repo, mock_branch_exists,
         mock_detect_branch, mock_gen_branch, mock_validate, mock_setup,
+        mock_resolve_profile, mock_resolve_config,
         mock_ide_config, mock_worktree, mock_macos, mock_cli,
         mock_check, mock_running, mock_exec,
     ):
         mock_ide_config.return_value = None
         _setup_repo_and_worktree(mock_resolve_repo, mock_worktree, mock_setup)
+        _setup_profile_mocks(mock_resolve_config, mock_resolve_profile)
 
         runner = CliRunner()
         result = runner.invoke(dev, [".", "--no-ide"])
@@ -125,11 +140,13 @@ class TestDevCreatePath:
         mock_patch, mock_makedirs, mock_sandbox_name, mock_repo_name,
         mock_validate_name, mock_find, mock_resolve_repo, mock_branch_exists,
         mock_detect_branch, mock_gen_branch, mock_validate, mock_setup,
+        mock_resolve_profile, mock_resolve_config,
         mock_ide_config, mock_worktree, mock_macos, mock_cli,
         mock_check, mock_running, mock_exec,
     ):
         mock_ide_config.return_value = None
         _setup_repo_and_worktree(mock_resolve_repo, mock_worktree, mock_setup)
+        _setup_profile_mocks(mock_resolve_config, mock_resolve_profile)
 
         runner = CliRunner()
         result = runner.invoke(dev, [".", "--agent", "invalid"])
@@ -154,12 +171,14 @@ class TestDevReusePath:
         mock_patch, mock_makedirs, mock_sandbox_name, mock_repo_name,
         mock_validate_name, mock_find, mock_resolve_repo, mock_branch_exists,
         mock_detect_branch, mock_gen_branch, mock_validate, mock_setup,
+        mock_resolve_profile, mock_resolve_config,
         mock_ide_config, mock_worktree, mock_macos, mock_cli,
         mock_check, mock_running, mock_exec,
     ):
         from foundry_sandbox.foundry_config import IdeConfig
         mock_ide_config.return_value = IdeConfig(preferred="code")
         _setup_repo_and_worktree(mock_resolve_repo, mock_worktree, mock_setup)
+        _setup_profile_mocks(mock_resolve_config, mock_resolve_profile)
         mock_find.return_value = "existing-sandbox"
 
         runner = CliRunner()
@@ -174,11 +193,13 @@ class TestDevReusePath:
         mock_patch, mock_makedirs, mock_sandbox_name, mock_repo_name,
         mock_validate_name, mock_find, mock_resolve_repo, mock_branch_exists,
         mock_detect_branch, mock_gen_branch, mock_validate, mock_setup,
+        mock_resolve_profile, mock_resolve_config,
         mock_ide_config, mock_worktree, mock_macos, mock_cli,
         mock_check, mock_running, mock_exec,
     ):
         mock_ide_config.return_value = None
         _setup_repo_and_worktree(mock_resolve_repo, mock_worktree, mock_setup)
+        _setup_profile_mocks(mock_resolve_config, mock_resolve_profile)
         mock_find.return_value = "existing-sandbox"
 
         runner = CliRunner()
@@ -193,11 +214,13 @@ class TestDevReusePath:
         mock_patch, mock_makedirs, mock_sandbox_name, mock_repo_name,
         mock_validate_name, mock_find, mock_resolve_repo, mock_branch_exists,
         mock_detect_branch, mock_gen_branch, mock_validate, mock_setup,
+        mock_resolve_profile, mock_resolve_config,
         mock_ide_config, mock_worktree, mock_macos, mock_cli,
         mock_check, mock_running, mock_exec,
     ):
         mock_ide_config.return_value = None
         _setup_repo_and_worktree(mock_resolve_repo, mock_worktree, mock_setup)
+        _setup_profile_mocks(mock_resolve_config, mock_resolve_profile)
         mock_find.return_value = None
 
         runner = CliRunner()
@@ -213,12 +236,14 @@ class TestDevDryRun:
     @patch("foundry_sandbox.commands.dev.sbx_check_available")
     @patch("foundry_sandbox.commands.dev._resolve_repo_input")
     @patch("foundry_sandbox.foundry_config.load_user_ide_config")
-    @patch("foundry_sandbox.foundry_config.resolve_foundry_config")
+    @patch("foundry_sandbox.commands.dev.resolve_foundry_config")
+    @patch("foundry_sandbox.commands.dev.resolve_profile")
     @patch("foundry_sandbox.foundry_config.render_plan_text", return_value="PLAN OUTPUT")
     def test_plan_mode(
-        self, mock_render, mock_resolve_config, mock_ide_config,
-        mock_resolve_repo, mock_check,
+        self, mock_render, mock_resolve_profile, mock_resolve_config,
+        mock_ide_config, mock_resolve_repo, mock_check,
     ):
+        from foundry_sandbox.foundry_config import DevProfile, FoundryConfig
         mock_ide_config.return_value = None
         mock_resolve_repo.return_value = (
             "https://github.com/org/repo",
@@ -226,9 +251,107 @@ class TestDevDryRun:
             "https://github.com/org/repo",
             "main",
         )
-        mock_resolve_config.return_value = MagicMock()
+        mock_resolve_config.return_value = FoundryConfig(version="1")
+        mock_resolve_profile.return_value = DevProfile()
 
         runner = CliRunner()
         result = runner.invoke(dev, [".", "--plan"])
         assert result.exit_code == 0
         assert "PLAN OUTPUT" in result.output
+        assert "Effective settings" in result.output
+
+
+class TestDevProfileResolution:
+    """Tests for profile resolution in cast dev."""
+
+    @_apply_mocks
+    def test_profile_provides_agent_default(
+        self, mock_last_ide, mock_which, mock_save_attach, mock_save_new,
+        mock_patch, mock_makedirs, mock_sandbox_name, mock_repo_name,
+        mock_validate_name, mock_find, mock_resolve_repo, mock_branch_exists,
+        mock_detect_branch, mock_gen_branch, mock_validate, mock_setup,
+        mock_resolve_profile, mock_resolve_config,
+        mock_ide_config, mock_worktree, mock_macos, mock_cli,
+        mock_check, mock_running, mock_exec,
+    ):
+        from foundry_sandbox.foundry_config import DevProfile, FoundryConfig
+        mock_ide_config.return_value = None
+        _setup_repo_and_worktree(mock_resolve_repo, mock_worktree, mock_setup)
+        mock_resolve_config.return_value = FoundryConfig(version="1")
+        mock_resolve_profile.return_value = DevProfile(agent="codex")
+
+        runner = CliRunner()
+        result = runner.invoke(dev, [".", "--profile", "work"])
+        assert result.exit_code == 0
+        call_kwargs = mock_setup.call_args
+        assert call_kwargs[1]["agent"] == "codex"
+
+    @_apply_mocks
+    def test_cli_flag_overrides_profile(
+        self, mock_last_ide, mock_which, mock_save_attach, mock_save_new,
+        mock_patch, mock_makedirs, mock_sandbox_name, mock_repo_name,
+        mock_validate_name, mock_find, mock_resolve_repo, mock_branch_exists,
+        mock_detect_branch, mock_gen_branch, mock_validate, mock_setup,
+        mock_resolve_profile, mock_resolve_config,
+        mock_ide_config, mock_worktree, mock_macos, mock_cli,
+        mock_check, mock_running, mock_exec,
+    ):
+        from foundry_sandbox.foundry_config import DevProfile, FoundryConfig
+        mock_ide_config.return_value = None
+        _setup_repo_and_worktree(mock_resolve_repo, mock_worktree, mock_setup)
+        mock_resolve_config.return_value = FoundryConfig(version="1")
+        mock_resolve_profile.return_value = DevProfile(agent="codex")
+
+        runner = CliRunner()
+        result = runner.invoke(dev, [".", "--profile", "work", "--agent", "gemini"])
+        assert result.exit_code == 0
+        call_kwargs = mock_setup.call_args
+        assert call_kwargs[1]["agent"] == "gemini"
+
+    @patch("foundry_sandbox.commands.dev.sbx_check_available")
+    @patch("foundry_sandbox.commands.dev._resolve_repo_input")
+    @patch("foundry_sandbox.foundry_config.load_user_ide_config")
+    @patch("foundry_sandbox.commands.dev.resolve_foundry_config")
+    @patch("foundry_sandbox.commands.dev.resolve_profile")
+    def test_unknown_profile_exits_with_error(
+        self, mock_resolve_profile, mock_resolve_config,
+        mock_ide_config, mock_resolve_repo, mock_check,
+    ):
+        from foundry_sandbox.foundry_config import FoundryConfig
+        mock_ide_config.return_value = None
+        mock_resolve_repo.return_value = (
+            "https://github.com/org/repo",
+            "/fake/repo",
+            "https://github.com/org/repo",
+            "main",
+        )
+        mock_resolve_config.return_value = FoundryConfig(version="1")
+        mock_resolve_profile.side_effect = ValueError("Unknown profile 'nonexistent'")
+
+        runner = CliRunner()
+        result = runner.invoke(dev, [".", "--profile", "nonexistent"])
+        assert result.exit_code != 0
+
+    @_apply_mocks
+    def test_default_profile_succeeds_with_no_config(
+        self, mock_last_ide, mock_which, mock_save_attach, mock_save_new,
+        mock_patch, mock_makedirs, mock_sandbox_name, mock_repo_name,
+        mock_validate_name, mock_find, mock_resolve_repo, mock_branch_exists,
+        mock_detect_branch, mock_gen_branch, mock_validate, mock_setup,
+        mock_resolve_profile, mock_resolve_config,
+        mock_ide_config, mock_worktree, mock_macos, mock_cli,
+        mock_check, mock_running, mock_exec,
+    ):
+        from foundry_sandbox.foundry_config import DevProfile, FoundryConfig
+        mock_ide_config.return_value = None
+        _setup_repo_and_worktree(mock_resolve_repo, mock_worktree, mock_setup)
+        mock_resolve_config.return_value = FoundryConfig(version="1")
+        mock_resolve_profile.return_value = DevProfile()
+
+        runner = CliRunner()
+        result = runner.invoke(dev, ["."])
+        assert result.exit_code == 0
+        assert "Created sandbox" in result.output
+        # Agent should be the hardcoded default "claude"
+        call_kwargs = mock_setup.call_args
+        assert call_kwargs[1]["agent"] == "claude"

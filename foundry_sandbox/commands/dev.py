@@ -20,7 +20,7 @@ from foundry_sandbox.commands.new import (
     _resolve_repo_input,
 )
 from foundry_sandbox.commands.new_setup import _validate_preconditions, new_sbx_setup
-from foundry_sandbox.foundry_config import load_user_ide_config
+from foundry_sandbox.foundry_config import load_user_ide_config, resolve_foundry_config, resolve_profile
 from foundry_sandbox.ide import launch_ide
 from foundry_sandbox.paths import (
     find_next_sandbox_name,
@@ -88,26 +88,26 @@ def _up_flow(
 @click.option("--profile", "-p", default="default", help="Named dev profile for reuse matching")
 @click.option("--branch", "-b", default="", help="Target branch (auto-generated if omitted)")
 @click.option("--fresh", is_flag=True, help="Force new sandbox, skip reuse lookup")
-@click.option("--agent", default="claude", help="Agent type (claude, codex, copilot, gemini, kiro, opencode, shell)")
-@click.option("--ide", default="", help="Override IDE (alias, path, or command)")
+@click.option("--agent", default=None, help="Agent type (claude, codex, copilot, gemini, kiro, opencode, shell)")
+@click.option("--ide", default=None, help="Override IDE (alias, path, or command)")
 @click.option("--no-ide", is_flag=True, help="Skip IDE launch")
 @click.option("--name", "name_override", default="", help="Override auto-generated sandbox name")
-@click.option("--wd", default="", help="Working directory (relative)")
-@click.option("--pip-requirements", "-r", default="", help="Install Python packages from requirements file")
-@click.option("--template", default="foundry-git-wrapper:latest", show_default=True, help="Template tag")
+@click.option("--wd", default=None, help="Working directory (relative)")
+@click.option("--pip-requirements", "-r", default=None, help="Install Python packages from requirements file")
+@click.option("--template", default=None, help="Template tag")
 @click.option("--plan", "dry_run_plan", is_flag=True, help="Dry-run: show resolved config without creating")
 def dev(
     repo: str,
     profile: str,
     branch: str,
     fresh: bool,
-    agent: str,
-    ide: str,
+    agent: str | None,
+    ide: str | None,
     no_ide: bool,
     name_override: str,
-    wd: str,
-    pip_requirements: str,
-    template: str,
+    wd: str | None,
+    pip_requirements: str | None,
+    template: str | None,
     dry_run_plan: bool,
 ) -> None:
     """Create or reuse a dev sandbox, open IDE, and attach.
@@ -115,6 +115,8 @@ def dev(
     Defaults to the current directory. Reuses an existing sandbox matching
     the repo and profile unless --fresh is given.
     """
+    from pathlib import Path
+
     sbx_check_available()
     ide_config = load_user_ide_config()
 
@@ -131,17 +133,33 @@ def dev(
     if not repo_root:
         repo_root = _ensure_repo_root(repo_url)
 
+    # Resolve config and profile
+    try:
+        config = resolve_foundry_config(Path(repo_root or repo_url))
+        profile_config = resolve_profile(config, profile)
+    except ValueError as exc:
+        log_error(f"Foundry config error: {exc}")
+        sys.exit(1)
+
+    # Merge: CLI flags override profile fields, which override hardcoded defaults
+    effective_agent = agent or profile_config.agent or "claude"
+    effective_ide = ide or profile_config.ide or ""
+    effective_wd = wd or profile_config.wd or ""
+    effective_pip = pip_requirements or profile_config.pip_requirements or ""
+    effective_template = template or profile_config.template or "foundry-git-wrapper:latest"
+
     # --plan: dry-run mode
     if dry_run_plan:
-        from foundry_sandbox.foundry_config import render_plan_text, resolve_foundry_config
-        from pathlib import Path
+        from foundry_sandbox.foundry_config import render_plan_text
 
-        try:
-            config = resolve_foundry_config(Path(repo_root or repo_url))
-            click.echo(render_plan_text(config))
-        except Exception as exc:
-            log_error(f"Foundry config error: {exc}")
-            sys.exit(1)
+        plan_output = render_plan_text(config, profile_name=profile)
+        plan_output += "\nEffective settings:\n"
+        plan_output += f"  agent:            {effective_agent}\n"
+        plan_output += f"  ide:              {effective_ide or '(auto)'}\n"
+        plan_output += f"  wd:               {effective_wd or '(repo root)'}\n"
+        plan_output += f"  pip_requirements: {effective_pip or '(none)'}\n"
+        plan_output += f"  template:         {effective_template}\n"
+        click.echo(plan_output)
         return
 
     # Reuse path: look for an existing sandbox matching repo + profile
@@ -149,7 +167,7 @@ def dev(
         existing = find_sandbox_by_profile(repo_url, profile)
         if existing:
             click.echo(f"Reusing sandbox: {existing}")
-            _up_flow(existing, no_ide=no_ide, ide_value=ide, ide_config=ide_config)
+            _up_flow(existing, no_ide=no_ide, ide_value=effective_ide, ide_config=ide_config)
             return
 
     # Create path: resolve branch, build sandbox, attach
@@ -157,8 +175,8 @@ def dev(
 
     # Validate agent
     valid_agents = {"claude", "codex", "copilot", "gemini", "kiro", "opencode", "shell"}
-    if agent not in valid_agents:
-        log_error(f"Invalid agent '{agent}'. Must be one of: {', '.join(sorted(valid_agents))}")
+    if effective_agent not in valid_agents:
+        log_error(f"Invalid agent '{effective_agent}'. Must be one of: {', '.join(sorted(valid_agents))}")
         sys.exit(1)
 
     # Resolve branch
@@ -183,8 +201,8 @@ def dev(
         from_branch = from_branch or "main"
 
     # Validate working directory
-    if wd:
-        wd = wd.lstrip("./")
+    if effective_wd:
+        effective_wd = effective_wd.lstrip("./")
 
     # Validate preconditions
     _validate_preconditions(repo_url, (), False)
@@ -227,16 +245,16 @@ def dev(
             branch=branch,
             from_branch=from_branch,
             name=name,
-            agent=agent,
+            agent=effective_agent,
             sandbox_config_path=sandbox_config_path,
             copies=[],
             allow_pr=False,
-            pip_requirements=pip_requirements,
+            pip_requirements=effective_pip,
             with_opencode=False,
             with_zai=False,
-            wd=wd,
-            template=template,
-            ide=ide,
+            wd=effective_wd,
+            template=effective_template,
+            ide=effective_ide,
         )
     except RuntimeError as exc:
         log_error(str(exc))
@@ -254,22 +272,22 @@ def dev(
     # Save state
     save_last_cast_new(
         repo=repo_url,
-        agent=agent,
+        agent=effective_agent,
         branch=branch,
         from_branch=from_branch,
-        working_dir=wd,
-        pip_requirements=pip_requirements,
-        template=template,
-        ide=ide,
+        working_dir=effective_wd,
+        pip_requirements=effective_pip,
+        template=effective_template,
+        ide=effective_ide,
     )
     save_last_attach(name)
 
     click.echo()
     click.echo(f"Created sandbox: {name}")
     click.echo(f"  Worktree   {host_worktree_path}")
-    click.echo(f"  Agent      {agent}")
+    click.echo(f"  Agent      {effective_agent}")
     click.echo(f"  Profile    {profile}")
     click.echo()
 
     # Attach
-    _up_flow(name, no_ide=no_ide, ide_value=ide, ide_config=ide_config)
+    _up_flow(name, no_ide=no_ide, ide_value=effective_ide, ide_config=ide_config)

@@ -171,6 +171,19 @@ class IdeConfig(_Strict):
 
 
 # ---------------------------------------------------------------------------
+# dev profiles
+# ---------------------------------------------------------------------------
+
+
+class DevProfile(_Strict):
+    agent: str | None = None
+    wd: str | None = None
+    ide: str | None = None
+    pip_requirements: str | None = None
+    template: str | None = None
+
+
+# ---------------------------------------------------------------------------
 # top level
 # ---------------------------------------------------------------------------
 
@@ -183,6 +196,7 @@ class FoundryConfig(_Strict):
     user_services: list[UserService] = Field(default_factory=list)
     allow_third_party_mcp: bool = False
     ide: IdeConfig | None = None
+    profiles: dict[str, DevProfile] = Field(default_factory=dict)
 
     @model_validator(mode="after")
     def _gate_third_party_mcp(self) -> FoundryConfig:
@@ -260,6 +274,12 @@ def _merge(layers: list[FoundryConfig]) -> FoundryConfig:
     for layer in layers:
         if layer.ide is not None:
             result.ide = layer.ide
+
+    # Profiles: collect all, later layer wins for same name (user wins over repo)
+    merged_profiles: dict[str, DevProfile] = {}
+    for layer in layers:
+        merged_profiles.update(layer.profiles)
+    result.profiles = merged_profiles
 
     return result
 
@@ -355,6 +375,21 @@ def resolve_foundry_config(repo_root: Path) -> FoundryConfig:
                 "IDE config is user-only and will be ignored"
             )
             repo = repo.model_copy(update={"ide": None})
+
+        # Strip ide from repo profiles (IDE is user-only)
+        if repo.profiles:
+            stripped: dict[str, DevProfile] = {}
+            for pname, prof in repo.profiles.items():
+                if prof.ide is not None:
+                    logger.warning(
+                        f"Repo foundry.yaml profile '{pname}' contains 'ide' — "
+                        "IDE config is user-only and will be ignored"
+                    )
+                    stripped[pname] = prof.model_copy(update={"ide": None})
+                else:
+                    stripped[pname] = prof
+            repo = repo.model_copy(update={"profiles": stripped})
+
         layers.append(repo)
         layer_names.append(str(repo_path))
 
@@ -377,12 +412,37 @@ def load_user_ide_config() -> IdeConfig | None:
     return layer.ide
 
 
+def resolve_profile(config: FoundryConfig, profile_name: str) -> DevProfile:
+    """Resolve a named dev profile from merged config.
+
+    Returns the DevProfile if found, or an empty DevProfile() if
+    profile_name is "default" and no profiles.default exists.
+    Raises ValueError for unknown profile names.
+    """
+    if profile_name in config.profiles:
+        return config.profiles[profile_name]
+
+    if profile_name == "default":
+        return DevProfile()
+
+    available = sorted(config.profiles.keys())
+    if available:
+        raise ValueError(
+            f"Unknown profile '{profile_name}'. "
+            f"Available profiles: {', '.join(available)}"
+        )
+    raise ValueError(
+        f"Unknown profile '{profile_name}'. "
+        f"No profiles are defined in any foundry.yaml config."
+    )
+
+
 # ---------------------------------------------------------------------------
 # Plan renderer
 # ---------------------------------------------------------------------------
 
 
-def render_plan_text(config: FoundryConfig) -> str:
+def render_plan_text(config: FoundryConfig, *, profile_name: str | None = None) -> str:
     lines: list[str] = []
     layer_names = getattr(config, "_layer_names", ["(defaults)"])
 
@@ -395,6 +455,30 @@ def render_plan_text(config: FoundryConfig) -> str:
     lines.append("Gates (AND across layers):")
     lines.append(f"  allow_third_party_mcp: {'true' if config.allow_third_party_mcp else 'false'}")
     lines.append("")
+
+    # Profiles
+    if profile_name is not None:
+        resolved = resolve_profile(config, profile_name)
+        lines.append(f"Profile: {profile_name}")
+        has_any = False
+        for field_name in ("agent", "wd", "ide", "pip_requirements", "template"):
+            value = getattr(resolved, field_name)
+            if value is not None:
+                lines.append(f"  {field_name}: {value}")
+                has_any = True
+        if not has_any:
+            lines.append("  (empty — all defaults from CLI)")
+        lines.append("")
+    elif config.profiles:
+        lines.append(f"Profiles defined ({len(config.profiles)}):")
+        for name, prof in sorted(config.profiles.items()):
+            fields = []
+            for field_name in ("agent", "wd", "ide", "pip_requirements", "template"):
+                value = getattr(prof, field_name)
+                if value is not None:
+                    fields.append(f"{field_name}={value}")
+            lines.append(f"  {name}: {', '.join(fields) if fields else '(empty)'}")
+        lines.append("")
 
     # Artifacts
     lines.append("Artifacts to apply:")

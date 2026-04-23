@@ -400,6 +400,72 @@ Resolution order for `preferred`:
 
 If a repo `foundry.yaml` includes an `ide:` section, Foundry ignores it and emits a warning.
 
+## Dev Profiles
+
+Define named dev profiles in `foundry.yaml` under the `profiles` key. Profiles
+set defaults for `cast dev` that CLI flags override.
+
+```yaml
+version: "1"
+
+profiles:
+  claude-python:
+    agent: claude
+    wd: packages/api
+    ide: cursor
+    pip_requirements: requirements-dev.txt
+    template: foundry-git-wrapper:latest
+
+  codex-node:
+    agent: codex
+    wd: frontend
+    ide: code
+```
+
+Fields:
+
+| Field | Purpose |
+|-------|---------|
+| `agent` | Default agent type (`claude`, `codex`, `copilot`, `gemini`, `kiro`, `opencode`, `shell`) |
+| `wd` | Default working directory inside the repo |
+| `ide` | Default IDE (user config only — stripped from repo profiles) |
+| `pip_requirements` | Default pip requirements file |
+| `template` | Default sandbox template tag |
+
+All fields are optional. An empty profile is valid and provides no defaults.
+
+### Where profiles can live
+
+Profiles can appear in both user config (`~/.foundry/foundry.yaml`) and repo
+config (`<repo>/foundry.yaml`).
+
+Merge behavior:
+
+- Profiles with **different names** across layers are all available.
+- For the **same name**, the user-layer profile wins entirely (not field-by-field).
+- The `ide` field in repo profiles is **stripped** (IDE config is user-only).
+
+### Resolution order
+
+When `cast dev . --profile work` runs:
+
+1. Resolve `foundry.yaml` config (builtin -> user -> repo layers).
+2. Look up profile `work` in the merged `profiles` dict.
+3. CLI flags override profile fields. Unset flags use profile defaults.
+4. If neither CLI nor profile sets a field, the hardcoded default applies.
+
+### `default` profile
+
+The profile name `default` is special. `cast dev` uses `--profile default`
+when no `--profile` flag is given. If `profiles.default` is not defined, the
+empty profile is used (all defaults from CLI). This preserves backward
+compatibility.
+
+### Unknown profiles
+
+If `--profile <name>` is given and `<name>` is not defined in any config layer,
+`cast dev` exits with an error listing available profiles.
+
 ## Host Paths
 
 The current host-side layout is:

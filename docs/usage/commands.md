@@ -71,6 +71,49 @@ cast new --preset myproject
 cast new --last
 ```
 
+### `cast dev`
+
+Create or reuse a dev sandbox, open IDE, and attach in one command.
+
+```bash
+cast dev [repo] [options]
+cast dev . --profile work
+cast dev . --fresh
+cast dev . --plan
+```
+
+Defaults to the current directory. Reuses an existing sandbox matching the repo and profile unless `--fresh` is given.
+
+Profiles are defined in `foundry.yaml` (see [Configuration - Dev Profiles](../configuration.md#dev-profiles)).
+
+Key options:
+
+| Option | Purpose |
+|--------|---------|
+| `--profile`, `-p` | Named dev profile (default: `default`) |
+| `--branch`, `-b` | Target branch (auto-generated if omitted) |
+| `--fresh` | Force new sandbox, skip reuse lookup |
+| `--agent` | Agent type (`claude`, `codex`, `copilot`, `gemini`, `kiro`, `opencode`, `shell`) |
+| `--ide` | Override IDE (alias, path, or command) |
+| `--no-ide` | Skip IDE launch |
+| `--name` | Override auto-generated sandbox name |
+| `--wd` | Working directory inside the repo |
+| `-r`, `--pip-requirements` | Install Python packages from requirements file |
+| `--template` | Template tag (default: `foundry-git-wrapper:latest`) |
+| `--plan` | Dry-run: show resolved config without creating |
+
+Resolution order: CLI flags override profile fields, which override hardcoded defaults.
+
+Examples:
+
+```bash
+cast dev .                          # create or reuse with default profile
+cast dev . --profile work           # use "work" profile from foundry.yaml
+cast dev . --fresh                  # force a new sandbox
+cast dev . --profile work --plan    # preview profile resolution
+cast dev . --agent codex            # override agent from profile
+```
+
 ### `cast attach`
 
 Attach to a sandbox. If the sandbox is stopped, `cast attach` starts it first.
