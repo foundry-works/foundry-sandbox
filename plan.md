@@ -1,322 +1,326 @@
-# IDE Convenience Plan
+# Local Dev Ergonomics Plan
 
 ## Summary
 
-This plan focuses on developer convenience for host-side IDE usage with
-Foundry Sandbox. The goal is not to deepen the sandbox boundary around the IDE.
-The goal is to make opening the right worktree in the right editor effectively
-zero-friction.
+Foundry already has most of the low-level primitives needed for a strong local
+developer workflow:
 
-The current product already has basic IDE launch support through
-`cast attach --with-ide` and `cast attach --ide-only`, but the experience is
-thin:
+- `cast new` creates a sandbox, worktree, and git-safety wiring.
+- `cast preset save` snapshots a running sandbox into an `sbx` template.
+- `foundry.yaml` can inject Claude Code config, MCP servers, proxy-backed env
+  vars, and git-safety overlays.
+- `cast up` already handles the "start, open IDE, attach" part for an existing
+  sandbox.
 
-- IDE selection is ephemeral and not persisted.
-- Supported IDEs are hardcoded.
-- Detection is mostly CLI-on-PATH based.
-- There is no host-only "open this worktree" command.
-- The create/start/open/attach flow is still split across multiple commands.
+What is missing is a first-class, reproducible "developer environment" concept.
+Today the workflow is spread across CLI flags, templates, presets, and
+`foundry.yaml`. That makes common setup for "new sandbox on a worktree, with
+Claude agent, plus packages, skills, and plugins pre-installed" feel pieced
+together instead of intentional.
 
-This plan proposes a first convenience-focused step centered on user-level IDE
-preferences, better launcher resolution, and a dedicated `cast open` command.
+This plan proposes a new top-level abstraction: a declarative local-dev
+profile, plus a higher-level command that uses it.
 
-## Goals
+## Problem Statement
 
-- Let a developer set a preferred IDE once and stop retyping it.
-- Support IDE aliases, explicit executable paths, and bare commands on `PATH`.
-- Make `cast attach` able to use the configured IDE by default.
-- Add a host-only `cast open` command for opening the sandbox worktree without
-  attaching a shell.
-- Keep IDE behavior machine-local and outside repo policy.
+The current workflow is correct but low-level:
+
+1. Create a sandbox with `cast new`.
+2. Optionally save or reuse a preset.
+3. Optionally snapshot a template.
+4. Optionally express Claude/MCP config in `foundry.yaml`.
+5. Attach or use `cast up`.
+
+That creates a few ergonomic gaps:
+
+- There is no single command for "open my normal dev environment here."
+- Package bootstrap is narrow. Today it is mostly `--pip-requirements` plus MCP
+  npm post-steps.
+- Presets are useful, but they are partly mutable snapshots rather than a
+  stable declarative setup.
+- Claude skills, commands, MCP servers, IDE preferences, and agent choice are
+  not bundled as one named setup.
+- Reuse behavior is not expressed as a user intent such as "reuse my sandbox
+  for this repo/profile unless I say fresh."
+
+## Design Goals
+
+- Make the common local-dev flow one command.
+- Keep worktree-based isolation as the default.
+- Support pre-installed agent tooling, packages, skills, and plugins.
+- Preserve current security boundaries around credentials, git safety, and
+  network policy.
+- Prefer declarative, repeatable setup over imperative one-off shell steps.
+- Reuse existing code paths where possible instead of inventing a parallel
+  lifecycle.
 
 ## Non-Goals
 
-- No IDE plugin or extension work.
-- No attempt to make the host IDE part of the sandbox trust boundary.
-- No repo-level IDE policy.
-- No remote editor protocol integration.
+- Replacing `cast new`, `cast attach`, `cast up`, or presets entirely.
+- Weakening git-safety or sandbox credential protections.
+- Turning templates into the source of truth for secrets or policy.
+- Supporting arbitrary unrestricted bootstrap code by default.
 
-## Current State
+## Current Seams To Build On
 
-The current implementation has two relevant pieces:
+- `foundry_sandbox/commands/new.py`
+  Current sandbox creation entrypoint with repo, branch, agent, template, IDE,
+  and pip flags.
+- `foundry_sandbox/commands/new_setup.py`
+  Current provisioning flow for `sbx create`, git safety, compiled artifacts,
+  copies, and pip install.
+- `foundry_sandbox/commands/preset.py`
+  Snapshotting a running sandbox into a managed template.
+- `foundry_sandbox/commands/up.py`
+  Existing "start, open IDE, attach" flow for sandboxes that already exist.
+- `foundry_sandbox/foundry_config.py`
+  Current schema and artifact compilers for Claude Code, MCP, user services,
+  and git-safety overlays.
+- `foundry_sandbox/sbx.py`
+  Existing hooks for `sbx create`, `sbx exec`, templates, and pip install.
 
-- `foundry_sandbox/commands/attach.py`
-  - Supports `--with-ide`, `--ide-only`, and `--no-ide`.
-  - Opens the host worktree and then optionally attaches a sandbox shell.
-- `foundry_sandbox/ide.py`
-  - Hardcodes IDE aliases: `cursor`, `zed`, `code`.
-  - Detects IDE availability through `PATH`.
-  - Uses `open -a` on macOS as a launch fallback.
+## Proposal
 
-The important product boundary is that the IDE is host-side convenience. The
-sandbox shell, git wrapper, proxy, and policy server remain the actual safety
-mechanisms.
+### 1. Add A First-Class `cast dev` Command
 
-## Proposed Config
-
-Add a user-only `ide` section to `~/.foundry/foundry.yaml`.
-
-Example:
-
-```yaml
-version: "1"
-
-ide:
-  preferred: /Applications/Cursor.app/Contents/Resources/app/bin/cursor
-  args: ["--reuse-window"]
-  auto_open_on_attach: true
-```
-
-Also valid:
-
-```yaml
-version: "1"
-
-ide:
-  preferred: cursor
-```
-
-### Semantics
-
-- `preferred`
-  - May be a known alias such as `cursor`, `zed`, or `code`.
-  - May be an absolute executable path.
-  - May be a bare command name that should be resolved from `PATH`.
-- `args`
-  - Optional extra arguments passed when launching the IDE.
-- `auto_open_on_attach`
-  - If `true`, plain `cast attach <name>` should open the configured IDE unless
-    `--no-ide` is passed.
-
-## Config Scope
-
-This config should be user-only.
-
-Repo `foundry.yaml` should not be allowed to configure `ide` because:
-
-- IDE paths are machine-specific.
-- IDE preference is personal workflow, not shared sandbox policy.
-- Repo config should not decide which host application a developer launches.
-
-If a repo config includes `ide:`, Foundry should ignore it and warn.
-
-## CLI Behavior
-
-## `cast attach`
-
-Keep the current attach command and extend its behavior.
-
-Desired behavior:
-
-- `cast attach foo`
-  - If `auto_open_on_attach: true` and `--no-ide` is not passed, open the
-    preferred IDE and then attach the sandbox shell.
-- `cast attach foo --with-ide`
-  - Use the configured preferred IDE.
-- `cast attach foo --with-ide cursor`
-  - Override the config with the provided alias, path, or command.
-- `cast attach foo --ide-only`
-  - Use the configured preferred IDE and skip terminal attach.
-- `cast attach foo --ide-only /path/to/bin`
-  - Override the config and skip terminal attach.
-- `cast attach foo --no-ide`
-  - Suppress all IDE behavior, even if auto-open is enabled in config.
-
-### Failure behavior
-
-- `--with-ide`
-  - IDE launch failure should warn and continue to terminal attach.
-- `--ide-only`
-  - IDE launch failure should exit non-zero.
-- plain `cast attach`
-  - If auto-open is config-driven, a launch failure should warn and still attach.
-
-## `cast open`
-
-Add a new host-only command for opening the sandbox worktree in an IDE.
-
-Examples:
+Add a developer-oriented command that expresses the user intent directly:
 
 ```bash
-cast open foo
-cast open --last
-cast open foo --ide cursor
-cast open foo --ide /Applications/Cursor.app/Contents/Resources/app/bin/cursor
+cast dev . --profile claude-python --branch feat/auth
 ```
 
-Behavior:
+Expected behavior:
 
-- Resolve sandbox name or `--last`.
-- Resolve the host worktree path.
-- Launch the requested or configured IDE against that worktree.
-- Do not attach a sandbox shell.
+- resolve repo from `.` by default
+- select a named profile
+- create a sandbox if none exists for that repo/profile/branch
+- otherwise reuse the existing sandbox
+- optionally open the IDE
+- attach immediately
 
-This command exists purely for convenience and should be fast and simple.
+This should be the ergonomic wrapper around existing primitives, not a parallel
+implementation. Internally it should lean on:
 
-## IDE Resolution Rules
+- `cast new` behavior for creation
+- `cast up` behavior for start/open/attach
+- existing metadata/state helpers for reuse
 
-Resolution order:
+### 2. Introduce Declarative Local-Dev Profiles
 
-1. explicit CLI value
-2. user config `ide.preferred`
-3. auto-detect
+Add a new config concept for reusable, named setups. Profiles should be
+declarative and portable, unlike mutable snapshots.
 
-Launcher resolution rules:
-
-- If the value contains `/`, treat it as an explicit executable path.
-- Else if it matches a known alias, use alias-aware launch behavior.
-- Else try it as a command on `PATH`.
-
-Known aliases should initially include:
-
-- `cursor`
-- `zed`
-- `code`
-
-Optional future aliases:
-
-- `vscode`
-- `code-insiders`
-- `windsurf`
-
-## Launcher Behavior
-
-The launcher should distinguish between three cases:
-
-### Alias
-
-Use Foundry's built-in knowledge for known IDEs:
-
-- display name mapping
-- macOS app name mapping
-- CLI command mapping
-
-### Explicit executable path
-
-Launch the provided binary directly with the worktree path and configured args.
-This is the main escape hatch for custom or non-standard installs.
-
-### Bare command
-
-Resolve via `PATH` and launch as a normal command.
-
-## macOS Reliability
-
-The current code already tries `open -a` on macOS, but discovery is still based
-on CLI presence. This means installed apps without CLI setup are not currently
-discoverable in the auto path.
-
-The improved design should:
-
-- still support `open -a` for known aliases on macOS
-- allow configured explicit executable paths to bypass discovery problems
-- avoid requiring the IDE CLI to be on `PATH` when the user has configured an
-  explicit path
-
-## Interaction With `git-mode`
-
-This plan is convenience-first, not isolation-first. Still, host IDEs often run
-host-side Git, indexers, and tooling against the host worktree. Foundry already
-has `cast git-mode` for reconciling host-side IDE tooling with sandbox-side Git
-expectations.
-
-Phase 1 should not make `git-mode` automatic by default.
-
-Phase 2 can consider:
-
-- optional auto `cast git-mode --mode host` when opening the worktree in an IDE
-- optional restoration to sandbox mode when attaching back into the sandbox
-
-That should remain explicitly framed as convenience behavior, not a security
-control.
-
-## Presets
-
-Phase 1 should keep IDE config user-level only.
-
-A possible Phase 2 extension is allowing presets to override the user default:
+Example shape:
 
 ```yaml
-ide:
-  preferred: cursor
+profiles:
+  claude-python:
+    agent: claude
+    wd: packages/api
+    ide: cursor
+    packages:
+      pip: requirements-dev.txt
+      apt: [jq, ripgrep]
+      npm: [typescript]
+    tooling:
+      claude_skills: [team-review]
+      claude_commands: [review, explain]
+      mcp: [github]
 ```
 
-for workflows where a specific sandbox profile is commonly associated with a
-specific editor.
+The exact schema can differ, but the user-facing intent should be:
 
-This is lower priority than getting user-level defaults working well.
+- choose an agent
+- choose a working directory
+- choose package bootstrap
+- choose skills/commands/plugins/tooling bundles
+- optionally choose IDE defaults
 
-## UX Examples
+Profiles should be usable from user config and optionally repo config, with
+merge rules that remain compatible with the current additive/tightening model.
 
-### Example 1: Preferred IDE path
+### 3. Separate Declarative Profiles From Snapshot Presets
 
-```yaml
-version: "1"
+Presets should remain, but their role should become clearer:
 
-ide:
-  preferred: /Applications/Cursor.app/Contents/Resources/app/bin/cursor
-  auto_open_on_attach: true
-```
+- profiles: declarative, reviewed, repeatable setup
+- presets: user snapshots of runtime state
 
-```bash
-cast attach repo-feature-login
-```
+This lets a developer do both:
 
-Result:
+- use a stable profile for everyday work
+- snapshot a warmed environment into a preset/template when needed
 
-- open Cursor on the host worktree
-- attach sandbox shell afterward
+That avoids overloading presets as the main ergonomics surface.
 
-### Example 2: No shell, just open the worktree
+### 4. Add A Typed Bootstrap Model For Packages
 
-```bash
-cast open repo-feature-login
-```
+Right now package installation is fragmented:
 
-Result:
+- Python packages via `--pip-requirements`
+- some npm packages via MCP `type: npm` post-steps
 
-- open the host worktree in the preferred IDE
-- do not enter the sandbox shell
+That is not enough for a smooth local-dev bootstrap. Add a typed package model,
+for example:
 
-### Example 3: One-off override
+- `packages.pip`
+- `packages.uv`
+- `packages.npm`
+- `packages.apt`
 
-```bash
-cast attach repo-feature-login --with-ide zed
-```
+If an escape hatch is needed, add a clearly gated `bootstrap.commands` or
+`post_steps`, but keep it explicit and opt-in.
 
-Result:
+### 5. Add Tooling Bundles For Skills, Commands, MCP, And Plugins
 
-- open the host worktree in Zed
-- attach sandbox shell
+Foundry already knows how to compile:
 
-## Implementation Notes
+- Claude skills and commands into `/workspace/.claude/...`
+- MCP servers into `/workspace/.mcp.json`
 
-The implementation should stay close to the existing code shape:
+Expose that through named bundles so developers do not need to hand-author
+low-level config every time. This also gives a place to represent the user's
+"plugins pre-installed" requirement without inventing several separate flags.
 
-- extend config parsing in `foundry_sandbox/foundry_config.py`
-- refactor `foundry_sandbox/ide.py` into a resolver + launcher
-- update `foundry_sandbox/commands/attach.py` to consult config
-- add a new `foundry_sandbox/commands/open_cmd.py`
-- register the new command in `foundry_sandbox/cli.py`
+Possible examples:
 
-## Phase 1 Deliverables
+- `tooling: [github, team-review, python-debug]`
+- bundles expand into Claude skills, Claude commands, MCP servers, and package
+  dependencies
 
-- user-level `ide` config
-- alias/path/command launcher resolution
-- attach integration with configured IDE defaults
-- new `cast open` command
-- tests and docs
+### 6. Cache Profile Setups As Managed Templates
 
-## Phase 2 Ideas
+The first time a profile is used, Foundry can build a managed template for it.
+Later sandboxes can reuse that template for a much faster startup.
 
-- preset-level IDE override
-- better alias coverage
-- automatic memory of last successful IDE
-- optional `git-mode host` on IDE open
-- future `cast up` command that wraps create/start/open/attach
+Important constraint: the template must not become the source of truth for
+security-sensitive runtime state.
 
-## Recommendation
+Safe to bake:
 
-Implement Phase 1 first. It is small, directly useful, and aligned with the
-current architecture. It improves convenience without expanding the trust model
-or introducing a large new product surface.
+- packages
+- editor tooling
+- Claude skills/commands copied into the sandbox
+- non-secret runtime dependencies
+
+Must remain late-bound at sandbox creation/start:
+
+- git-safety registration
+- HMAC secrets
+- proxy-backed secret injection
+- branch-specific policy overlays
+- credentials derived from host env
+
+### 7. Make Reuse Behavior Explicit
+
+For daily local development, auto-numbering sandboxes is useful but not the
+best default UX. A developer usually wants one of two intents:
+
+- reuse my normal sandbox for this repo/profile
+- give me a fresh sandbox
+
+Add explicit reuse controls such as:
+
+- default reuse by repo + profile + branch
+- `--fresh` to force a new sandbox
+- `--name` to take full manual control
+
+## Security Constraints
+
+This work should preserve the current threat model:
+
+- Sandboxes remain the boundary, not templates.
+- Real credentials stay on the host and continue to resolve through proxy-backed
+  injection.
+- Git safety continues to be provisioned per sandbox and verified after start.
+- Third-party package/plugin installation should follow a user-controlled gate
+  comparable to `allow_third_party_mcp`.
+
+In practical terms:
+
+- do not bake raw secrets into templates
+- do not treat generated `.mcp.json` or `.claude/settings.json` as user-edited
+  control surfaces
+- do not let repo config silently loosen user-level restrictions
+
+## Suggested Rollout
+
+### Phase 1: CLI Ergonomics
+
+Ship `cast dev` as an orchestration layer over existing commands.
+
+Scope:
+
+- repo resolution
+- profile selection flag
+- create-or-reuse decision
+- IDE open + attach
+- `--fresh`
+
+This delivers the biggest UX win quickly and with low risk.
+
+### Phase 2: Declarative Profiles
+
+Add a profile schema and config resolution rules.
+
+Scope:
+
+- profile models
+- state persistence in metadata
+- plan output support
+- docs for authoring and selecting profiles
+
+### Phase 3: Package Bootstrap Expansion
+
+Add a typed bootstrap model beyond pip requirements.
+
+Scope:
+
+- new package config schema
+- bootstrap executor/compiler
+- gating for higher-risk install types
+- metadata and plan rendering
+
+### Phase 4: Tooling Bundles
+
+Introduce named bundles for Claude skills, commands, MCP, and plugin-like
+tooling.
+
+Scope:
+
+- bundle schema
+- expansion logic
+- conflict handling
+- docs and examples
+
+### Phase 5: Managed Template Caching
+
+Add profile-backed template build/reuse.
+
+Scope:
+
+- cache key derivation
+- invalidation when profile inputs change
+- metadata for template provenance
+- commands to inspect/rebuild cached templates
+
+## Open Questions
+
+- Should profiles live only in `~/.foundry/foundry.yaml`, or can repos publish
+  safe defaults that users opt into?
+- Should package bootstrap compile into artifact post-steps, or be handled by a
+  dedicated bootstrap subsystem?
+- How much template caching should happen automatically versus explicitly?
+- Should "plugin" be modeled as MCP only, or as a broader tooling concept that
+  can include Claude assets and packages?
+- What is the canonical identity for reuse: repo + profile, or repo + profile +
+  branch?
+
+## Success Criteria
+
+- A developer can spin up a normal local-dev sandbox with one command.
+- Common agent/tooling/package setup is declarative and reproducible.
+- Repeated sandbox creation is materially faster through cached templates.
+- Existing security guarantees remain intact.
+- The docs describe one obvious default workflow instead of several loosely
+  connected primitives.

@@ -1,110 +1,88 @@
-# IDE Convenience Checklist
+# Local Dev Ergonomics Checklist
 
-## Phase 1
+## Phase 1: `cast dev`
 
-- Add a new `IdeConfig` model to `foundry_sandbox/foundry_config.py`.
-- Add fields:
-  - `preferred: str = ""`
-  - `args: list[str] = []`
-  - `auto_open_on_attach: bool = False`
-- Ensure `ide` is supported only from `~/.foundry/foundry.yaml`.
-- If repo `foundry.yaml` contains `ide:`, ignore it and emit a warning.
+- [ ] Add a new `cast dev` command.
+- [ ] Default repo resolution to the current checkout when possible.
+- [ ] Add `--profile` selection.
+- [ ] Add explicit reuse behavior for repo/profile/branch.
+- [ ] Add `--fresh` to force a new sandbox.
+- [ ] Reuse existing `cast new` creation logic instead of duplicating it.
+- [ ] Reuse existing `cast up` behavior for start, IDE launch, and attach.
+- [ ] Persist the selected profile in sandbox metadata.
+- [ ] Print clear output that explains whether the sandbox was reused or created.
 
-## IDE Resolution
+## Phase 2: Profile Schema
 
-- Refactor `foundry_sandbox/ide.py` to support:
-  - known alias
-  - explicit executable path
-  - bare command from `PATH`
-- Preserve human-readable display names for known aliases.
-- Preserve macOS app-name fallback for known aliases.
-- Add support for passing extra launcher args.
-- Add a small internal resolver object or tuple so launch decisions are explicit.
+- [ ] Add profile models to the config layer.
+- [ ] Decide where profiles are allowed: user config only, or user config plus repo config with safe merge rules.
+- [ ] Define merge and precedence behavior for profiles.
+- [ ] Add validation for unknown profile names.
+- [ ] Add plan rendering support so `--plan` can show the selected profile.
+- [ ] Document the profile schema with examples.
 
-## Attach Integration
+## Phase 3: Package Bootstrap
 
-- Update `foundry_sandbox/commands/attach.py` to read user IDE config.
-- Keep existing flags:
-  - `--with-ide`
-  - `--ide-only`
-  - `--no-ide`
-- Change behavior:
-  - `--with-ide` with no value uses configured preferred IDE.
-  - `--ide-only` with no value uses configured preferred IDE.
-  - plain `cast attach` auto-opens IDE if `auto_open_on_attach: true`.
-  - `--no-ide` suppresses config-driven auto-open.
-- Failure rules:
-  - config-driven auto-open warns and continues
-  - `--with-ide` warns and continues
-  - `--ide-only` exits non-zero on launch failure
+- [ ] Replace the narrow `--pip-requirements` mental model with typed package bootstrap.
+- [ ] Add support for `pip` bootstrap.
+- [ ] Evaluate whether to add `uv` bootstrap.
+- [ ] Evaluate whether to add `npm` bootstrap outside MCP-only flows.
+- [ ] Evaluate whether to add `apt` bootstrap.
+- [ ] Decide whether a generic `bootstrap.commands` escape hatch is needed.
+- [ ] Gate higher-risk bootstrap paths explicitly.
+- [ ] Persist package bootstrap configuration in metadata and state.
+- [ ] Make package bootstrap visible in dry-run plan output.
 
-## New Command
+## Phase 4: Tooling Bundles
 
-- Add `foundry_sandbox/commands/open_cmd.py`.
-- Add `cast open [name]`.
-- Support:
-  - `cast open foo`
-  - `cast open --last`
-  - `cast open foo --ide cursor`
-  - `cast open foo --ide /path/to/bin`
-- Resolve the host worktree path and launch the IDE only.
-- Do not start or attach a sandbox shell.
-- Decide whether `cast open` should auto-start a stopped sandbox.
-  - Recommended: no, because it only needs the host worktree.
+- [ ] Design a bundle abstraction for reusable tooling sets.
+- [ ] Allow bundles to expand into Claude skills.
+- [ ] Allow bundles to expand into Claude commands.
+- [ ] Allow bundles to expand into MCP servers.
+- [ ] Allow bundles to declare package prerequisites when needed.
+- [ ] Define conflict handling when multiple bundles set overlapping config.
+- [ ] Keep generated `.claude` and `.mcp.json` files as compiled artifacts, not source of truth.
+- [ ] Document how bundles map to the current Claude and MCP config surfaces.
 
-## CLI Wiring
+## Phase 5: Template Caching
 
-- Register `open` in `foundry_sandbox/cli.py`.
-- Add help text consistent with existing command style.
+- [ ] Add a managed-template strategy for profile-backed environments.
+- [ ] Define a stable cache key for template reuse.
+- [ ] Invalidate cached templates when profile inputs change.
+- [ ] Track template provenance in sandbox metadata.
+- [ ] Provide a way to rebuild or refresh cached templates.
+- [ ] Keep secrets, git safety, and other runtime-sensitive state out of templates.
 
-## Tests
+## Safety And Policy
 
-- Add unit tests for IDE config parsing.
-- Add unit tests for repo-level `ide:` being ignored or warned.
-- Add unit tests for resolver behavior:
-  - alias
-  - absolute path
-  - command on `PATH`
-  - invalid executable
-- Add unit tests for launcher args propagation.
-- Extend attach tests:
-  - auto-open from config
-  - `--with-ide` using config default
-  - explicit override by alias
-  - explicit override by path
-  - `--ide-only` failure exits non-zero
-  - `--no-ide` disables config-driven auto-open
-- Add tests for `cast open`.
+- [ ] Preserve current git-safety provisioning as a per-sandbox step.
+- [ ] Preserve proxy-backed credential injection.
+- [ ] Preserve user-level veto behavior for third-party tooling installs.
+- [ ] Ensure repo config cannot silently weaken user restrictions.
+- [ ] Add tests that confirm templates do not capture raw secrets.
+
+## Testing
+
+- [ ] Add unit tests for `cast dev` create-or-reuse behavior.
+- [ ] Add unit tests for profile selection and precedence.
+- [ ] Add unit tests for new package bootstrap config parsing.
+- [ ] Add unit tests for bundle expansion.
+- [ ] Add unit tests for template cache hit and miss behavior.
+- [ ] Add smoke coverage for a typical local-dev flow.
+- [ ] Extend red-team coverage for new package/plugin installation paths.
 
 ## Docs
 
-- Update `docs/configuration.md` with the new user-only `ide` section.
-- Update `docs/usage/commands.md` with:
-  - revised `cast attach` semantics
-  - new `cast open` command
-- Update `docs/getting-started.md` with one convenience example using IDE config.
-- Optionally add a short note to `docs/operations.md` clarifying that IDEs are
-  host-side convenience, not part of the sandbox boundary.
+- [ ] Update getting-started docs to recommend the new default workflow.
+- [ ] Update command reference with `cast dev`.
+- [ ] Update configuration docs with profile, bundle, and package bootstrap sections.
+- [ ] Update workflow docs to show create-or-reuse local dev flows.
+- [ ] Add examples for Claude-focused and Python-focused profiles.
 
-## Decisions To Lock Before Coding
+## Implementation Order
 
-- Decide whether `--with-ide` and `--ide-only` should keep their current Click
-  parsing style or move to explicit optional values.
-- Decide whether a missing configured IDE should fall back to auto-detect or
-  fail immediately.
-  - Recommended: auto-detect for plain attach, fail for `ide-only`.
-- Decide whether `cast open` should honor configured `args`.
-  - Recommended: yes.
-- Decide whether explicit path support requires the file to be executable.
-  - Recommended: yes.
-
-## Nice Phase 2
-
-- Add preset-level IDE override.
-- Add more aliases:
-  - `vscode`
-  - `code-insiders`
-  - `windsurf`
-- Remember last successful IDE automatically.
-- Add optional auto `cast git-mode --mode host` integration.
-- Add `cast up` convenience wrapper around create/start/open/attach.
+- [ ] Ship `cast dev` first.
+- [ ] Ship declarative profiles second.
+- [ ] Ship expanded package bootstrap third.
+- [ ] Ship tooling bundles fourth.
+- [ ] Ship managed template caching last.
