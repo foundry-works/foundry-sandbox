@@ -1,25 +1,28 @@
-"""IDE detection and launch utilities.
+"""IDE detection, resolution, and launch utilities.
 
-Migrated from lib/ide.sh. Provides IDE detection, launch, and interactive
-selection for attaching editors to sandbox worktrees.
+Provides IDE resolution (alias / explicit path / bare command), launch, and
+interactive selection for attaching editors to sandbox worktrees.
 """
 
 from __future__ import annotations
 
+import os
 import platform
 import shutil
 import subprocess
 import sys
 import time
+from dataclasses import dataclass
+from typing import Literal
 
 import click
 
 from foundry_sandbox.utils import _is_noninteractive
 
-# IDE commands in preference order (matching lib/ide.sh)
+# Known IDE aliases in preference order
 IDE_COMMANDS = ("cursor", "zed", "code")
 
-# Display names for IDEs
+# Display names for known IDEs
 _DISPLAY_NAMES: dict[str, str] = {
     "cursor": "Cursor",
     "zed": "Zed",
@@ -34,38 +37,91 @@ _MACOS_APP_NAMES: dict[str, str] = {
 }
 
 
-def ide_exists(ide: str) -> bool:
-    """Check if an IDE command is available on PATH."""
-    return shutil.which(ide) is not None
+# ---------------------------------------------------------------------------
+# IdeSpec — resolved IDE descriptor
+# ---------------------------------------------------------------------------
 
 
-def detect_available_ides() -> list[str]:
-    """Detect available IDEs on the system.
+@dataclass
+class IdeSpec:
+    kind: Literal["alias", "path", "command"]
+    name: str       # canonical command or alias
+    display: str    # human-readable name
+    executable: str # what to actually run
 
-    Returns:
-        List of available IDE command names in preference order.
+
+# ---------------------------------------------------------------------------
+# Resolution
+# ---------------------------------------------------------------------------
+
+
+def resolve_ide(value: str) -> IdeSpec | None:
+    """Resolve an IDE string into an IdeSpec.
+
+    Resolution order:
+      1. Contains ``/`` → explicit executable path (must exist + be executable).
+      2. Matches a known alias → alias-aware spec.
+      3. Bare command → resolve via PATH.
+
+    Returns None if the value cannot be resolved.
     """
-    return [ide for ide in IDE_COMMANDS if ide_exists(ide)]
+    if not value:
+        return None
+
+    # Explicit executable path
+    if "/" in value:
+        path = value
+        if os.path.isfile(path) and os.access(path, os.X_OK):
+            return IdeSpec(
+                kind="path",
+                name=os.path.basename(path),
+                display=os.path.basename(path),
+                executable=path,
+            )
+        return None
+
+    # Known alias
+    if value in _DISPLAY_NAMES:
+        exe = shutil.which(value)
+        executable = exe if exe else value
+        return IdeSpec(
+            kind="alias",
+            name=value,
+            display=_DISPLAY_NAMES[value],
+            executable=executable,
+        )
+
+    # Bare command on PATH
+    exe = shutil.which(value)
+    if exe:
+        return IdeSpec(
+            kind="command",
+            name=value,
+            display=value,
+            executable=exe,
+        )
+
+    return None
 
 
-def ide_display_name(ide: str) -> str:
-    """Get the human-readable display name for an IDE."""
-    return _DISPLAY_NAMES.get(ide, ide)
+# ---------------------------------------------------------------------------
+# Launch helpers
+# ---------------------------------------------------------------------------
 
 
-def _try_macos_open(ide: str, path: str) -> bool:
-    """Try to launch an IDE via macOS ``open -a`` as a fallback.
-
-    Returns True if the app was opened successfully.
-    """
+def _try_macos_open(spec: IdeSpec, path: str, extra_args: list[str]) -> bool:
+    """Try to launch an IDE via macOS ``open -a`` as a fallback."""
     if platform.system() != "Darwin":
         return False
-    app_name = _MACOS_APP_NAMES.get(ide)
+    if spec.kind != "alias":
+        return False
+    app_name = _MACOS_APP_NAMES.get(spec.name)
     if not app_name:
         return False
     try:
+        cmd = ["open", "-a", app_name, "--args", *extra_args, path]
         ret = subprocess.call(
-            ["open", "-a", app_name, path],
+            cmd,
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
             timeout=5,
@@ -75,19 +131,19 @@ def _try_macos_open(ide: str, path: str) -> bool:
         return False
 
 
-def _launch_via_cli(ide: str, path: str) -> bool:
-    """Launch an IDE using its CLI command.
+def _launch_via_cli(executable: str, path: str, extra_args: list[str], display: str) -> bool:
+    """Launch an IDE binary directly.
 
     Returns True if the process started successfully.
     """
     try:
+        cmd = [executable, *extra_args, path]
         proc = subprocess.Popen(
-            [ide, path],
+            cmd,
             stdout=subprocess.DEVNULL,
             stderr=subprocess.PIPE,
             start_new_session=True,
         )
-        # Give the CLI a moment — most IDE CLIs exit quickly on error.
         time.sleep(0.5)
         ret = proc.poll()
         if ret is not None and ret != 0:
@@ -96,66 +152,74 @@ def _launch_via_cli(ide: str, path: str) -> bool:
                 stderr_out = proc.stderr.read().decode("utf-8", errors="replace").strip()
                 proc.stderr.close()
             if stderr_out:
-                display = ide_display_name(ide)
-                click.echo(f"  {display} CLI error: {stderr_out}", err=True)
+                click.echo(f"  {display} error: {stderr_out}", err=True)
             return False
-        # Still running or exited 0 — detach and move on.
         if proc.stderr:
             proc.stderr.close()
-        proc.returncode = 0  # suppress ResourceWarning for detached process
+        proc.returncode = 0
         return True
     except (OSError, FileNotFoundError):
         return False
 
 
-def launch_ide(ide: str, path: str) -> None:
-    """Launch an IDE with the given path.
+def launch_ide(spec: IdeSpec, path: str, extra_args: list[str] | None = None) -> bool:
+    """Launch an IDE given a resolved IdeSpec.
 
-    On macOS, prefers ``open -a`` which reliably activates the application.
-    Falls back to the CLI command. On Linux, uses the CLI command directly.
+    On macOS, alias specs prefer ``open -a`` for reliable app activation.
+    Falls back to CLI for all cases.
 
-    Args:
-        ide: IDE command name (e.g., "cursor", "code").
-        path: Path to open in the IDE.
+    Returns True on success, False on failure.
     """
-    display = ide_display_name(ide)
-    click.echo(f"Launching {display}...")
+    args = extra_args or []
+    click.echo(f"Launching {spec.display}...")
 
-    if platform.system() == "Darwin":
-        # macOS: prefer `open -a` — more reliable app activation
-        if _try_macos_open(ide, path):
-            return
-        # Fall back to CLI
-        if _launch_via_cli(ide, path):
-            return
-    else:
-        # Linux: use CLI, no `open -a` equivalent
-        if _launch_via_cli(ide, path):
-            return
+    # macOS alias: try open -a first
+    if _try_macos_open(spec, path, args):
+        return True
 
-    click.echo(f"Failed to launch {display}.", err=True)
+    # CLI launch (all platforms)
+    if _launch_via_cli(spec.executable, path, args, spec.display):
+        return True
+
+    click.echo(f"Failed to launch {spec.display}.", err=True)
+    return False
+
+
+# ---------------------------------------------------------------------------
+# Legacy public API (preserved for backward compatibility)
+# ---------------------------------------------------------------------------
+
+
+def ide_exists(ide: str) -> bool:
+    """Check if an IDE command is available on PATH."""
+    return shutil.which(ide) is not None
+
+
+def detect_available_ides() -> list[str]:
+    """Detect available IDEs on the system in preference order."""
+    return [ide for ide in IDE_COMMANDS if ide_exists(ide)]
+
+
+def ide_display_name(ide: str) -> str:
+    """Get the human-readable display name for an IDE."""
+    return _DISPLAY_NAMES.get(ide, ide)
 
 
 def auto_launch_ide(ide_name: str, path: str) -> bool:
-    """Launch a specific IDE by name.
+    """Launch a specific IDE by name (legacy API).
 
-    Args:
-        ide_name: IDE name (e.g., "cursor", "code").
-        path: Path to open.
-
-    Returns:
-        True if IDE was launched, False if not found or empty name.
+    Returns True if IDE was launched, False if not found or empty name.
     """
     if not ide_name or ide_name == "auto":
         return False
 
-    if ide_exists(ide_name):
-        launch_ide(ide_name, path)
-        return True
+    spec = resolve_ide(ide_name)
+    if spec is None:
+        display = _DISPLAY_NAMES.get(ide_name, ide_name)
+        click.echo(f"Warning: {display} ({ide_name}) not found")
+        return False
 
-    display = ide_display_name(ide_name)
-    click.echo(f"Warning: {display} ({ide_name}) not found")
-    return False
+    return launch_ide(spec, path)
 
 
 def prompt_ide_selection(path: str) -> bool:
@@ -163,12 +227,6 @@ def prompt_ide_selection(path: str) -> bool:
 
     Detects available IDEs and prompts the user to select one.
     In non-interactive mode or when no IDEs are available, returns False.
-
-    Args:
-        path: Path to open in the IDE.
-
-    Returns:
-        True if an IDE was launched, False otherwise.
     """
     if not sys.stdin.isatty() or _is_noninteractive():
         return False
@@ -184,7 +242,6 @@ def prompt_ide_selection(path: str) -> bool:
     click.echo("  Launch an editor?")
     click.echo()
 
-    # Numbered selection
     for i, opt in enumerate(options, 1):
         suffix = " (default)" if i == len(options) else ""
         click.echo(f"  {i}) {opt}{suffix}")
@@ -211,10 +268,11 @@ def prompt_ide_selection(path: str) -> bool:
     if selection == "Terminal only":
         return False
 
-    # Map display name back to command
     for ide in available:
         if ide_display_name(ide) == selection:
-            launch_ide(ide, path)
-            return True
+            spec = resolve_ide(ide)
+            if spec:
+                return launch_ide(spec, path)
+            return False
 
     return False

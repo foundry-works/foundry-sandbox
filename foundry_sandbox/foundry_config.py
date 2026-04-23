@@ -159,6 +159,17 @@ class UserService(_Strict):
 
 
 # ---------------------------------------------------------------------------
+# IDE config (user-only)
+# ---------------------------------------------------------------------------
+
+
+class IdeConfig(_Strict):
+    preferred: str = ""
+    args: list[str] = Field(default_factory=list)
+    auto_open_on_attach: bool = False
+
+
+# ---------------------------------------------------------------------------
 # top level
 # ---------------------------------------------------------------------------
 
@@ -170,6 +181,7 @@ class FoundryConfig(_Strict):
     claude_code: ClaudeCodeConfig | None = None
     user_services: list[UserService] = Field(default_factory=list)
     allow_third_party_mcp: bool = False
+    ide: IdeConfig | None = None
 
     @model_validator(mode="after")
     def _gate_third_party_mcp(self) -> FoundryConfig:
@@ -242,6 +254,11 @@ def _merge(layers: list[FoundryConfig]) -> FoundryConfig:
 
     # Claude code: last non-None wins (hooks merge per-key)
     result.claude_code = _merge_claude_code(layers)
+
+    # IDE: last non-None wins (user-only; repo layers are stripped before merge)
+    for layer in layers:
+        if layer.ide is not None:
+            result.ide = layer.ide
 
     return result
 
@@ -330,6 +347,13 @@ def resolve_foundry_config(repo_root: Path) -> FoundryConfig:
     repo_path = repo_root / "foundry.yaml"
     repo = _load_layer(repo_path)
     if repo is not None:
+        # ide is user-only — strip from repo config
+        if repo.ide is not None:
+            logger.warning(
+                "Repo foundry.yaml contains 'ide' section — "
+                "IDE config is user-only and will be ignored"
+            )
+            repo = repo.model_copy(update={"ide": None})
         layers.append(repo)
         layer_names.append(str(repo_path))
 
@@ -339,6 +363,17 @@ def resolve_foundry_config(repo_root: Path) -> FoundryConfig:
     config = _merge(layers)
     config._layer_names = layer_names  # type: ignore[attr-defined]
     return config
+
+
+def load_user_ide_config() -> IdeConfig | None:
+    """Load the IDE config from ~/.foundry/foundry.yaml (user-only).
+
+    Returns None if the file does not exist or has no ``ide`` section.
+    """
+    layer = _load_layer(_USER_CONFIG_PATH)
+    if layer is None:
+        return None
+    return layer.ide
 
 
 # ---------------------------------------------------------------------------

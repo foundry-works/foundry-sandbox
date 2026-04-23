@@ -161,3 +161,24 @@ SANDBOX_NONINTERACTIVE=1 cast destroy repo-feature-login
 ```
 
 This suppresses prompts and implies assume-yes behavior.
+
+## IDE Convenience
+
+Set a preferred IDE once in `~/.foundry/foundry.yaml`:
+
+```yaml
+version: "1"
+
+ide:
+  preferred: cursor
+  args: ["--reuse-window"]
+  auto_open_on_attach: true
+```
+
+Then `cast attach` opens Cursor automatically, or use `cast open` to open the worktree without attaching a shell:
+
+```bash
+cast open repo-feature-login
+cast open --last
+cast open repo-feature-login --ide zed
+```

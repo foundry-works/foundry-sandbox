@@ -87,7 +87,22 @@ Options:
 | `--last` | Reattach to the last sandbox |
 | `--with-ide [name]` | Launch an IDE and still open a terminal |
 | `--ide-only [name]` | Launch an IDE and skip the terminal |
-| `--no-ide` | Skip the IDE prompt |
+| `--no-ide` | Skip IDE launch, even if `auto_open_on_attach` is enabled |
+
+IDE resolution:
+
+- `--with-ide` with no value uses the configured preferred IDE (from `~/.foundry/foundry.yaml`), falling back to auto-detect
+- `--with-ide cursor` overrides config and launches Cursor
+- `--ide-only` with no value uses the configured preferred IDE (fails if not found)
+- `--ide-only /path/to/bin` overrides config and launches the given executable
+- `--no-ide` suppresses all IDE behavior, including config-driven auto-open
+- If `auto_open_on_attach: true` is set and no IDE flags are given, the IDE opens automatically
+
+Failure behavior:
+
+- Config-driven auto-open: warns and continues to terminal attach
+- `--with-ide`: warns and continues to terminal attach
+- `--ide-only`: exits non-zero if the IDE cannot be launched
 
 Examples:
 
@@ -96,7 +111,29 @@ cast attach repo-feature-login
 cast attach --last
 cast attach repo-feature-login --with-ide
 cast attach repo-feature-login --ide-only cursor
+cast attach repo-feature-login --no-ide
 ```
+
+### `cast open`
+
+Open a sandbox worktree in an IDE without attaching a shell.
+
+```bash
+cast open [name]
+cast open --last
+cast open [name] --ide cursor
+```
+
+Options:
+
+| Option | Purpose |
+|--------|---------|
+| `--last` | Open the last sandbox's worktree |
+| `--ide <value>` | Override the configured IDE with an alias, path, or command |
+
+IDE resolution: CLI `--ide` > config `ide.preferred` > auto-detect (first available).
+
+`cast open` does not start or attach a sandbox shell. It only launches the host-side IDE against the worktree path.
 
 ### `cast start`
 

@@ -370,6 +370,36 @@ claude_code:
 The compiled `settings.json` follows Claude Code's native format. Only
 non-empty sections are included.
 
+## IDE Preferences (User-Only)
+
+Configure your preferred IDE in `~/.foundry/foundry.yaml`. This section is
+**user-only** — repo-level `foundry.yaml` files cannot set it.
+
+```yaml
+version: "1"
+
+ide:
+  preferred: cursor
+  args: ["--reuse-window"]
+  auto_open_on_attach: true
+```
+
+Fields:
+
+| Field | Default | Purpose |
+|-------|---------|---------|
+| `preferred` | `""` | IDE alias (`cursor`, `zed`, `code`), absolute executable path, or bare command on `PATH` |
+| `args` | `[]` | Extra arguments passed when launching the IDE |
+| `auto_open_on_attach` | `false` | If `true`, `cast attach` opens the IDE automatically unless `--no-ide` is passed |
+
+Resolution order for `preferred`:
+
+1. If the value contains `/`, treated as an explicit executable path (must exist and be executable)
+2. If it matches a known alias (`cursor`, `zed`, `code`), uses alias-aware launch behavior
+3. Otherwise, resolved as a bare command on `PATH`
+
+If a repo `foundry.yaml` includes an `ide:` section, Foundry ignores it and emits a warning.
+
 ## Host Paths
 
 The current host-side layout is:

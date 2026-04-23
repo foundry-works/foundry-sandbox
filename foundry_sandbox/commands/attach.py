@@ -6,6 +6,11 @@ Auto-starts the sandbox if not running.
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from foundry_sandbox.ide import IdeSpec
+
 import os
 import sys
 
@@ -30,40 +35,88 @@ def _start_sandbox(name: str) -> None:
     start_sandbox(name)
 
 
+def _resolve_ide_for_attach(
+    ide_config: object | None,
+) -> "IdeSpec | None":  # noqa: F821
+    """Resolve which IDE to use, consulting config then auto-detect."""
+    from foundry_sandbox.ide import detect_available_ides, resolve_ide
+
+    preferred = getattr(ide_config, "preferred", "") if ide_config else ""
+
+    # Try config preferred first
+    if preferred:
+        spec = resolve_ide(preferred)
+        if spec is not None:
+            return spec
+
+    # Fall back to auto-detect
+    available = detect_available_ides()
+    if available:
+        return resolve_ide(available[0])
+
+    return None
+
+
+def _get_ide_args(ide_config: object | None) -> list[str]:
+    """Extract extra args from IDE config."""
+    if ide_config:
+        return list(getattr(ide_config, "args", []))
+    return []
+
+
 def _handle_ide_options(
     name: str,
     worktree_path: str,
     no_ide: bool,
     with_ide: str | None,
     ide_only: str | None,
+    ide_config: object | None,
 ) -> bool:
     """Handle IDE launch options. Returns True if terminal should be skipped."""
+    from foundry_sandbox.ide import launch_ide, resolve_ide
+
     if not os.isatty(0):
         return False
 
     if no_ide:
         return False
 
-    if ide_only and ide_only != "auto":
-        from foundry_sandbox.ide import auto_launch_ide
-        if auto_launch_ide(ide_only, worktree_path):
+    # Explicit CLI value (not "auto")
+    cli_value = ide_only or with_ide
+    if cli_value and cli_value != "auto":
+        spec = resolve_ide(cli_value)
+        if spec is None:
+            click.echo(f"Warning: IDE '{cli_value}' could not be resolved", err=True)
+            if ide_only:
+                sys.exit(1)
+            return False
+        extra_args = _get_ide_args(ide_config)
+        ok = launch_ide(spec, worktree_path, extra_args)
+        if not ok and ide_only:
+            sys.exit(1)
+        if ide_only and ok:
             click.echo(f"IDE launched. Run 'cast attach {name}' for terminal.")
-            return True
+        return bool(ide_only and ok)
 
-    if with_ide and with_ide != "auto":
-        from foundry_sandbox.ide import auto_launch_ide
-        auto_launch_ide(with_ide, worktree_path)
-        return False
-
-    if ide_only == "auto":
+    # "auto" — interactive prompt (preserving existing behavior)
+    if cli_value == "auto":
         from foundry_sandbox.ide import prompt_ide_selection
         if prompt_ide_selection(worktree_path):
-            click.echo(f"\n  Run this in your IDE's terminal to connect:\n\n    cast attach {name}\n")
-            return True
+            if ide_only:
+                click.echo(f"\n  Run this in your IDE's terminal to connect:\n\n    cast attach {name}\n")
+                return True
+        return False
 
-    if with_ide == "auto":
-        from foundry_sandbox.ide import prompt_ide_selection
-        prompt_ide_selection(worktree_path)
+    # No CLI flag — check config-driven auto-open
+    if ide_config and getattr(ide_config, "auto_open_on_attach", False):
+        spec = _resolve_ide_for_attach(ide_config)
+        if spec is not None:
+            extra_args = _get_ide_args(ide_config)
+            ok = launch_ide(spec, worktree_path, extra_args)
+            if not ok:
+                click.echo("Warning: config-driven IDE launch failed", err=True)
+            return False
+        click.echo("Warning: auto_open_on_attach set but no IDE found", err=True)
 
     return False
 
@@ -116,6 +169,10 @@ def attach(
 ) -> None:
     """Attach to a sandbox."""
 
+    # Load user IDE config (user-only, from ~/.foundry/foundry.yaml)
+    from foundry_sandbox.foundry_config import load_user_ide_config
+    ide_config = load_user_ide_config()
+
     # ------------------------------------------------------------------
     # 1. Resolve sandbox name
     # ------------------------------------------------------------------
@@ -151,6 +208,6 @@ def attach(
     # ------------------------------------------------------------------
     # 6. IDE launch and attach
     # ------------------------------------------------------------------
-    skip_terminal = _handle_ide_options(name, str(worktree_path), no_ide, with_ide, ide_only)
+    skip_terminal = _handle_ide_options(name, str(worktree_path), no_ide, with_ide, ide_only, ide_config)
     if not skip_terminal:
         _sbx_attach(name, working_dir)
