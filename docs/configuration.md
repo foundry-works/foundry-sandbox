@@ -1,254 +1,80 @@
 # Configuration
 
-This guide covers configuration options for Foundry Sandbox, including AI tool plugins, API keys, git safety settings, and `foundry.yaml` workspace configuration.
+This page documents the configuration surface that is verified in this repo today: host authentication, credential refresh, host-side paths, user-service configuration, and the main environment variables that affect `cast`.
 
-## Claude Plugin
+## Host Authentication
 
-The [claude-foundry](https://github.com/foundry-works/claude-foundry) plugin is installed automatically when you create a new sandbox. This provides:
-- Skills: `/foundry-spec`, `/foundry-implement`, `/foundry-review`, `/foundry-test`, etc.
+### Required for `cast new`
 
-No host installation required. The plugin is fetched from GitHub and configured during sandbox creation.
+`cast new` checks for Claude auth unless you pass `--skip-key-check`.
 
-### Statusline
-
-`claude-statusline` is bundled and configured automatically.
-
-### LSPs
-
-The `pyright-lsp` plugin is installed from the official Claude marketplace for type checking support.
-
-## API Keys
-
-API keys are stored on the host via `sbx secret set -g` and injected into sandbox requests by sbx's proxy. They never enter the sandbox VM directly.
+Set one of:
 
 ```bash
-# Store API keys on the host
-echo "$ANTHROPIC_API_KEY" | sbx secret set -g anthropic
-echo "$GITHUB_TOKEN" | sbx secret set -g github
-echo "$OPENAI_API_KEY" | sbx secret set -g openai
-```
-
-Or use `cast refresh-creds` to push all configured keys at once:
-
-```bash
-cast refresh-creds          # Refresh last sandbox
-cast refresh-creds --all    # Refresh all running sandboxes
-```
-
-Set your keys in your shell profile or `.env` file:
-
-```bash
-# AI Provider Keys (at least one required)
+export CLAUDE_CODE_OAUTH_TOKEN="..."
+# or
 export ANTHROPIC_API_KEY="..."
-export CLAUDE_CODE_OAUTH_TOKEN="..."   # Get via: claude setup-token
-
-# Search Provider Keys (optional - for deep research features)
-export TAVILY_API_KEY="..."
-export PERPLEXITY_API_KEY="..."
 ```
 
-## Config Files
-
-The sandbox copies configuration files from your host into the sandbox via `sbx exec`:
-
-| Source | Destination | Purpose |
-|--------|-------------|---------|
-| `~/.claude.json` | Claude preferences (host file only) | Claude Code preferences |
-| `~/.claude/settings.json` | Claude settings | Claude Code settings |
-| `~/.gitconfig` | Git configuration | Git user/name/email |
-| `~/.config/gh/` | GitHub CLI config | From `gh auth login` |
-| `~/.gemini/` | Gemini CLI OAuth | From `gemini auth` |
-| `~/.config/opencode/opencode.json` | OpenCode config | OpenCode settings |
-
-## Tool-Specific Notes
-
-### Gemini CLI
-
-Run `gemini auth` on your host to authenticate. The OAuth credentials in `~/.gemini/` are automatically copied into sandboxes.
-
-Sandboxes default to disabling auto-updates, update nags, telemetry, and usage stats unless you set them in `~/.gemini/settings.json`.
-
-### Codex CLI
-
-Sandboxes default to disabling update checks and analytics via `~/.codex/config.toml`. If your host config does not set them, sandboxes also default to `approval_policy = "on-failure"` and `sandbox_mode = "danger-full-access"` inside the sandbox.
-
-### OpenCode
-
-Run `opencode auth login` for zai-coding-plan authentication.
-
-### Python / PyPI Packages
-
-Install Python packages from a requirements file using `--pip-requirements` / `-r`:
+### Common Optional Credentials
 
 ```bash
-# Explicit requirements file
-cast new owner/repo feature -r requirements.txt
-
-# Auto-detect: looks for requirements.txt, requirements-dev.txt, etc.
-cast new owner/repo feature -r auto
+export GITHUB_TOKEN="ghp_..."     # private repos and push
+export OPENAI_API_KEY="..."       # Codex / OpenAI tooling
+export ZHIPU_API_KEY="..."        # required for --with-zai
 ```
 
-When `auto` is specified, the sandbox scans the repository root for common requirements file patterns (`requirements*.txt`) and installs them automatically.
+`GH_TOKEN` is also accepted as a fallback for GitHub.
 
-Packages are re-installed on `cast start` and `cast attach` (if the sandbox was stopped), ensuring dependencies stay in sync.
+## Refreshing Credentials
 
-### ZAI
-
-ZAI provides a Claude alias backed by the Zhipu API. Enable with `--with-zai` when creating a sandbox:
+Running sandboxes use `sbx` host-side secrets. If you rotate host credentials after a sandbox is already up, refresh them:
 
 ```bash
-cast new owner/repo feature --with-zai
+cast refresh-creds repo-feature-login
+cast refresh-creds --last
+cast refresh-creds --all
 ```
 
-Requires `ZHIPU_API_KEY` set in your environment.
+The current implementation pushes:
 
-### Search Providers
+- `anthropic` from `ANTHROPIC_API_KEY`
+- `github` from `GITHUB_TOKEN` or `GH_TOKEN`
+- `openai` from `OPENAI_API_KEY`
+- any user-defined services declared in `config/user-services.yaml`
 
-The research tools support multiple search providers. Set these optional API keys for enhanced research capabilities:
+## Sandbox Creation Options
 
-| Variable | Provider | Purpose |
-|----------|----------|---------|
-| `TAVILY_API_KEY` | Tavily | Web search for deep research |
-| `PERPLEXITY_API_KEY` | Perplexity | AI-powered search |
-| `SEMANTIC_SCHOLAR_API_KEY` | Semantic Scholar | Academic paper search |
+These `cast new` options change sandbox setup and are persisted in metadata and presets:
 
-## Git Safety Configuration
+| Option | Purpose |
+|--------|---------|
+| `--wd PATH` | Initial working directory inside the repo |
+| `-r`, `--pip-requirements PATH` | Install Python dependencies inside the sandbox |
+| `-c`, `--copy HOST:CONTAINER` | Copy a host file into the sandbox once at creation time |
+| `--allow-pr` | Allow PR-oriented operations |
+| `--template TAG` | Use a specific `sbx` template instead of the default wrapper template |
+| `--with-opencode` | Enable OpenCode-related setup intent; warns if host auth is missing |
+| `--with-zai` | Enable ZAI-related setup intent; requires `ZHIPU_API_KEY` |
 
-The git safety layer (`foundry-git-safety`) is configured via `foundry.yaml` in the workspace root. See `foundry-git-safety/docs/configuration.md` for the complete reference.
+## User-Defined Services
 
-### `foundry.yaml` Schema
+For APIs that are not handled directly by the built-in `sbx` secret flow,
+Foundry can inject proxy URLs into the sandbox instead of raw secrets.
 
-```yaml
-git_safety_server:
-  host: "127.0.0.1"
-  port: 8083
-  secrets_path: "/run/secrets/sandbox-hmac"
-  data_dir: "/var/lib/foundry-git-safety"
+Search order for the config file:
 
-protected_branches:
-  enabled: true
-  patterns:
-    - "main"
-    - "master"
-    - "release/*"
-    - "production"
+1. explicit path passed by code
+2. `FOUNDRY_USER_SERVICES_PATH`
+3. `config/user-services.yaml`
 
-file_restrictions:
-  blocked_patterns:
-    - ".github/workflows/"
-    - "Makefile"
-  warned_patterns:
-    - "package.json"
-    - "pyproject.toml"
-  warn_action: "log"  # "log" or "reject"
-```
-
-### Git Safety Server Management
+Start from the bundled example:
 
 ```bash
-# Start the server (runs as a daemon by default)
-foundry-git-safety start
-
-# Check status
-foundry-git-safety status
-
-# Stop the server
-foundry-git-safety stop
-
-# Validate configuration
-foundry-git-safety validate
+cp config/user-services.yaml.example config/user-services.yaml
 ```
 
-The server is automatically started by `cast new` if not already running.
-
-## Network Policy Configuration
-
-Network access is managed by sbx's policy system:
-
-```bash
-# Set default profile
-sbx policy set-default balanced    # Default: common dev domains
-sbx policy set-default allow-all   # No restrictions
-sbx policy set-default deny-all    # Block all external traffic
-
-# Add domain exceptions
-sbx policy allow network example.com
-sbx policy deny network ads.example.com
-```
-
-## Push File Restrictions
-
-Sandboxes enforce push-time file restrictions to prevent agents from modifying CI/CD pipelines, build system files, or other sensitive configuration. Restrictions are defined in `foundry.yaml` under `file_restrictions`.
-
-### How It Works
-
-File restrictions are enforced at two points:
-- **Push time** — The git safety server's `check_push_files()` enumerates files changed between the remote tracking branch and HEAD, matching each against restriction patterns. Blocked files reject the entire push.
-- **Commit time** — `check_file_restrictions()` runs against staged files for early feedback before the push attempt.
-
-### Default Restrictions
-
-The default configuration blocks CI/CD pipeline files and generates warnings for dependency/build files:
-
-**Blocked** (always rejected):
-- `.github/workflows/`, `.github/actions/` — GitHub Actions
-- `Makefile`, `Justfile`, `Taskfile.yml` — Build system entry points
-- `.pre-commit-config.yaml` — Git hook configuration
-- `CODEOWNERS` — Approval requirement definitions
-
-**Warned** (logged by default):
-- `package.json`, `pyproject.toml`, `requirements.txt`, `Gemfile`, `go.mod`, `Cargo.toml` — Dependency manifests
-- `Dockerfile`, `*.sbx.toml` — Container and sbx definitions
-- `.env*` — Environment files
-
-### Customization
-
-Edit `foundry.yaml` to modify restrictions. Changes take effect on the next git safety server restart. To switch warned patterns from monitoring to enforcement:
-
-```yaml
-file_restrictions:
-  warn_action: "reject"
-```
-
-For pattern matching semantics (directory prefix, glob, basename) and the difference between blocked and warned patterns, see [Security Model: Git Safety](security/security-model.md#git-safety).
-
-## Environment Variables
-
-### Sandbox Configuration
-
-| Variable | Default | Purpose |
-|----------|---------|---------|
-| `SANDBOX_HOME` | `~/.sandboxes` | Root directory for sandbox state |
-| `SANDBOX_DEBUG` | (unset) | Enable debug logging |
-| `SANDBOX_VERBOSE` | (unset) | Show sbx subprocess commands |
-| `SANDBOX_ASSUME_YES` | (unset) | Auto-confirm prompts |
-| `SANDBOX_NONINTERACTIVE` | (unset) | Non-interactive mode (no prompts) |
-
-### Git Safety
-
-| Variable | Default | Purpose |
-|----------|---------|---------|
-| `GIT_API_SECRETS_PATH` | `/run/secrets/sandbox-hmac` | HMAC secrets directory |
-| `FOUNDRY_DATA_DIR` | `/var/lib/foundry-git-safety` | Git safety data directory |
-
-## User-Defined Service Credential Injection
-
-For services not covered by sbx's built-in providers (Tavily, Perplexity, Semantic Scholar, Zhipu, etc.), you can declare them in `config/user-services.yaml`. The host-side git-safety server acts as a reverse proxy, injecting credentials on the fly.
-
-### How It Works
-
-```
-Sandbox → http://host.docker.internal:8083/proxy/<service-slug>/<path>
-         → foundry-git-safety reads API key from host env
-         → adds credential header, forwards to upstream via HTTPS
-         → streams response back
-```
-
-Credentials never enter the sandbox VM. The sandbox only sees a local HTTP URL.
-
-### Configuration
-
-Copy `config/user-services.yaml.example` to `config/user-services.yaml` and uncomment the services you need:
+Example:
 
 ```yaml
 version: "1"
@@ -259,72 +85,73 @@ services:
     domain: api.tavily.com
     header: Authorization
     format: bearer
-
-  - name: Semantic Scholar
-    env_var: SEMANTIC_SCHOLAR_API_KEY
-    domain: api.semanticscholar.org
-    header: X-Api-Key
-    format: value
 ```
 
-Set the corresponding environment variables on the host:
+At sandbox creation time, Foundry injects a proxy URL such as:
 
-```bash
-export TAVILY_API_KEY="tvly-..."
-export SEMANTIC_SCHOLAR_API_KEY="..."
+```text
+TAVILY_API_KEY=http://host.docker.internal:8083/proxy/tavily
 ```
 
-### What Happens During `cast new`
+Important behavior:
 
-1. The proxy routes are registered on the git-safety server
-2. Environment variables are injected into the sandbox pointing each service at its proxy URL:
-   - `TAVILY_API_KEY=http://host.docker.internal:8083/proxy/tavily`
-   - `SEMANTIC_SCHOLAR_API_KEY=http://host.docker.internal:8083/proxy/semantic-scholar`
-3. The agent uses these URLs as base URLs for API calls
+- The configured `env_var` inside the sandbox contains a proxy URL, not an API key.
+- The real secret stays on the host.
+- Requests to the proxy are authenticated with sandbox HMAC headers.
+- This works best for direct HTTP clients or tools that can adapt to a custom
+  proxy/base URL flow.
+- SDKs that assume `*_API_KEY` always contains a raw token will usually need
+  extra adaptation or a different integration path.
 
-### Field Reference
+For manual requests inside the sandbox, use the installed `proxy-sign` helper to
+generate the required headers for `/proxy/...` endpoints.
 
-| Field | Required | Description |
-|-------|----------|-------------|
-| `name` | Yes | Display name and proxy slug source |
-| `env_var` | Yes | Host environment variable holding the API key |
-| `domain` | Yes | Upstream domain to forward to |
-| `header` | Yes | HTTP header name (e.g., `Authorization`, `X-Api-Key`) |
-| `format` | Yes | `bearer` (prepends `Bearer `) or `value` (raw key) |
-| `methods` | No | Allowed HTTP methods (default: all) |
-| `paths` | No | Allowed URL path globs (default: all) |
-| `scheme` | No | Upstream scheme (default: `https`) |
-| `port` | No | Upstream port (default: scheme default) |
+## Host Paths
 
-### Limitations
+The current host-side layout is:
 
-- SDKs must support custom base URLs to use the proxy. SDKs that hardcode their API domain need wrapper code.
-- No OAuth token refresh flows.
-- No request body credential injection.
-- The `HTTPS_PROXY` environment variable is not used — the proxy uses explicit base URLs.
+```text
+~/.sandboxes/
+  sandboxes/<name>/metadata.json
+  presets/
+  .last-cast-new.json
+  .last-attach.json
 
-### Migration from 0.20.x
+<repo>/.sbx/<sandbox>-worktrees/<branch>/
 
-Services that were auto-included in 0.20.x now require explicit declaration:
-
-| Service | env_var | domain |
-|---------|---------|--------|
-| Tavily | `TAVILY_API_KEY` | `api.tavily.com` |
-| Perplexity | `PERPLEXITY_API_KEY` | `api.perplexity.ai` |
-| Semantic Scholar | `SEMANTIC_SCHOLAR_API_KEY` | `api.semanticscholar.org` |
-| Zhipu | `ZHIPU_API_KEY` | `open.bigmodel.cn` |
-
-### Health Check
-
-```bash
-curl http://localhost:8083/proxy/health
+~/.foundry/
+  secrets/sandbox-hmac/<sandbox>
+  data/git-safety/sandboxes/<sandbox>.json
+  logs/decisions.jsonl
+  template-image-digest
 ```
 
-Returns JSON listing registered services and whether their API keys are present on the host.
+## Environment Variables
 
-## See Also
+### `cast` Runtime
 
-- [Commands](usage/commands.md) — Full CLI reference
-- [Getting Started](getting-started.md) — Installation and first sandbox
-- [Security Model](security/security-model.md) — Threats, defenses, and hardening
-- [foundry-git-safety Configuration](../foundry-git-safety/docs/configuration.md) — Complete git safety config reference
+| Variable | Default | Purpose |
+|----------|---------|---------|
+| `SANDBOX_HOME` | `~/.sandboxes` | Base directory for metadata and presets |
+| `SANDBOX_VERBOSE` | unset | Print `sbx` subprocess commands |
+| `SANDBOX_DEBUG` | unset | Enable additional debug logging |
+| `SANDBOX_ASSUME_YES` | unset | Skip confirmations |
+| `SANDBOX_NONINTERACTIVE` | unset | Disable prompts and imply assume-yes behavior |
+
+### Git Safety / Host Services
+
+| Variable | Default | Purpose |
+|----------|---------|---------|
+| `GIT_API_SECRETS_PATH` | `~/.foundry/secrets/sandbox-hmac` | HMAC secret directory |
+| `FOUNDRY_DATA_DIR` | `~/.foundry/data/git-safety` | Git-safety registration directory |
+| `FOUNDRY_USER_SERVICES_PATH` | unset | Override path to `user-services.yaml` |
+
+### Common Credentials
+
+| Variable | Purpose |
+|----------|---------|
+| `CLAUDE_CODE_OAUTH_TOKEN` | Claude auth |
+| `ANTHROPIC_API_KEY` | Claude / Anthropic auth |
+| `GITHUB_TOKEN`, `GH_TOKEN` | GitHub clone/push/PR auth |
+| `OPENAI_API_KEY` | OpenAI / Codex auth |
+| `ZHIPU_API_KEY` | Required for `--with-zai` |

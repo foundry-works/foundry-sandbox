@@ -1,26 +1,20 @@
 # Unit Tests
 
-Unit tests for individual functions and modules in isolation.
-
-## Structure
-
-Tests should mirror the source directory structure. For example:
-- `lib/config.sh` → `tests/unit/test_config.sh`
-- `lib/docker.sh` → `tests/unit/test_docker.sh`
+Python unit tests for the `cast` CLI and supporting modules.
 
 ## Running Tests
 
 ```bash
-# Run all unit tests
-./tests/unit/run.sh
-
-# Run specific test file
-./tests/unit/test_config.sh
+pytest tests/unit/ -v
+pytest tests/unit/test_new.py -v
+pytest tests/unit/test_cli.py::TestCLIGroup::test_cli_shows_help_with_no_args -v
 ```
 
-## Guidelines
+The repo-wide pytest defaults and markers live in `pyproject.toml`.
 
-- Tests should be fast (no network, no containers)
-- Mock external dependencies
-- One assertion per test when practical
-- Use descriptive test names
+## Scope
+
+- Keep unit tests fast and isolated.
+- Mock subprocess, filesystem, and network-facing behavior where practical.
+- Prefer focused coverage of CLI contracts, validation, and security-sensitive
+  helpers.

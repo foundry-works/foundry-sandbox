@@ -1,102 +1,72 @@
 # Contributing Guide
 
-This guide covers how to contribute to Foundry Sandbox.
+This guide reflects the current repo layout and local workflow in this checkout.
 
-## Code Organization
+## Repo Layout
 
-```
+```text
 foundry-sandbox/
-├── install.sh              # Installation script
-├── pyproject.toml          # Python package definition (entry point: cast)
-│
-├── foundry_sandbox/        # Python package (orchestration layer)
-│   ├── cli.py              # Click CLI group with alias resolution
-│   ├── constants.py        # Configuration defaults
-│   ├── models.py           # Pydantic data models (SbxSandboxMetadata)
-│   ├── paths.py            # Path resolution (SandboxPaths)
-│   ├── utils.py            # Logging/formatting helpers
-│   ├── sbx.py              # sbx CLI wrapper (all subprocess calls)
-│   ├── git_safety.py       # Git safety integration bridge
-│   ├── git.py              # Git operations with retry
-│   ├── git_worktree.py     # Worktree management
-│   ├── state.py            # Metadata persistence (JSON, atomic writes)
-│   ├── validate.py         # Input validation
-│   ├── api_keys.py         # API key validation
-│   └── commands/           # Click command implementations
-│       ├── new.py          # cast new (dispatches to new_sbx.py)
-│       ├── new_sbx.py      # sbx sandbox creation logic
-│       ├── attach.py       # cast attach (sbx exec streaming)
-│       ├── start.py        # cast start (sbx run)
-│       ├── stop.py         # cast stop (sbx stop)
-│       ├── destroy.py      # cast destroy (sbx rm + cleanup)
-│       ├── destroy_all.py  # cast destroy-all
-│       ├── list_cmd.py     # cast list (sbx ls enrichment)
-│       ├── config.py       # cast config
-│       ├── refresh_creds.py # cast refresh-creds (sbx secret)
-│       ├── help_cmd.py     # cast help
-│       └── git_mode.py     # cast git-mode
-│
-├── foundry-git-safety/     # Standalone git safety package
-│   ├── foundry_git_safety/
-│   │   ├── cli.py          # CLI entry point (start/stop/status/validate)
-│   │   ├── server.py       # Flask git API server (port 8083)
-│   │   ├── auth.py         # HMAC auth, nonce store, rate limiter
-│   │   ├── policies.py     # Command allowlist, protected branches
-│   │   ├── operations.py   # Git command execution
-│   │   ├── branch_isolation.py  # Cross-sandbox branch isolation
-│   │   └── schemas/        # Pydantic config models
-│   └── tests/              # 727 tests (unit, integration, security)
-│
-├── foundry_sandbox/assets/ # Assets injected into sandboxes
-│   ├── git-wrapper-sbx.sh  # Git wrapper for sbx networking
-│   └── proxy-sign.sh       # HMAC request signing helper
-│
-├── tests/                  # Test suite
-│
-└── docs/                   # Documentation (you are here)
+  foundry_sandbox/            Python package and CLI
+    commands/                 Click subcommands
+    assets/                   Scripts injected into sandboxes
+  config/                     Example configuration files
+  docs/                       User and operator docs
+  scripts/                    Local CI and benchmark helpers
+  tests/
+    unit/                     Fast unit tests
+    smoke/                    Live `sbx` smoke tests
+    chaos/                    Fault-injection shell modules
+    redteam/                  Sandbox security tests
 ```
 
-## CI Pipeline
+Key modules:
 
-CI runs via GitHub Actions on every push and PR. The main workflow is `.github/workflows/test.yml`.
+| Path | Purpose |
+|------|---------|
+| `foundry_sandbox/cli.py` | root Click entry point |
+| `foundry_sandbox/commands/` | CLI command implementations |
+| `foundry_sandbox/sbx.py` | subprocess wrapper around `sbx` |
+| `foundry_sandbox/git_safety.py` | bridge to `foundry-git-safety` |
+| `foundry_sandbox/state.py` | metadata, presets, and last-used state |
+| `foundry_sandbox/assets/git-wrapper.sh` | sandbox git wrapper |
 
-### Test Jobs
+## Local Checks
 
-| Job | What it runs |
-|-----|-------------|
-| `unit` | Root package tests: `pytest tests/unit/` |
-| `lint` | ruff lint + format check |
-| `git-safety-unit` | `foundry-git-safety` unit tests: `pytest tests/unit/` |
-| `git-safety-security` | `foundry-git-safety` security tests: `pytest tests/security/` |
-| `git-safety-integration` | `foundry-git-safety` integration tests: `pytest tests/integration/` |
-
-All five jobs must pass before merge (gated by the `all-pass` job).
-
-### Pytest Isolation
-
-The root package and `foundry-git-safety` have separate `pyproject.toml` files and must be tested independently. Running both in the same pytest invocation causes import collisions. Each CI job `cd`s into the correct directory before running pytest.
-
-### Running Tests Locally
+Run the same local helper used by contributors:
 
 ```bash
-# Run the same checks as CI
 ./scripts/ci-local.sh
-
-# Include integration tests
 ./scripts/ci-local.sh --all
-
-# Show all results (don't stop at first failure)
 ./scripts/ci-local.sh --no-fail-fast
-
-# Run only foundry-git-safety tests
-cd foundry-git-safety && pytest tests/unit/ -v
 ```
 
-Always run `./scripts/ci-local.sh` before committing to catch CI failures early.
+Useful direct test entry points:
 
-### Additional Workflows
+```bash
+pytest tests/unit/ -v
+pytest tests/smoke/ -v -m requires_sbx
+./tests/chaos/runner.sh
+./tests/redteam/runner.sh
+```
 
-| Workflow | Trigger | Purpose |
-|----------|---------|---------|
-| `release.yml` | `v*` tags | GitHub release + PyPI publish |
-| `sbx-drift.yml` | Schedule | Detect sbx CLI version drift |
+## GitHub Workflows
+
+Current workflows in this repo:
+
+| Workflow | Purpose |
+|----------|---------|
+| `test.yml` | CI checks |
+| `release.yml` | release and publish flow |
+| `sbx-drift.yml` | detect `sbx` version drift |
+
+## Documentation Policy
+
+Keep the maintained current-state docs in sync when behavior changes:
+
+- `README.md`
+- `docs/getting-started.md`
+- `docs/usage/commands.md`
+- `docs/usage/workflows.md`
+- `docs/configuration.md`
+- `docs/operations.md`
+- `docs/security/security-model.md`
