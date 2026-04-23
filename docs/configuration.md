@@ -165,6 +165,73 @@ mcp_servers:
 The `host_env` field names the host environment variable that holds the real
 credential. The `target` field is the upstream domain the proxy routes to.
 
+## Claude Code
+
+Configure Claude Code skills, commands, hooks, and permissions in `foundry.yaml`
+under the `claude_code` key. At sandbox creation, Foundry writes the compiled
+configuration into `/workspace/.claude/` inside the sandbox.
+
+### Skills
+
+Install skills from a local directory or a git repository.
+
+```yaml
+version: "1"
+
+claude_code:
+  skills:
+    # From a host directory — all files are copied into the sandbox
+    - source: /path/to/my-skills/security-review
+
+    # From a git repository — cloned at sandbox creation time
+    - git: https://github.com/user/cool-skill
+
+    # From a git repo with a subdirectory path
+    - git: https://github.com/user/skill-collection.git
+      path: skills/review
+```
+
+Host-directory skills are copied as `FileWrite` artifacts. Git-based skills are
+cloned as `PostStep` commands (run after all other artifacts are applied).
+
+### Commands
+
+Copy Claude Code command files from the host into the sandbox:
+
+```yaml
+claude_code:
+  commands:
+    - /path/to/commands/explain.md
+    - /path/to/commands/review.md
+```
+
+Each file is written to `/workspace/.claude/commands/<filename>`.
+
+### Hooks and Permissions
+
+Hooks and permissions are compiled into `/workspace/.claude/settings.json`:
+
+```yaml
+claude_code:
+  hooks:
+    PreToolUse:
+      - match: Bash
+        command: audit-log.sh
+    Stop:
+      - match: "*"
+        command: cleanup.sh
+
+  permissions:
+    allow:
+      - WebSearch
+      - "Bash(grep:*)"
+    deny:
+      - "Bash(rm -rf:*)"
+```
+
+The compiled `settings.json` follows Claude Code's native format. Only
+non-empty sections are included.
+
 ## Host Paths
 
 The current host-side layout is:

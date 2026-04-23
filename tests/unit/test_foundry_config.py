@@ -16,11 +16,13 @@ from foundry_sandbox.foundry_config import (
     McpServerBuiltin,
     McpServerNpm,
     McpServerProxy,
+    Permissions,
     ProtectedBranchesAdd,
     SkillSource,
     UserService,
     _merge,
     _resolve_host_refs,
+    compile_claude_code,
     compile_git_safety,
     compile_mcp_servers,
     compile_user_services,
@@ -553,3 +555,177 @@ class TestCompileMcpPlanRenderer:
         text = render_plan_text(config)
         assert "sbx_secrets" in text
         assert "svc" in text
+
+
+# ---------------------------------------------------------------------------
+# compile_claude_code (Phase 5)
+# ---------------------------------------------------------------------------
+
+
+class TestCompileClaudeCode:
+    def test_empty_config_returns_empty_bundle(self):
+        cfg = ClaudeCodeConfig()
+        bundle = compile_claude_code(cfg)
+        assert bundle.file_writes == []
+        assert bundle.post_steps == []
+        assert bundle.env_vars == {}
+        assert bundle.sbx_secrets == []
+
+    def test_settings_json_shape(self):
+        cfg = ClaudeCodeConfig(
+            hooks={
+                "PreToolUse": [HookRule(match="Bash", command="audit-log.sh")],
+            },
+            permissions=Permissions(
+                allow=["Bash(grep:*)"],
+                deny=["Bash(rm -rf:*)"],
+            ),
+        )
+        bundle = compile_claude_code(cfg)
+        assert len(bundle.file_writes) == 1
+        fw = bundle.file_writes[0]
+        assert fw.container_path == "/workspace/.claude/settings.json"
+
+        import json
+        settings = json.loads(fw.content)
+        assert "hooks" in settings
+        assert "PreToolUse" in settings["hooks"]
+        entry = settings["hooks"]["PreToolUse"][0]
+        assert entry["matcher"] == "Bash"
+        assert entry["hooks"][0]["type"] == "command"
+        assert entry["hooks"][0]["command"] == "audit-log.sh"
+        assert "permissions" in settings
+        assert "Bash(grep:*)" in settings["permissions"]["allow"]
+        assert "Bash(rm -rf:*)" in settings["permissions"]["deny"]
+
+    def test_settings_json_hooks_only(self):
+        cfg = ClaudeCodeConfig(
+            hooks={"Stop": [HookRule(match="*", command="cleanup.sh")]},
+        )
+        bundle = compile_claude_code(cfg)
+        import json
+        settings = json.loads(bundle.file_writes[0].content)
+        assert "hooks" in settings
+        assert "permissions" not in settings
+
+    def test_settings_json_permissions_only(self):
+        cfg = ClaudeCodeConfig(
+            permissions=Permissions(allow=["WebSearch"], deny=["Bash(rm:*)"]),
+        )
+        bundle = compile_claude_code(cfg)
+        import json
+        settings = json.loads(bundle.file_writes[0].content)
+        assert "permissions" in settings
+        assert "hooks" not in settings
+
+    def test_skill_from_host_path(self, tmp_path: Path):
+        skill_dir = tmp_path / "my-skill"
+        skill_dir.mkdir()
+        (skill_dir / "prompt.md").write_text("# My Skill")
+        (skill_dir / "helper.sh").write_text("#!/bin/bash")
+
+        cfg = ClaudeCodeConfig(skills=[SkillSource(source=str(skill_dir))])
+        bundle = compile_claude_code(cfg)
+        paths = [fw.container_path for fw in bundle.file_writes]
+        assert "/workspace/.claude/skills/my-skill/prompt.md" in paths
+        assert "/workspace/.claude/skills/my-skill/helper.sh" in paths
+
+    def test_skill_from_host_single_file(self, tmp_path: Path):
+        skill_file = tmp_path / "review.md"
+        skill_file.write_text("# Review")
+
+        cfg = ClaudeCodeConfig(skills=[SkillSource(source=str(skill_file))])
+        bundle = compile_claude_code(cfg)
+        paths = [fw.container_path for fw in bundle.file_writes]
+        assert "/workspace/.claude/skills/review.md/review.md" in paths
+
+    def test_skill_from_host_nonexistent_raises(self):
+        cfg = ClaudeCodeConfig(skills=[SkillSource(source="/nonexistent/skill")])
+        with pytest.raises(ValueError, match="does not exist"):
+            compile_claude_code(cfg)
+
+    def test_skill_from_git_emits_post_step(self):
+        cfg = ClaudeCodeConfig(
+            skills=[SkillSource(git="https://github.com/user/cool-skill")],
+        )
+        bundle = compile_claude_code(cfg)
+        assert len(bundle.post_steps) == 1
+        assert bundle.post_steps[0].cmd == [
+            "git", "clone", "--depth", "1",
+            "https://github.com/user/cool-skill",
+            "/workspace/.claude/skills/cool-skill",
+        ]
+        assert bundle.post_steps[0].user == "agent"
+
+    def test_skill_from_git_with_path(self):
+        cfg = ClaudeCodeConfig(
+            skills=[SkillSource(git="https://github.com/user/repo.git", path="skills/review")],
+        )
+        bundle = compile_claude_code(cfg)
+        assert len(bundle.post_steps) == 2
+        # First step: clone
+        assert "clone" in bundle.post_steps[0].cmd
+        # Second step: move subdirectory contents
+        assert "mv" in bundle.post_steps[1].cmd[2]
+
+    def test_commands_from_host(self, tmp_path: Path):
+        cmd_file = tmp_path / "explain.md"
+        cmd_file.write_text("Explain the selected code")
+
+        cfg = ClaudeCodeConfig(commands=[str(cmd_file)])
+        bundle = compile_claude_code(cfg)
+        paths = [fw.container_path for fw in bundle.file_writes]
+        assert "/workspace/.claude/commands/explain.md" in paths
+        assert bundle.file_writes[0].content == b"Explain the selected code"
+
+    def test_commands_nonexistent_raises(self):
+        cfg = ClaudeCodeConfig(commands=["/nonexistent/cmd.md"])
+        with pytest.raises(ValueError, match="does not exist"):
+            compile_claude_code(cfg)
+
+    def test_combined_config(self, tmp_path: Path):
+        skill_dir = tmp_path / "audit"
+        skill_dir.mkdir()
+        (skill_dir / "audit.md").write_text("# Audit")
+
+        cmd_file = tmp_path / "review.md"
+        cmd_file.write_text("Review code")
+
+        cfg = ClaudeCodeConfig(
+            skills=[SkillSource(source=str(skill_dir))],
+            commands=[str(cmd_file)],
+            hooks={"PreToolUse": [HookRule(match="Bash", command="log.sh")]},
+            permissions=Permissions(allow=["WebSearch"]),
+        )
+        bundle = compile_claude_code(cfg)
+        # 1 settings.json + 1 skill file + 1 command = 3
+        assert len(bundle.file_writes) == 3
+
+
+class TestCompileClaudeCodePlanRenderer:
+    def test_plan_renders_claude_code_artifacts(self, tmp_path: Path):
+        skill_dir = tmp_path / "my-skill"
+        skill_dir.mkdir()
+        (skill_dir / "prompt.md").write_text("# Skill")
+
+        config = FoundryConfig(
+            version="1",
+            claude_code=ClaudeCodeConfig(
+                skills=[SkillSource(source=str(skill_dir))],
+                hooks={"PreToolUse": [HookRule(match="Bash", command="log.sh")]},
+            ),
+        )
+        text = render_plan_text(config)
+        assert "/workspace/.claude/settings.json" in text
+        assert "/workspace/.claude/skills/my-skill/prompt.md" in text
+
+    def test_plan_renders_git_skill_post_steps(self):
+        config = FoundryConfig(
+            version="1",
+            claude_code=ClaudeCodeConfig(
+                skills=[SkillSource(git="https://github.com/user/skill")],
+            ),
+        )
+        text = render_plan_text(config)
+        assert "post_steps (1):" in text
+        assert "git clone" in text

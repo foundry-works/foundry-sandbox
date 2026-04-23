@@ -216,6 +216,7 @@ def new_sbx_setup(
     user_service_overrides: dict[str, str] = {}
     try:
         from foundry_sandbox.foundry_config import (
+            compile_claude_code,
             compile_git_safety,
             compile_mcp_servers,
             compile_user_services,
@@ -241,6 +242,8 @@ def new_sbx_setup(
                 bundles.append(compile_user_services(us))
         if config.mcp_servers:
             bundles.append(compile_mcp_servers(config.mcp_servers))
+        if config.claude_code:
+            bundles.append(compile_claude_code(config.claude_code))
 
         if bundles:
             merged = _merge_bundles(bundles)

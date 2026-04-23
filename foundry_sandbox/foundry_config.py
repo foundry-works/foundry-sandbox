@@ -356,6 +356,13 @@ def render_plan_text(config: FoundryConfig) -> str:
         n_env += len(mcp_bundle.env_vars)
         n_secrets += len(mcp_bundle.sbx_secrets)
 
+    # Claude Code artifacts
+    cc_bundle: ArtifactBundle | None = None
+    if config.claude_code:
+        cc_bundle = compile_claude_code(config.claude_code)
+        n_writes += len(cc_bundle.file_writes)
+        n_steps += len(cc_bundle.post_steps)
+
     lines.append(f"  policy_patches ({n_patches}):")
     if config.git_safety:
         g = config.git_safety
@@ -369,6 +376,9 @@ def render_plan_text(config: FoundryConfig) -> str:
     lines.append(f"  file_writes ({n_writes}):")
     if mcp_bundle:
         for fw in mcp_bundle.file_writes:
+            lines.append(f"    {fw.container_path} ({len(fw.content)} bytes, {fw.owner})")
+    if cc_bundle:
+        for fw in cc_bundle.file_writes:
             lines.append(f"    {fw.container_path} ({len(fw.content)} bytes, {fw.owner})")
     lines.append(f"  env_vars ({n_env}):")
     if config.user_services:
@@ -387,6 +397,9 @@ def render_plan_text(config: FoundryConfig) -> str:
         for slug_name, env_var in mcp_bundle.sbx_secrets:
             lines.append(f"    {slug_name} (from host ${env_var})")
     lines.append(f"  post_steps ({n_steps}):")
+    if cc_bundle:
+        for step in cc_bundle.post_steps:
+            lines.append(f"    {' '.join(step.cmd)}")
 
     return "\n".join(lines)
 
@@ -570,3 +583,103 @@ def compile_mcp_servers(
         env_vars=env_vars,
         sbx_secrets=sbx_secrets,
     )
+
+
+def _skill_name_from_source(source: str) -> str:
+    return Path(source).name
+
+
+def _skill_name_from_git(url: str) -> str:
+    name = url.rstrip("/").split("/")[-1]
+    if name.endswith(".git"):
+        name = name[:-4]
+    return name
+
+
+def compile_claude_code(cfg: ClaudeCodeConfig) -> ArtifactBundle:
+    """Compile a ClaudeCodeConfig into an ArtifactBundle.
+
+    Produces:
+    - FileWrite for /workspace/.claude/settings.json (hooks + permissions)
+    - FileWrites for skills from host source paths
+    - PostSteps for skills from git URLs
+    - FileWrites for commands from host file paths
+    """
+    import json
+
+    from foundry_sandbox.artifacts import FileWrite, PostStep
+
+    file_writes: list[FileWrite] = []
+    post_steps: list[PostStep] = []
+
+    # -- Skills --
+    for skill in cfg.skills:
+        if skill.source:
+            host_path = Path(skill.source)
+            if not host_path.exists():
+                raise ValueError(f"Skill source path does not exist: {skill.source}")
+            skill_name = _skill_name_from_source(skill.source)
+            if host_path.is_dir():
+                for child in sorted(host_path.rglob("*")):
+                    if child.is_file():
+                        rel = child.relative_to(host_path)
+                        file_writes.append(FileWrite(
+                            container_path=f"/workspace/.claude/skills/{skill_name}/{rel}",
+                            content=child.read_bytes(),
+                        ))
+            else:
+                file_writes.append(FileWrite(
+                    container_path=f"/workspace/.claude/skills/{skill_name}/{host_path.name}",
+                    content=host_path.read_bytes(),
+                ))
+        elif skill.git:
+            skill_name = _skill_name_from_git(skill.git)
+            target = f"/workspace/.claude/skills/{skill_name}"
+            post_steps.append(PostStep(
+                cmd=["git", "clone", "--depth", "1", skill.git, target],
+            ))
+            if skill.path:
+                post_steps.append(PostStep(
+                    cmd=["sh", "-c",
+                         f"mv '{target}/{skill.path}/*' '{target}/' 2>/dev/null; "
+                         f"rm -rf '{target}/{skill.path}'"],
+                ))
+
+    # -- Commands --
+    for cmd_path in cfg.commands:
+        host_file = Path(cmd_path)
+        if not host_file.exists():
+            raise ValueError(f"Command source file does not exist: {cmd_path}")
+        file_writes.append(FileWrite(
+            container_path=f"/workspace/.claude/commands/{host_file.name}",
+            content=host_file.read_bytes(),
+        ))
+
+    # -- Hooks + Permissions → settings.json --
+    settings: dict[str, Any] = {}
+    if cfg.hooks:
+        hooks_json: dict[str, list[dict[str, Any]]] = {}
+        for event, rules in cfg.hooks.items():
+            hooks_json[event] = [
+                {
+                    "matcher": rule.match,
+                    "hooks": [{"type": "command", "command": rule.command}],
+                }
+                for rule in rules
+            ]
+        settings["hooks"] = hooks_json
+    if cfg.permissions and (cfg.permissions.allow or cfg.permissions.deny):
+        perm_json: dict[str, list[str]] = {}
+        if cfg.permissions.allow:
+            perm_json["allow"] = list(cfg.permissions.allow)
+        if cfg.permissions.deny:
+            perm_json["deny"] = list(cfg.permissions.deny)
+        settings["permissions"] = perm_json
+
+    if settings:
+        file_writes.append(FileWrite(
+            container_path="/workspace/.claude/settings.json",
+            content=json.dumps(settings, indent=2).encode(),
+        ))
+
+    return ArtifactBundle(file_writes=file_writes, post_steps=post_steps)

@@ -277,4 +277,6 @@ def apply_artifacts(
 
     # Step 5: Post steps
     if bundle.post_steps:
-        raise NotImplementedError("post_steps apply (Phase 5+)")
+        logger.info("Running %d post steps in %s", len(bundle.post_steps), sandbox_id)
+        for step in bundle.post_steps:
+            sbx_exec(name, step.cmd, user=step.user, quiet=True)
