@@ -17,6 +17,7 @@ from foundry_sandbox.foundry_config import (
     McpServerBuiltin,
     McpServerNpm,
     McpServerProxy,
+    PackageBootstrap,
     Permissions,
     ProtectedBranchesAdd,
     SkillSource,
@@ -28,6 +29,7 @@ from foundry_sandbox.foundry_config import (
     compile_git_safety,
     compile_mcp_servers,
     compile_user_services,
+    normalize_profile_packages,
     render_plan_text,
     resolve_foundry_config,
     resolve_profile,
@@ -879,7 +881,7 @@ class TestDevProfile:
 
     def test_strict_mode_rejects_unknown(self):
         with pytest.raises(ValidationError, match="Extra inputs are not permitted"):
-            DevProfile(agent="claude", packages={"pip": "req.txt"})
+            DevProfile(agent="claude", unknown_field=True)
 
     def test_partial_profile(self):
         p = DevProfile(agent="codex", wd="src")
@@ -1046,3 +1048,207 @@ class TestRenderPlanProfile:
         text = render_plan_text(config)
         assert "Profiles defined" not in text
         assert "Profile:" not in text
+
+
+# ---------------------------------------------------------------------------
+# Phase 3: Package Bootstrap
+# ---------------------------------------------------------------------------
+
+
+class TestPackageBootstrap:
+    def test_empty(self):
+        p = PackageBootstrap()
+        assert p.pip is None
+        assert p.uv is None
+        assert p.apt == []
+        assert p.npm == []
+
+    def test_pip_str(self):
+        p = PackageBootstrap(pip="requirements.txt")
+        assert p.pip == "requirements.txt"
+
+    def test_pip_list(self):
+        p = PackageBootstrap(pip=["ruff", "mypy"])
+        assert p.pip == ["ruff", "mypy"]
+
+    def test_apt(self):
+        p = PackageBootstrap(apt=["jq", "ripgrep"])
+        assert p.apt == ["jq", "ripgrep"]
+
+    def test_npm(self):
+        p = PackageBootstrap(npm=["typescript"])
+        assert p.npm == ["typescript"]
+
+    def test_uv_str(self):
+        p = PackageBootstrap(uv="requirements.txt")
+        assert p.uv == "requirements.txt"
+
+    def test_all_types(self):
+        p = PackageBootstrap(
+            pip="requirements.txt",
+            uv="uv-requirements.txt",
+            apt=["jq"],
+            npm=["prettier"],
+        )
+        assert p.pip == "requirements.txt"
+        assert p.uv == "uv-requirements.txt"
+        assert p.apt == ["jq"]
+        assert p.npm == ["prettier"]
+
+    def test_strict_rejects_unknown(self):
+        with pytest.raises(ValidationError, match="Extra inputs are not permitted"):
+            PackageBootstrap(pip="req.txt", unknown=True)
+
+    def test_profile_with_packages(self):
+        p = DevProfile(packages=PackageBootstrap(pip="requirements.txt"))
+        assert p.packages is not None
+        assert p.packages.pip == "requirements.txt"
+
+
+class TestSystemPackagesGate:
+    def test_npm_rejected_without_gate(self):
+        with pytest.raises(ValidationError, match="allow_system_packages"):
+            FoundryConfig(
+                version="1",
+                profiles={"work": DevProfile(
+                    packages=PackageBootstrap(npm=["typescript"]),
+                )},
+            )
+
+    def test_apt_rejected_without_gate(self):
+        with pytest.raises(ValidationError, match="allow_system_packages"):
+            FoundryConfig(
+                version="1",
+                profiles={"work": DevProfile(
+                    packages=PackageBootstrap(apt=["curl"]),
+                )},
+            )
+
+    def test_pip_allowed_without_gate(self):
+        cfg = FoundryConfig(
+            version="1",
+            profiles={"work": DevProfile(
+                packages=PackageBootstrap(pip="requirements.txt"),
+            )},
+        )
+        assert cfg.profiles["work"].packages is not None
+        assert cfg.profiles["work"].packages.pip == "requirements.txt"
+
+    def test_uv_allowed_without_gate(self):
+        cfg = FoundryConfig(
+            version="1",
+            profiles={"work": DevProfile(
+                packages=PackageBootstrap(uv="requirements.txt"),
+            )},
+        )
+        assert cfg.profiles["work"].packages is not None
+        assert cfg.profiles["work"].packages.uv == "requirements.txt"
+
+    def test_npm_allowed_with_gate(self):
+        cfg = FoundryConfig(
+            version="1",
+            allow_system_packages=True,
+            profiles={"work": DevProfile(
+                packages=PackageBootstrap(npm=["typescript"]),
+            )},
+        )
+        assert cfg.profiles["work"].packages is not None
+        assert cfg.profiles["work"].packages.npm == ["typescript"]
+
+    def test_apt_allowed_with_gate(self):
+        cfg = FoundryConfig(
+            version="1",
+            allow_system_packages=True,
+            profiles={"work": DevProfile(
+                packages=PackageBootstrap(apt=["curl", "jq"]),
+            )},
+        )
+        assert cfg.profiles["work"].packages.apt == ["curl", "jq"]
+
+    def test_no_packages_no_gate_needed(self):
+        cfg = FoundryConfig(version="1", profiles={"work": DevProfile(agent="claude")})
+        assert cfg.allow_system_packages is False
+
+
+class TestMergeAllowSystemPackages:
+    def test_merge_anded_false_wins(self):
+        a = FoundryConfig(version="1", allow_system_packages=False)
+        b = FoundryConfig(version="1", allow_system_packages=True)
+        result = _merge([a, b])
+        assert result.allow_system_packages is False
+
+    def test_merge_both_true(self):
+        a = FoundryConfig(version="1", allow_system_packages=True)
+        b = FoundryConfig(version="1", allow_system_packages=True)
+        result = _merge([a, b])
+        assert result.allow_system_packages is True
+
+    def test_merge_defaults_to_false(self):
+        a = FoundryConfig(version="1")
+        b = FoundryConfig(version="1")
+        result = _merge([a, b])
+        assert result.allow_system_packages is False
+
+
+class TestNormalizeProfilePackages:
+    def test_empty_profile(self):
+        pkgs = normalize_profile_packages(DevProfile())
+        assert pkgs == {}
+
+    def test_legacy_pip_requirements(self):
+        pkgs = normalize_profile_packages(DevProfile(pip_requirements="requirements.txt"))
+        assert pkgs == {"pip": "requirements.txt"}
+
+    def test_explicit_packages(self):
+        pkgs = normalize_profile_packages(DevProfile(
+            packages=PackageBootstrap(pip="requirements.txt", apt=["jq"]),
+        ))
+        assert pkgs == {"pip": "requirements.txt", "apt": ["jq"]}
+
+    def test_explicit_pip_wins_over_legacy(self):
+        pkgs = normalize_profile_packages(DevProfile(
+            pip_requirements="legacy.txt",
+            packages=PackageBootstrap(pip="explicit.txt"),
+        ))
+        assert pkgs == {"pip": "explicit.txt"}
+
+    def test_all_package_types(self):
+        pkgs = normalize_profile_packages(DevProfile(
+            packages=PackageBootstrap(
+                pip="req.txt",
+                uv="uv-req.txt",
+                apt=["jq"],
+                npm=["ts"],
+            ),
+        ))
+        assert pkgs == {"pip": "req.txt", "uv": "uv-req.txt", "apt": ["jq"], "npm": ["ts"]}
+
+
+class TestRenderPlanPackages:
+    def test_plan_shows_allow_system_packages_gate(self):
+        config = FoundryConfig(version="1", allow_system_packages=True)
+        text = render_plan_text(config)
+        assert "allow_system_packages: true" in text
+
+    def test_plan_shows_packages_in_profile(self):
+        config = FoundryConfig(
+            version="1",
+            profiles={"work": DevProfile(
+                packages=PackageBootstrap(pip="requirements.txt", apt=["jq"]),
+            )},
+            allow_system_packages=True,
+        )
+        text = render_plan_text(config, profile_name="work")
+        assert "pip: requirements.txt" in text
+        assert "apt: ['jq']" in text
+
+    def test_plan_shows_packages_in_all_profiles(self):
+        config = FoundryConfig(
+            version="1",
+            profiles={"work": DevProfile(
+                packages=PackageBootstrap(npm=["typescript"]),
+            )},
+            allow_system_packages=True,
+        )
+        text = render_plan_text(config)
+        assert "packages=" in text

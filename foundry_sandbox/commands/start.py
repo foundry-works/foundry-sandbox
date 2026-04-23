@@ -19,6 +19,7 @@ from foundry_sandbox.git_safety import (
     verify_wrapper_integrity,
 )
 from foundry_sandbox.sbx import (
+    bootstrap_packages,
     install_pip_requirements,
     sbx_check_available,
     sbx_run,
@@ -115,10 +116,14 @@ def start_sandbox(name: str, watchdog: bool = False) -> None:
         except Exception:
             pass
 
-    # Install pip requirements if configured
-    pip_req = metadata.get("pip_requirements", "")
-    if pip_req:
-        install_pip_requirements(name, pip_req)
+    # Install packages if configured
+    packages = metadata.get("packages", {})
+    if packages:
+        bootstrap_packages(name, packages)
+    else:
+        pip_req = metadata.get("pip_requirements", "")
+        if pip_req:
+            install_pip_requirements(name, pip_req)
 
     click.echo(f"Sandbox '{name}' started.")
 

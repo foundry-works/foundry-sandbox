@@ -23,15 +23,15 @@
 
 ## Phase 3: Package Bootstrap
 
-- [ ] Replace the narrow `--pip-requirements` mental model with typed package bootstrap.
-- [ ] Add support for `pip` bootstrap.
-- [ ] Evaluate whether to add `uv` bootstrap.
-- [ ] Evaluate whether to add `npm` bootstrap outside MCP-only flows.
-- [ ] Evaluate whether to add `apt` bootstrap.
-- [ ] Decide whether a generic `bootstrap.commands` escape hatch is needed.
-- [ ] Gate higher-risk bootstrap paths explicitly.
-- [ ] Persist package bootstrap configuration in metadata and state.
-- [ ] Make package bootstrap visible in dry-run plan output.
+- [x] Replace the narrow `--pip-requirements` mental model with typed package bootstrap.
+- [x] Add support for `pip` bootstrap.
+- [x] Evaluate whether to add `uv` bootstrap.
+- [x] Evaluate whether to add `npm` bootstrap outside MCP-only flows.
+- [x] Evaluate whether to add `apt` bootstrap.
+- [x] Decide whether a generic `bootstrap.commands` escape hatch is needed.
+- [x] Gate higher-risk bootstrap paths explicitly.
+- [x] Persist package bootstrap configuration in metadata and state.
+- [x] Make package bootstrap visible in dry-run plan output.
 
 ## Phase 4: Tooling Bundles
 

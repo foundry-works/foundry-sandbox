@@ -171,6 +171,18 @@ class IdeConfig(_Strict):
 
 
 # ---------------------------------------------------------------------------
+# package bootstrap
+# ---------------------------------------------------------------------------
+
+
+class PackageBootstrap(_Strict):
+    pip: str | list[str] | None = None
+    uv: str | list[str] | None = None
+    apt: list[str] = Field(default_factory=list)
+    npm: list[str] = Field(default_factory=list)
+
+
+# ---------------------------------------------------------------------------
 # dev profiles
 # ---------------------------------------------------------------------------
 
@@ -180,6 +192,7 @@ class DevProfile(_Strict):
     wd: str | None = None
     ide: str | None = None
     pip_requirements: str | None = None
+    packages: PackageBootstrap | None = None
     template: str | None = None
 
 
@@ -195,6 +208,7 @@ class FoundryConfig(_Strict):
     claude_code: ClaudeCodeConfig | None = None
     user_services: list[UserService] = Field(default_factory=list)
     allow_third_party_mcp: bool = False
+    allow_system_packages: bool = False
     ide: IdeConfig | None = None
     profiles: dict[str, DevProfile] = Field(default_factory=dict)
 
@@ -206,6 +220,24 @@ class FoundryConfig(_Strict):
                 raise ValueError(
                     f"MCP servers {bad} are type=npm but allow_third_party_mcp is off"
                 )
+        return self
+
+    @model_validator(mode="after")
+    def _gate_system_packages(self) -> FoundryConfig:
+        if not self.allow_system_packages:
+            for name, profile in self.profiles.items():
+                if profile.packages and (
+                    profile.packages.apt or profile.packages.npm
+                ):
+                    parts = []
+                    if profile.packages.apt:
+                        parts.append(f"apt: {profile.packages.apt}")
+                    if profile.packages.npm:
+                        parts.append(f"npm: {profile.packages.npm}")
+                    raise ValueError(
+                        f"Profile '{name}' has system packages ({', '.join(parts)}) "
+                        f"but allow_system_packages is off"
+                    )
         return self
 
 
@@ -254,6 +286,9 @@ def _merge(layers: list[FoundryConfig]) -> FoundryConfig:
 
     # allow_third_party_mcp: AND across layers
     result.allow_third_party_mcp = all(layer.allow_third_party_mcp for layer in layers)
+
+    # allow_system_packages: AND across layers
+    result.allow_system_packages = all(layer.allow_system_packages for layer in layers)
 
     # Lists: concatenate
     all_mcp: list[McpServer] = []
@@ -437,6 +472,23 @@ def resolve_profile(config: FoundryConfig, profile_name: str) -> DevProfile:
     )
 
 
+def normalize_profile_packages(profile: DevProfile) -> dict[str, object]:
+    """Build a packages dict from a profile, bridging legacy pip_requirements."""
+    packages: dict[str, object] = {}
+    if profile.packages:
+        if profile.packages.pip is not None:
+            packages["pip"] = profile.packages.pip
+        if profile.packages.uv is not None:
+            packages["uv"] = profile.packages.uv
+        if profile.packages.apt:
+            packages["apt"] = profile.packages.apt
+        if profile.packages.npm:
+            packages["npm"] = profile.packages.npm
+    if "pip" not in packages and profile.pip_requirements:
+        packages["pip"] = profile.pip_requirements
+    return packages
+
+
 # ---------------------------------------------------------------------------
 # Plan renderer
 # ---------------------------------------------------------------------------
@@ -454,6 +506,7 @@ def render_plan_text(config: FoundryConfig, *, profile_name: str | None = None) 
     # Gates
     lines.append("Gates (AND across layers):")
     lines.append(f"  allow_third_party_mcp: {'true' if config.allow_third_party_mcp else 'false'}")
+    lines.append(f"  allow_system_packages: {'true' if config.allow_system_packages else 'false'}")
     lines.append("")
 
     # Profiles
@@ -466,6 +519,13 @@ def render_plan_text(config: FoundryConfig, *, profile_name: str | None = None) 
             if value is not None:
                 lines.append(f"  {field_name}: {value}")
                 has_any = True
+        if resolved.packages:
+            pkgs = normalize_profile_packages(resolved)
+            if pkgs:
+                lines.append("  packages:")
+                for pkg_type, pkg_val in pkgs.items():
+                    lines.append(f"    {pkg_type}: {pkg_val}")
+                has_any = True
         if not has_any:
             lines.append("  (empty — all defaults from CLI)")
         lines.append("")
@@ -477,6 +537,10 @@ def render_plan_text(config: FoundryConfig, *, profile_name: str | None = None) 
                 value = getattr(prof, field_name)
                 if value is not None:
                     fields.append(f"{field_name}={value}")
+            if prof.packages:
+                pkgs = normalize_profile_packages(prof)
+                if pkgs:
+                    fields.append(f"packages={pkgs}")
             lines.append(f"  {name}: {', '.join(fields) if fields else '(empty)'}")
         lines.append("")
 

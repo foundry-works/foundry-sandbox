@@ -519,6 +519,11 @@ def new(
     click.echo()
     click.echo(f"Setting up your sandbox: {name}")
 
+    # Build packages dict from --pip-requirements
+    new_packages: dict[str, object] = {}
+    if pip_requirements:
+        new_packages["pip"] = pip_requirements
+
     try:
         host_worktree_path = new_sbx_setup(
             repo_url=repo_url,
@@ -536,6 +541,7 @@ def new(
             wd=wd or "",
             template=template,
             ide=ide or "",
+            packages=new_packages or None,
         )
     except RuntimeError as exc:
         log_error(str(exc))
@@ -565,6 +571,7 @@ def new(
         template=template,
         template_managed=effective_template_managed,
         ide=ide or "",
+        packages=new_packages or None,
     )
     save_last_attach(name)
 
@@ -584,6 +591,7 @@ def new(
             template=template,
             template_managed=effective_template_managed,
             ide=ide or "",
+            packages=new_packages or None,
         )
 
     # Success message

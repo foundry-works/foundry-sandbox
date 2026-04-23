@@ -252,6 +252,7 @@ def collect_sandbox_list(
         sb["wrapper_last_verified"] = md.get("wrapper_last_verified", "")
         sb["working_dir"] = md.get("working_dir", "")
         sb["pip_requirements"] = md.get("pip_requirements", "")
+        sb["packages"] = md.get("packages", {})
         sb["allow_pr"] = str(md.get("allow_pr", False))
         sb["copies"] = str(md.get("copies", []))
     return sandboxes
@@ -274,6 +275,7 @@ def _build_command_line(
     enable_zai: bool = False,
     copies: list[str] | None = None,
     ide: str = "",
+    packages: dict[str, object] | None = None,
 ) -> str:
     """Build a display-friendly command line string from cast-new arguments."""
     parts = ["cast new", repo]
@@ -285,7 +287,11 @@ def _build_command_line(
         parts.extend(["--agent", agent])
     if working_dir:
         parts.extend(["--wd", working_dir])
-    if pip_requirements:
+    if packages and packages.get("pip"):
+        pip_val = packages["pip"]
+        if isinstance(pip_val, str):
+            parts.extend(["--pip-requirements", pip_val])
+    elif pip_requirements:
         parts.extend(["--pip-requirements", pip_requirements])
     if allow_pr:
         parts.append("--allow-pr")
@@ -316,6 +322,7 @@ def _write_cast_new_json(
     template: str = "",
     template_managed: bool = False,
     ide: str = "",
+    packages: dict[str, object] | None = None,
 ) -> str:
     """Write cast-new JSON to a file.
 
@@ -329,6 +336,7 @@ def _write_cast_new_json(
         from_branch=from_branch,
         working_dir=working_dir,
         pip_requirements=pip_requirements,
+        packages=packages or {},
         allow_pr=allow_pr,
         enable_opencode=enable_opencode,
         enable_zai=enable_zai,
@@ -343,6 +351,7 @@ def _write_cast_new_json(
         repo, agent, branch, from_branch, working_dir,
         pip_requirements, allow_pr,
         enable_opencode, enable_zai, copies, ide,
+        packages=packages,
     )
 
     data = {
@@ -371,6 +380,7 @@ def save_last_cast_new(
     template: str = "",
     template_managed: bool = False,
     ide: str = "",
+    packages: dict[str, object] | None = None,
 ) -> str:
     """Save the most recent cast-new command.
 
@@ -384,7 +394,7 @@ def save_last_cast_new(
         allow_pr=allow_pr,
         enable_opencode=enable_opencode, enable_zai=enable_zai,
         copies=copies, template=template, template_managed=template_managed,
-        ide=ide,
+        ide=ide, packages=packages,
     )
 
 
@@ -404,6 +414,7 @@ def save_cast_preset(
     template: str = "",
     template_managed: bool = False,
     ide: str = "",
+    packages: dict[str, object] | None = None,
 ) -> None:
     """Save a named cast-new preset."""
     ensure_dir(path_presets_dir())
@@ -414,7 +425,7 @@ def save_cast_preset(
         allow_pr=allow_pr,
         enable_opencode=enable_opencode, enable_zai=enable_zai,
         copies=copies, template=template, template_managed=template_managed,
-        ide=ide,
+        ide=ide, packages=packages,
     )
 
 

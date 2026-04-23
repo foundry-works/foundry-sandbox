@@ -18,7 +18,7 @@ from pathlib import Path
 from typing import Any, cast
 
 from foundry_sandbox.constants import get_sandbox_verbose
-from foundry_sandbox.utils import log_info, log_warn
+from foundry_sandbox.utils import log_info, log_section, log_warn
 
 
 # ============================================================================
@@ -402,6 +402,84 @@ def install_pip_requirements(name: str, requirements: str) -> None:
         sbx_exec(name, ["pip", "install", "-r", requirements])
     except Exception as exc:
         log_warn(f"Failed to install pip requirements: {exc}")
+
+
+def install_pip_packages(name: str, packages: list[str]) -> None:
+    """Install named pip packages inside an sbx sandbox."""
+    log_info(f"Installing pip packages: {packages}")
+    try:
+        sbx_exec(name, ["pip", "install", *packages])
+    except Exception as exc:
+        log_warn(f"Failed to install pip packages: {exc}")
+
+
+def install_uv_requirements(name: str, requirements: str) -> None:
+    """Install uv requirements inside an sbx sandbox."""
+    log_info(f"Installing uv requirements: {requirements}")
+    try:
+        sbx_exec(name, ["sh", "-c", f"uv pip install -r {requirements}"], user="root")
+    except Exception as exc:
+        log_warn(f"Failed to install uv requirements: {exc}")
+
+
+def install_uv_packages(name: str, packages: list[str]) -> None:
+    """Install named uv packages inside an sbx sandbox."""
+    log_info(f"Installing uv packages: {packages}")
+    try:
+        sbx_exec(name, ["sh", "-c", "uv pip install " + " ".join(packages)], user="root")
+    except Exception as exc:
+        log_warn(f"Failed to install uv packages: {exc}")
+
+
+def install_apt_packages(name: str, packages: list[str]) -> None:
+    """Install apt packages inside an sbx sandbox."""
+    if not packages:
+        return
+    log_info(f"Installing apt packages: {packages}")
+    try:
+        sbx_exec(
+            name,
+            ["sh", "-c", "apt-get update -qq && apt-get install -y -qq " + " ".join(packages)],
+            user="root",
+        )
+    except Exception as exc:
+        log_warn(f"Failed to install apt packages: {exc}")
+
+
+def install_npm_packages(name: str, packages: list[str]) -> None:
+    """Install npm packages globally inside an sbx sandbox."""
+    if not packages:
+        return
+    log_info(f"Installing npm packages: {packages}")
+    try:
+        sbx_exec(name, ["npm", "install", "-g", *packages], user="root")
+    except Exception as exc:
+        log_warn(f"Failed to install npm packages: {exc}")
+
+
+def bootstrap_packages(name: str, packages: dict[str, object]) -> None:
+    """Run all package bootstrap steps in dependency order: apt -> pip -> uv -> npm."""
+    if not packages:
+        return
+    log_section("Dependencies")
+    apt_val = packages.get("apt")
+    if apt_val and isinstance(apt_val, list):
+        install_apt_packages(name, apt_val)
+    pip_val = packages.get("pip")
+    if pip_val:
+        if isinstance(pip_val, list):
+            install_pip_packages(name, pip_val)
+        else:
+            install_pip_requirements(name, str(pip_val))
+    uv_val = packages.get("uv")
+    if uv_val:
+        if isinstance(uv_val, list):
+            install_uv_packages(name, uv_val)
+        else:
+            install_uv_requirements(name, str(uv_val))
+    npm_val = packages.get("npm")
+    if npm_val and isinstance(npm_val, list):
+        install_npm_packages(name, npm_val)
 
 
 # ============================================================================

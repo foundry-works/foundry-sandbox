@@ -355,3 +355,55 @@ class TestDevProfileResolution:
         # Agent should be the hardcoded default "claude"
         call_kwargs = mock_setup.call_args
         assert call_kwargs[1]["agent"] == "claude"
+
+    @_apply_mocks
+    def test_profile_packages_flow_to_setup(
+        self, mock_last_ide, mock_which, mock_save_attach, mock_save_new,
+        mock_patch, mock_makedirs, mock_sandbox_name, mock_repo_name,
+        mock_validate_name, mock_find, mock_resolve_repo, mock_branch_exists,
+        mock_detect_branch, mock_gen_branch, mock_validate, mock_setup,
+        mock_resolve_profile, mock_resolve_config,
+        mock_ide_config, mock_worktree, mock_macos, mock_cli,
+        mock_check, mock_running, mock_exec,
+    ):
+        from foundry_sandbox.foundry_config import DevProfile, FoundryConfig, PackageBootstrap
+        mock_ide_config.return_value = None
+        _setup_repo_and_worktree(mock_resolve_repo, mock_worktree, mock_setup)
+        mock_resolve_config.return_value = FoundryConfig(
+            version="1",
+            allow_system_packages=True,
+        )
+        mock_resolve_profile.return_value = DevProfile(
+            packages=PackageBootstrap(pip="requirements.txt", apt=["jq"]),
+        )
+
+        runner = CliRunner()
+        result = runner.invoke(dev, [".", "--profile", "work"])
+        assert result.exit_code == 0
+        call_kwargs = mock_setup.call_args
+        assert call_kwargs[1]["packages"] is not None
+        assert call_kwargs[1]["packages"]["pip"] == "requirements.txt"
+        assert call_kwargs[1]["packages"]["apt"] == ["jq"]
+
+    @_apply_mocks
+    def test_pip_requirements_cli_bridge(
+        self, mock_last_ide, mock_which, mock_save_attach, mock_save_new,
+        mock_patch, mock_makedirs, mock_sandbox_name, mock_repo_name,
+        mock_validate_name, mock_find, mock_resolve_repo, mock_branch_exists,
+        mock_detect_branch, mock_gen_branch, mock_validate, mock_setup,
+        mock_resolve_profile, mock_resolve_config,
+        mock_ide_config, mock_worktree, mock_macos, mock_cli,
+        mock_check, mock_running, mock_exec,
+    ):
+        from foundry_sandbox.foundry_config import DevProfile, FoundryConfig
+        mock_ide_config.return_value = None
+        _setup_repo_and_worktree(mock_resolve_repo, mock_worktree, mock_setup)
+        mock_resolve_config.return_value = FoundryConfig(version="1")
+        mock_resolve_profile.return_value = DevProfile()
+
+        runner = CliRunner()
+        result = runner.invoke(dev, [".", "--pip-requirements", "dev-requirements.txt"])
+        assert result.exit_code == 0
+        call_kwargs = mock_setup.call_args
+        assert call_kwargs[1]["packages"] is not None
+        assert call_kwargs[1]["packages"]["pip"] == "dev-requirements.txt"

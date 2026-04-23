@@ -19,6 +19,7 @@ from foundry_sandbox.git_safety import (
 )
 from foundry_sandbox.paths import ensure_dir
 from foundry_sandbox.sbx import (
+    bootstrap_packages,
     install_pip_requirements,
     sbx_check_available,
     sbx_create,
@@ -75,6 +76,7 @@ def new_sbx_setup(
     wd: str,
     template: str | None = FOUNDRY_TEMPLATE_TAG,
     ide: str = "",
+    packages: dict[str, object] | None = None,
 ) -> str:
     """Create a new sbx-based sandbox.
 
@@ -181,6 +183,7 @@ def new_sbx_setup(
             workspace_dir="/workspace",
             working_dir=wd,
             pip_requirements=pip_requirements,
+            packages=packages or {},
             allow_pr=allow_pr,
             enable_opencode=with_opencode,
             enable_zai=with_zai,
@@ -272,7 +275,9 @@ def new_sbx_setup(
             except Exception as exc:
                 log_warn(f"Failed to copy {host_path}: {exc}")
 
-    if pip_requirements:
+    if packages:
+        bootstrap_packages(name, packages)
+    elif pip_requirements:
         log_section("Dependencies")
         install_pip_requirements(name, pip_requirements)
 

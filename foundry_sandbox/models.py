@@ -33,6 +33,9 @@ class SbxSandboxMetadata(BaseModel):
     pip_requirements: str = ""
     """Path to pip requirements file or 'auto'."""
 
+    packages: dict[str, object] = Field(default_factory=dict)
+    """Typed package bootstrap config: {"pip": ..., "apt": [...], ...}."""
+
     allow_pr: bool = False
     """Whether to allow PR creation."""
 
@@ -90,6 +93,9 @@ class CastNewPreset(BaseModel):
 
     pip_requirements: str = ""
     """Path to pip requirements file or 'auto'."""
+
+    packages: dict[str, object] = Field(default_factory=dict)
+    """Typed package bootstrap config: {"pip": ..., "apt": [...], ...}."""
 
     allow_pr: bool = False
     """Whether to allow PR creation."""

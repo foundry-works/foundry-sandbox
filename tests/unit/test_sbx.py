@@ -18,9 +18,13 @@ from foundry_sandbox.sbx import (
     _is_docker_plugin_path,
     _resolve_sbx_binary,
     _run_standalone_probe,
+    bootstrap_packages,
     check_sbx_version,
     find_sbx_binary,
     get_sbx_version,
+    install_apt_packages,
+    install_npm_packages,
+    install_uv_requirements,
     sbx_check_available,
     sbx_create,
     sbx_diagnose,
@@ -646,3 +650,82 @@ class TestSbxCheckAvailableIdentity:
                     with patch("foundry_sandbox.sbx._run_standalone_probe", return_value=False):
                         with pytest.raises(SystemExit):
                             sbx_check_available()
+
+
+# ---------------------------------------------------------------------------
+# Phase 3: Package Bootstrap install functions
+# ---------------------------------------------------------------------------
+
+
+class TestInstallAptPackages:
+    @patch("foundry_sandbox.sbx.sbx_exec")
+    def test_install_apt(self, mock_exec):
+        install_apt_packages("test-sbx", ["curl", "jq"])
+        mock_exec.assert_called_once()
+        assert mock_exec.call_args.kwargs["user"] == "root"
+        cmd = mock_exec.call_args.args[1]
+        assert "apt-get update" in cmd[2]
+        assert "apt-get install" in cmd[2]
+
+    @patch("foundry_sandbox.sbx.sbx_exec")
+    def test_empty_packages_is_noop(self, mock_exec):
+        install_apt_packages("test-sbx", [])
+        mock_exec.assert_not_called()
+
+
+class TestInstallNpmPackages:
+    @patch("foundry_sandbox.sbx.sbx_exec")
+    def test_install_npm(self, mock_exec):
+        install_npm_packages("test-sbx", ["typescript", "prettier"])
+        mock_exec.assert_called_once()
+        assert mock_exec.call_args.kwargs["user"] == "root"
+        cmd = mock_exec.call_args.args[1]
+        assert cmd == ["npm", "install", "-g", "typescript", "prettier"]
+
+    @patch("foundry_sandbox.sbx.sbx_exec")
+    def test_empty_packages_is_noop(self, mock_exec):
+        install_npm_packages("test-sbx", [])
+        mock_exec.assert_not_called()
+
+
+class TestInstallUvRequirements:
+    @patch("foundry_sandbox.sbx.sbx_exec")
+    def test_install_uv(self, mock_exec):
+        install_uv_requirements("test-sbx", "requirements.txt")
+        mock_exec.assert_called_once()
+        assert mock_exec.call_args.kwargs["user"] == "root"
+        cmd = mock_exec.call_args.args[1]
+        assert "uv pip install" in cmd[2]
+
+
+class TestBootstrapPackages:
+    @patch("foundry_sandbox.sbx.install_npm_packages")
+    @patch("foundry_sandbox.sbx.install_uv_requirements")
+    @patch("foundry_sandbox.sbx.install_pip_requirements")
+    @patch("foundry_sandbox.sbx.install_apt_packages")
+    @patch("foundry_sandbox.sbx.log_section")
+    def test_order_apt_pip_uv_npm(self, mock_log, mock_apt, mock_pip, mock_uv, mock_npm):
+        call_order = []
+        mock_apt.side_effect = lambda *a, **k: call_order.append("apt")
+        mock_pip.side_effect = lambda *a, **k: call_order.append("pip")
+        mock_uv.side_effect = lambda *a, **k: call_order.append("uv")
+        mock_npm.side_effect = lambda *a, **k: call_order.append("npm")
+
+        bootstrap_packages("test-sbx", {
+            "pip": "requirements.txt",
+            "uv": "uv-requirements.txt",
+            "apt": ["jq"],
+            "npm": ["typescript"],
+        })
+
+        assert call_order == ["apt", "pip", "uv", "npm"]
+
+    @patch("foundry_sandbox.sbx.log_section")
+    def test_empty_dict_is_noop(self, mock_log):
+        bootstrap_packages("test-sbx", {})
+
+    @patch("foundry_sandbox.sbx.install_pip_packages")
+    @patch("foundry_sandbox.sbx.log_section")
+    def test_pip_list_installs_packages(self, mock_log, mock_pip_pkgs):
+        bootstrap_packages("test-sbx", {"pip": ["ruff", "mypy"]})
+        mock_pip_pkgs.assert_called_once_with("test-sbx", ["ruff", "mypy"])

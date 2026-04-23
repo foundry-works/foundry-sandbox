@@ -20,7 +20,7 @@ from foundry_sandbox.commands.new import (
     _resolve_repo_input,
 )
 from foundry_sandbox.commands.new_setup import _validate_preconditions, new_sbx_setup
-from foundry_sandbox.foundry_config import load_user_ide_config, resolve_foundry_config, resolve_profile
+from foundry_sandbox.foundry_config import load_user_ide_config, normalize_profile_packages, resolve_foundry_config, resolve_profile
 from foundry_sandbox.ide import launch_ide
 from foundry_sandbox.paths import (
     find_next_sandbox_name,
@@ -148,17 +148,27 @@ def dev(
     effective_pip = pip_requirements or profile_config.pip_requirements or ""
     effective_template = template or profile_config.template or "foundry-git-wrapper:latest"
 
+    # Resolve packages from profile, bridge CLI --pip-requirements
+    effective_packages = normalize_profile_packages(profile_config)
+    if pip_requirements:
+        effective_packages["pip"] = pip_requirements
+
     # --plan: dry-run mode
     if dry_run_plan:
         from foundry_sandbox.foundry_config import render_plan_text
 
         plan_output = render_plan_text(config, profile_name=profile)
         plan_output += "\nEffective settings:\n"
-        plan_output += f"  agent:            {effective_agent}\n"
-        plan_output += f"  ide:              {effective_ide or '(auto)'}\n"
-        plan_output += f"  wd:               {effective_wd or '(repo root)'}\n"
-        plan_output += f"  pip_requirements: {effective_pip or '(none)'}\n"
-        plan_output += f"  template:         {effective_template}\n"
+        plan_output += f"  agent:     {effective_agent}\n"
+        plan_output += f"  ide:       {effective_ide or '(auto)'}\n"
+        plan_output += f"  wd:        {effective_wd or '(repo root)'}\n"
+        plan_output += f"  template:  {effective_template}\n"
+        if effective_packages:
+            plan_output += "  packages:\n"
+            for pkg_type, pkg_val in effective_packages.items():
+                plan_output += f"    {pkg_type}: {pkg_val}\n"
+        else:
+            plan_output += "  packages:  (none)\n"
         click.echo(plan_output)
         return
 
@@ -255,6 +265,7 @@ def dev(
             wd=effective_wd,
             template=effective_template,
             ide=effective_ide,
+            packages=effective_packages or None,
         )
     except RuntimeError as exc:
         log_error(str(exc))
@@ -279,6 +290,7 @@ def dev(
         pip_requirements=effective_pip,
         template=effective_template,
         ide=effective_ide,
+        packages=effective_packages or None,
     )
     save_last_attach(name)
 

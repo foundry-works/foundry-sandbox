@@ -117,6 +117,7 @@ class TestSbxSandboxMetadata:
         assert meta.workspace_dir == "/workspace"
         assert meta.working_dir == ""
         assert meta.pip_requirements == ""
+        assert meta.packages == {}
         assert meta.allow_pr is False
         assert meta.enable_opencode is False
         assert meta.enable_zai is False
@@ -139,6 +140,29 @@ class TestSbxSandboxMetadata:
         restored = SbxSandboxMetadata(**data)
         assert restored.template == "preset-my-setup:latest"
         assert restored.template_managed is True
+
+    def test_packages_roundtrip(self):
+        meta = SbxSandboxMetadata(
+            sbx_name="test",
+            agent="claude",
+            repo_url="u",
+            branch="b",
+            packages={"pip": "requirements.txt", "apt": ["jq", "ripgrep"]},
+        )
+        data = meta.model_dump()
+        restored = SbxSandboxMetadata(**data)
+        assert restored.packages == {"pip": "requirements.txt", "apt": ["jq", "ripgrep"]}
+
+    def test_backward_compat_no_packages(self):
+        meta = SbxSandboxMetadata(
+            sbx_name="test",
+            agent="claude",
+            repo_url="u",
+            branch="b",
+            pip_requirements="requirements.txt",
+        )
+        assert meta.pip_requirements == "requirements.txt"
+        assert meta.packages == {}
 
 
 # ---------------------------------------------------------------------------

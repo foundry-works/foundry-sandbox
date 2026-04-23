@@ -416,10 +416,15 @@ profiles:
     pip_requirements: requirements-dev.txt
     template: foundry-git-wrapper:latest
 
-  codex-node:
-    agent: codex
-    wd: frontend
-    ide: code
+  full-stack:
+    agent: claude
+    wd: .
+    ide: cursor
+    packages:
+      pip: requirements-dev.txt
+      apt: [jq, ripgrep]
+      npm: [typescript]
+    template: foundry-git-wrapper:latest
 ```
 
 Fields:
@@ -429,10 +434,66 @@ Fields:
 | `agent` | Default agent type (`claude`, `codex`, `copilot`, `gemini`, `kiro`, `opencode`, `shell`) |
 | `wd` | Default working directory inside the repo |
 | `ide` | Default IDE (user config only — stripped from repo profiles) |
-| `pip_requirements` | Default pip requirements file |
+| `pip_requirements` | Default pip requirements file (legacy — use `packages.pip` instead) |
+| `packages` | Typed package bootstrap config (see below) |
 | `template` | Default sandbox template tag |
 
 All fields are optional. An empty profile is valid and provides no defaults.
+
+### Package Bootstrap
+
+The `packages` field on a profile controls dependency installation inside the
+sandbox. Packages are installed at sandbox creation time and re-installed on
+restart.
+
+```yaml
+profiles:
+  python-dev:
+    packages:
+      pip: requirements-dev.txt       # str = requirements file path
+      uv: pyproject.toml              # str = requirements file path
+      apt: [jq, ripgrep]             # list of system package names
+      npm: [typescript, prettier]    # list of npm package names
+```
+
+Fields:
+
+| Field | Type | Purpose |
+|-------|------|---------|
+| `pip` | `str` or `list[str]` | `str` installs from a requirements file (`pip install -r`). `list` installs named packages. |
+| `uv` | `str` or `list[str]` | Same as `pip` but uses `uv pip install`. Requires `uv` in the sandbox. |
+| `apt` | `list[str]` | System packages installed via `apt-get install -y`. |
+| `npm` | `list[str]` | Global npm packages installed via `npm install -g`. |
+
+Install order: `apt` → `pip` → `uv` → `npm` (system packages first so Python
+and Node tools can find their C dependencies).
+
+#### System packages gate
+
+`apt` and `npm` bootstrap require the `allow_system_packages` gate to be set
+to `true`. This gate uses AND semantics across config layers — any layer
+setting it to `false` blocks system package installation.
+
+```yaml
+version: "1"
+
+allow_system_packages: true
+
+profiles:
+  full-stack:
+    packages:
+      apt: [jq]
+      npm: [typescript]
+```
+
+`pip` and `uv` bootstrap do not require this gate — they have the same trust
+level as the existing `--pip-requirements` flag.
+
+#### Legacy `pip_requirements`
+
+The `pip_requirements` field on profiles continues to work. If a profile sets
+both `pip_requirements` and `packages.pip`, the `packages.pip` value wins. The
+`--pip-requirements` CLI flag is also bridged into the packages system.
 
 ### Where profiles can live
 
