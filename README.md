@@ -26,6 +26,8 @@ Use `sbx` alone for an ephemeral microVM. Use Foundry when you also want the age
 
 Foundry installs a git wrapper at `/usr/local/bin/git` in each sandbox. Every git command routes through `foundry-git-safety` on the host, which validates refs, enforces branch isolation, blocks pushes to protected branches and sensitive file patterns, filters GitHub API calls, and logs decisions for audit. A host-side watchdog checksums the wrapper and re-injects it if a process inside the sandbox tampers with it.
 
+Repo and user policy live primarily in `foundry.yaml`. Foundry resolves built-in defaults, `~/.foundry/foundry.yaml`, and repo `foundry.yaml`, then compiles git-safety overlays, proxy-backed service env vars, MCP config, and Claude Code config into sandbox artifacts at creation time.
+
 The goal is practical blast-radius reduction: agents can work freely in an isolated workspace while host state, secrets, and protected git operations stay behind policy boundaries.
 
 ## Quick Start
@@ -38,19 +40,25 @@ export CLAUDE_CODE_OAUTH_TOKEN="..."   # or ANTHROPIC_API_KEY
 gh auth login                          # for private repos and push
 ```
 
-3. Create a sandbox:
+3. Optional: preview the resolved config and generated artifacts:
+
+```bash
+cast new owner/repo feature-login main --plan
+```
+
+4. Create a sandbox:
 
 ```bash
 cast new owner/repo feature-login main
 ```
 
-4. Attach to it:
+5. Attach to it:
 
 ```bash
 cast attach repo-feature-login
 ```
 
-5. Work inside `/workspace`, then destroy it when done:
+6. Work inside `/workspace`, then destroy it when done:
 
 ```bash
 cast destroy repo-feature-login --yes
@@ -80,7 +88,7 @@ The maintained docs for the current product surface are:
 |----------|-------------|
 | [Getting Started](docs/getting-started.md) | Install, authenticate, create, attach |
 | [Commands](docs/usage/commands.md) | Current CLI reference |
-| [Configuration](docs/configuration.md) | Environment variables, credentials, user services |
+| [Configuration](docs/configuration.md) | `foundry.yaml`, credentials, MCP, Claude Code, user services |
 | [Operations](docs/operations.md) | Runbook and troubleshooting |
 | [Security Model](docs/security/security-model.md) | Threat model and enforcement boundaries |
 | [Workflows](docs/usage/workflows.md) | Common day-to-day patterns |

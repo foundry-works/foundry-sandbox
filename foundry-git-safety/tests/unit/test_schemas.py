@@ -104,12 +104,48 @@ class TestGitSafetyConfig:
 class TestFoundryConfig:
     def test_defaults(self):
         cfg = FoundryConfig()
-        assert cfg.version == "1.0"
+        assert cfg.version == "1"
         assert isinstance(cfg.git_safety, GitSafetyConfig)
+        assert cfg.user_services == []
 
     def test_override(self):
         cfg = FoundryConfig(version="2.0")
         assert cfg.version == "2.0"
+
+    def test_legacy_version_still_loads(self):
+        cfg = FoundryConfig(version="1.0")
+        assert cfg.version == "1.0"
+
+    def test_top_level_user_services_list(self):
+        cfg = FoundryConfig(
+            user_services=[
+                {
+                    "name": "Tavily",
+                    "env_var": "TAVILY_API_KEY",
+                    "domain": "api.tavily.com",
+                }
+            ],
+        )
+        assert len(cfg.user_services) == 1
+        assert cfg.user_services[0].header == "Authorization"
+        assert cfg.user_services[0].format == "bearer"
+
+    def test_nested_user_services_compat_unwraps(self):
+        cfg = FoundryConfig(
+            user_services={
+                "version": "1",
+                "services": [
+                    {
+                        "name": "CustomService",
+                        "env_var": "CUSTOM_API_KEY",
+                        "domain": "api.custom.example",
+                        "format": "value",
+                    }
+                ],
+            },
+        )
+        assert len(cfg.user_services) == 1
+        assert cfg.user_services[0].format == "header"
 
 
 if __name__ == "__main__":

@@ -1,6 +1,63 @@
 # Configuration
 
-This page documents the configuration surface that is verified in this repo today: host authentication, credential refresh, host-side paths, user-service configuration, and the main environment variables that affect `cast`.
+This page documents the current configuration surface verified in this repo.
+The primary declarative input is `foundry.yaml`.
+
+## `foundry.yaml`
+
+Foundry resolves configuration in this order:
+
+1. packaged builtin defaults
+2. `~/.foundry/foundry.yaml`
+3. `<repo>/foundry.yaml`
+
+Use `cast new ... --plan` to inspect the resolved config and generated artifacts
+before creating a sandbox:
+
+```bash
+cast new . feature-login main --plan
+```
+
+Example:
+
+```yaml
+version: "1"
+
+git_safety:
+  protected_branches:
+    add:
+      - refs/heads/staging
+  file_restrictions:
+    blocked_patterns_add:
+      - db/migrations/
+  allow_pr_operations: false
+
+user_services:
+  - name: Tavily
+    env_var: TAVILY_API_KEY
+    domain: api.tavily.com
+
+mcp_servers:
+  - name: github
+    type: builtin
+    env:
+      GITHUB_PERSONAL_ACCESS_TOKEN: "${from_host:GITHUB_TOKEN}"
+
+claude_code:
+  commands:
+    - /path/to/commands/review.md
+```
+
+Merge behavior:
+
+- `mcp_servers` and `user_services` concatenate across layers
+- `git_safety.protected_branches.add` and
+  `git_safety.file_restrictions.blocked_patterns_add` only append
+- `allow_third_party_mcp` and `git_safety.allow_pr_operations` tighten via AND
+  semantics across layers
+- `claude_code` skills, commands, hooks, and permissions merge additively
+- a repo `foundry.yaml` can add config, but it cannot override tighter
+  user-layer gates
 
 ## Host Authentication
 
@@ -41,7 +98,8 @@ The current implementation pushes:
 - `anthropic` from `ANTHROPIC_API_KEY`
 - `github` from `GITHUB_TOKEN` or `GH_TOKEN`
 - `openai` from `OPENAI_API_KEY`
-- any user-defined services declared in `config/user-services.yaml`
+- any resolved `foundry.yaml` secret refs from:
+  `user_services`, proxy MCP `host_env`, and `${from_host:VAR}` MCP env values
 
 ## Sandbox Creation Options
 
@@ -52,39 +110,56 @@ These `cast new` options change sandbox setup and are persisted in metadata and 
 | `--wd PATH` | Initial working directory inside the repo |
 | `-r`, `--pip-requirements PATH` | Install Python dependencies inside the sandbox |
 | `-c`, `--copy HOST:CONTAINER` | Copy a host file into the sandbox once at creation time |
-| `--allow-pr` | Allow PR-oriented operations |
+| `--allow-pr` | Request PR-oriented operations; resolved config can still tighten this |
 | `--template TAG` | Use a specific `sbx` template instead of the default wrapper template |
 | `--with-opencode` | Enable OpenCode-related setup intent; warns if host auth is missing |
 | `--with-zai` | Enable ZAI-related setup intent; requires `ZHIPU_API_KEY` |
+| `--plan` | Show resolved `foundry.yaml` layers and compiled artifacts without creating a sandbox |
+
+## Git Safety Overlay
+
+Use the `git_safety` section in `foundry.yaml` to tighten sandbox git policy:
+
+```yaml
+git_safety:
+  protected_branches:
+    add:
+      - refs/heads/staging
+      - refs/heads/release
+  file_restrictions:
+    blocked_patterns_add:
+      - ".env.production"
+      - "db/migrations/"
+  allow_pr_operations: false
+```
+
+Behavior:
+
+- `protected_branches.add` and `blocked_patterns_add` are additive-only
+- `allow_pr_operations` can tighten existing PR permission, but cannot loosen it
+- `cast new --allow-pr` and `git_safety.allow_pr_operations` combine via AND
+  semantics: `false` anywhere wins
 
 ## User-Defined Services
 
 For APIs that are not handled directly by the built-in `sbx` secret flow,
-Foundry can inject proxy URLs into the sandbox instead of raw secrets.
-
-Search order for the config file:
-
-1. explicit path passed by code
-2. `FOUNDRY_USER_SERVICES_PATH`
-3. `config/user-services.yaml`
-
-Start from the bundled example:
-
-```bash
-cp config/user-services.yaml.example config/user-services.yaml
-```
+declare proxy-backed service env vars in `foundry.yaml` under `user_services`.
 
 Example:
 
 ```yaml
 version: "1"
 
-services:
+user_services:
   - name: Tavily
     env_var: TAVILY_API_KEY
     domain: api.tavily.com
     header: Authorization
     format: bearer
+    methods: [GET, POST]
+    paths: ["/search*", "/extract*"]
+    scheme: https
+    port: 443
 ```
 
 At sandbox creation time, Foundry injects a proxy URL such as:
@@ -98,6 +173,12 @@ Important behavior:
 - The configured `env_var` inside the sandbox contains a proxy URL, not an API key.
 - The real secret stays on the host.
 - Requests to the proxy are authenticated with sandbox HMAC headers.
+- `format` controls how the credential is injected:
+  `bearer` adds `Bearer <secret>` to `header`,
+  `header` writes the raw secret to `header`,
+  and `query` appends the secret as a query parameter named by `header`.
+- `methods` and `paths` optionally restrict which requests the proxy accepts.
+- `scheme` and `port` let you target non-default upstream transport settings.
 - This works best for direct HTTP clients or tools that can adapt to a custom
   proxy/base URL flow.
 - SDKs that assume `*_API_KEY` always contains a raw token will usually need
@@ -110,7 +191,8 @@ generate the required headers for `/proxy/...` endpoints.
 
 Declare MCP servers in `foundry.yaml` under the `mcp_servers` key. At sandbox
 creation, Foundry writes a `/workspace/.mcp.json` inside the sandbox with the
-compiled configuration.
+compiled configuration. Treat `foundry.yaml` as the source of truth, not the
+generated `.mcp.json` inside the sandbox.
 
 ### Builtin servers
 
@@ -151,8 +233,7 @@ env:
 ### Proxy servers
 
 For APIs that are not covered by a builtin, use `type: proxy`. The MCP server
-in the sandbox points at the Foundry proxy, which authenticates and forwards
-requests to the real service.
+in the sandbox points at the Foundry proxy.
 
 ```yaml
 mcp_servers:
@@ -163,7 +244,7 @@ mcp_servers:
 ```
 
 The `host_env` field names the host environment variable that holds the real
-credential. The `target` field is the upstream domain the proxy routes to.
+credential. The `target` field identifies the intended upstream service domain.
 
 ### npm servers (third-party)
 
@@ -225,7 +306,8 @@ mcp_servers:
 
 Configure Claude Code skills, commands, hooks, and permissions in `foundry.yaml`
 under the `claude_code` key. At sandbox creation, Foundry writes the compiled
-configuration into `/workspace/.claude/` inside the sandbox.
+configuration into `/workspace/.claude/` inside the sandbox. Keep
+`foundry.yaml` as the source of truth for those files.
 
 ### Skills
 
@@ -302,6 +384,7 @@ The current host-side layout is:
 <repo>/.sbx/<sandbox>-worktrees/<branch>/
 
 ~/.foundry/
+  foundry.yaml
   secrets/sandbox-hmac/<sandbox>
   data/git-safety/sandboxes/<sandbox>.json
   logs/decisions.jsonl
@@ -326,7 +409,6 @@ The current host-side layout is:
 |----------|---------|---------|
 | `GIT_API_SECRETS_PATH` | `~/.foundry/secrets/sandbox-hmac` | HMAC secret directory |
 | `FOUNDRY_DATA_DIR` | `~/.foundry/data/git-safety` | Git-safety registration directory |
-| `FOUNDRY_USER_SERVICES_PATH` | unset | Override path to `user-services.yaml` |
 
 ### Common Credentials
 

@@ -196,14 +196,14 @@ class TestLoadFoundryConfig:
     def test_missing_file_returns_defaults(self, tmp_path):
         """When the file does not exist, returns a FoundryConfig with defaults."""
         config = load_foundry_config(str(tmp_path / "nonexistent.yaml"))
-        assert config.version == "1.0"
+        assert config.version == "1"
         assert config.git_safety.server.host == "127.0.0.1"
         assert config.git_safety.server.port == 8083
 
     def test_valid_yaml_loads_correctly(self, tmp_path):
         """A valid foundry.yaml is parsed into a FoundryConfig."""
         yaml_content = {
-            "version": "1.0",
+            "version": "1",
             "git_safety": {
                 "server": {"host": "0.0.0.0", "port": 9999},
             },
@@ -214,14 +214,34 @@ class TestLoadFoundryConfig:
         assert config.git_safety.server.host == "0.0.0.0"
         assert config.git_safety.server.port == 9999
 
+    def test_top_level_user_services_loads_correctly(self, tmp_path):
+        yaml_content = {
+            "version": "1",
+            "user_services": [
+                {
+                    "name": "Tavily",
+                    "env_var": "TAVILY_API_KEY",
+                    "domain": "api.tavily.com",
+                }
+            ],
+        }
+        yaml_file = tmp_path / "foundry.yaml"
+        yaml_file.write_text(yaml.dump(yaml_content))
+
+        config = load_foundry_config(str(yaml_file))
+        assert len(config.user_services) == 1
+        assert config.user_services[0].name == "Tavily"
+        assert config.user_services[0].header == "Authorization"
+        assert config.user_services[0].format == "bearer"
+
     def test_env_var_path_used_when_no_arg(self, tmp_path):
         """FOUNDRY_CONFIG_PATH env var is used when path is not provided."""
-        yaml_content = {"version": "1.0"}
+        yaml_content = {"version": "1"}
         yaml_file = tmp_path / "custom.yaml"
         yaml_file.write_text(yaml.dump(yaml_content))
         with patch.dict(os.environ, {"FOUNDRY_CONFIG_PATH": str(yaml_file)}):
             config = load_foundry_config()
-        assert config.version == "1.0"
+        assert config.version == "1"
 
     def test_invalid_yaml_raises_config_error(self, tmp_path):
         """Malformed YAML raises ConfigError."""

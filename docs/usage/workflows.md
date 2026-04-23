@@ -5,6 +5,7 @@ These examples follow the current flow: create the sandbox first, then attach to
 ## Start a Feature Sandbox
 
 ```bash
+cast new owner/repo feature-login main --plan
 cast new owner/repo feature-login main
 cast attach repo-feature-login
 ```
@@ -54,7 +55,22 @@ cast new owner/repo review-pr-123 main --allow-pr
 cast attach repo-review-pr-123
 ```
 
+If the resolved `foundry.yaml` sets `git_safety.allow_pr_operations: false`,
+that tighter policy still wins.
+
 Inside the sandbox, use your normal git and `gh` workflow.
+
+## Preview `foundry.yaml` Changes
+
+Before creating a new sandbox, inspect the resolved config and compiled
+artifacts:
+
+```bash
+cast new . feature-login main --plan
+```
+
+Use this when changing repo `foundry.yaml`, user `~/.foundry/foundry.yaml`, MCP
+servers, or Claude Code config.
 
 ## Reuse a Known Setup
 

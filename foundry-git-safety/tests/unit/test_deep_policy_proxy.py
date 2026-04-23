@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import time
 from unittest.mock import MagicMock, patch
 
@@ -153,6 +154,153 @@ class TestProxyAllow:
 
         resp = _signed_request(client=app_client, path="/deep-policy/test-svc/v1/items")
         assert resp.status_code == 200
+
+
+class TestPolicyContext:
+    @patch("foundry_git_safety.deep_policy_proxy.http.client.HTTPSConnection")
+    def test_allow_pr_metadata_enables_conditional_rule(
+        self,
+        mock_conn_cls,
+        tmp_path,
+        monkeypatch: pytest.MonkeyPatch,
+    ):
+        from foundry_git_safety.server import create_git_api
+
+        data_dir = tmp_path / "data"
+        metadata_dir = data_dir / "sandboxes"
+        metadata_dir.mkdir(parents=True)
+        (metadata_dir / f"{_TEST_SANDBOX}.json").write_text(
+            json.dumps({"allow_pr": True})
+        )
+        monkeypatch.setenv("FOUNDRY_DATA_DIR", str(data_dir))
+
+        secrets_dir = tmp_path / "secrets"
+        secrets_dir.mkdir()
+        (secrets_dir / _TEST_SANDBOX).write_bytes(_TEST_SECRET)
+
+        secret_store = SecretStore(secrets_path=str(secrets_dir))
+        nonce_store = NonceStore()
+        rate_limiter = RateLimiter()
+
+        rules = [
+            {
+                "method": "POST",
+                "path_pattern": r"^/pulls$",
+                "action": "deny",
+                "reason": "blocked",
+                "priority": 50,
+                "condition": "allow_pr_operations == false",
+            },
+            {
+                "method": "POST",
+                "path_pattern": r"^/pulls$",
+                "action": "allow",
+                "priority": 5,
+                "condition": "allow_pr_operations == true",
+            },
+        ]
+        policy_sets, services = _make_policy_set(rules=rules)
+        cb = CircuitBreaker(threshold=5, recovery_seconds=30)
+
+        app = create_git_api(
+            secret_store=secret_store,
+            nonce_store=nonce_store,
+            rate_limiter=rate_limiter,
+        )
+        bp = create_deep_policy_blueprint(
+            policy_sets,
+            services,
+            secret_store=secret_store,
+            nonce_store=nonce_store,
+            rate_limiter=rate_limiter,
+            circuit_breaker=cb,
+        )
+        app.register_blueprint(bp)
+        client = app.test_client()
+
+        mock_conn = MagicMock()
+        mock_response = MagicMock()
+        mock_response.status = 200
+        mock_response.getheaders.return_value = []
+        mock_response.read.side_effect = [b"{}", b""]
+        mock_conn.getresponse.return_value = mock_response
+        mock_conn_cls.return_value = mock_conn
+
+        resp = _signed_request(
+            client=client,
+            path="/deep-policy/test-svc/pulls",
+            method="POST",
+            body=b"{}",
+        )
+        assert resp.status_code == 200
+
+    def test_allow_pr_metadata_false_blocks_conditional_rule(
+        self,
+        tmp_path,
+        monkeypatch: pytest.MonkeyPatch,
+    ):
+        from foundry_git_safety.server import create_git_api
+
+        data_dir = tmp_path / "data"
+        metadata_dir = data_dir / "sandboxes"
+        metadata_dir.mkdir(parents=True)
+        (metadata_dir / f"{_TEST_SANDBOX}.json").write_text(
+            json.dumps({"allow_pr": False})
+        )
+        monkeypatch.setenv("FOUNDRY_DATA_DIR", str(data_dir))
+
+        secrets_dir = tmp_path / "secrets"
+        secrets_dir.mkdir()
+        (secrets_dir / _TEST_SANDBOX).write_bytes(_TEST_SECRET)
+
+        secret_store = SecretStore(secrets_path=str(secrets_dir))
+        nonce_store = NonceStore()
+        rate_limiter = RateLimiter()
+
+        rules = [
+            {
+                "method": "POST",
+                "path_pattern": r"^/pulls$",
+                "action": "deny",
+                "reason": "blocked",
+                "priority": 50,
+                "condition": "allow_pr_operations == false",
+            },
+            {
+                "method": "POST",
+                "path_pattern": r"^/pulls$",
+                "action": "allow",
+                "priority": 5,
+                "condition": "allow_pr_operations == true",
+            },
+        ]
+        policy_sets, services = _make_policy_set(rules=rules)
+        cb = CircuitBreaker(threshold=5, recovery_seconds=30)
+
+        app = create_git_api(
+            secret_store=secret_store,
+            nonce_store=nonce_store,
+            rate_limiter=rate_limiter,
+        )
+        bp = create_deep_policy_blueprint(
+            policy_sets,
+            services,
+            secret_store=secret_store,
+            nonce_store=nonce_store,
+            rate_limiter=rate_limiter,
+            circuit_breaker=cb,
+        )
+        app.register_blueprint(bp)
+        client = app.test_client()
+
+        resp = _signed_request(
+            client=client,
+            path="/deep-policy/test-svc/pulls",
+            method="POST",
+            body=b"{}",
+        )
+        assert resp.status_code == 403
+        assert "blocked" in resp.get_json()["message"]
 
 
 class TestProxyUnknownService:

@@ -94,6 +94,12 @@ class TestCheckCondition:
     def test_equals_true(self):
         assert _check_condition("allow_pr == true", {"allow_pr": "true"}) is True
 
+    def test_allow_pr_operations_alias(self):
+        assert _check_condition(
+            "allow_pr_operations == true",
+            {"allow_pr_operations": "true"},
+        ) is True
+
     def test_equals_false(self):
         assert _check_condition("allow_pr == false", {"allow_pr": "true"}) is False
 

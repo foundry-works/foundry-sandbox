@@ -18,7 +18,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
-- **User services dual-read** — `user_services.py` prefers `foundry.yaml` `user_services:` over `config/user-services.yaml`. The legacy file still works but emits a deprecation warning. Migrate by moving service definitions into `foundry.yaml` under the `user_services:` key.
+- **`cast refresh-creds` resolves sandbox config** — credential refresh now loads the sandbox worktree's resolved `foundry.yaml` and refreshes `user_services`, proxy MCP `host_env`, and `${from_host:VAR}` MCP secret refs in addition to the built-in provider keys.
 - **`new_setup.py` unified artifact pipeline** — git-safety overlays and user services now both flow through `compile_*` → `_merge_bundles` → `apply_artifacts` instead of ad-hoc `sbx_exec` calls.
 
 - **`install_pip_requirements_sbx` deduplicated** — moved from per-command copies in `start.py` and `new_sbx.py` to a single canonical function in `sbx.py`
@@ -30,6 +30,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Removed
 
+- **Legacy user-services fallback removed** — `config/user-services.yaml`, `config/user-services.yaml.example`, `FOUNDRY_USER_SERVICES_PATH`, and `foundry_sandbox/user_services.py` are gone. `foundry.yaml` `user_services:` is now the only supported configuration path.
+- **`cast new --with-pr` alias removed** — use `cast new --allow-pr`
 - **CLI aliases** — `repeat` and `reattach` aliases removed; use `cast new --last` and `cast attach --last` instead
 - **`refresh-credentials` command renamed** — use `cast refresh-creds` (the old `refresh-credentials` name is no longer recognized)
 - **`cast info` command removed** — use `cast config` and `cast status` separately

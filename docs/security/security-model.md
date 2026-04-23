@@ -73,8 +73,23 @@ In normal operation:
 - `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, and similar secrets are not present as real values inside the sandbox
 - GitHub auth is represented by a placeholder such as `GH_TOKEN=proxy-managed`
 - user-defined services can expose proxy URLs instead of raw secrets, with requests authenticated by sandbox HMAC headers
+- MCP env values declared as `${from_host:VAR}` resolve to proxy URLs at sandbox creation time rather than exposing raw secrets
 
 This protects against simple credential scraping by agent code, shell commands, or dependencies running inside the sandbox. It does not protect against abuse of already-allowed outbound requests.
+
+### Compiled Configuration Artifacts
+
+Foundry resolves `foundry.yaml` on the host, then compiles sandbox artifacts
+from the resolved config. Current examples include:
+
+- proxy-backed env var injection for `user_services`
+- `/workspace/.mcp.json` for MCP servers
+- `/workspace/.claude/` files for Claude Code config
+- additive git-safety registration patches on the host
+
+The raw `foundry.yaml` file is not the in-sandbox control surface. The
+red-team suite checks for raw-config leakage, unresolved
+`${from_host:VAR}` templates, and unexpected mutability of compiled artifacts.
 
 ### Branch Isolation
 
@@ -166,3 +181,5 @@ Security behavior in this repo is exercised by:
 - `tests/redteam/`
 
 See `tests/redteam/README.md` for the active red-team module list.
+In particular, module `14-foundry-yaml-tamper` covers compiled-config
+immutability and leakage checks.

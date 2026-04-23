@@ -25,6 +25,7 @@ from foundry_git_safety.deep_policy_proxy import create_deep_policy_blueprint
 from foundry_git_safety.schemas.foundry_yaml import (
     DeepPolicyRule,
     DeepPolicyServiceConfig,
+    FoundryConfig,
     UserServiceEntry,
 )
 from foundry_git_safety.server import create_git_api
@@ -137,6 +138,34 @@ def _make_app_with_deep_policy(tmp_path, sandbox_id="test-sandbox", secret=b"tes
 
 class TestUnauthorizedSandboxCannotUseService:
     """Sandbox without a valid HMAC secret cannot access user service proxy."""
+
+    def test_create_git_api_registers_user_services_from_config(self, tmp_path):
+        secrets_dir = tmp_path / "secrets"
+        secrets_dir.mkdir()
+        (secrets_dir / "test-sandbox").write_bytes(
+            b"test-secret-key-here-0123456789abcdef\n"
+        )
+
+        app = create_git_api(
+            secret_store=SecretStore(secrets_path=str(secrets_dir)),
+            nonce_store=NonceStore(),
+            rate_limiter=RateLimiter(),
+            config=FoundryConfig(
+                user_services=[
+                    {
+                        "name": "Tavily",
+                        "env_var": "TAVILY_API_KEY",
+                        "domain": "api.tavily.com",
+                    }
+                ],
+            ),
+        )
+
+        with app.test_client() as client:
+            resp = client.get("/proxy/health")
+            assert resp.status_code == 200
+            data = resp.get_json()
+            assert data["services"][0]["slug"] == "tavily"
 
     def test_no_auth_headers_rejected(self, tmp_path):
         app = _make_app_with_user_services(tmp_path)

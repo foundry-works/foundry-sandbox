@@ -9,7 +9,11 @@ and per-service circuit breaking.
 from __future__ import annotations
 
 import http.client
+import json
 import logging
+import os
+from pathlib import Path
+from typing import Callable
 
 try:
     from flask import Blueprint, Response, jsonify, request
@@ -26,12 +30,41 @@ from .schemas.foundry_yaml import DeepPolicyServiceConfig
 logger = logging.getLogger(__name__)
 
 _CHUNK_SIZE = 64 * 1024  # 64 KiB
+_FOUNDRY_BASE = os.path.expanduser("~/.foundry")
+_DEFAULT_DATA_DIR = os.environ.get(
+    "FOUNDRY_DATA_DIR", f"{_FOUNDRY_BASE}/data/git-safety"
+)
 
 _HOP_BY_HOP = frozenset({
     "transfer-encoding", "connection", "keep-alive",
     "proxy-authenticate", "proxy-authorization", "te", "upgrade",
     "content-length",
 })
+
+
+def _load_policy_context(sandbox_id: str) -> dict[str, str]:
+    """Load conditional-rule context for a verified sandbox.
+
+    Today this is just PR policy, exposed under both the legacy
+    `allow_pr` key and the foundry.yaml-facing `allow_pr_operations` key.
+    """
+    data_dir = os.environ.get("FOUNDRY_DATA_DIR", _DEFAULT_DATA_DIR)
+    metadata_path = Path(data_dir) / "sandboxes" / f"{sandbox_id}.json"
+
+    try:
+        metadata = json.loads(metadata_path.read_text())
+    except (FileNotFoundError, OSError, json.JSONDecodeError):
+        return {}
+
+    allow_pr = metadata.get("allow_pr")
+    if not isinstance(allow_pr, bool):
+        return {}
+
+    value = "true" if allow_pr else "false"
+    return {
+        "allow_pr": value,
+        "allow_pr_operations": value,
+    }
 
 
 def create_deep_policy_blueprint(
@@ -41,6 +74,7 @@ def create_deep_policy_blueprint(
     nonce_store: NonceStore,
     rate_limiter: RateLimiter,
     circuit_breaker: CircuitBreaker,
+    context_resolver: Callable[[str], dict[str, str]] | None = None,
 ) -> Blueprint:
     """Create a Flask Blueprint that proxies with deep policy enforcement.
 
@@ -49,6 +83,7 @@ def create_deep_policy_blueprint(
     The health endpoint remains unauthenticated.
     """
     bp = Blueprint("deep_policy_proxy", __name__)
+    resolve_context = context_resolver or _load_policy_context
 
     @bp.route("/deep-policy/health", methods=["GET"])
     def deep_policy_health():
@@ -91,8 +126,16 @@ def create_deep_policy_blueprint(
         # Read body
         body = request.get_data() or None
 
-        # Build evaluation context from config
-        context: dict[str, str] = {}
+        # Build evaluation context from sandbox metadata.
+        try:
+            context = resolve_context(sandbox_id) or {}
+        except Exception as exc:
+            logger.warning(
+                "Failed to load deep-policy context for %s: %s",
+                sandbox_id,
+                exc,
+            )
+            context = {}
 
         # Policy evaluation
         full_path = f"/{upstream_path}"

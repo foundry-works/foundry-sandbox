@@ -2,7 +2,7 @@
 
 import os
 import re
-from typing import List, Literal
+from typing import Any, List, Literal
 
 from pydantic import BaseModel, Field, field_validator
 
@@ -192,12 +192,19 @@ class UserServiceEntry(BaseModel):
     name: str
     env_var: str
     domain: str
-    header: str
-    format: Literal["bearer", "value"]
+    header: str = "Authorization"
+    format: Literal["bearer", "header", "query"] = "bearer"
     methods: List[str] = Field(default_factory=list)
     paths: List[str] = Field(default_factory=list)
     scheme: str = "https"
     port: int = 0
+
+    @field_validator("format", mode="before")
+    @classmethod
+    def normalize_format(cls, v: str) -> str:
+        if v == "value":
+            return "header"
+        return v
 
     @field_validator("env_var")
     @classmethod
@@ -214,16 +221,18 @@ class UserServiceEntry(BaseModel):
         return v
 
 
-class UserServicesConfig(BaseModel):
-    """User-defined service credential injection configuration."""
-
-    version: str = "1"
-    services: List[UserServiceEntry] = Field(default_factory=list)
-
-
 class FoundryConfig(BaseModel):
     """Root foundry.yaml configuration."""
 
-    version: str = "1.0"
+    version: str = "1"
     git_safety: GitSafetyConfig = Field(default_factory=GitSafetyConfig)
-    user_services: UserServicesConfig = Field(default_factory=UserServicesConfig)
+    user_services: List[UserServiceEntry] = Field(default_factory=list)
+
+    @field_validator("user_services", mode="before")
+    @classmethod
+    def normalize_user_services(cls, v: Any) -> Any:
+        # Accept the current top-level list shape and unwrap the older nested
+        # {"version": "...", "services": [...]} form when encountered.
+        if isinstance(v, dict):
+            return v.get("services", [])
+        return v

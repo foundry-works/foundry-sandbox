@@ -159,7 +159,7 @@ def _apply_sbx_secrets(secrets: list[tuple[str, str]]) -> None:
         if not value:
             logger.warning("sbx secret %s: host env %s is unset, skipping", slug_name, env_var)
             continue
-        sbx_secret_set(slug_name, value)
+        sbx_secret_set(slug_name, value, global_scope=True)
 
 
 # ---------------------------------------------------------------------------

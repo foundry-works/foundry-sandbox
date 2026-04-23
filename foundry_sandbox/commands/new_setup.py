@@ -224,22 +224,15 @@ def new_sbx_setup(
         )
         from foundry_sandbox.artifacts import apply_artifacts, _merge_bundles
 
-        config = resolve_foundry_config(Path(repo_root))
+        # Resolve against the actual sandbox worktree so branch-specific
+        # foundry.yaml contents drive compiled artifacts.
+        config = resolve_foundry_config(Path(host_worktree_path))
 
         bundles = []
         if config.git_safety:
             bundles.append(compile_git_safety(config.git_safety))
         if config.user_services:
             bundles.append(compile_user_services(config.user_services))
-        else:
-            # Legacy fallback: read config/user-services.yaml
-            from foundry_sandbox.user_services import load_user_services
-
-            legacy_services = load_user_services()
-            if legacy_services:
-                from foundry_sandbox.foundry_config import UserService
-                us = [UserService(**s) for s in legacy_services]
-                bundles.append(compile_user_services(us))
         if config.mcp_servers:
             bundles.append(compile_mcp_servers(config.mcp_servers))
         if config.claude_code:

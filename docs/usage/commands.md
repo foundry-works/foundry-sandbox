@@ -33,6 +33,11 @@ Notes:
   falls back to `main`.
 - For local repo inputs such as `.`, Foundry can infer the current branch or
   `origin/HEAD` more accurately.
+- `--plan` resolves the effective `foundry.yaml` and prints loaded layers,
+  gates, policy patches, file writes, env vars, secrets, and post-steps without
+  creating a sandbox.
+- `--allow-pr` requests PR operations, but a resolved
+  `git_safety.allow_pr_operations: false` can still tighten that permission.
 
 Key options:
 
@@ -42,7 +47,7 @@ Key options:
 | `-c`, `--copy HOST:CONTAINER` | Copy a host file into the sandbox once |
 | `-r`, `--pip-requirements PATH` | Install Python dependencies |
 | `--wd PATH` | Initial working directory inside the repo |
-| `--allow-pr`, `--with-pr` | Allow PR-related operations |
+| `--allow-pr` | Request PR-related operations |
 | `--with-opencode` | Enable OpenCode-related setup intent |
 | `--with-zai` | Requires `ZHIPU_API_KEY` |
 | `--save-as NAME` | Save these CLI args as a preset |
@@ -201,6 +206,12 @@ cast refresh-creds --last
 cast refresh-creds --all
 ```
 
+Current scope:
+
+- refreshes Anthropic, GitHub, and OpenAI host credentials
+- refreshes resolved `foundry.yaml` secret refs for `user_services`
+- refreshes proxy MCP `host_env` secrets and `${from_host:VAR}` MCP env refs
+
 ### `cast watchdog`
 
 Run wrapper-integrity monitoring in the foreground:
@@ -261,4 +272,3 @@ cast --help
 | `ZHIPU_API_KEY` | - | Required for `--with-zai` |
 | `GIT_API_SECRETS_PATH` | `~/.foundry/secrets/sandbox-hmac` | HMAC secret directory |
 | `FOUNDRY_DATA_DIR` | `~/.foundry/data/git-safety` | Git-safety registration directory |
-| `FOUNDRY_USER_SERVICES_PATH` | unset | Override path to `user-services.yaml` |

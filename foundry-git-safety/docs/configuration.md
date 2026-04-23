@@ -7,7 +7,9 @@ The primary configuration file, read from the workspace root or the path specifi
 ### Top-level schema
 
 ```yaml
-version: "1.0"
+version: "1"
+user_services:
+  - ...
 git_safety:
   server: ...
   protected_branches: ...
@@ -15,6 +17,22 @@ git_safety:
   branch_isolation: ...
   rate_limits: ...
 ```
+
+### user_services
+
+Top-level proxy credential declarations consumed by the user-services proxy.
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `name` | string | required | Human-readable service name |
+| `env_var` | string | required | Host environment variable holding the real credential |
+| `domain` | string | required | Upstream service domain |
+| `header` | string | `Authorization` | Header name, or query parameter name when `format: query` |
+| `format` | string | `bearer` | Credential transport: `bearer`, `header`, or `query` |
+| `methods` | list of strings | `[]` | Optional allowed HTTP methods |
+| `paths` | list of strings | `[]` | Optional allowed path globs |
+| `scheme` | string | `https` | Upstream scheme |
+| `port` | integer | `0` | Upstream port override; `0` means default for scheme |
 
 ### server
 

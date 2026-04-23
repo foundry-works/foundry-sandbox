@@ -344,7 +344,7 @@ _FETCH_LOCK_POLL_INTERVAL = 0.1
 @contextlib.contextmanager
 def _fetch_lock(
     bare_repo_dir: str, timeout: float = _FETCH_LOCK_TIMEOUT,
-) -> Generator[None]:
+) -> Generator[None, None, None]:
     """Acquire an exclusive file lock for fetch serialization.
 
     Creates ``.foundry-fetch.lock`` in the bare repo directory and holds

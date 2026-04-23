@@ -17,12 +17,18 @@ from pathlib import Path
 from typing import Annotated, Any, Literal, Union
 
 import yaml
-from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator, model_validator
 
 from foundry_sandbox.artifacts import ArtifactBundle, PolicyPatch, PostStep
-from foundry_sandbox.user_services import slug
 
 logger = logging.getLogger(__name__)
+_ENV_VAR_RE = re.compile(r"^[A-Z_][A-Z0-9_]*$")
+
+
+def slug(name: str) -> str:
+    """Convert a service or env-var name to a proxy-safe slug."""
+    s = re.sub(r"[^a-z0-9]+", "-", name.lower()).strip("-")
+    return s or "unknown"
 
 
 # ---------------------------------------------------------------------------
@@ -123,6 +129,33 @@ class UserService(_Strict):
     domain: str
     header: str = "Authorization"
     format: Literal["bearer", "header", "query"] = "bearer"
+    methods: list[str] = Field(default_factory=list)
+    paths: list[str] = Field(default_factory=list)
+    scheme: str = "https"
+    port: int = 0
+
+    @field_validator("env_var")
+    @classmethod
+    def _validate_env_var(cls, value: str) -> str:
+        if not _ENV_VAR_RE.match(value):
+            raise ValueError(
+                f"env_var must match [A-Z_][A-Z0-9_]*, got {value!r}"
+            )
+        return value
+
+    @field_validator("format", mode="before")
+    @classmethod
+    def _normalize_format(cls, value: str) -> str:
+        if value == "value":
+            return "header"
+        return value
+
+    @field_validator("port")
+    @classmethod
+    def _validate_port(cls, value: int) -> int:
+        if value < 0 or value > 65535:
+            raise ValueError(f"Port must be 0-65535, got {value}")
+        return value
 
 
 # ---------------------------------------------------------------------------
@@ -414,6 +447,33 @@ def render_plan_text(config: FoundryConfig) -> str:
 
 
 _FROM_HOST_RE = re.compile(r"\$\{from_host:([A-Za-z_][A-Za-z0-9_]*)\}")
+
+
+def collect_secret_refs(config: FoundryConfig) -> list[tuple[str, str]]:
+    """Return deduplicated sbx secret refs implied by a resolved config."""
+    refs: list[tuple[str, str]] = []
+    seen: set[tuple[str, str]] = set()
+
+    def add(slug_name: str, env_var: str) -> None:
+        item = (slug_name, env_var)
+        if item not in seen:
+            refs.append(item)
+            seen.add(item)
+
+    for svc in config.user_services:
+        add(slug(svc.name), svc.env_var)
+
+    for server in config.mcp_servers:
+        if server.type == "proxy":
+            add(slug(server.name), server.host_env)
+            continue
+
+        for value in server.env.values():
+            for match in _FROM_HOST_RE.finditer(value):
+                env_var = match.group(1)
+                add(slug(env_var), env_var)
+
+    return refs
 
 
 def _resolve_host_refs(value: str) -> tuple[str, bool]:

@@ -16,6 +16,7 @@ import logging
 import os
 import re
 from fnmatch import fnmatch
+from urllib.parse import parse_qsl, urlencode
 
 try:
     from flask import Blueprint, Response, jsonify, request
@@ -140,16 +141,22 @@ def create_user_services_blueprint(
                 headers[key] = value
         headers["Host"] = svc.domain
 
-        # Set credential header
+        # Inject the credential using the configured transport.
         if svc.format == "bearer":
             headers[svc.header] = f"Bearer {api_key}"
-        else:
+        elif svc.format == "header":
             headers[svc.header] = api_key
 
-        # Preserve query string
+        # Preserve query string and optionally inject the key there.
         full_path = f"/{upstream_path}"
-        if request.query_string:
-            full_path += f"?{request.query_string.decode()}"
+        query_pairs = parse_qsl(
+            request.query_string.decode(),
+            keep_blank_values=True,
+        )
+        if svc.format == "query":
+            query_pairs.append((svc.header, api_key))
+        if query_pairs:
+            full_path += f"?{urlencode(query_pairs)}"
 
         # Read request body
         body = request.get_data() or None

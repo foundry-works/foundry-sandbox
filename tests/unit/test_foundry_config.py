@@ -22,6 +22,7 @@ from foundry_sandbox.foundry_config import (
     UserService,
     _merge,
     _resolve_host_refs,
+    collect_secret_refs,
     compile_claude_code,
     compile_git_safety,
     compile_mcp_servers,
@@ -373,55 +374,80 @@ class TestCompileUserServices:
         bundle = compile_user_services(services, port=9090, host="myhost")
         assert bundle.env_vars["K"] == "http://myhost:9090/proxy/svc"
 
-
-class TestUserServicesMigration:
-    def test_same_output_foundry_yaml_vs_legacy(self):
-        """Same service definition produces identical env vars via both paths."""
-        # foundry.yaml path (via compiler)
-        services = [
-            UserService(name="Tavily", env_var="TAVILY_API_KEY", domain="api.tavily.com"),
-        ]
+    def test_preserves_proxy_options_in_schema(self):
+        services = [UserService(
+            name="ReadOnlyAPI",
+            env_var="READONLY_API_KEY",
+            domain="api.readonly.example",
+            header="X-Api-Key",
+            format="header",
+            methods=["GET"],
+            paths=["/v1/**"],
+            scheme="http",
+            port=8080,
+        )]
         bundle = compile_user_services(services)
+        assert bundle.env_vars["READONLY_API_KEY"] == "http://host.docker.internal:8083/proxy/readonlyapi"
+        assert bundle.sbx_secrets[0] == ("readonlyapi", "READONLY_API_KEY")
 
-        # Legacy path (via get_proxy_env_overrides logic)
-        from foundry_sandbox.user_services import slug
-        slug_val = slug("Tavily")
-        legacy_url = f"http://host.docker.internal:8083/proxy/{slug_val}"
+    def test_value_alias_normalizes_to_header(self):
+        svc = UserService(
+            name="CustomService",
+            env_var="CUSTOM_API_KEY",
+            domain="api.custom.example",
+            format="value",
+        )
+        assert svc.format == "header"
 
-        assert bundle.env_vars["TAVILY_API_KEY"] == legacy_url
 
-    def test_foundry_yaml_wins(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
-        """When foundry.yaml defines user_services, it takes precedence over the legacy file."""
-        # Create a legacy config
-        legacy = tmp_path / "config" / "user-services.yaml"
-        legacy.parent.mkdir(parents=True)
-        legacy.write_text(
-            'version: "1"\n'
-            "services:\n"
-            "  - name: Legacy\n"
-            "    env_var: LEGACY_KEY\n"
-            "    domain: legacy.example\n"
-            "    header: Authorization\n"
-            "    format: bearer\n"
+class TestCollectSecretRefs:
+    def test_collects_user_services_proxy_and_from_host_refs(self):
+        config = FoundryConfig(
+            version="1",
+            user_services=[
+                UserService(name="Tavily", env_var="TAVILY_API_KEY", domain="api.tavily.com"),
+            ],
+            mcp_servers=[
+                McpServerProxy(
+                    name="internal-api",
+                    type="proxy",
+                    host_env="INTERNAL_API_KEY",
+                    target="api.internal.com",
+                ),
+                McpServerBuiltin(
+                    name="github",
+                    type="builtin",
+                    env={"GITHUB_PERSONAL_ACCESS_TOKEN": "${from_host:GITHUB_TOKEN}"},
+                ),
+            ],
         )
 
-        monkeypatch.chdir(tmp_path)
+        assert collect_secret_refs(config) == [
+            ("tavily", "TAVILY_API_KEY"),
+            ("internal-api", "INTERNAL_API_KEY"),
+            ("github-token", "GITHUB_TOKEN"),
+        ]
 
-        from foundry_sandbox.user_services import load_user_services, clear_cache
-        clear_cache()
-
-        # Without foundry_services, legacy file is used
-        result_legacy = load_user_services()
-        assert len(result_legacy) == 1
-        assert result_legacy[0]["name"] == "Legacy"
-
-        # With foundry_services, it takes precedence
-        clear_cache()
-        result_foundry = load_user_services(
-            foundry_services=[{"name": "New", "env_var": "NEW_KEY", "domain": "new.example"}]
+    def test_dedupes_duplicate_host_refs(self):
+        config = FoundryConfig(
+            version="1",
+            allow_third_party_mcp=True,
+            mcp_servers=[
+                McpServerBuiltin(
+                    name="github",
+                    type="builtin",
+                    env={"GITHUB_PERSONAL_ACCESS_TOKEN": "${from_host:GITHUB_TOKEN}"},
+                ),
+                McpServerNpm(
+                    name="npm-tool",
+                    type="npm",
+                    package="@example/tool",
+                    env={"TOKEN": "${from_host:GITHUB_TOKEN}"},
+                ),
+            ],
         )
-        assert len(result_foundry) == 1
-        assert result_foundry[0]["name"] == "New"
+
+        assert collect_secret_refs(config) == [("github-token", "GITHUB_TOKEN")]
 
 
 # ---------------------------------------------------------------------------

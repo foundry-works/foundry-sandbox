@@ -4,11 +4,13 @@ from __future__ import annotations
 
 import os
 import sys
+from pathlib import Path
 
 import click
 
 from foundry_sandbox.commands._helpers import resolve_sandbox_name
 from foundry_sandbox.sbx import sbx_check_available, sbx_is_running, sbx_secret_set
+from foundry_sandbox.state import load_sandbox_metadata
 from foundry_sandbox.utils import log_error, log_info
 from foundry_sandbox.validate import validate_existing_sandbox_name
 
@@ -58,18 +60,21 @@ def _refresh_one(name: str) -> bool:
         if not _push_secret(service, value):
             ok = False
 
-    # Push user-defined service credentials
+    # Push secret refs declared in the sandbox's resolved foundry.yaml.
     try:
-        from foundry_sandbox.user_services import _slug, get_user_services
+        from foundry_sandbox.foundry_config import collect_secret_refs, resolve_foundry_config
 
-        for svc in get_user_services():
-            slug = _slug(str(svc["name"]))
-            value = os.environ.get(str(svc["env_var"]), "")
-            if not _push_secret(slug, value):
-                ok = False
+        metadata = load_sandbox_metadata(name) or {}
+        worktree = str(metadata.get("host_worktree_path", ""))
+        if worktree:
+            config = resolve_foundry_config(Path(worktree))
+            for slug_name, env_var in collect_secret_refs(config):
+                value = os.environ.get(env_var, "")
+                if not _push_secret(slug_name, value):
+                    ok = False
     except Exception as exc:
         from foundry_sandbox.utils import log_warn
-        log_warn(f"User service credential push failed: {exc}")
+        log_warn(f"Foundry config credential push failed: {exc}")
 
     return ok
 

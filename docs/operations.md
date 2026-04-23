@@ -16,6 +16,7 @@ Current defaults:
 <repo>/.sbx/<sandbox>-worktrees/<branch>/
 
 ~/.foundry/
+  foundry.yaml
   secrets/sandbox-hmac/<sandbox>
   data/git-safety/sandboxes/<sandbox>.json
   logs/decisions.jsonl
@@ -31,6 +32,17 @@ cast list
 cast status repo-feature-login
 cast diagnose
 ```
+
+### Preview Resolved Config
+
+Before creating a sandbox after changing repo or user config:
+
+```bash
+cast new . feature-login main --plan
+```
+
+Use this to inspect loaded `foundry.yaml` layers, gates, policy patches, file
+writes, env vars, secrets, and post-steps before provisioning.
 
 ### Start and Stop
 
@@ -184,6 +196,24 @@ sbx secret list
 ```
 
 Verify the corresponding host environment variables are set before refreshing.
+
+`cast refresh-creds` covers Anthropic, GitHub, OpenAI, resolved
+`foundry.yaml` `user_services`, proxy MCP `host_env` secrets, and MCP
+`${from_host:VAR}` entries.
+
+### Generated Config Looks Wrong
+
+Checks:
+
+```bash
+cast new . feature-login main --plan
+ls -la ~/.foundry/foundry.yaml
+ls -la ./foundry.yaml
+```
+
+Treat `foundry.yaml` as the source of truth. Files such as `/workspace/.mcp.json`
+and `/workspace/.claude/settings.json` are generated artifacts, not the place
+to make persistent edits.
 
 ### Deep Policy Changes Not Reflected
 

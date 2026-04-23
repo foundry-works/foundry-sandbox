@@ -77,7 +77,7 @@ def custom_service():
         env_var="CUSTOM_API_KEY",
         domain="api.custom.example",
         header="X-Api-Key",
-        format="value",
+        format="header",
     )
 
 
@@ -91,6 +91,17 @@ def restricted_service():
         format="bearer",
         methods=["GET"],
         paths=["/v1/**"],
+    )
+
+
+@pytest.fixture
+def query_service():
+    return UserServiceEntry(
+        name="QueryAPI",
+        env_var="QUERY_API_KEY",
+        domain="api.query.example",
+        header="api_key",
+        format="query",
     )
 
 
@@ -352,3 +363,38 @@ class TestProxyRequest:
                     call_args = mock_conn.request.call_args
                     path = call_args[0][1] if call_args[0] else call_args[1].get("path", "")
                     assert "q=test" in path
+
+    def test_query_format(self, query_service, auth_stores):
+        from flask import Flask
+
+        secret_store, nonce_store, rate_limiter = auth_stores
+        bp = create_user_services_blueprint(
+            [query_service],
+            secret_store=secret_store,
+            nonce_store=nonce_store,
+            rate_limiter=rate_limiter,
+        )
+        app = Flask(__name__)
+        app.register_blueprint(bp)
+
+        mock_response = MagicMock()
+        mock_response.status = 200
+        mock_response.getheaders.return_value = []
+        mock_response.read.side_effect = [b"", b""]
+
+        mock_conn = MagicMock()
+        mock_conn.getresponse.return_value = mock_response
+
+        with app.test_client() as client:
+            with patch.dict(os.environ, {"QUERY_API_KEY": "query-secret"}):
+                with patch(
+                    "foundry_git_safety.user_services_proxy.http.client.HTTPSConnection",
+                    return_value=mock_conn,
+                ):
+                    headers = _auth_headers("GET", "/proxy/queryapi/v1/search")
+                    resp = client.get("/proxy/queryapi/v1/search?q=test", headers=headers)
+                    assert resp.status_code == 200
+
+                    call_args = mock_conn.request.call_args
+                    path = call_args[0][1] if call_args[0] else call_args[1].get("path", "")
+                    assert path == "/v1/search?q=test&api_key=query-secret"

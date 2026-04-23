@@ -1,7 +1,7 @@
 # foundry.yaml — Git Safety Layer Configuration
 # Place this file in your workspace root or set FOUNDRY_CONFIG_PATH.
 
-version: "1.0"
+version: "1"
 
 git_safety:
   server:

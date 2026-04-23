@@ -67,6 +67,13 @@ If you update host credentials after sandboxes are already running, push them in
 cast refresh-creds --all
 ```
 
+If the repo uses `foundry.yaml`, preview the resolved config before creating a
+sandbox:
+
+```bash
+cast new . feature-login main --plan
+```
+
 ## Create Your First Sandbox
 
 Create a sandbox from a GitHub repo:
@@ -95,7 +102,8 @@ What `cast new` does:
 3. Creates an `sbx` sandbox and repo-local worktree.
 4. Starts `foundry-git-safety` if needed — the host-side policy server that validates git commands from the sandbox.
 5. Generates a per-sandbox HMAC secret, registers the sandbox with the policy server, injects the git wrapper at `/usr/local/bin/git`, and writes sandbox metadata.
-6. Prints the sandbox name, worktree path, and next commands.
+6. Resolves `foundry.yaml` layers and applies compiled artifacts such as git-safety overlays, proxy-backed env vars, `/workspace/.mcp.json`, and `/workspace/.claude/`.
+7. Prints the sandbox name, worktree path, and next commands.
 
 Steps 4 and 5 are what Foundry adds on top of `sbx`; steps 1–3 are ordinary `sbx` operations. `cast new` does not attach automatically.
 

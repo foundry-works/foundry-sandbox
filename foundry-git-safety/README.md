@@ -67,7 +67,13 @@ foundry-git-safety stop
 foundry-git-safety reads `foundry.yaml` from the workspace root. See `foundry_git_safety/default_config/foundry.yaml.example` for a complete example with all options.
 
 ```yaml
-version: "1.0"
+version: "1"
+user_services:
+  - name: Tavily
+    env_var: TAVILY_API_KEY
+    domain: api.tavily.com
+    format: bearer
+
 git_safety:
   server:
     host: "127.0.0.1"
@@ -109,6 +115,10 @@ git_safety:
     sustained: 120
     global_ceiling: 1000
 ```
+
+`user_services` is a top-level list. Each entry declares a proxy-backed host
+credential with fields such as `name`, `env_var`, `domain`, `header`,
+`format`, `methods`, `paths`, `scheme`, and `port`.
 
 ### Environment Variable Overrides
 

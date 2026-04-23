@@ -238,7 +238,11 @@ class TestApplySbxSecrets:
 
         with patch("foundry_sandbox.sbx.sbx_secret_set") as mock_set:
             _apply_sbx_secrets([("my-api", "MY_API_KEY")])
-            mock_set.assert_called_once_with("my-api", "secret123")
+            mock_set.assert_called_once_with(
+                "my-api",
+                "secret123",
+                global_scope=True,
+            )
 
     def test_sbx_secrets_skips_unset_env(self, monkeypatch: pytest.MonkeyPatch):
         from foundry_sandbox.artifacts import _apply_sbx_secrets
