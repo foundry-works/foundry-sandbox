@@ -15,7 +15,7 @@ Adversarial security tests that run **inside** an sbx sandbox to validate isolat
 ./tests/redteam/runner.sh --output-format tap --output-dir /tmp/results
 ```
 
-## Active Modules (13)
+## Active Modules (14)
 
 | # | Module | Category | Description |
 |---|--------|----------|-------------|
@@ -32,6 +32,7 @@ Adversarial security tests that run **inside** an sbx sandbox to validate isolat
 | 11 | `workflow-push` | Git safety | `.github/workflows/` push blocking |
 | 12 | `merge-early-exit` | Git safety | Early-exit merge blocking before identity checks |
 | 13 | `package-install` | Boundary testing | pip/npm install paths, sudo blocking |
+| 14 | `foundry-yaml-tamper` | Config integrity | foundry.yaml artifact immutability, gate exposure, template leakage |
 
 ## Retired Modules (7)
 

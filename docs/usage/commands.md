@@ -49,6 +49,7 @@ Key options:
 | `--name NAME` | Override the generated sandbox name |
 | `--template TAG` | Use a specific `sbx` template; `none` disables template use |
 | `--skip-key-check` | Skip the Claude auth precheck |
+| `--plan` | Dry-run: show resolved foundry.yaml config without creating sandbox |
 
 Examples:
 
@@ -60,6 +61,7 @@ cast new owner/repo feature-login --agent codex
 cast new owner/repo feature-login -r requirements.txt
 cast new owner/repo feature-login --wd packages/api
 cast new owner/repo feature-login --save-as myproject
+cast new owner/repo feature-login --plan
 cast new --preset myproject
 cast new --last
 ```
