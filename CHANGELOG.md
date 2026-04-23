@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`type: npm` MCP server compilation (Phase 6)** — `compile_mcp_servers` now handles `type: npm` servers behind the `allow_third_party_mcp` gate. Emits a `PostStep` for `npm install -g` and a `.mcp.json` fragment using `npx`. Supports `${from_host:VAR}` env substitution. The gate is ANDed across layers — a user-level `false` blocks npm servers even if the repo config sets `true`.
 - **`compile_user_services` compiler** — user services defined in `foundry.yaml` now flow through the artifact pipeline alongside git-safety overlays. The compiler emits `env_vars` (proxy URLs) and `sbx_secrets` (host credential refs) as a single `ArtifactBundle`.
 - **Env-var apply step** — `apply_artifacts` step 4 (env vars) now writes to profile.d, bash.bashrc, and user-services.env inside the sandbox, matching the git-safety env injection pattern.
 - **sbx-secret apply step** — `apply_artifacts` step 1 pushes host credentials to `sbx secret set` so the proxy can read them at request time.

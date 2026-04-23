@@ -165,6 +165,62 @@ mcp_servers:
 The `host_env` field names the host environment variable that holds the real
 credential. The `target` field is the upstream domain the proxy routes to.
 
+### npm servers (third-party)
+
+Third-party MCP servers distributed as npm packages. Requires the
+`allow_third_party_mcp` gate to be set to `true`.
+
+```yaml
+version: "1"
+
+allow_third_party_mcp: true
+
+mcp_servers:
+  - name: my-mcp-server
+    type: npm
+    package: "@example/mcp-server"
+    env:
+      API_KEY: "${from_host:MY_API_KEY}"
+```
+
+At sandbox creation, Foundry installs the package globally via
+`npm install -g` (as root) and writes a `.mcp.json` entry that starts the
+server via `npx`. Env values support the same `${from_host:VAR}` substitution
+as builtins.
+
+### Supply-chain gates
+
+The `allow_third_party_mcp` flag controls whether npm-type MCP servers are
+allowed. It is **ANDed across all config layers**:
+
+```text
+builtin-defaults  (unset → defaults to false)
+~/.foundry/foundry.yaml  (user can enable)
+repo/foundry.yaml  (repo cannot override user false)
+```
+
+Any layer setting `allow_third_party_mcp: false` blocks npm servers across the
+entire resolved config. A repo `foundry.yaml` cannot re-enable it if the user's
+`~/.foundry/foundry.yaml` sets it to `false`.
+
+Example — user blocks, repo tries to allow:
+
+```yaml
+# ~/.foundry/foundry.yaml
+version: "1"
+allow_third_party_mcp: false
+```
+
+```yaml
+# repo/foundry.yaml
+version: "1"
+allow_third_party_mcp: true  # ignored — user layer wins
+mcp_servers:
+  - name: risky
+    type: npm
+    package: risky-pkg  # validation error at resolve time
+```
+
 ## Claude Code
 
 Configure Claude Code skills, commands, hooks, and permissions in `foundry.yaml`

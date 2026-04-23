@@ -19,7 +19,7 @@ from typing import Annotated, Any, Literal, Union
 import yaml
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
 
-from foundry_sandbox.artifacts import ArtifactBundle, PolicyPatch
+from foundry_sandbox.artifacts import ArtifactBundle, PolicyPatch, PostStep
 from foundry_sandbox.user_services import slug
 
 logger = logging.getLogger(__name__)
@@ -355,6 +355,7 @@ def render_plan_text(config: FoundryConfig) -> str:
         n_writes += len(mcp_bundle.file_writes)
         n_env += len(mcp_bundle.env_vars)
         n_secrets += len(mcp_bundle.sbx_secrets)
+        n_steps += len(mcp_bundle.post_steps)
 
     # Claude Code artifacts
     cc_bundle: ArtifactBundle | None = None
@@ -397,6 +398,9 @@ def render_plan_text(config: FoundryConfig) -> str:
         for slug_name, env_var in mcp_bundle.sbx_secrets:
             lines.append(f"    {slug_name} (from host ${env_var})")
     lines.append(f"  post_steps ({n_steps}):")
+    if mcp_bundle:
+        for step in mcp_bundle.post_steps:
+            lines.append(f"    {' '.join(step.cmd)}")
     if cc_bundle:
         for step in cc_bundle.post_steps:
             lines.append(f"    {' '.join(step.cmd)}")
@@ -512,7 +516,7 @@ def compile_mcp_servers(
     sbx_secrets for proxy-type servers and from_host references.
 
     Raises ValueError for unknown builtin names.
-    Skips npm servers (Phase 6).
+    Requires allow_third_party_mcp=True for npm servers (enforced by schema gate).
     """
     if not servers:
         return ArtifactBundle()
@@ -522,6 +526,7 @@ def compile_mcp_servers(
     mcp_servers_json: dict[str, dict[str, Any]] = {}
     env_vars: dict[str, str] = {}
     sbx_secrets: list[tuple[str, str]] = []
+    post_steps: list[PostStep] = []
 
     for server in servers:
         s = slug(server.name)
@@ -556,11 +561,32 @@ def compile_mcp_servers(
             sbx_secrets.append((s, server.host_env))
 
         elif server.type == "npm":
-            logger.warning("Skipping npm MCP server %r (Phase 6)", server.name)
-            continue
+            post_steps.append(PostStep(
+                cmd=["npm", "install", "-g", server.package],
+                user="root",
+            ))
+            resolved_env = {}
+            for k, v in server.env.items():
+                resolved, is_proxy = _resolve_host_refs(v)
+                resolved_env[k] = resolved
+                if is_proxy:
+                    match = _FROM_HOST_RE.search(v)
+                    env_var_name = match.group(1)  # type: ignore[union-attr]
+                    sbx_secrets.append((slug(env_var_name), env_var_name))
+            entry: dict[str, Any] = {
+                "command": "npx",
+                "args": [server.package],
+            }
+            if resolved_env:
+                entry["env"] = resolved_env
+            mcp_servers_json[server.name] = entry
 
     if not mcp_servers_json:
-        return ArtifactBundle(env_vars=env_vars, sbx_secrets=sbx_secrets)
+        return ArtifactBundle(
+            env_vars=env_vars,
+            sbx_secrets=sbx_secrets,
+            post_steps=post_steps,
+        )
 
     import json
 
@@ -582,6 +608,7 @@ def compile_mcp_servers(
         ],
         env_vars=env_vars,
         sbx_secrets=sbx_secrets,
+        post_steps=post_steps,
     )
 
 

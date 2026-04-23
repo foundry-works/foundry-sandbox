@@ -556,6 +556,96 @@ class TestCompileMcpPlanRenderer:
         assert "sbx_secrets" in text
         assert "svc" in text
 
+    def test_plan_shows_npm_post_steps(self):
+        config = FoundryConfig(
+            version="1",
+            allow_third_party_mcp=True,
+            mcp_servers=[McpServerNpm(
+                name="my-server", type="npm", package="@example/mcp-server",
+            )],
+        )
+        text = render_plan_text(config)
+        assert "post_steps (1):" in text
+        assert "npm install" in text
+
+
+# ---------------------------------------------------------------------------
+# compile_mcp_servers npm (Phase 6)
+# ---------------------------------------------------------------------------
+
+
+class TestCompileMcpNpm:
+    def test_npm_mcp_blocked_without_flag(self):
+        with pytest.raises(ValidationError, match="type=npm"):
+            FoundryConfig(
+                version="1",
+                mcp_servers=[McpServerNpm(
+                    name="evil", type="npm", package="evil-pkg",
+                )],
+                allow_third_party_mcp=False,
+            )
+
+    def test_npm_mcp_compiles_with_flag(self):
+        servers = [McpServerNpm(
+            name="my-server", type="npm", package="@example/mcp-server",
+        )]
+        bundle = compile_mcp_servers(servers)
+
+        # PostStep for global install
+        assert len(bundle.post_steps) == 1
+        assert bundle.post_steps[0].cmd == [
+            "npm", "install", "-g", "@example/mcp-server",
+        ]
+        assert bundle.post_steps[0].user == "root"
+
+        # FileWrite for .mcp.json
+        assert len(bundle.file_writes) == 1
+        import json
+        content = json.loads(bundle.file_writes[0].content)
+        assert "my-server" in content["mcpServers"]
+        entry = content["mcpServers"]["my-server"]
+        assert entry["command"] == "npx"
+        assert entry["args"] == ["@example/mcp-server"]
+
+    def test_npm_mcp_with_plain_env(self):
+        servers = [McpServerNpm(
+            name="svc", type="npm", package="@acme/svc",
+            env={"DEBUG": "1", "LOG_LEVEL": "verbose"},
+        )]
+        bundle = compile_mcp_servers(servers)
+        import json
+        content = json.loads(bundle.file_writes[0].content)
+        env = content["mcpServers"]["svc"]["env"]
+        assert env["DEBUG"] == "1"
+        assert env["LOG_LEVEL"] == "verbose"
+        assert bundle.sbx_secrets == []
+
+    def test_npm_mcp_with_env_from_host(self, monkeypatch: pytest.MonkeyPatch):
+        monkeypatch.setenv("MY_API_KEY", "secret123")
+        servers = [McpServerNpm(
+            name="ext", type="npm", package="@acme/ext",
+            env={"API_KEY": "${from_host:MY_API_KEY}"},
+        )]
+        bundle = compile_mcp_servers(servers)
+        import json
+        content = json.loads(bundle.file_writes[0].content)
+        env = content["mcpServers"]["ext"]["env"]
+        assert "proxy/my-api-key" in env["API_KEY"]
+        assert len(bundle.sbx_secrets) == 1
+        assert bundle.sbx_secrets[0] == ("my-api-key", "MY_API_KEY")
+
+    def test_npm_mcp_mixed_with_builtin(self):
+        servers = [
+            McpServerBuiltin(name="github", type="builtin"),
+            McpServerNpm(name="custom", type="npm", package="@acme/custom"),
+        ]
+        bundle = compile_mcp_servers(servers)
+        import json
+        content = json.loads(bundle.file_writes[0].content)
+        assert "github" in content["mcpServers"]
+        assert "custom" in content["mcpServers"]
+        assert len(bundle.post_steps) == 1
+
 
 # ---------------------------------------------------------------------------
 # compile_claude_code (Phase 5)
