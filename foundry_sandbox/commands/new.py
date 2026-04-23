@@ -11,6 +11,7 @@ import subprocess
 import sys
 from dataclasses import dataclass
 from datetime import datetime
+from pathlib import Path
 
 import click
 from click.core import ParameterSource
@@ -308,6 +309,8 @@ def _generate_branch_name(repo_url: str, from_branch: str) -> str:
 @click.option("--name", "name_override", metavar="NAME", help="Override auto-generated sandbox name")
 @click.option("--template", "template", default="foundry-git-wrapper:latest", show_default=True,
               help="Template tag for sandbox creation. Use 'none' to disable.")
+@click.option("--plan", "dry_run_plan", is_flag=True,
+              help="Dry-run: show resolved foundry.yaml config without creating sandbox")
 @click.pass_context
 def new(
     ctx: click.Context,
@@ -327,6 +330,7 @@ def new(
     skip_key_check: bool,
     name_override: str,
     template: str,
+    dry_run_plan: bool,
 ) -> None:
     """Create a new sandbox with sbx."""
 
@@ -426,6 +430,18 @@ def new(
     # Expand repo URL shorthand
     if not repo_url.startswith(("http://", "https://", "git@")) and "://" not in repo_url and not repo_url.startswith("/"):
         repo_url = f"https://github.com/{repo_url}"
+
+    # --plan: dry-run mode — resolve config, print plan, exit
+    if dry_run_plan:
+        from foundry_sandbox.foundry_config import resolve_foundry_config, render_plan_text
+
+        try:
+            config = resolve_foundry_config(Path(repo_root or repo_url))
+            click.echo(render_plan_text(config))
+        except Exception as exc:
+            log_error(f"Foundry config error: {exc}")
+            sys.exit(1)
+        return
 
     # Validate preconditions: git URL, API keys, copies
     _validate_preconditions(repo_url, copies, skip_key_check)

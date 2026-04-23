@@ -94,4 +94,5 @@ line-length = 100
 packages = ["foundry_sandbox"]
 artifacts = [
     "foundry_sandbox/assets/*.sh",
+    "foundry_sandbox/default_config/*.yaml",
 ]
