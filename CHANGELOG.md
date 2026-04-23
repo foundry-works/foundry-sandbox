@@ -7,7 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **`compile_user_services` compiler** — user services defined in `foundry.yaml` now flow through the artifact pipeline alongside git-safety overlays. The compiler emits `env_vars` (proxy URLs) and `sbx_secrets` (host credential refs) as a single `ArtifactBundle`.
+- **Env-var apply step** — `apply_artifacts` step 4 (env vars) now writes to profile.d, bash.bashrc, and user-services.env inside the sandbox, matching the git-safety env injection pattern.
+- **sbx-secret apply step** — `apply_artifacts` step 1 pushes host credentials to `sbx secret set` so the proxy can read them at request time.
+
 ### Changed
+
+- **User services dual-read** — `user_services.py` prefers `foundry.yaml` `user_services:` over `config/user-services.yaml`. The legacy file still works but emits a deprecation warning. Migrate by moving service definitions into `foundry.yaml` under the `user_services:` key.
+- **`new_setup.py` unified artifact pipeline** — git-safety overlays and user services now both flow through `compile_*` → `_merge_bundles` → `apply_artifacts` instead of ad-hoc `sbx_exec` calls.
 
 - **`install_pip_requirements_sbx` deduplicated** — moved from per-command copies in `start.py` and `new_sbx.py` to a single canonical function in `sbx.py`
 - **Shared `resolve_sandbox_name()` helper** — consolidated per-command sandbox name resolution logic (attach, git-mode, refresh-creds, preset) into `commands/_helpers.py`

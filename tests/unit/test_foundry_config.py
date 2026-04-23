@@ -19,6 +19,8 @@ from foundry_sandbox.foundry_config import (
     SkillSource,
     UserService,
     _merge,
+    compile_git_safety,
+    compile_user_services,
     render_plan_text,
     resolve_foundry_config,
 )
@@ -275,3 +277,143 @@ class TestClaudeCodeMerge:
         )
         result = _merge([a, b])
         assert len(result.claude_code.skills) == 2
+
+
+# ---------------------------------------------------------------------------
+# compile_git_safety (Phase 2)
+# ---------------------------------------------------------------------------
+
+
+class TestCompileGitSafety:
+    def test_compile_git_safety_empty_overlay(self):
+        overlay = GitSafetyOverlay()
+        bundle = compile_git_safety(overlay)
+        assert bundle.policy_patches == []
+        assert bundle.file_writes == []
+
+    def test_compile_git_safety_protected_branches(self):
+        overlay = GitSafetyOverlay(
+            protected_branches=ProtectedBranchesAdd(add=["refs/heads/staging", "refs/heads/release"]),
+        )
+        bundle = compile_git_safety(overlay)
+        assert len(bundle.policy_patches) == 1
+        patch = bundle.policy_patches[0]
+        assert patch.op == "add"
+        assert patch.path == "protected_branches"
+        assert patch.value == ["refs/heads/staging", "refs/heads/release"]
+
+    def test_compile_git_safety_blocked_patterns(self):
+        overlay = GitSafetyOverlay(
+            file_restrictions=FileRestrictionsAdd(blocked_patterns_add=["db/migrations/", "secrets/"]),
+        )
+        bundle = compile_git_safety(overlay)
+        assert len(bundle.policy_patches) == 1
+        assert bundle.policy_patches[0].path == "blocked_patterns"
+
+    def test_compile_git_safety_allow_pr(self):
+        overlay = GitSafetyOverlay(allow_pr_operations=True)
+        bundle = compile_git_safety(overlay)
+        assert len(bundle.policy_patches) == 1
+        assert bundle.policy_patches[0].value is True
+
+    def test_compile_git_safety_allow_pr_false(self):
+        overlay = GitSafetyOverlay(allow_pr_operations=False)
+        bundle = compile_git_safety(overlay)
+        assert len(bundle.policy_patches) == 1
+        assert bundle.policy_patches[0].value is False
+
+    def test_compile_git_safety_all_fields(self):
+        overlay = GitSafetyOverlay(
+            protected_branches=ProtectedBranchesAdd(add=["refs/heads/staging"]),
+            file_restrictions=FileRestrictionsAdd(blocked_patterns_add=["db/"]),
+            allow_pr_operations=False,
+        )
+        bundle = compile_git_safety(overlay)
+        assert len(bundle.policy_patches) == 3
+
+
+# ---------------------------------------------------------------------------
+# compile_user_services (Phase 3)
+# ---------------------------------------------------------------------------
+
+
+class TestCompileUserServices:
+    def test_empty_services_returns_empty_bundle(self):
+        bundle = compile_user_services([])
+        assert bundle.env_vars == {}
+        assert bundle.sbx_secrets == []
+        assert bundle.policy_patches == []
+
+    def test_single_service_emits_env_and_secret(self):
+        services = [UserService(name="Tavily", env_var="TAVILY_API_KEY", domain="api.tavily.com")]
+        bundle = compile_user_services(services)
+        assert "TAVILY_API_KEY" in bundle.env_vars
+        assert bundle.env_vars["TAVILY_API_KEY"] == "http://host.docker.internal:8083/proxy/tavily"
+        assert len(bundle.sbx_secrets) == 1
+        assert bundle.sbx_secrets[0] == ("tavily", "TAVILY_API_KEY")
+
+    def test_multiple_services(self):
+        services = [
+            UserService(name="OpenRouter", env_var="OPENROUTER_API_KEY", domain="openrouter.ai"),
+            UserService(name="Groq API", env_var="GROQ_API_KEY", domain="api.groq.com"),
+        ]
+        bundle = compile_user_services(services)
+        assert len(bundle.env_vars) == 2
+        assert len(bundle.sbx_secrets) == 2
+        # Slug for "Groq API" should be "groq-api"
+        assert bundle.env_vars["GROQ_API_KEY"] == "http://host.docker.internal:8083/proxy/groq-api"
+
+    def test_custom_host_and_port(self):
+        services = [UserService(name="svc", env_var="K", domain="d")]
+        bundle = compile_user_services(services, port=9090, host="myhost")
+        assert bundle.env_vars["K"] == "http://myhost:9090/proxy/svc"
+
+
+class TestUserServicesMigration:
+    def test_same_output_foundry_yaml_vs_legacy(self):
+        """Same service definition produces identical env vars via both paths."""
+        # foundry.yaml path (via compiler)
+        services = [
+            UserService(name="Tavily", env_var="TAVILY_API_KEY", domain="api.tavily.com"),
+        ]
+        bundle = compile_user_services(services)
+
+        # Legacy path (via get_proxy_env_overrides logic)
+        from foundry_sandbox.user_services import slug
+        slug_val = slug("Tavily")
+        legacy_url = f"http://host.docker.internal:8083/proxy/{slug_val}"
+
+        assert bundle.env_vars["TAVILY_API_KEY"] == legacy_url
+
+    def test_foundry_yaml_wins(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+        """When foundry.yaml defines user_services, it takes precedence over the legacy file."""
+        # Create a legacy config
+        legacy = tmp_path / "config" / "user-services.yaml"
+        legacy.parent.mkdir(parents=True)
+        legacy.write_text(
+            'version: "1"\n'
+            "services:\n"
+            "  - name: Legacy\n"
+            "    env_var: LEGACY_KEY\n"
+            "    domain: legacy.example\n"
+            "    header: Authorization\n"
+            "    format: bearer\n"
+        )
+
+        monkeypatch.chdir(tmp_path)
+
+        from foundry_sandbox.user_services import load_user_services, clear_cache
+        clear_cache()
+
+        # Without foundry_services, legacy file is used
+        result_legacy = load_user_services()
+        assert len(result_legacy) == 1
+        assert result_legacy[0]["name"] == "Legacy"
+
+        # With foundry_services, it takes precedence
+        clear_cache()
+        result_foundry = load_user_services(
+            foundry_services=[{"name": "New", "env_var": "NEW_KEY", "domain": "new.example"}]
+        )
+        assert len(result_foundry) == 1
+        assert result_foundry[0]["name"] == "New"

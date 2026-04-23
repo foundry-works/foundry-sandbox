@@ -1,8 +1,10 @@
-"""Declarative foundry.yaml config: schema, three-layer resolver, plan renderer.
+"""Declarative foundry.yaml config: schema, three-layer resolver, plan renderer, compilers.
 
 Layers resolve in order: built-in defaults -> ~/.foundry/foundry.yaml -> repo foundry.yaml.
 Merge is additive-only: lists concatenate, allow flags AND across layers, overlays can only
 tighten policy. The repo layer cannot weaken a user-layer forbid.
+
+Compilers turn resolved config sections into ArtifactBundles (pure functions).
 """
 
 from __future__ import annotations
@@ -14,6 +16,9 @@ from typing import Annotated, Literal, Union
 
 import yaml
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
+
+from foundry_sandbox.artifacts import ArtifactBundle, PolicyPatch
+from foundry_sandbox.user_services import slug
 
 logger = logging.getLogger(__name__)
 
@@ -337,6 +342,10 @@ def render_plan_text(config: FoundryConfig) -> str:
         if g.allow_pr_operations is not None:
             n_patches += 1
 
+    if config.user_services:
+        n_env = len(config.user_services)
+        n_secrets = len(config.user_services)
+
     lines.append(f"  policy_patches ({n_patches}):")
     if config.git_safety:
         g = config.git_safety
@@ -349,7 +358,80 @@ def render_plan_text(config: FoundryConfig) -> str:
 
     lines.append(f"  file_writes ({n_writes}):")
     lines.append(f"  env_vars ({n_env}):")
+    if config.user_services:
+        for svc in config.user_services:
+            s = slug(svc.name)
+            lines.append(f"    {svc.env_var}=http://host.docker.internal:8083/proxy/{s}")
     lines.append(f"  sbx_secrets ({n_secrets}):")
+    if config.user_services:
+        for svc in config.user_services:
+            s = slug(svc.name)
+            lines.append(f"    {s} (from host ${svc.env_var})")
     lines.append(f"  post_steps ({n_steps}):")
 
     return "\n".join(lines)
+
+
+# ---------------------------------------------------------------------------
+# Compilers
+# ---------------------------------------------------------------------------
+
+
+def compile_git_safety(overlay: GitSafetyOverlay) -> ArtifactBundle:
+    """Compile a git-safety overlay into an ArtifactBundle.
+
+    Pure function: no side effects. Emits PolicyPatch entries for
+    protected branches, blocked patterns, and allow_pr_operations.
+    """
+    patches: list[PolicyPatch] = []
+
+    if overlay.protected_branches and overlay.protected_branches.add:
+        patches.append(PolicyPatch(
+            op="add",
+            path="protected_branches",
+            value=list(overlay.protected_branches.add),
+        ))
+
+    if overlay.file_restrictions and overlay.file_restrictions.blocked_patterns_add:
+        patches.append(PolicyPatch(
+            op="add",
+            path="blocked_patterns",
+            value=list(overlay.file_restrictions.blocked_patterns_add),
+        ))
+
+    if overlay.allow_pr_operations is not None:
+        patches.append(PolicyPatch(
+            op="add",
+            path="allow_pr",
+            value=overlay.allow_pr_operations,
+        ))
+
+    return ArtifactBundle(policy_patches=patches)
+
+
+def compile_user_services(
+    services: list[UserService],
+    *,
+    port: int = 8083,
+    host: str = "host.docker.internal",
+) -> ArtifactBundle:
+    """Compile user-defined services into an ArtifactBundle.
+
+    Produces env_vars pointing sandbox tools at the host-side proxy and
+    sbx_secrets so the proxy can read the real credentials from the host.
+    """
+    if not services:
+        return ArtifactBundle()
+
+    env_vars: dict[str, str] = {}
+    sbx_secrets: list[tuple[str, str]] = []
+
+    for svc in services:
+        s = slug(svc.name)
+        proxy_url = f"http://{host}:{port}/proxy/{s}"
+        env_vars[svc.env_var] = proxy_url
+        # sbx_secret stores (slug, host_env_var) — the applier reads
+        # the real value from os.environ[host_env_var] at apply time.
+        sbx_secrets.append((s, svc.env_var))
+
+    return ArtifactBundle(env_vars=env_vars, sbx_secrets=sbx_secrets)

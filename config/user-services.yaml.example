@@ -1,31 +1,20 @@
 # User-Defined Services
 #
-# Define custom API services for credential injection via the host-side
-# reverse proxy. Copy this file to config/user-services.yaml and uncomment
-# the services you need.
+# **DEPRECATED** — Use foundry.yaml instead. This file is still read as a
+# fallback, but a deprecation warning is logged. Migrate by adding a
+# `user_services:` section to your repo's foundry.yaml:
 #
-# Each service gets:
-#   - A reverse-proxy route on the git-safety server (host-side)
-#   - An environment variable injected into the sandbox pointing at the proxy
-#   - Real credentials never enter the sandbox VM
+#   version: "1"
+#   user_services:
+#     - name: OpenRouter
+#       env_var: OPENROUTER_API_KEY
+#       domain: openrouter.ai
+#       header: Authorization
+#       format: bearer
 #
-# How it works:
-#   The sandbox agent calls http://host.docker.internal:8083/proxy/<slug>/...
-#   The proxy reads the real API key from the host environment, adds the
-#   configured header, and forwards the request to the upstream service.
-#   No MITM, no custom CA.
+# See docs/configuration.md for the full foundry.yaml schema.
 #
-# Config file search order:
-#   1. FOUNDRY_USER_SERVICES_PATH environment variable
-#   2. ./config/user-services.yaml (relative to project root)
-#
-# Limitations:
-#   - Header-based credential injection only
-#   - SDKs must support custom base URLs (e.g., TAVILY_API_BASE)
-#   - No OAuth token refresh flows
-#   - No request body injection
-#
-# See docs/configuration.md for full documentation.
+# Legacy format below.
 
 version: "1"
 

@@ -211,32 +211,44 @@ def new_sbx_setup(
         )
 
     # ------------------------------------------------------------------
-    # 5.5. Inject user service environment overrides
+    # 5.1. Apply foundry.yaml artifacts (git-safety overlay + user services)
     # ------------------------------------------------------------------
     user_service_overrides: dict[str, str] = {}
     try:
-        from foundry_sandbox.user_services import get_proxy_env_overrides
+        from foundry_sandbox.foundry_config import (
+            compile_git_safety,
+            compile_user_services,
+            resolve_foundry_config,
+        )
+        from foundry_sandbox.artifacts import apply_artifacts, _merge_bundles
 
-        user_service_overrides = get_proxy_env_overrides()
-        if user_service_overrides:
-            lines = [f"export {k}={v}" for k, v in sorted(user_service_overrides.items())]
-            env_script = "\n".join(lines) + "\n"
-            sbx_exec(
-                name,
-                ["tee", "/etc/profile.d/foundry-user-services.sh"],
-                user="root",
-                input=env_script,
-                quiet=True,
-            )
-            sbx_exec(
-                name,
-                ["chmod", "644", "/etc/profile.d/foundry-user-services.sh"],
-                user="root",
-                quiet=True,
-            )
-            log_info(f"Injected {len(user_service_overrides)} user service proxy URLs")
+        config = resolve_foundry_config(Path(repo_root))
+
+        bundles = []
+        if config.git_safety:
+            bundles.append(compile_git_safety(config.git_safety))
+        if config.user_services:
+            bundles.append(compile_user_services(config.user_services))
+        else:
+            # Legacy fallback: read config/user-services.yaml
+            from foundry_sandbox.user_services import load_user_services
+
+            legacy_services = load_user_services()
+            if legacy_services:
+                from foundry_sandbox.foundry_config import UserService
+                us = [UserService(**s) for s in legacy_services]
+                bundles.append(compile_user_services(us))
+
+        if bundles:
+            merged = _merge_bundles(bundles)
+            apply_artifacts(name, merged, sandbox_id=name)
+            user_service_overrides = merged.env_vars
+            log_info(f"Applied {len(merged.policy_patches)} policy patch(es), "
+                     f"{len(merged.env_vars)} env var(s) from foundry.yaml")
+    except NotImplementedError:
+        raise
     except Exception as exc:
-        log_warn(f"User service env injection failed: {exc}")
+        log_warn(f"Foundry.yaml artifact apply failed: {exc}")
 
     # ------------------------------------------------------------------
     # 6. Copy files and install pip requirements

@@ -1,7 +1,8 @@
 """Config loader for user-defined service credential injection.
 
-Reads config/user-services.yaml and generates proxy URLs for sandbox
-environment variable injection. The proxy routes live in foundry-git-safety.
+Dual-read: foundry.yaml user_services wins over legacy config/user-services.yaml.
+When the legacy file is used, a deprecation warning is logged pointing to foundry.yaml
+migration. The proxy routes live in foundry-git-safety.
 """
 
 from __future__ import annotations
@@ -21,41 +22,29 @@ _DEFAULT_SEARCH_PATHS = [
     Path("config/user-services.yaml"),
 ]
 
+_LEGACY_DEPRECATION_MSG = (
+    "config/user-services.yaml is deprecated — migrate to foundry.yaml user_services. "
+    "See docs/configuration.md for the new schema."
+)
+
 
 def _slug(name: str) -> str:
     """Convert a service name to a URL-safe slug."""
-    slug = re.sub(r"[^a-z0-9]+", "-", name.lower()).strip("-")
-    return slug or "unknown"
+    return slug(name)
 
 
-def load_user_services(path: str | Path | None = None) -> list[dict[str, Any]]:
-    """Load user-defined services from YAML config.
+def slug(name: str) -> str:
+    """Convert a service name to a URL-safe slug (public for reuse)."""
+    s = re.sub(r"[^a-z0-9]+", "-", name.lower()).strip("-")
+    return s or "unknown"
 
-    Search order:
-      1. Explicit path argument
-      2. FOUNDRY_USER_SERVICES_PATH env var
-      3. ./config/user-services.yaml
 
-    Returns list of service dicts, or empty list if no config found.
-    """
+def _load_legacy(path: str | Path) -> list[dict[str, Any]]:
+    """Load user-defined services from the legacy YAML config."""
     from foundry_git_safety.schemas.foundry_yaml import UserServicesConfig  # type: ignore[import-not-found,import-untyped,unused-ignore]
-
-    if path is None:
-        env_path = os.environ.get("FOUNDRY_USER_SERVICES_PATH")
-        if env_path:
-            path = Path(env_path)
-        else:
-            for candidate in _DEFAULT_SEARCH_PATHS:
-                if candidate.exists():
-                    path = candidate
-                    break
-
-    if path is None:
-        return []
 
     path = Path(path)
     if not path.exists():
-        logger.debug("User services config not found: %s", path)
         return []
 
     try:
@@ -75,6 +64,43 @@ def load_user_services(path: str | Path | None = None) -> list[dict[str, Any]]:
         return []
 
     return [s.model_dump() for s in config.services]
+
+
+def load_user_services(
+    path: str | Path | None = None,
+    *,
+    foundry_services: list[dict[str, Any]] | None = None,
+) -> list[dict[str, Any]]:
+    """Load user-defined services with dual-read semantics.
+
+    Priority:
+      1. foundry.yaml user_services (passed as foundry_services)
+      2. Explicit path argument
+      3. FOUNDRY_USER_SERVICES_PATH env var
+      4. ./config/user-services.yaml
+
+    Returns list of service dicts, or empty list if no config found.
+    """
+    if foundry_services:
+        return foundry_services
+
+    if path is None:
+        env_path = os.environ.get("FOUNDRY_USER_SERVICES_PATH")
+        if env_path:
+            path = Path(env_path)
+        else:
+            for candidate in _DEFAULT_SEARCH_PATHS:
+                if candidate.exists():
+                    path = candidate
+                    break
+
+    if path is None:
+        return []
+
+    result = _load_legacy(path)
+    if result:
+        logger.warning(_LEGACY_DEPRECATION_MSG)
+    return result
 
 
 @lru_cache(maxsize=1)
@@ -104,7 +130,7 @@ def get_proxy_env_overrides(
     for svc in services:
         name = str(svc["name"])
         env_var = str(svc["env_var"])
-        slug = _slug(name)
-        proxy_url = f"http://{host}:{port}/proxy/{slug}"
+        s = _slug(name)
+        proxy_url = f"http://{host}:{port}/proxy/{s}"
         overrides[env_var] = proxy_url
     return overrides
