@@ -106,6 +106,65 @@ Important behavior:
 For manual requests inside the sandbox, use the installed `proxy-sign` helper to
 generate the required headers for `/proxy/...` endpoints.
 
+## MCP Servers
+
+Declare MCP servers in `foundry.yaml` under the `mcp_servers` key. At sandbox
+creation, Foundry writes a `/workspace/.mcp.json` inside the sandbox with the
+compiled configuration.
+
+### Builtin servers
+
+Curated servers that ship with Foundry. No manual setup required.
+
+Available builtins: `github`, `filesystem`, `memory`.
+
+```yaml
+version: "1"
+
+mcp_servers:
+  - name: github
+    type: builtin
+    env:
+      GITHUB_PERSONAL_ACCESS_TOKEN: "${from_host:GITHUB_TOKEN}"
+
+  - name: filesystem
+    type: builtin
+
+  - name: memory
+    type: builtin
+```
+
+Each builtin resolves to an `npx` command from `@modelcontextprotocol`.
+
+### `${from_host:VAR}` substitution
+
+Env values containing `${from_host:VAR_NAME}` are replaced with a proxy URL at
+compile time. The real credential stays on the host. The host env var must be
+set when `cast new` runs (fail-fast).
+
+```yaml
+env:
+  API_KEY: "${from_host:MY_API_KEY}"
+# resolves to: http://host.docker.internal:8083/proxy/my-api-key
+```
+
+### Proxy servers
+
+For APIs that are not covered by a builtin, use `type: proxy`. The MCP server
+in the sandbox points at the Foundry proxy, which authenticates and forwards
+requests to the real service.
+
+```yaml
+mcp_servers:
+  - name: internal-api
+    type: proxy
+    host_env: INTERNAL_API_KEY
+    target: api.internal.com
+```
+
+The `host_env` field names the host environment variable that holds the real
+credential. The `target` field is the upstream domain the proxy routes to.
+
 ## Host Paths
 
 The current host-side layout is:

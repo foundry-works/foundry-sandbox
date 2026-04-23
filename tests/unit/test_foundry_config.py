@@ -15,11 +15,14 @@ from foundry_sandbox.foundry_config import (
     HookRule,
     McpServerBuiltin,
     McpServerNpm,
+    McpServerProxy,
     ProtectedBranchesAdd,
     SkillSource,
     UserService,
     _merge,
+    _resolve_host_refs,
     compile_git_safety,
+    compile_mcp_servers,
     compile_user_services,
     render_plan_text,
     resolve_foundry_config,
@@ -417,3 +420,136 @@ class TestUserServicesMigration:
         )
         assert len(result_foundry) == 1
         assert result_foundry[0]["name"] == "New"
+
+
+# ---------------------------------------------------------------------------
+# compile_mcp_servers (Phase 4)
+# ---------------------------------------------------------------------------
+
+
+class TestCompileMcpBuiltin:
+    def test_builtin_github(self):
+        servers = [McpServerBuiltin(name="github", type="builtin")]
+        bundle = compile_mcp_servers(servers)
+        assert len(bundle.file_writes) == 1
+        assert bundle.file_writes[0].container_path == "/workspace/.mcp.json"
+        import json
+        content = json.loads(bundle.file_writes[0].content)
+        assert "github" in content["mcpServers"]
+        assert content["mcpServers"]["github"]["command"] == "npx"
+        assert bundle.env_vars == {}
+        assert bundle.sbx_secrets == []
+
+    def test_builtin_with_plain_env(self):
+        servers = [McpServerBuiltin(
+            name="github", type="builtin",
+            env={"GITHUB_TOOL_VERBOSE": "1"},
+        )]
+        bundle = compile_mcp_servers(servers)
+        import json
+        content = json.loads(bundle.file_writes[0].content)
+        assert content["mcpServers"]["github"]["env"]["GITHUB_TOOL_VERBOSE"] == "1"
+
+    def test_unknown_builtin_raises(self):
+        servers = [McpServerBuiltin(name="nonexistent", type="builtin")]
+        with pytest.raises(ValueError, match="Unknown builtin MCP server"):
+            compile_mcp_servers(servers)
+
+    def test_empty_servers_returns_empty_bundle(self):
+        bundle = compile_mcp_servers([])
+        assert bundle.file_writes == []
+        assert bundle.env_vars == {}
+        assert bundle.sbx_secrets == []
+
+    def test_multiple_builtins(self):
+        servers = [
+            McpServerBuiltin(name="github", type="builtin"),
+            McpServerBuiltin(name="filesystem", type="builtin"),
+        ]
+        bundle = compile_mcp_servers(servers)
+        import json
+        content = json.loads(bundle.file_writes[0].content)
+        assert "github" in content["mcpServers"]
+        assert "filesystem" in content["mcpServers"]
+
+
+class TestCompileMcpProxy:
+    def test_proxy_emits_secret_and_env(self):
+        servers = [McpServerProxy(
+            name="internal-api", type="proxy",
+            host_env="INTERNAL_API_KEY", target="api.internal.com",
+        )]
+        bundle = compile_mcp_servers(servers)
+        assert len(bundle.sbx_secrets) == 1
+        assert bundle.sbx_secrets[0] == ("internal-api", "INTERNAL_API_KEY")
+        assert len(bundle.env_vars) == 1
+        assert any("internal-api" in v for v in bundle.env_vars.values())
+        import json
+        content = json.loads(bundle.file_writes[0].content)
+        assert "internal-api" in content["mcpServers"]
+        assert "/proxy/internal-api" in content["mcpServers"]["internal-api"]["url"]
+
+    def test_proxy_custom_host_and_port(self):
+        servers = [McpServerProxy(
+            name="svc", type="proxy",
+            host_env="SVC_KEY", target="svc.example.com",
+        )]
+        bundle = compile_mcp_servers(servers, port=9090, host="myhost")
+        import json
+        content = json.loads(bundle.file_writes[0].content)
+        assert "http://myhost:9090/proxy/svc" in content["mcpServers"]["svc"]["url"]
+
+
+class TestFromHostRef:
+    def test_from_host_resolves_to_proxy_url(self, monkeypatch: pytest.MonkeyPatch):
+        monkeypatch.setenv("MY_TOKEN", "tok123")
+        resolved, is_proxy = _resolve_host_refs("${from_host:MY_TOKEN}")
+        assert is_proxy is True
+        assert "proxy/my-token" in resolved
+
+    def test_from_host_unset_raises(self, monkeypatch: pytest.MonkeyPatch):
+        monkeypatch.delenv("MISSING_VAR", raising=False)
+        with pytest.raises(ValueError, match="MISSING_VAR"):
+            _resolve_host_refs("${from_host:MISSING_VAR}")
+
+    def test_no_from_host_returns_unchanged(self):
+        resolved, is_proxy = _resolve_host_refs("plain-value")
+        assert resolved == "plain-value"
+        assert is_proxy is False
+
+    def test_builtin_with_from_host_env(self, monkeypatch: pytest.MonkeyPatch):
+        monkeypatch.setenv("GITHUB_TOKEN", "ghp_test123")
+        servers = [McpServerBuiltin(
+            name="github", type="builtin",
+            env={"GITHUB_PERSONAL_ACCESS_TOKEN": "${from_host:GITHUB_TOKEN}"},
+        )]
+        bundle = compile_mcp_servers(servers)
+        import json
+        content = json.loads(bundle.file_writes[0].content)
+        env = content["mcpServers"]["github"]["env"]
+        assert "proxy/github-token" in env["GITHUB_PERSONAL_ACCESS_TOKEN"]
+        assert len(bundle.sbx_secrets) == 1
+        assert bundle.sbx_secrets[0] == ("github-token", "GITHUB_TOKEN")
+
+
+class TestCompileMcpPlanRenderer:
+    def test_plan_shows_mcp_file_writes(self):
+        config = FoundryConfig(
+            version="1",
+            mcp_servers=[McpServerBuiltin(name="github", type="builtin")],
+        )
+        text = render_plan_text(config)
+        assert "file_writes (1):" in text
+        assert "/workspace/.mcp.json" in text
+
+    def test_plan_shows_proxy_secrets(self):
+        config = FoundryConfig(
+            version="1",
+            mcp_servers=[McpServerProxy(
+                name="svc", type="proxy",
+                host_env="SVC_KEY", target="svc.example.com",
+            )],
+        )
+        text = render_plan_text(config)
+        assert "sbx_secrets" in text
+        assert "svc" in text

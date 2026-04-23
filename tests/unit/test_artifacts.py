@@ -14,6 +14,7 @@ from foundry_sandbox.artifacts import (
     PostStep,
     _merge_bundles,
     _patch_sandbox_policy,
+    apply_artifacts,
 )
 
 
@@ -248,3 +249,68 @@ class TestApplySbxSecrets:
         with patch("foundry_sandbox.sbx.sbx_secret_set") as mock_set:
             _apply_sbx_secrets([("unset", "UNSET_KEY")])
             mock_set.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# File-write apply (Phase 4)
+# ---------------------------------------------------------------------------
+
+
+class TestWriteFileInSandbox:
+    def test_write_file_uses_base64_through_sbx_exec(self):
+        from foundry_sandbox.artifacts import _write_file_in_sandbox
+        from unittest.mock import patch
+
+        fw = FileWrite(container_path="/workspace/.mcp.json", content=b'{"test": true}')
+        with patch("foundry_sandbox.artifacts.sbx_exec") as mock_exec:
+            _write_file_in_sandbox("test-sbx", fw)
+            mock_exec.assert_called_once()
+            call_args = mock_exec.call_args
+            assert call_args.args[0] == "test-sbx"
+            cmd = " ".join(call_args.args[1])
+            assert "base64 -d" in cmd
+            assert "/workspace/.mcp.json" in cmd
+            assert call_args.kwargs["user"] == "root"
+
+    def test_write_file_creates_parent_dirs(self):
+        from foundry_sandbox.artifacts import _write_file_in_sandbox
+        from unittest.mock import patch
+
+        fw = FileWrite(container_path="/deep/nested/dir/file.txt", content=b"hello")
+        with patch("foundry_sandbox.artifacts.sbx_exec") as mock_exec:
+            _write_file_in_sandbox("test-sbx", fw)
+            cmd = " ".join(mock_exec.call_args.args[1])
+            assert "mkdir -p" in cmd
+
+    def test_write_file_sets_permissions(self):
+        from foundry_sandbox.artifacts import _write_file_in_sandbox
+        from unittest.mock import patch
+
+        fw = FileWrite(container_path="/tmp/test.sh", content=b"#!/bin/sh\n", mode=0o755)
+        with patch("foundry_sandbox.artifacts.sbx_exec") as mock_exec:
+            _write_file_in_sandbox("test-sbx", fw)
+            cmd = " ".join(mock_exec.call_args.args[1])
+            assert "chmod 755" in cmd
+
+
+class TestApplyArtifactsFileWrites:
+    def test_apply_artifacts_writes_files(self):
+        from unittest.mock import patch
+
+        bundle = ArtifactBundle(
+            file_writes=[
+                FileWrite(container_path="/workspace/.mcp.json", content=b'{"mcpServers": {}}'),
+            ],
+        )
+        with patch("foundry_sandbox.artifacts._write_file_in_sandbox") as mock_write:
+            apply_artifacts("test-sbx", bundle, sandbox_id="test-sbx")
+            mock_write.assert_called_once()
+            assert mock_write.call_args.args[1].container_path == "/workspace/.mcp.json"
+
+    def test_apply_artifacts_empty_file_writes_is_noop(self):
+        from unittest.mock import patch
+
+        bundle = ArtifactBundle(file_writes=[])
+        with patch("foundry_sandbox.artifacts._write_file_in_sandbox") as mock_write:
+            apply_artifacts("test-sbx", bundle, sandbox_id="test-sbx")
+            mock_write.assert_not_called()

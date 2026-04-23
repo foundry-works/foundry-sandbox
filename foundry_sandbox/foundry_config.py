@@ -11,8 +11,10 @@ from __future__ import annotations
 
 import importlib.resources
 import logging
+import os
+import re
 from pathlib import Path
-from typing import Annotated, Literal, Union
+from typing import Annotated, Any, Literal, Union
 
 import yaml
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
@@ -325,7 +327,7 @@ def render_plan_text(config: FoundryConfig) -> str:
     lines.append(f"  allow_third_party_mcp: {'true' if config.allow_third_party_mcp else 'false'}")
     lines.append("")
 
-    # Artifacts (Phase 1: always empty since no compilers yet)
+    # Artifacts
     lines.append("Artifacts to apply:")
     n_patches = 0
     n_writes = 0
@@ -343,8 +345,16 @@ def render_plan_text(config: FoundryConfig) -> str:
             n_patches += 1
 
     if config.user_services:
-        n_env = len(config.user_services)
-        n_secrets = len(config.user_services)
+        n_env += len(config.user_services)
+        n_secrets += len(config.user_services)
+
+    # MCP server artifacts (compile to get counts/details)
+    mcp_bundle: ArtifactBundle | None = None
+    if config.mcp_servers:
+        mcp_bundle = compile_mcp_servers(config.mcp_servers)
+        n_writes += len(mcp_bundle.file_writes)
+        n_env += len(mcp_bundle.env_vars)
+        n_secrets += len(mcp_bundle.sbx_secrets)
 
     lines.append(f"  policy_patches ({n_patches}):")
     if config.git_safety:
@@ -357,19 +367,59 @@ def render_plan_text(config: FoundryConfig) -> str:
             lines.append(f'    set allow_pr_operations  = {g.allow_pr_operations}')
 
     lines.append(f"  file_writes ({n_writes}):")
+    if mcp_bundle:
+        for fw in mcp_bundle.file_writes:
+            lines.append(f"    {fw.container_path} ({len(fw.content)} bytes, {fw.owner})")
     lines.append(f"  env_vars ({n_env}):")
     if config.user_services:
         for svc in config.user_services:
             s = slug(svc.name)
             lines.append(f"    {svc.env_var}=http://host.docker.internal:8083/proxy/{s}")
+    if mcp_bundle:
+        for k, v in sorted(mcp_bundle.env_vars.items()):
+            lines.append(f"    {k}={v}")
     lines.append(f"  sbx_secrets ({n_secrets}):")
     if config.user_services:
         for svc in config.user_services:
             s = slug(svc.name)
             lines.append(f"    {s} (from host ${svc.env_var})")
+    if mcp_bundle:
+        for slug_name, env_var in mcp_bundle.sbx_secrets:
+            lines.append(f"    {slug_name} (from host ${env_var})")
     lines.append(f"  post_steps ({n_steps}):")
 
     return "\n".join(lines)
+
+
+# ---------------------------------------------------------------------------
+# Host-variable substitution
+# ---------------------------------------------------------------------------
+
+
+_FROM_HOST_RE = re.compile(r"\$\{from_host:([A-Za-z_][A-Za-z0-9_]*)\}")
+
+
+def _resolve_host_refs(value: str) -> tuple[str, bool]:
+    """Resolve ${from_host:VAR} references in a string.
+
+    Returns (resolved_value, is_proxy_ref).  When a reference is found the
+    value becomes a proxy URL and the caller should emit an sbx_secret.
+    Raises ValueError if the host env var is not set.
+    """
+    match = _FROM_HOST_RE.search(value)
+    if not match:
+        return value, False
+
+    env_var = match.group(1)
+    if not os.environ.get(env_var):
+        raise ValueError(
+            f"MCP server env references ${{from_host:{env_var}}} "
+            f"but {env_var} is not set in the host environment"
+        )
+
+    s = slug(env_var)
+    proxy_url = f"http://host.docker.internal:8083/proxy/{s}"
+    return proxy_url, True
 
 
 # ---------------------------------------------------------------------------
@@ -435,3 +485,88 @@ def compile_user_services(
         sbx_secrets.append((s, svc.env_var))
 
     return ArtifactBundle(env_vars=env_vars, sbx_secrets=sbx_secrets)
+
+
+def compile_mcp_servers(
+    servers: list[McpServer],
+    *,
+    port: int = 8083,
+    host: str = "host.docker.internal",
+) -> ArtifactBundle:
+    """Compile MCP server declarations into an ArtifactBundle.
+
+    Produces a FileWrite for /workspace/.mcp.json, plus env_vars and
+    sbx_secrets for proxy-type servers and from_host references.
+
+    Raises ValueError for unknown builtin names.
+    Skips npm servers (Phase 6).
+    """
+    if not servers:
+        return ArtifactBundle()
+
+    from foundry_sandbox.mcp_builtins import get_builtin, list_builtins
+
+    mcp_servers_json: dict[str, dict[str, Any]] = {}
+    env_vars: dict[str, str] = {}
+    sbx_secrets: list[tuple[str, str]] = []
+
+    for server in servers:
+        s = slug(server.name)
+
+        if server.type == "builtin":
+            spec = get_builtin(server.name)
+            if spec is None:
+                raise ValueError(
+                    f"Unknown builtin MCP server: {server.name!r}. "
+                    f"Available: {', '.join(list_builtins())}"
+                )
+            # Resolve from_host refs in user-supplied env overrides
+            resolved_env: dict[str, str] = {}
+            for k, v in server.env.items():
+                resolved, is_proxy = _resolve_host_refs(v)
+                resolved_env[k] = resolved
+                if is_proxy:
+                    match = _FROM_HOST_RE.search(v)
+                    env_var_name = match.group(1)  # type: ignore[union-attr]
+                    secret_slug = slug(env_var_name)
+                    sbx_secrets.append((secret_slug, env_var_name))
+            if resolved_env:
+                spec["env"] = resolved_env
+            mcp_servers_json[server.name] = spec
+
+        elif server.type == "proxy":
+            proxy_url = f"http://{host}:{port}/proxy/{s}"
+            mcp_servers_json[server.name] = {
+                "url": proxy_url,
+            }
+            env_vars[f"MCP_PROXY_{s.upper().replace('-', '_')}"] = proxy_url
+            sbx_secrets.append((s, server.host_env))
+
+        elif server.type == "npm":
+            logger.warning("Skipping npm MCP server %r (Phase 6)", server.name)
+            continue
+
+    if not mcp_servers_json:
+        return ArtifactBundle(env_vars=env_vars, sbx_secrets=sbx_secrets)
+
+    import json
+
+    mcp_json_content = json.dumps(
+        {"mcpServers": mcp_servers_json},
+        indent=2,
+    )
+
+    from foundry_sandbox.artifacts import FileWrite
+
+    return ArtifactBundle(
+        file_writes=[
+            FileWrite(
+                container_path="/workspace/.mcp.json",
+                content=mcp_json_content.encode(),
+                mode=0o644,
+                owner="agent",
+            )
+        ],
+        env_vars=env_vars,
+        sbx_secrets=sbx_secrets,
+    )

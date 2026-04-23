@@ -217,6 +217,7 @@ def new_sbx_setup(
     try:
         from foundry_sandbox.foundry_config import (
             compile_git_safety,
+            compile_mcp_servers,
             compile_user_services,
             resolve_foundry_config,
         )
@@ -238,13 +239,16 @@ def new_sbx_setup(
                 from foundry_sandbox.foundry_config import UserService
                 us = [UserService(**s) for s in legacy_services]
                 bundles.append(compile_user_services(us))
+        if config.mcp_servers:
+            bundles.append(compile_mcp_servers(config.mcp_servers))
 
         if bundles:
             merged = _merge_bundles(bundles)
             apply_artifacts(name, merged, sandbox_id=name)
             user_service_overrides = merged.env_vars
             log_info(f"Applied {len(merged.policy_patches)} policy patch(es), "
-                     f"{len(merged.env_vars)} env var(s) from foundry.yaml")
+                     f"{len(merged.env_vars)} env var(s), "
+                     f"{len(merged.file_writes)} file write(s) from foundry.yaml")
     except NotImplementedError:
         raise
     except Exception as exc:

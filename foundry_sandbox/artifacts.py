@@ -216,6 +216,33 @@ def _apply_env_vars(sandbox_name: str, env_vars: dict[str, str]) -> None:
 
 
 # ---------------------------------------------------------------------------
+# File-write applier
+# ---------------------------------------------------------------------------
+
+
+def _write_file_in_sandbox(sandbox_name: str, fw: FileWrite) -> None:
+    """Write a file into a sandbox via base64-through-sbx-exec.
+
+    Creates parent directories, writes content, sets permissions and ownership.
+    """
+    import base64
+
+    payload = base64.b64encode(fw.content).decode()
+    octal_mode = format(fw.mode, "o")
+
+    sbx_exec(
+        sandbox_name,
+        ["sh", "-c",
+         f"mkdir -p \"$(dirname '{fw.container_path}')\" "
+         f"&& echo '{payload}' | base64 -d > '{fw.container_path}' "
+         f"&& chmod {octal_mode} '{fw.container_path}' "
+         f"&& chown {fw.owner} '{fw.container_path}'"],
+        user="root",
+        quiet=True,
+    )
+
+
+# ---------------------------------------------------------------------------
 # Top-level applier (5-step fixed order)
 # ---------------------------------------------------------------------------
 
@@ -239,7 +266,9 @@ def apply_artifacts(
 
     # Step 3: File writes
     if bundle.file_writes:
-        raise NotImplementedError("file_writes apply (Phase 4+)")
+        logger.info("Writing %d files into %s", len(bundle.file_writes), sandbox_id)
+        for fw in bundle.file_writes:
+            _write_file_in_sandbox(name, fw)
 
     # Step 4: Env vars
     if bundle.env_vars:
