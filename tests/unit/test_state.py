@@ -13,7 +13,6 @@ from foundry_sandbox.state import (
     write_sandbox_metadata,
     load_sandbox_metadata,
     list_sandboxes,
-    inspect_sandbox,
     save_last_cast_new,
     load_last_cast_new,
     save_cast_preset,
@@ -91,7 +90,6 @@ class TestMetadataWriteRead:
         metadata = load_sandbox_metadata("test-sandbox")
 
         assert metadata is not None
-        assert metadata["backend"] == "sbx"
         assert metadata["sbx_name"] == "test-sandbox"
         assert metadata["agent"] == "claude"
         assert metadata["repo_url"] == "https://github.com/user/repo.git"
@@ -136,7 +134,7 @@ class TestMetadataWriteRead:
         assert load_sandbox_metadata("nonexistent") is None
 
     def test_load_empty_metadata_file(self, sandbox_home):
-        config_dir = sandbox_home / "claude-config" / "empty-sandbox"
+        config_dir = sandbox_home / "sandboxes" / "empty-sandbox"
         config_dir.mkdir(parents=True)
         meta_file = config_dir / "metadata.json"
         meta_file.write_text("")
@@ -144,7 +142,7 @@ class TestMetadataWriteRead:
         assert load_sandbox_metadata("empty-sandbox") is None
 
     def test_write_creates_config_directory(self, sandbox_home):
-        config_dir = sandbox_home / "claude-config" / "new-sandbox"
+        config_dir = sandbox_home / "sandboxes" / "new-sandbox"
         assert not config_dir.exists()
 
         write_sandbox_metadata(
@@ -171,10 +169,9 @@ class TestMetadataWriteRead:
             ),
         )
 
-        config_dir = sandbox_home / "claude-config" / "json-check"
+        config_dir = sandbox_home / "sandboxes" / "json-check"
         meta_file = config_dir / "metadata.json"
         data = json.loads(meta_file.read_text())
-        assert data["backend"] == "sbx"
         assert data["sbx_name"] == "json-check"
 
 
@@ -271,34 +268,10 @@ class TestListSandboxes:
         assert len(result) == 2
 
     def test_skips_empty_config_dirs(self, sandbox_home):
-        config_dir = sandbox_home / "claude-config" / "empty"
+        config_dir = sandbox_home / "sandboxes" / "empty"
         config_dir.mkdir(parents=True)
 
         assert list_sandboxes() == []
-
-
-class TestInspectSandbox:
-    """Tests for inspect_sandbox()."""
-
-    def test_existing_sandbox(self, sandbox_home):
-        write_sandbox_metadata(
-            "inspect-me",
-            SbxSandboxMetadata(
-                sbx_name="inspect-me",
-                agent="claude",
-                repo_url="https://github.com/org/repo",
-                branch="main",
-            ),
-        )
-
-        result = inspect_sandbox("inspect-me")
-        assert result is not None
-        assert result["name"] == "inspect-me"
-        assert result["sbx_name"] == "inspect-me"
-        assert result["repo_url"] == "https://github.com/org/repo"
-
-    def test_nonexistent_sandbox(self, sandbox_home):
-        assert inspect_sandbox("nope") is None
 
 
 # ============================================================================

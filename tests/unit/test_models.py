@@ -31,7 +31,6 @@ class TestSbxSandboxMetadata:
             repo_url="https://github.com/org/repo",
             branch="main",
         )
-        assert meta.backend == "sbx"
         assert meta.sbx_name == "test-sandbox"
         assert meta.agent == "claude"
         assert meta.git_safety_enabled is True

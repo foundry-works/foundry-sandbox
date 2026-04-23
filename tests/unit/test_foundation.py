@@ -15,7 +15,7 @@ import pytest
 from foundry_sandbox.constants import (
     get_sandbox_home,
     get_repos_dir,
-    get_claude_configs_dir,
+    get_sandbox_configs_dir,
 )
 from foundry_sandbox.config import (
     load_json,
@@ -23,7 +23,7 @@ from foundry_sandbox.config import (
 )
 from foundry_sandbox.models import SbxSandboxMetadata
 from foundry_sandbox.paths import (
-    path_claude_config,
+    path_sandbox_config,
     path_metadata_file,
     path_last_cast_new,
     path_last_attach,
@@ -58,9 +58,9 @@ class TestConstantsDirectoryGetters:
         monkeypatch.setenv("SANDBOX_HOME", "/tmp/sb")
         assert str(get_repos_dir()) == "/tmp/sb/repos"
 
-    def test_claude_configs_dir(self, monkeypatch):
+    def test_sandbox_configs_dir(self, monkeypatch):
         monkeypatch.setenv("SANDBOX_HOME", "/tmp/sb")
-        assert str(get_claude_configs_dir()) == "/tmp/sb/claude-config"
+        assert str(get_sandbox_configs_dir()) == "/tmp/sb/sandboxes"
 
 
 
@@ -76,11 +76,11 @@ class TestPathDerivation:
     def set_sandbox_home(self, monkeypatch):
         monkeypatch.setenv("SANDBOX_HOME", "/tmp/sb")
 
-    def test_path_claude_config(self):
-        assert str(path_claude_config("my-sandbox")) == "/tmp/sb/claude-config/my-sandbox"
+    def test_path_sandbox_config(self):
+        assert str(path_sandbox_config("my-sandbox")) == "/tmp/sb/sandboxes/my-sandbox"
 
     def test_path_metadata_file(self):
-        assert str(path_metadata_file("my-sandbox")) == "/tmp/sb/claude-config/my-sandbox/metadata.json"
+        assert str(path_metadata_file("my-sandbox")) == "/tmp/sb/sandboxes/my-sandbox/metadata.json"
 
     def test_path_last_cast_new(self):
         assert str(path_last_cast_new()) == "/tmp/sb/.last-cast-new.json"
@@ -111,9 +111,9 @@ class TestPathSafetyAssertions:
         ".",
         "",
     ])
-    def test_path_claude_config_rejects_traversal(self, bad_name):
+    def test_path_sandbox_config_rejects_traversal(self, bad_name):
         with pytest.raises(ValueError):
-            path_claude_config(bad_name)
+            path_sandbox_config(bad_name)
 
     @pytest.mark.parametrize("bad_name", [
         "../evil",
@@ -124,7 +124,7 @@ class TestPathSafetyAssertions:
             path_preset_file(bad_name)
 
     def test_valid_names_pass(self):
-        path_claude_config("my-sandbox")
+        path_sandbox_config("my-sandbox")
         path_preset_file("default")
 
 
@@ -272,7 +272,7 @@ class TestResolveHostWorktreePath:
         monkeypatch.setenv("SANDBOX_HOME", "/tmp/sb")
 
     def test_returns_metadata_host_worktree_path(self, tmp_path, monkeypatch):
-        meta_dir = tmp_path / "claude-config" / "my-sandbox"
+        meta_dir = tmp_path / "sandboxes" / "my-sandbox"
         meta_dir.mkdir(parents=True)
         metadata_file = meta_dir / "metadata.json"
         metadata_file.write_text(
@@ -281,7 +281,7 @@ class TestResolveHostWorktreePath:
         )
 
         monkeypatch.setattr(
-            "foundry_sandbox.paths.path_claude_config",
+            "foundry_sandbox.paths.path_sandbox_config",
             lambda name: meta_dir,
         )
         monkeypatch.setattr(
@@ -311,27 +311,27 @@ class TestResolveHostWorktreePath:
 
 
 class TestFindNextSandboxName:
-    """Tests for find_next_sandbox_name — only checks claude-config/."""
+    """Tests for find_next_sandbox_name — only checks sandboxes/."""
 
     @pytest.fixture(autouse=True)
     def set_sandbox_home(self, monkeypatch, tmp_path):
         monkeypatch.setenv("SANDBOX_HOME", str(tmp_path))
 
     def test_returns_base_when_available(self, tmp_path):
-        configs = tmp_path / "claude-config"
+        configs = tmp_path / "sandboxes"
         configs.mkdir()
         result = find_next_sandbox_name("my-sandbox")
         assert result == "my-sandbox"
 
     def test_appends_suffix_on_collision(self, tmp_path):
-        configs = tmp_path / "claude-config"
+        configs = tmp_path / "sandboxes"
         configs.mkdir()
         (configs / "my-sandbox").mkdir()
         result = find_next_sandbox_name("my-sandbox")
         assert result == "my-sandbox-2"
 
     def test_only_checks_configs_not_worktrees(self, tmp_path):
-        configs = tmp_path / "claude-config"
+        configs = tmp_path / "sandboxes"
         configs.mkdir()
         worktrees = tmp_path / "worktrees"
         worktrees.mkdir()

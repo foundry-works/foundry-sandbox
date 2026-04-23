@@ -143,8 +143,9 @@ def _collect_tamper_events(n: int = 20) -> list[dict[str, Any]]:
 def _collect_tamper_counter() -> dict[str, Any]:
     """Collect the server-side tamper event counter from /metrics."""
     import urllib.request
+    from foundry_sandbox.git_safety import get_tamper_event_fallback_count
 
-    result: dict[str, Any] = {"total": 0, "reachable": False}
+    result: dict[str, Any] = {"total": 0, "reachable": False, "local_fallback": get_tamper_event_fallback_count()}
     try:
         req = urllib.request.Request("http://127.0.0.1:8083/metrics")
         with urllib.request.urlopen(req, timeout=3) as resp:
@@ -278,6 +279,10 @@ def diagnose(json_output: bool) -> None:
         click.echo(f"  Server counter: {server_total} total")
     else:
         click.echo("  Server counter: unreachable")
+
+    local_fallback = tamper_counter.get("local_fallback", 0)
+    if local_fallback > 0:
+        click.echo(f"  Local fallback counter: {local_fallback}")
 
     if not tamper_events and server_total == 0:
         click.echo("  No wrapper tamper events recorded.")

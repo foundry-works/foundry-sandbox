@@ -1,8 +1,4 @@
-"""Logging and formatting utilities for foundry sandbox.
-
-This module provides logging and text formatting utilities that replace
-the shell scripts lib/utils.sh, lib/format.sh, and lib/runtime.sh.
-"""
+"""Logging and formatting utilities for foundry-sandbox."""
 
 from __future__ import annotations
 
@@ -25,10 +21,7 @@ _USE_COLORS = _should_use_colors()
 # ANSI color codes
 BOLD = "\033[1m" if _USE_COLORS else ""
 RESET = "\033[0m" if _USE_COLORS else ""
-RED = "\033[91m" if _USE_COLORS else ""
 YELLOW = "\033[93m" if _USE_COLORS else ""
-BLUE = "\033[94m" if _USE_COLORS else ""
-GREEN = "\033[92m" if _USE_COLORS else ""
 
 
 def log_info(msg: str) -> None:
@@ -76,15 +69,6 @@ def log_section(msg: str) -> None:
     """
     print()
     print(f"{BOLD}▸ {msg}{RESET}")
-
-
-def log_step(msg: str) -> None:
-    """Log an indented step message (2 spaces indent).
-
-    Args:
-        msg: The step message.
-    """
-    print(f"  {msg}")
 
 
 # Formatting helper functions (pure functions, not logging)

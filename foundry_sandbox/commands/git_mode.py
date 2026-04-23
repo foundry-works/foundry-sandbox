@@ -1,8 +1,4 @@
-"""Toggle sandbox git configuration between host and sandbox modes.
-
-This command updates per-worktree git config so host-side tooling and
-sandbox-side git proxy mode can be switched explicitly.
-"""
+"""Toggle sandbox git configuration between host and sandbox modes."""
 
 from __future__ import annotations
 
@@ -214,12 +210,15 @@ def git_mode(name: str | None, mode: str) -> None:
 
 
 def git_mode_shim() -> None:
-    """Entrypoint used by the `git-mode` script to avoid Click errors for GitHub CLI."""
+    """Backward-compat entrypoint for stale installed ``git-mode`` scripts.
+
+    The ``git-mode`` console script is no longer installed. This symbol stays
+    in place so older editable/user installs do not crash with ``ImportError``
+    before the environment is refreshed.
+    """
     args = sys.argv[1:]
     has_mode_flag = "--mode" in args
     has_mode_value = any(arg in {"host", "sandbox"} for arg in args)
     if not has_mode_flag and not has_mode_value:
-        # GitHub CLI (and similar) may call `git mode` without arguments; treat as no-op.
         return
-    # Delegate to the Click command for real work.
     git_mode.main()

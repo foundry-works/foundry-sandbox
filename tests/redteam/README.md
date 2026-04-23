@@ -6,9 +6,6 @@ Adversarial security tests that run **inside** an sbx sandbox to validate isolat
 
 ```bash
 # Inside a running sandbox:
-./tests/redteam-sandbox.sh
-
-# Or directly:
 ./tests/redteam/runner.sh
 
 # Run a single module:

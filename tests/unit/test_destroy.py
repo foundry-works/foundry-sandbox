@@ -16,7 +16,7 @@ class TestDestroyImplNewLayout:
     @patch("foundry_sandbox.commands.destroy.load_sandbox_metadata")
     @patch("foundry_sandbox.commands.destroy.unregister_sandbox_from_git_safety")
     @patch("foundry_sandbox.commands.destroy.sbx_rm")
-    @patch("foundry_sandbox.commands.destroy.path_claude_config")
+    @patch("foundry_sandbox.commands.destroy.path_sandbox_config")
     @patch("foundry_sandbox.commands.destroy.validate_existing_sandbox_name")
     def test_new_layout_cleans_branch_from_repo(
         self, mock_validate, mock_config_path, mock_rm, mock_unregister,
@@ -45,7 +45,7 @@ class TestDestroyImplNewLayout:
     @patch("foundry_sandbox.commands.destroy.load_sandbox_metadata")
     @patch("foundry_sandbox.commands.destroy.unregister_sandbox_from_git_safety")
     @patch("foundry_sandbox.commands.destroy.sbx_rm")
-    @patch("foundry_sandbox.commands.destroy.path_claude_config")
+    @patch("foundry_sandbox.commands.destroy.path_sandbox_config")
     @patch("foundry_sandbox.commands.destroy.validate_existing_sandbox_name")
     def test_new_layout_skips_branch_for_protected(
         self, mock_validate, mock_config_path, mock_rm, mock_unregister,
@@ -71,7 +71,7 @@ class TestDestroyImplCommon:
     @patch("foundry_sandbox.commands.destroy.load_sandbox_metadata")
     @patch("foundry_sandbox.commands.destroy.unregister_sandbox_from_git_safety")
     @patch("foundry_sandbox.commands.destroy.sbx_rm")
-    @patch("foundry_sandbox.commands.destroy.path_claude_config")
+    @patch("foundry_sandbox.commands.destroy.path_sandbox_config")
     @patch("foundry_sandbox.commands.destroy.validate_existing_sandbox_name")
     def test_sbx_rm_failure_best_effort(
         self, mock_validate, mock_config_path, mock_rm, mock_unregister, mock_metadata,
@@ -89,7 +89,7 @@ class TestDestroyImplCommon:
     @patch("foundry_sandbox.commands.destroy.load_sandbox_metadata")
     @patch("foundry_sandbox.commands.destroy.unregister_sandbox_from_git_safety")
     @patch("foundry_sandbox.commands.destroy.sbx_rm")
-    @patch("foundry_sandbox.commands.destroy.path_claude_config")
+    @patch("foundry_sandbox.commands.destroy.path_sandbox_config")
     @patch("foundry_sandbox.commands.destroy.validate_existing_sandbox_name")
     def test_invalid_name_raises(
         self, mock_validate, mock_config_path, mock_rm, mock_unregister, mock_metadata,
@@ -105,7 +105,7 @@ class TestDestroyImplCommon:
     @patch("foundry_sandbox.commands.destroy.load_sandbox_metadata")
     @patch("foundry_sandbox.commands.destroy.unregister_sandbox_from_git_safety")
     @patch("foundry_sandbox.commands.destroy.sbx_rm")
-    @patch("foundry_sandbox.commands.destroy.path_claude_config")
+    @patch("foundry_sandbox.commands.destroy.path_sandbox_config")
     @patch("foundry_sandbox.commands.destroy.validate_existing_sandbox_name")
     def test_keep_worktree(
         self, mock_validate, mock_config_path, mock_rm, mock_unregister,
@@ -140,7 +140,7 @@ class TestDestroyCommand:
     @patch("foundry_sandbox.commands.destroy.resolve_host_worktree_path")
     @patch("foundry_sandbox.commands.destroy.destroy_impl")
     @patch("foundry_sandbox.commands.destroy.sbx_check_available")
-    @patch("foundry_sandbox.commands.destroy.path_claude_config")
+    @patch("foundry_sandbox.commands.destroy.path_sandbox_config")
     @patch("foundry_sandbox.commands.destroy.validate_existing_sandbox_name")
     def test_confirmation_yes(self, mock_validate, mock_config_path, mock_check, mock_impl, mock_resolve):
         mock_validate.return_value = (True, "")
@@ -153,7 +153,7 @@ class TestDestroyCommand:
 
     @patch("foundry_sandbox.commands.destroy.resolve_host_worktree_path")
     @patch("foundry_sandbox.commands.destroy.sbx_check_available")
-    @patch("foundry_sandbox.commands.destroy.path_claude_config")
+    @patch("foundry_sandbox.commands.destroy.path_sandbox_config")
     @patch("foundry_sandbox.commands.destroy.validate_existing_sandbox_name")
     def test_confirmation_no_aborts(self, mock_validate, mock_config_path, mock_check, mock_resolve):
         mock_validate.return_value = (True, "")

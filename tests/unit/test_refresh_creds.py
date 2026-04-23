@@ -1,4 +1,4 @@
-"""Tests for the rewritten cast refresh-credentials command (sbx backend)."""
+"""Tests for the ``cast refresh-creds`` command."""
 
 from __future__ import annotations
 

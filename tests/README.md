@@ -18,7 +18,7 @@ pytest tests/performance/
 ./tests/run.sh
 
 # Run security red-team tests (inside sandbox)
-./tests/redteam-sandbox.sh
+./tests/redteam/runner.sh
 ```
 
 ## Test Structure
@@ -48,7 +48,7 @@ tests/
 │   └── test_throughput.py   # Operations per second
 │
 ├── run.sh                   # Shell test runner
-├── redteam-sandbox.sh       # Security red-team tests (run in sandbox)
+├── redteam/runner.sh        # Security red-team tests (run in sandbox)
 ├── test-pip-requirements.sh # Python dependency validation
 ├── test-pip-install-integration.sh  # pip install test
 └── test_validate.sh         # Configuration validation
@@ -183,12 +183,12 @@ Shell tests validate sandbox behavior and CLI functionality.
 | File | Purpose |
 |------|---------|
 | `run.sh` | Main test runner (help, list, status, config, info commands) |
-| `redteam-sandbox.sh` | Security red-team tests (run inside sandbox) |
+| `redteam/runner.sh` | Security red-team tests (run inside sandbox) |
 | `test-pip-requirements.sh` | Python dependency installation |
 | `test-pip-install-integration.sh` | pip install integration test |
 | `test_validate.sh` | Configuration file validation |
 
-### Red-Team Tests (`redteam-sandbox.sh`)
+### Red-Team Tests (`redteam/runner.sh`)
 
 **Run inside the sandbox.** 9 active modules validate:
 
@@ -200,7 +200,7 @@ Network egress control (proxy bypass, DNS exfiltration, network isolation) is no
 
 ```bash
 # Inside sandbox
-./tests/redteam-sandbox.sh
+./tests/redteam/runner.sh
 ```
 
 ## Test Configuration

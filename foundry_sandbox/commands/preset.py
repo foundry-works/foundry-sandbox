@@ -198,17 +198,3 @@ def _cleanup_managed_template(template_tag: str) -> None:
 def delete(name: str) -> None:
     """Delete a preset."""
     _delete_with_cleanup(name)
-
-
-@preset.command("rm", hidden=True)
-@click.argument("name")
-def rm(name: str) -> None:
-    """Delete a preset (alias for delete)."""
-    _delete_with_cleanup(name)
-
-
-@preset.command("remove", hidden=True)
-@click.argument("name")
-def remove(name: str) -> None:
-    """Delete a preset (alias for delete)."""
-    _delete_with_cleanup(name)

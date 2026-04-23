@@ -24,7 +24,7 @@ from foundry_sandbox.paths import (
 from foundry_sandbox.commands.new_setup import new_sbx_setup, rollback_new_sbx, _validate_preconditions
 from foundry_sandbox.api_keys import has_opencode_key, has_zai_key
 from foundry_sandbox.constants import TIMEOUT_GIT_QUERY, TIMEOUT_LOCAL_CMD
-from foundry_sandbox.paths import path_claude_config
+from foundry_sandbox.paths import path_sandbox_config
 from foundry_sandbox.state import save_last_cast_new, save_cast_preset, load_last_cast_new, load_cast_preset, save_last_attach
 from foundry_sandbox.utils import log_debug, log_error, log_info, log_warn, sanitize_ref_component
 from foundry_sandbox.validate import validate_sandbox_name
@@ -465,13 +465,13 @@ def new(
             branch = f"{base_branch}{suffix}"
 
     # Atomically claim the sandbox name
-    claude_config_path = path_claude_config(name)
+    sandbox_config_path = path_sandbox_config(name)
 
     _MAX_NAME_RETRIES = 5
     _seen_names = {name}
     for _attempt in range(_MAX_NAME_RETRIES):
         try:
-            os.makedirs(claude_config_path, exist_ok=False)
+            os.makedirs(sandbox_config_path, exist_ok=False)
             break
         except FileExistsError:
             if not (last or preset):
@@ -487,7 +487,7 @@ def new(
                 branch = f"{base_branch}{suffix}"
             else:
                 branch = base_branch
-            claude_config_path = path_claude_config(name)
+            sandbox_config_path = path_sandbox_config(name)
     else:
         log_error(f"Could not claim a unique sandbox name after {_MAX_NAME_RETRIES} attempts")
         sys.exit(1)
@@ -504,7 +504,7 @@ def new(
             from_branch=from_branch or "",
             name=name,
             agent=agent,
-            claude_config_path=claude_config_path,
+            sandbox_config_path=sandbox_config_path,
             copies=list(copies),
             allow_pr=allow_pr,
             pip_requirements=pip_requirements or "",
@@ -516,14 +516,14 @@ def new(
     except RuntimeError as exc:
         log_error(str(exc))
         log_info("Cleaning up partial sandbox resources...")
-        rollback_new_sbx(claude_config_path, name)
+        rollback_new_sbx(sandbox_config_path, name)
         sys.exit(1)
     except SystemExit:
         raise
     except Exception as exc:
         log_error(f"Sandbox creation failed: {exc}")
         log_info("Cleaning up partial sandbox resources...")
-        rollback_new_sbx(claude_config_path, name)
+        rollback_new_sbx(sandbox_config_path, name)
         sys.exit(1)
 
     # Save state

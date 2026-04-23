@@ -32,7 +32,7 @@ class TestNewSbxSetup:
             from_branch="main",
             name="test-sandbox",
             agent="claude",
-            claude_config_path=tmp_path / "config",
+            sandbox_config_path=tmp_path / "config",
             copies=[],
             allow_pr=False,
             pip_requirements="",
@@ -67,7 +67,7 @@ class TestNewSbxSetup:
                 from_branch="main",
                 name="test-sandbox",
                 agent="claude",
-                claude_config_path=tmp_path / "config",
+                sandbox_config_path=tmp_path / "config",
                 copies=[],
                 allow_pr=False,
                 pip_requirements="",
@@ -95,7 +95,7 @@ class TestNewSbxSetup:
             from_branch="main",
             name="test-sandbox",
             agent="claude",
-            claude_config_path=tmp_path / "config",
+            sandbox_config_path=tmp_path / "config",
             copies=[],
             allow_pr=False,
             pip_requirements="",
@@ -126,7 +126,7 @@ class TestNewSbxSetup:
             from_branch="main",
             name="test-sandbox",
             agent="claude",
-            claude_config_path=tmp_path / "config",
+            sandbox_config_path=tmp_path / "config",
             copies=[],
             allow_pr=False,
             pip_requirements="",
@@ -166,7 +166,7 @@ class TestWorkspaceInfoMismatch:
             from_branch="main",
             name="test-sandbox",
             agent="claude",
-            claude_config_path=tmp_path / "config",
+            sandbox_config_path=tmp_path / "config",
             copies=[],
             allow_pr=False,
             pip_requirements="",
@@ -200,7 +200,7 @@ class TestWorkspaceInfoMismatch:
             from_branch="main",
             name="test-sandbox",
             agent="claude",
-            claude_config_path=tmp_path / "config",
+            sandbox_config_path=tmp_path / "config",
             copies=[],
             allow_pr=False,
             pip_requirements="",
@@ -222,7 +222,7 @@ class TestTemplateValidation:
             from_branch="main",
             name="test-sandbox",
             agent="claude",
-            claude_config_path=tmp_path / "config",
+            sandbox_config_path=tmp_path / "config",
             copies=[],
             allow_pr=False,
             pip_requirements="",
@@ -309,7 +309,7 @@ class TestGitSafetyFailClosed:
             from_branch="main",
             name="test-sandbox",
             agent="claude",
-            claude_config_path=tmp_path / "config",
+            sandbox_config_path=tmp_path / "config",
             copies=[],
             allow_pr=False,
             pip_requirements="",
@@ -416,7 +416,7 @@ class TestSbxWorkspaceInfo:
 
 class TestNewCommand:
     @patch("foundry_sandbox.commands.new.new_sbx_setup")
-    @patch("foundry_sandbox.commands.new.path_claude_config")
+    @patch("foundry_sandbox.commands.new.path_sandbox_config")
     @patch("foundry_sandbox.commands.new._validate_preconditions")
     @patch("foundry_sandbox.commands.new._resolve_repo_input")
     @patch("foundry_sandbox.commands.new.validate_sandbox_name")

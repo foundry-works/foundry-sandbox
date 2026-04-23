@@ -51,7 +51,7 @@ This document explains the technical design of Foundry Sandbox: how components f
 │  ~/.sandboxes/                                                   │
 │    ├── repos/       (git checkouts)                              │
 │    ├── worktrees/   (checked-out code per sandbox)               │
-│    └── claude-config/ (AI tool configs per sandbox)              │
+│    └── sandboxes/    (sandbox configs per sandbox)              │
 │                                                                  │
 └─────────────────────────────────────────────────────────────────┘
 ```
@@ -247,7 +247,7 @@ The git wrapper is installed into the sandbox during `cast new`:
 │   └── repo-bugfix-123/
 │       └── ...
 │
-├── claude-config/                      # Per-sandbox config + metadata
+├── sandboxes/                          # Per-sandbox config + metadata
 │   ├── repo-feature-branch/
 │   │   ├── metadata.json              # SbxSandboxMetadata
 │   │   └── claude/                     # Claude home directory
@@ -267,17 +267,19 @@ Each sandbox has a `metadata.json` recording its configuration:
 
 ```json
 {
-  "backend": "sbx",
   "sbx_name": "repo-feature-branch",
   "agent": "claude",
   "repo_url": "https://github.com/owner/repo",
   "branch": "feature-branch",
   "from_branch": "main",
-  "network_profile": "balanced",
   "git_safety_enabled": true,
+  "workspace_dir": "/workspace",
+  "working_dir": "",
+  "pip_requirements": "",
   "allow_pr": false,
   "template": "foundry-git-wrapper:latest",
-  "template_managed": false
+  "template_managed": false,
+  "host_worktree_path": "/home/user/repo/.sbx/repo-feature-branch-worktrees/feature-branch"
 }
 ```
 

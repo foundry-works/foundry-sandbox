@@ -680,12 +680,13 @@ class TestProvisionGitSafety:
     @patch("foundry_sandbox.git_safety._verify_sandbox_connectivity")
     @patch("foundry_sandbox.git_safety.compute_wrapper_checksum", return_value="sha256abc")
     @patch("foundry_sandbox.git_safety.inject_git_wrapper")
+    @patch("foundry_sandbox.git_safety.register_sandbox_with_git_safety")
     @patch("foundry_sandbox.git_safety.write_hmac_secret_for_server")
     @patch("foundry_sandbox.git_safety.write_hmac_secret_to_sandbox")
     @patch("foundry_sandbox.git_safety.generate_hmac_secret", return_value="a" * 64)
     @patch("foundry_sandbox.state.patch_sandbox_metadata")
     def test_uses_sandbox_id_default(
-        self, mock_patch, mock_hmac, mock_guest, mock_host, mock_inject,
+        self, mock_patch, mock_hmac, mock_guest, mock_host, mock_register, mock_inject,
         mock_checksum, mock_connectivity,
     ):
         from foundry_sandbox.git_safety import provision_git_safety

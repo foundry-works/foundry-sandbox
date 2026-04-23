@@ -167,9 +167,8 @@ cast attach repo-feature-branch
 # Use fzf selector (if no name provided)
 cast attach
 
-# Reattach to the last sandbox
+# Attach to the last sandbox
 cast attach --last
-cast reattach  # shorthand alias
 ```
 
 ---
@@ -504,9 +503,7 @@ cast config --json
 Sandbox config
   SANDBOX_HOME       /home/user/.sandboxes
   REPOS_DIR          /home/user/.sandboxes/repos
-  WORKTREES_DIR      /home/user/.sandboxes/worktrees
-  CLAUDE_CONFIGS_DIR /home/user/.sandboxes/claude-config
-  SCRIPT_DIR         /path/to/foundry-sandbox
+  SANDBOX_CONFIGS_DIR /home/user/.sandboxes/sandboxes
   ...
 
 Checks

@@ -11,6 +11,7 @@ import sys
 import click
 
 from foundry_sandbox.commands.destroy import destroy_impl
+from foundry_sandbox.commands._helpers import list_sandbox_names
 from foundry_sandbox.sbx import sbx_check_available, sbx_ls
 from foundry_sandbox.utils import log_warn
 
@@ -22,10 +23,11 @@ def destroy_all(keep_worktree: bool) -> None:
     sbx_check_available()
 
     # ------------------------------------------------------------------
-    # List all sandboxes from sbx
+    # List all sandboxes from sbx and the filesystem registry
     # ------------------------------------------------------------------
-    all_sandboxes = sbx_ls()
-    sandbox_names = [sb["name"] for sb in all_sandboxes]
+    sbx_names = {sb["name"] for sb in sbx_ls()}
+    registry_names = set(list_sandbox_names())
+    sandbox_names = sorted(sbx_names | registry_names)
 
     if not sandbox_names:
         click.echo("No sandboxes to destroy.")
@@ -42,7 +44,8 @@ def destroy_all(keep_worktree: bool) -> None:
     # ------------------------------------------------------------------
     click.echo(f"This will destroy ALL sandboxes ({len(sandbox_names)} total):")
     for name in sandbox_names:
-        click.echo(f"  - {name}")
+        marker = " (orphan)" if name not in sbx_names else ""
+        click.echo(f"  - {name}{marker}")
     click.echo("")
 
     # ------------------------------------------------------------------

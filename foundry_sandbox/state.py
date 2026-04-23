@@ -24,7 +24,7 @@ from foundry_sandbox.atomic_io import (
     atomic_write as _secure_write,
 )
 from foundry_sandbox.config import load_json
-from foundry_sandbox.constants import get_claude_configs_dir
+from foundry_sandbox.constants import get_sandbox_configs_dir
 from foundry_sandbox.utils import log_debug, log_error
 from foundry_sandbox.models import CastNewPreset, SbxSandboxMetadata
 from foundry_sandbox.paths import (
@@ -35,6 +35,7 @@ from foundry_sandbox.paths import (
     path_preset_file,
     path_presets_dir,
 )
+from foundry_sandbox.sbx import sbx_ls
 
 
 # ============================================================================
@@ -187,12 +188,12 @@ def load_sandbox_metadata(name: str) -> dict[str, Any] | None:
 def list_sandboxes() -> list[dict[str, Any]]:
     """List all sandboxes with their metadata.
 
-    Scans the claude-config directory for sandbox metadata files.
+    Scans the sandboxes directory for sandbox metadata files.
 
     Returns:
         List of dicts with 'name' and metadata fields for each sandbox.
     """
-    config_dir = get_claude_configs_dir()
+    config_dir = get_sandbox_configs_dir()
     if not config_dir.exists():
         return []
 
@@ -208,19 +209,35 @@ def list_sandboxes() -> list[dict[str, Any]]:
     return results
 
 
-def inspect_sandbox(name: str) -> dict[str, Any] | None:
-    """Get full metadata for a single sandbox.
+def collect_sandbox_list(
+    name: str | None = None,
+) -> list[dict[str, str]]:
+    """Collect sandbox info from sbx and foundry metadata.
+
+    Merges live sbx status with persisted metadata for one or all sandboxes.
 
     Args:
-        name: Sandbox name identifier.
+        name: If given, filter to a single sandbox.  Returns an empty list if
+              the sandbox is not tracked by sbx.
 
     Returns:
-        Metadata dictionary with 'name' field, or None if not found.
+        List of sandbox dicts enriched with metadata fields.
     """
-    metadata = load_sandbox_metadata(name)
-    if metadata is None:
-        return None
-    return {"name": name, **metadata}
+    sandboxes = sbx_ls()
+    if name is not None:
+        sandboxes = [sb for sb in sandboxes if sb.get("name") == name]
+    for sb in sandboxes:
+        md = load_sandbox_metadata(sb.get("name", "")) or {}
+        sb["repo"] = md.get("repo_url", "")
+        sb["from_branch"] = md.get("from_branch", "")
+        sb["git_safety"] = str(md.get("git_safety_enabled", False))
+        sb["wrapper_checksum"] = md.get("wrapper_checksum", "")
+        sb["wrapper_last_verified"] = md.get("wrapper_last_verified", "")
+        sb["working_dir"] = md.get("working_dir", "")
+        sb["pip_requirements"] = md.get("pip_requirements", "")
+        sb["allow_pr"] = str(md.get("allow_pr", False))
+        sb["copies"] = str(md.get("copies", []))
+    return sandboxes
 
 
 # ============================================================================

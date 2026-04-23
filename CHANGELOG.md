@@ -14,6 +14,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Metadata field rename: `workspace_path` → `host_worktree_path`** — the on-disk JSON key is now `host_worktree_path`; the legacy `workspace_path` read-compat shim has been removed
 - **Command structure cleanup** — collapsed `new_*.py` fan-out from 4 files to 2 (`new.py` + `new_sbx.py`); extracted `start_sandbox()` from `start.py` for direct reuse by `attach.py` (removing `ctx.invoke()` cross-command coupling)
 - **`cast config` no longer displays `WORKTREES_DIR`** — the deprecated worktrees directory is no longer shown since sbx manages worktrees internally
+- **Installer no longer edits shell rc files** — `install.sh` now installs the Python CLI directly without rewriting legacy aliases or completion snippets in user shell startup files
 
 ### Removed
 
@@ -24,6 +25,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **`git_worktree.py` deleted** — all bare-repo worktree management functions (`create_worktree`, `remove_worktree`, `cleanup_sandbox_branch`, `configure_sparse_checkout`, `worktree_has_changes`) removed; `cleanup_sandbox_branch_repo` moved to `git.py`
 - **Legacy bare-repo helpers removed** — `ensure_bare_repo()`, `fetch_bare_branch()`, `_ensure_fetch_refspec()` from `git.py`; `repo_url_to_bare_path()` from `paths.py`; `get_worktrees_dir()` from `constants.py`; `path_worktree()` from `paths.py`
 - **Dual-dispatch code paths removed** — `destroy.py`, `git_mode.py`, `_helpers.py`, and `paths.py` no longer contain legacy-layout fallback branches; metadata is the sole source of truth
+- **Standalone `git-mode` console script** — use `cast git-mode`; the separate installed `git-mode` entry point is no longer published
+- **`claude-config` compatibility layer** — sandbox metadata/config paths are now read exclusively from `$SANDBOX_HOME/sandboxes`; the legacy rename/symlink helpers and path aliases have been deleted
+- **`tests/redteam-sandbox.sh` wrapper** — red-team runs now invoke `tests/redteam/runner.sh` directly
 
 ## [0.21.0] - 2026-04-21
 

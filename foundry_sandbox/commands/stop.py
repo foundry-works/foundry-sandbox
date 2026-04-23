@@ -1,7 +1,4 @@
-"""Stop command — stop a running sandbox.
-
-Delegates to `sbx stop` instead of docker-compose.
-"""
+"""Stop command — stop a running sandbox."""
 
 from __future__ import annotations
 

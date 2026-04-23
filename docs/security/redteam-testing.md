@@ -19,7 +19,7 @@ cast new . sbx --name redteam-test --agent shell
 
 # 2. Run the tests inside it
 sbx exec redteam-test -- bash -c \
-  "bash /home/tyler/GitHub/foundry-sandbox/tests/redteam-sandbox.sh"
+  "bash /home/tyler/GitHub/foundry-sandbox/tests/redteam/runner.sh"
 
 # 3. Clean up
 cast destroy redteam-test -f -y

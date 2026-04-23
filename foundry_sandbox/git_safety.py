@@ -287,6 +287,57 @@ def _proxy_sign_script_path() -> Path:
     return path
 
 
+def _emit_profile_d(sandbox_name: str, env_vars: dict[str, str]) -> None:
+    """Write env vars to /etc/profile.d/foundry-git-safety.sh (login shells)."""
+    from foundry_sandbox.sbx import sbx_exec
+    import base64
+
+    lines = "".join(f"export {k}={v}\n" for k, v in env_vars.items())
+    payload = base64.b64encode(lines.encode()).decode()
+    sbx_exec(
+        sandbox_name,
+        ["sh", "-c", f"echo '{payload}' | base64 -d > /etc/profile.d/foundry-git-safety.sh && chmod 644 /etc/profile.d/foundry-git-safety.sh"],
+        user="root",
+        quiet=True,
+    )
+
+
+def _emit_bashrc_block(sandbox_name: str, env_vars: dict[str, str]) -> None:
+    """Append a guarded env block to /etc/bash.bashrc (non-login interactive shells)."""
+    from foundry_sandbox.sbx import sbx_exec
+    import base64
+
+    export_lines = "".join(f"export {k}={v}\n" for k, v in env_vars.items())
+    block = f"# >>> foundry-git-safety >>>\n{export_lines}# <<< foundry-git-safety <<<\n"
+    payload = base64.b64encode(block.encode()).decode()
+    sbx_exec(
+        sandbox_name,
+        ["sh", "-c",
+         f"if ! grep -q 'foundry-git-safety' /etc/bash.bashrc 2>/dev/null; then "
+         f"echo '{payload}' | base64 -d >> /etc/bash.bashrc; fi"],
+        user="root",
+        quiet=True,
+    )
+
+
+def _emit_plain_env(sandbox_name: str, env_vars: dict[str, str]) -> None:
+    """Write bare KEY=VALUE to /var/lib/foundry/git-safety.env (persists across VM restarts)."""
+    from foundry_sandbox.sbx import sbx_exec
+    import base64
+
+    # Exclude GIT_HMAC_SECRET_FILE from the plain env file — the wrapper
+    # discovers the secret via filesystem probing instead.
+    plain_vars = {k: v for k, v in env_vars.items() if k != "GIT_HMAC_SECRET_FILE"}
+    lines = "".join(f"{k}={v}\n" for k, v in plain_vars.items())
+    payload = base64.b64encode(lines.encode()).decode()
+    sbx_exec(
+        sandbox_name,
+        ["sh", "-c", f"mkdir -p /var/lib/foundry && echo '{payload}' | base64 -d > /var/lib/foundry/git-safety.env && chmod 644 /var/lib/foundry/git-safety.env"],
+        user="root",
+        quiet=True,
+    )
+
+
 def inject_git_wrapper(
     sandbox_name: str,
     *,
@@ -336,64 +387,19 @@ def inject_git_wrapper(
         quiet=True,
     )
 
-    # Write environment configuration to a profile script (login shells)
-    env_script = (
-        f"export SANDBOX_ID={sandbox_id}\n"
-        f"export WORKSPACE_DIR={workspace_dir}\n"
-        f"export GIT_API_HOST={git_api_host}\n"
-        f"export GIT_API_PORT={git_api_port}\n"
-        f'export GIT_HMAC_SECRET_FILE="/run/foundry/hmac-secret"\n'
-        f"export PIP_USER=1\n"
-        f"export PIP_BREAK_SYSTEM_PACKAGES=1\n"
-    )
-    env_b64 = base64.b64encode(env_script.encode()).decode()
-    sbx_exec(
-        sandbox_name,
-        ["sh", "-c", f"echo '{env_b64}' | base64 -d > /etc/profile.d/foundry-git-safety.sh && chmod 644 /etc/profile.d/foundry-git-safety.sh"],
-        user="root",
-        quiet=True,
-    )
-
-    # Also write to /etc/bash.bashrc so non-login interactive shells pick up
-    # the env vars.  Wrap in a guard to avoid duplicate sourcing.
-    bashrc_block = (
-        "# >>> foundry-git-safety >>>\n"
-        f"export SANDBOX_ID={sandbox_id}\n"
-        f"export WORKSPACE_DIR={workspace_dir}\n"
-        f"export GIT_API_HOST={git_api_host}\n"
-        f"export GIT_API_PORT={git_api_port}\n"
-        f'export GIT_HMAC_SECRET_FILE="/run/foundry/hmac-secret"\n'
-        f"export PIP_USER=1\n"
-        f"export PIP_BREAK_SYSTEM_PACKAGES=1\n"
-        "# <<< foundry-git-safety <<<\n"
-    )
-    bashrc_b64 = base64.b64encode(bashrc_block.encode()).decode()
-    sbx_exec(
-        sandbox_name,
-        ["sh", "-c",
-         f"if ! grep -q 'foundry-git-safety' /etc/bash.bashrc 2>/dev/null; then "
-         f"echo '{bashrc_b64}' | base64 -d >> /etc/bash.bashrc; fi"],
-        user="root",
-        quiet=True,
-    )
-
-    # Write a plain env file (no export) for the wrapper to source directly.
-    # This persists across VM restarts and does not require a login shell.
-    plain_env = (
-        f"SANDBOX_ID={sandbox_id}\n"
-        f"WORKSPACE_DIR={workspace_dir}\n"
-        f"GIT_API_HOST={git_api_host}\n"
-        f"GIT_API_PORT={git_api_port}\n"
-        f"PIP_USER=1\n"
-        f"PIP_BREAK_SYSTEM_PACKAGES=1\n"
-    )
-    env_plain_b64 = base64.b64encode(plain_env.encode()).decode()
-    sbx_exec(
-        sandbox_name,
-        ["sh", "-c", f"mkdir -p /var/lib/foundry && echo '{env_plain_b64}' | base64 -d > /var/lib/foundry/git-safety.env && chmod 644 /var/lib/foundry/git-safety.env"],
-        user="root",
-        quiet=True,
-    )
+    # Build env vars once, then emit to all three destinations.
+    env_vars: dict[str, str] = {
+        "SANDBOX_ID": sandbox_id,
+        "WORKSPACE_DIR": workspace_dir,
+        "GIT_API_HOST": git_api_host,
+        "GIT_API_PORT": str(git_api_port),
+        "GIT_HMAC_SECRET_FILE": '"/run/foundry/hmac-secret"',
+        "PIP_USER": "1",
+        "PIP_BREAK_SYSTEM_PACKAGES": "1",
+    }
+    _emit_profile_d(sandbox_name, env_vars)
+    _emit_bashrc_block(sandbox_name, env_vars)
+    _emit_plain_env(sandbox_name, env_vars)
 
     # Harden git configuration to prevent hook-based attacks.
     # Write directly to the agent user's .gitconfig (root FS may be read-only,

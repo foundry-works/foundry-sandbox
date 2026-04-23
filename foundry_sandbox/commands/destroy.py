@@ -15,7 +15,7 @@ import click
 from foundry_sandbox.git_safety import unregister_sandbox_from_git_safety
 from foundry_sandbox.git import cleanup_sandbox_branch_repo
 from foundry_sandbox.paths import (
-    path_claude_config,
+    path_sandbox_config,
     resolve_host_worktree_path,
 )
 from foundry_sandbox.sbx import sbx_check_available, sbx_rm
@@ -54,7 +54,7 @@ def destroy_impl(
     if not valid_name:
         raise ValueError(f"Invalid sandbox name: {name_error}")
 
-    claude_config_path = path_claude_config(name)
+    sandbox_config_path = path_sandbox_config(name)
 
     # ------------------------------------------------------------------
     # 1. Load metadata BEFORE removing anything (needed for branch cleanup)
@@ -93,14 +93,14 @@ def destroy_impl(
     # ------------------------------------------------------------------
     # 4. Remove config directory
     # ------------------------------------------------------------------
-    if not keep_worktree and claude_config_path.is_dir():
+    if not keep_worktree and sandbox_config_path.is_dir():
         try:
-            log_info("Removing Claude config...")
-            shutil.rmtree(claude_config_path)
+            log_info("Removing sandbox config...")
+            shutil.rmtree(sandbox_config_path)
         except OSError:
             try:
-                os.chmod(str(claude_config_path), 0o755)
-                shutil.rmtree(claude_config_path)
+                os.chmod(str(sandbox_config_path), 0o755)
+                shutil.rmtree(sandbox_config_path)
             except OSError as exc:
                 if not best_effort:
                     raise
@@ -149,12 +149,12 @@ def destroy(name: str, keep_worktree: bool, force: bool, yes: bool) -> None:
 
     if not skip_confirm:
         workspace = resolve_host_worktree_path(name)
-        config_path = path_claude_config(name)
+        config_path = path_sandbox_config(name)
         click.echo(f"This will destroy sandbox '{name}' including:")
-        click.echo("  - Sandbox microVM (sbx rm)")
+        click.echo("  - Sandbox (sbx rm)")
         if not keep_worktree:
             click.echo(f"  - Worktree at {workspace}")
-            click.echo(f"  - Claude config at {config_path}")
+            click.echo(f"  - Sandbox config at {config_path}")
         click.echo("")
         try:
             if not click.confirm("Are you sure?", default=False):

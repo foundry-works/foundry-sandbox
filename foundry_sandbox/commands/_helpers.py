@@ -11,7 +11,7 @@ from pathlib import Path
 
 import click
 
-from foundry_sandbox.constants import get_claude_configs_dir
+from foundry_sandbox.constants import get_sandbox_configs_dir
 from foundry_sandbox.utils import log_debug, log_error
 from foundry_sandbox.validate import validate_existing_sandbox_name
 
@@ -86,15 +86,14 @@ def fzf_select_sandbox() -> str | None:
 
 
 def list_sandbox_names() -> list[str]:
-    """List all sandbox names by scanning claude-config directories.
+    """List all sandbox names by scanning sandbox config directories.
 
-    The claude-config directory is the authoritative registry — it covers
-    both old-layout and new-layout sandboxes.
+    The sandboxes directory is the authoritative registry.
 
     Returns:
         Sorted list of sandbox directory names.
     """
-    configs_dir = get_claude_configs_dir()
+    configs_dir = get_sandbox_configs_dir()
     if not configs_dir.is_dir():
         return []
 

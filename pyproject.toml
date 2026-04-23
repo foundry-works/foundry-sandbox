@@ -5,14 +5,14 @@ build-backend = "hatchling.build"
 [project]
 name = "foundry-sandbox"
 version = "0.21.0"
-description = "MicroVM-based sandbox environment for running Claude Code with isolated credentials"
+description = "Sandbox environment for running Claude Code with isolated credentials"
 requires-python = ">=3.10"
 license = "MIT"
 readme = "README.md"
 authors = [
     { name = "Foundry Works" },
 ]
-keywords = ["claude", "sandbox", "docker", "ai", "isolation"]
+keywords = ["claude", "sandbox", "sbx", "ai", "isolation"]
 classifiers = [
     "Development Status :: 4 - Beta",
     "Environment :: Console",
@@ -44,7 +44,6 @@ Documentation = "https://github.com/foundry-works/foundry-sandbox/tree/main/docs
 
 [project.scripts]
 cast = "foundry_sandbox.cli:main"
-git-mode = "foundry_sandbox.commands.git_mode:git_mode_shim"
 
 [project.optional-dependencies]
 dev = [

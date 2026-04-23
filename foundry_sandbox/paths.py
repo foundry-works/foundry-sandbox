@@ -14,7 +14,7 @@ from pathlib import Path
 
 from foundry_sandbox.constants import (
     SANDBOX_NAME_MAX_LENGTH,
-    get_claude_configs_dir,
+    get_sandbox_configs_dir,
     get_repos_dir,
     get_sandbox_home,
 )
@@ -46,17 +46,17 @@ def _assert_safe_path_component(name: str) -> None:
 # ============================================================================
 
 
-def path_claude_config(name: str) -> Path:
-    """Get the path to a sandbox's Claude configuration directory.
+def path_sandbox_config(name: str) -> Path:
+    """Get the path to a sandbox's configuration directory.
 
     Args:
         name: Sandbox name
 
     Returns:
-        Path to the Claude config directory
+        Path to the sandbox config directory
     """
     _assert_safe_path_component(name)
-    return get_claude_configs_dir() / name
+    return get_sandbox_configs_dir() / name
 
 
 def path_metadata_file(name: str) -> Path:
@@ -69,7 +69,7 @@ def path_metadata_file(name: str) -> Path:
         Path to the metadata.json file
     """
     _assert_safe_path_component(name)
-    return path_claude_config(name) / "metadata.json"
+    return path_sandbox_config(name) / "metadata.json"
 
 
 def path_last_cast_new() -> Path:
@@ -243,8 +243,7 @@ def sandbox_name(repo_name: str, branch: str) -> str:
 def find_next_sandbox_name(base_name: str) -> str:
     """Find next available sandbox name by appending a numeric suffix.
 
-    Only checks the claude-config directory — it is the authoritative registry
-    covering both old-layout (worktrees/) and new-layout (sbx-managed) sandboxes.
+    Only checks the sandboxes directory — it is the authoritative registry.
 
     Args:
         base_name: Desired sandbox name.
@@ -252,7 +251,7 @@ def find_next_sandbox_name(base_name: str) -> str:
     Returns:
         *base_name* if available, otherwise *base_name*-N.
     """
-    configs = get_claude_configs_dir()
+    configs = get_sandbox_configs_dir()
 
     def _taken(candidate: str) -> bool:
         return (configs / candidate).exists()

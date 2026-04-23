@@ -11,8 +11,8 @@ from foundry_sandbox.commands.list_cmd import list_cmd
 
 
 class TestListCommand:
-    @patch("foundry_sandbox.commands.list_cmd.load_sandbox_metadata")
-    @patch("foundry_sandbox.commands.list_cmd.sbx_ls")
+    @patch("foundry_sandbox.state.load_sandbox_metadata")
+    @patch("foundry_sandbox.state.sbx_ls")
     def test_list_empty(self, mock_ls, mock_metadata):
         mock_ls.return_value = []
         runner = CliRunner()
@@ -20,8 +20,8 @@ class TestListCommand:
         assert result.exit_code == 0
         assert "none" in result.output
 
-    @patch("foundry_sandbox.commands.list_cmd.load_sandbox_metadata")
-    @patch("foundry_sandbox.commands.list_cmd.sbx_ls")
+    @patch("foundry_sandbox.state.load_sandbox_metadata")
+    @patch("foundry_sandbox.state.sbx_ls")
     def test_list_with_sandboxes(self, mock_ls, mock_metadata):
         mock_ls.return_value = [
             {"name": "sbx-1", "status": "running", "agent": "claude", "branch": "main"},
@@ -34,8 +34,8 @@ class TestListCommand:
         assert "sbx-1" in result.output
         assert "sbx-2" in result.output
 
-    @patch("foundry_sandbox.commands.list_cmd.load_sandbox_metadata")
-    @patch("foundry_sandbox.commands.list_cmd.sbx_ls")
+    @patch("foundry_sandbox.state.load_sandbox_metadata")
+    @patch("foundry_sandbox.state.sbx_ls")
     def test_list_json(self, mock_ls, mock_metadata):
         mock_ls.return_value = [
             {"name": "sbx-1", "status": "running", "agent": "claude", "branch": "main"},
@@ -49,8 +49,8 @@ class TestListCommand:
         assert data[0]["name"] == "sbx-1"
         assert data[0]["git_safety"] == "True"
 
-    @patch("foundry_sandbox.commands.list_cmd.load_sandbox_metadata")
-    @patch("foundry_sandbox.commands.list_cmd.sbx_ls")
+    @patch("foundry_sandbox.state.load_sandbox_metadata")
+    @patch("foundry_sandbox.state.sbx_ls")
     def test_list_no_metadata(self, mock_ls, mock_metadata):
         mock_ls.return_value = [
             {"name": "sbx-1", "status": "running", "agent": "claude", "branch": "main"},

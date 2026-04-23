@@ -4,14 +4,7 @@ from pydantic import BaseModel, Field
 
 
 class SbxSandboxMetadata(BaseModel):
-    """Metadata for an sbx-based sandbox.
-
-    Replaces the docker-compose-based SandboxMetadata. Stores only fields
-    relevant to the sbx backend.
-    """
-
-    backend: str = "sbx"
-    """Backend identifier (always 'sbx')."""
+    """Metadata model for sbx-based sandboxes."""
 
     sbx_name: str
     """Sandbox name as known to sbx CLI."""

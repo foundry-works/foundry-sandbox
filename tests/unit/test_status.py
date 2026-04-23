@@ -12,8 +12,8 @@ from foundry_sandbox.commands.status import status
 
 class TestStatusCommand:
     @patch("foundry_sandbox.commands.status.sbx_check_available")
-    @patch("foundry_sandbox.commands.status.load_sandbox_metadata")
-    @patch("foundry_sandbox.commands.status.sbx_ls")
+    @patch("foundry_sandbox.state.load_sandbox_metadata")
+    @patch("foundry_sandbox.state.sbx_ls")
     def test_status_all(self, mock_ls, mock_metadata, mock_check):
         mock_ls.return_value = [
             {"name": "sbx-1", "status": "running", "agent": "claude", "branch": "main"},
@@ -25,9 +25,9 @@ class TestStatusCommand:
         assert "sbx-1" in result.output
 
     @patch("foundry_sandbox.commands.status.sbx_check_available")
-    @patch("foundry_sandbox.commands.status.load_sandbox_metadata")
+    @patch("foundry_sandbox.state.load_sandbox_metadata")
     @patch("foundry_sandbox.commands.status.sbx_is_running")
-    @patch("foundry_sandbox.commands.status.sbx_ls")
+    @patch("foundry_sandbox.state.sbx_ls")
     def test_status_single(self, mock_ls, mock_running, mock_metadata, mock_check):
         mock_ls.return_value = [
             {"name": "my-sandbox", "status": "running", "agent": "claude", "branch": "feature-x"},
@@ -49,7 +49,7 @@ class TestStatusCommand:
         assert "running" in result.output
 
     @patch("foundry_sandbox.commands.status.sbx_check_available")
-    @patch("foundry_sandbox.commands.status.sbx_ls")
+    @patch("foundry_sandbox.state.sbx_ls")
     def test_status_single_not_found(self, mock_ls, mock_check):
         mock_ls.return_value = []
         runner = CliRunner()
@@ -58,9 +58,9 @@ class TestStatusCommand:
         assert "not found" in result.output
 
     @patch("foundry_sandbox.commands.status.sbx_check_available")
-    @patch("foundry_sandbox.commands.status.load_sandbox_metadata")
+    @patch("foundry_sandbox.state.load_sandbox_metadata")
     @patch("foundry_sandbox.commands.status.sbx_is_running")
-    @patch("foundry_sandbox.commands.status.sbx_ls")
+    @patch("foundry_sandbox.state.sbx_ls")
     def test_status_single_json(self, mock_ls, mock_running, mock_metadata, mock_check):
         mock_ls.return_value = [
             {"name": "my-sandbox", "status": "stopped", "agent": "codex", "branch": "dev"},

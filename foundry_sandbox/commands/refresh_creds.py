@@ -1,8 +1,4 @@
-"""Refresh credentials command — sync API keys via sbx secrets.
-
-Uses `sbx secret set` to push API keys from the host into sbx-managed
-secrets. No more direct/isolation mode distinction.
-"""
+"""Refresh credentials — sync API keys via sbx secrets."""
 
 from __future__ import annotations
 

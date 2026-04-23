@@ -111,10 +111,11 @@ class TestHelpCommand:
         assert "list" in result.output
         assert "attach" in result.output
 
-    def test_help_command_shows_agent_option(self, runner: click.testing.CliRunner) -> None:
+    def test_help_command_shows_commands_section(self, runner: click.testing.CliRunner) -> None:
         result = runner.invoke(cli, ["help"])
         assert result.exit_code == 0
-        assert "agent" in result.output.lower() or "sbx" in result.output.lower()
+        assert "Commands:" in result.output
+        assert "sandbox" in result.output.lower()
 
 
 # ---------------------------------------------------------------------------
@@ -133,7 +134,6 @@ class TestConfigCommand:
         import json
         data = json.loads(result.output)
         assert "sandbox_home" in data
-        assert "script_dir" in data
 
     def test_config_json_has_boolean_fields(self, runner: click.testing.CliRunner) -> None:
         from foundry_sandbox.commands.config import config
@@ -151,7 +151,6 @@ class TestConfigCommand:
         result = runner.invoke(config, [])
         assert result.exit_code == 0
         assert "SANDBOX_HOME" in result.output
-        assert "SCRIPT_DIR" in result.output
 
 
 class TestCliFlagRouting:

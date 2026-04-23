@@ -6,6 +6,7 @@ that was built without the assets directory.
 
 from __future__ import annotations
 import re
+from pathlib import Path
 
 
 class TestWheelAssetPresence:
@@ -53,3 +54,9 @@ class TestWheelAssetPresence:
 
         mod = importlib.import_module("foundry_sandbox.assets")
         assert mod is not None
+
+    def test_git_mode_console_script_not_installed(self):
+        pyproject = Path(__file__).resolve().parents[2] / "pyproject.toml"
+        text = pyproject.read_text(encoding="utf-8")
+        assert 'cast = "foundry_sandbox.cli:main"' in text
+        assert 'git-mode =' not in text

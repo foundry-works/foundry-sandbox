@@ -9,46 +9,10 @@ import json
 
 import click
 
-from foundry_sandbox.sbx import sbx_check_available, sbx_is_running, sbx_ls
-from foundry_sandbox.state import load_sandbox_metadata
+from foundry_sandbox.sbx import sbx_check_available, sbx_is_running
+from foundry_sandbox.state import collect_sandbox_list
 from foundry_sandbox.utils import BOLD, RESET, format_kv, format_table_row
 from foundry_sandbox.validate import validate_existing_sandbox_name
-
-
-def _collect_all_sandboxes() -> list[dict[str, str]]:
-    """Collect status info for all sandboxes."""
-    sandboxes = sbx_ls()
-    for sb in sandboxes:
-        name = sb.get("name", "")
-        metadata = load_sandbox_metadata(name)
-        if metadata:
-            sb["repo"] = metadata.get("repo_url", "")
-            sb["from_branch"] = metadata.get("from_branch", "")
-            sb["git_safety"] = str(metadata.get("git_safety_enabled", False))
-        else:
-            sb["repo"] = ""
-            sb["from_branch"] = ""
-            sb["git_safety"] = str(False)
-    return sandboxes
-
-
-def _collect_single_sandbox(name: str) -> dict[str, str] | None:
-    """Collect detailed status for a single sandbox."""
-    # Find this sandbox in sbx ls output
-    for sb in sbx_ls():
-        if sb.get("name") == name:
-            metadata = load_sandbox_metadata(name) or {}
-            sb["repo"] = metadata.get("repo_url", "")
-            sb["from_branch"] = metadata.get("from_branch", "")
-            sb["working_dir"] = metadata.get("working_dir", "")
-            sb["pip_requirements"] = metadata.get("pip_requirements", "")
-            sb["git_safety"] = str(metadata.get("git_safety_enabled", False))
-            sb["allow_pr"] = str(metadata.get("allow_pr", False))
-            sb["copies"] = str(metadata.get("copies", []))
-            sb["wrapper_checksum"] = metadata.get("wrapper_checksum", "")
-            sb["wrapper_last_verified"] = metadata.get("wrapper_last_verified", "")
-            return sb
-    return None
 
 
 @click.command()
@@ -59,8 +23,7 @@ def status(name: str | None, json_output: bool) -> None:
     sbx_check_available()
 
     if name is None:
-        # List all sandboxes
-        sandboxes = _collect_all_sandboxes()
+        sandboxes = collect_sandbox_list()
 
         if json_output:
             click.echo(json.dumps(sandboxes))
@@ -80,7 +43,8 @@ def status(name: str | None, json_output: bool) -> None:
         click.echo(f"Error: {name_error}", err=True)
         raise SystemExit(1)
 
-    info = _collect_single_sandbox(name)
+    results = collect_sandbox_list(name=name)
+    info = results[0] if results else None
     if info is None:
         click.echo(f"Error: Sandbox '{name}' not found in sbx", err=True)
         raise SystemExit(1)

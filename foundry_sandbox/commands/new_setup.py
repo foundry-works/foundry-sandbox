@@ -1,9 +1,4 @@
-"""SBX-specific sandbox creation logic.
-
-Replaces new_setup.py's docker-compose-based creation with sbx-based creation.
-Delegates worktree management to sbx — cast passes the repo root and sbx
-creates the worktree under ``<repo_root>/.sbx/<name>-worktrees/<branch>/``.
-"""
+"""SBX-based sandbox creation and worktree setup."""
 
 from __future__ import annotations
 
@@ -71,7 +66,7 @@ def new_sbx_setup(
     from_branch: str,
     name: str,
     agent: str,
-    claude_config_path: Path,
+    sandbox_config_path: Path,
     copies: list[str],
     allow_pr: bool,
     pip_requirements: str,
@@ -172,7 +167,7 @@ def new_sbx_setup(
     # ------------------------------------------------------------------
     # 4. Write initial metadata (git safety not yet provisioned)
     # ------------------------------------------------------------------
-    ensure_dir(claude_config_path)
+    ensure_dir(sandbox_config_path)
     write_sandbox_metadata(
         name,
         SbxSandboxMetadata(
@@ -278,7 +273,7 @@ def new_sbx_setup(
 
 
 def rollback_new_sbx(
-    claude_config_path: Path,
+    sandbox_config_path: Path,
     name: str,
 ) -> None:
     """Clean up partial sandbox resources on failure."""
@@ -289,9 +284,9 @@ def rollback_new_sbx(
         pass
 
     # Remove config directory
-    if claude_config_path.is_dir():
+    if sandbox_config_path.is_dir():
         try:
             import shutil
-            shutil.rmtree(claude_config_path)
+            shutil.rmtree(sandbox_config_path)
         except OSError:
             pass

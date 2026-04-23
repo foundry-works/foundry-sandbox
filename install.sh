@@ -196,92 +196,79 @@ echo ""
 # Check API keys
 echo -e "${BLUE}Checking API keys...${NC}"
 
-# Determine script directory for local install, or use temp for curl install
-if [[ -n "${BASH_SOURCE[0]:-}" ]] && [[ -f "$(dirname "${BASH_SOURCE[0]}")/lib/api_keys.sh" ]]; then
-    source "$(dirname "${BASH_SOURCE[0]}")/lib/api_keys.sh"
-elif [[ -d "$INSTALL_DIR" ]] && [[ -f "$INSTALL_DIR/lib/api_keys.sh" ]]; then
-    source "$INSTALL_DIR/lib/api_keys.sh"
-else
-    # Inline minimal check for curl-piped install (before repo is cloned)
-    # Keys are expected to be set in the environment
-    _check_api_keys_inline() {
-        local has_ai_key=false
-        local has_search_key=false
+# Inline API key check
+_check_api_keys_inline() {
+    local has_ai_key=false
+    local has_search_key=false
 
-        # Check Claude authentication (OAuth token or API key)
-        for key in CLAUDE_CODE_OAUTH_TOKEN ANTHROPIC_API_KEY; do
-            if [ -n "${!key:-}" ]; then
-                has_ai_key=true
-                break
-            fi
-        done
-        # Check search provider keys
-        if [ -n "${TAVILY_API_KEY:-}" ]; then
-            has_search_key=true
-        elif [ -n "${PERPLEXITY_API_KEY:-}" ]; then
-            has_search_key=true
+    # Check Claude authentication (OAuth token or API key)
+    for key in CLAUDE_CODE_OAUTH_TOKEN ANTHROPIC_API_KEY; do
+        if [ -n "${!key:-}" ]; then
+            has_ai_key=true
+            break
         fi
+    done
+    # Check search provider keys
+    if [ -n "${TAVILY_API_KEY:-}" ]; then
+        has_search_key=true
+    elif [ -n "${PERPLEXITY_API_KEY:-}" ]; then
+        has_search_key=true
+    fi
 
-        # All keys present
-        if [ "$has_ai_key" = "true" ] && [ "$has_search_key" = "true" ]; then
-            echo -e "  ${GREEN}✓${NC} API keys configured"
+    # All keys present
+    if [ "$has_ai_key" = "true" ] && [ "$has_search_key" = "true" ]; then
+        echo -e "  ${GREEN}✓${NC} API keys configured"
+        return 0
+    fi
+
+    # AI key present but no search key - warn but continue
+    if [ "$has_ai_key" = "true" ]; then
+        echo -e "  ${GREEN}✓${NC} AI provider keys configured"
+        echo -e "${YELLOW}Warning: No search provider API keys found.${NC}"
+        echo "Deep research features will be unavailable."
+        echo ""
+        echo "Expected at least one of:"
+        echo "  - TAVILY_API_KEY"
+        echo "  - PERPLEXITY_API_KEY"
+        echo ""
+        return 0
+    fi
+
+    # No AI key - prompt to continue
+    echo -e "${YELLOW}Warning: Claude authentication not found.${NC}"
+    echo ""
+    echo "Expected one of:"
+    echo "  - CLAUDE_CODE_OAUTH_TOKEN (run: claude setup-token)"
+    echo "  - ANTHROPIC_API_KEY"
+    echo ""
+    if [ "$has_search_key" = "false" ]; then
+        echo -e "${YELLOW}Warning: No search provider API keys found.${NC}"
+        echo "Deep research features will be unavailable."
+        echo ""
+        echo "Expected at least one of:"
+        echo "  - TAVILY_API_KEY"
+        echo "  - PERPLEXITY_API_KEY"
+        echo ""
+    fi
+    echo "Set the required environment variables before running:"
+    echo "  export CLAUDE_CODE_OAUTH_TOKEN=\"your-token\""
+    echo "  export TAVILY_API_KEY=\"your-key\""
+    echo ""
+    echo "See .env.example for all supported keys."
+    echo ""
+    read -p "Continue without API keys? [y/N]: " response
+    case "$response" in
+        [yY]|[yY][eE][sS])
+            echo -e "${YELLOW}Continuing without API keys...${NC}"
             return 0
-        fi
-
-        # AI key present but no search key - warn but continue
-        if [ "$has_ai_key" = "true" ]; then
-            echo -e "  ${GREEN}✓${NC} AI provider keys configured"
-            echo -e "${YELLOW}Warning: No search provider API keys found.${NC}"
-            echo "Deep research features will be unavailable."
-            echo ""
-            echo "Expected at least one of:"
-            echo "  - TAVILY_API_KEY"
-            echo "  - PERPLEXITY_API_KEY"
-            echo ""
-            return 0
-        fi
-
-        # No AI key - prompt to continue
-        echo -e "${YELLOW}Warning: Claude authentication not found.${NC}"
-        echo ""
-        echo "Expected one of:"
-        echo "  - CLAUDE_CODE_OAUTH_TOKEN (run: claude setup-token)"
-        echo "  - ANTHROPIC_API_KEY"
-        echo ""
-        if [ "$has_search_key" = "false" ]; then
-            echo -e "${YELLOW}Warning: No search provider API keys found.${NC}"
-            echo "Deep research features will be unavailable."
-            echo ""
-            echo "Expected at least one of:"
-            echo "  - TAVILY_API_KEY"
-            echo "  - PERPLEXITY_API_KEY"
-            echo ""
-        fi
-        echo "Set the required environment variables before running:"
-        echo "  export CLAUDE_CODE_OAUTH_TOKEN=\"your-token\""
-        echo "  export TAVILY_API_KEY=\"your-key\""
-        echo ""
-        echo "See .env.example for all supported keys."
-        echo ""
-        read -p "Continue without API keys? [y/N]: " response
-        case "$response" in
-            [yY]|[yY][eE][sS])
-                echo -e "${YELLOW}Continuing without API keys...${NC}"
-                return 0
-                ;;
-            *)
-                echo -e "${RED}Installation cancelled.${NC}"
-                return 1
-                ;;
-        esac
-    }
-    _check_api_keys_inline || exit 1
-fi
-
-# If we loaded api_keys.sh, use its functions
-if type check_api_keys_with_prompt &>/dev/null; then
-    check_api_keys_with_prompt "Installation" || exit 1
-fi
+            ;;
+        *)
+            echo -e "${RED}Installation cancelled.${NC}"
+            return 1
+            ;;
+    esac
+}
+_check_api_keys_inline || exit 1
 
 echo ""
 
@@ -369,53 +356,6 @@ fi
 
 echo ""
 
-# Migrate from old bash-based installation
-# Remove legacy aliases and stale references from the shell-script era
-
-# Patterns to remove from rc files (extended regex)
-LEGACY_PATTERNS=(
-    'alias cast=.*sandbox\.sh'
-    "source.*Documents/GitHub/foundry-sandbox/completion\.bash"
-)
-
-migrate_legacy_rc() {
-    local rc_file="$1"
-    local found=false
-
-    [ -f "$rc_file" ] || return 1
-
-    for pattern in "${LEGACY_PATTERNS[@]}"; do
-        if grep -qE "$pattern" "$rc_file" 2>/dev/null; then
-            echo -e "  ${YELLOW}⚠${NC} Removing legacy line from $rc_file: $pattern"
-            # Use | as sed delimiter to avoid conflicts with / in paths
-            sed -i.bak "\|$pattern|d" "$rc_file"
-            rm -f "${rc_file}.bak"
-            found=true
-        fi
-    done
-
-    # Remove the _sb() completion function block if present
-    if grep -q '^_sb()' "$rc_file" 2>/dev/null; then
-        echo -e "  ${YELLOW}⚠${NC} Removing legacy _sb() function from $rc_file"
-        sed -i.bak '/^_sb()/,/^}/d' "$rc_file"
-        rm -f "${rc_file}.bak"
-        found=true
-    fi
-
-    [ "$found" = "true" ]
-}
-
-MIGRATED=false
-# Scan standard rc files plus common custom rc files sourced from them
-for rc in "$HOME/.bashrc" "$HOME/.bash_profile" "$HOME/.zshrc" "$HOME/.custom_zshrc" "$HOME/.aliases"; do
-    if migrate_legacy_rc "$rc"; then
-        MIGRATED=true
-    fi
-done
-if [ "$MIGRATED" = "true" ]; then
-    echo -e "  ${GREEN}✓${NC} Legacy references removed (cast is now installed via pip)"
-fi
-
 # Install Python packages (provides `cast` and `foundry-git-safety` entry points)
 echo -e "${BLUE}Installing Python packages...${NC}"
 
@@ -438,13 +378,8 @@ echo -e "${GREEN}Installation complete!${NC}"
 echo ""
 echo "To get started:"
 echo ""
-if [ "$MIGRATED" = "true" ]; then
-    echo "  1. Clear the stale alias from your current shell and reload:"
-    echo -e "     ${BLUE}unalias cast 2>/dev/null; source $SHELL_RC${NC}"
-else
-    echo "  1. Reload your shell:"
-    echo -e "     ${BLUE}source $SHELL_RC${NC}"
-fi
+echo "  1. Reload your shell:"
+echo -e "     ${BLUE}source $SHELL_RC${NC}"
 echo ""
 echo "  2. Create your first sandbox:"
 echo -e "     ${BLUE}cast new owner/repo${NC}"

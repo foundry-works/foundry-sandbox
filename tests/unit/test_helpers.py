@@ -43,9 +43,9 @@ class TestAutoDetectSandbox:
 
 
 class TestListSandboxNames:
-    """list_sandbox_names: scan claude-config dirs with metadata.json."""
+    """list_sandbox_names: scan sandbox config dirs with metadata.json."""
 
-    @patch("foundry_sandbox.commands._helpers.get_claude_configs_dir")
+    @patch("foundry_sandbox.commands._helpers.get_sandbox_configs_dir")
     def test_returns_sorted_names(self, mock_dir, tmp_path):
         for name in ["charlie", "alpha", "bravo"]:
             d = tmp_path / name
@@ -58,7 +58,7 @@ class TestListSandboxNames:
         result = list_sandbox_names()
         assert result == ["alpha", "bravo", "charlie"]
 
-    @patch("foundry_sandbox.commands._helpers.get_claude_configs_dir")
+    @patch("foundry_sandbox.commands._helpers.get_sandbox_configs_dir")
     def test_returns_empty_when_dir_missing(self, mock_dir, tmp_path):
         mock_dir.return_value = tmp_path / "nonexistent"
         result = list_sandbox_names()

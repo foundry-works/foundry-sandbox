@@ -26,7 +26,7 @@ We will **not** support dual-mode operation. Users must fully migrate to the `sb
 
 3. **foundry-git-safety is backend-agnostic** — The standalone git safety package works with any backend. The orchestration layer (`cast` commands) is where the coupling lives.
 
-4. **Migration is one-time** — The `cast migrate-to-sbx` command with snapshot/rollback provides safety without requiring runtime dual-mode.
+4. **Migration is one-time** — Snapshot/rollback was the safety net for migration, avoiding any need for runtime dual-mode support.
 
 5. **Users who cannot migrate should pin** — `pip install foundry-sandbox==0.20.15` remains available. There is no deadline to migrate.
 

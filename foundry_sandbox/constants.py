@@ -1,8 +1,4 @@
-"""Configuration defaults for foundry-sandbox.
-
-This module replaces lib/constants.sh and provides Python equivalents
-for all sandbox configuration constants.
-"""
+"""Configuration defaults for foundry-sandbox."""
 
 from __future__ import annotations
 
@@ -47,14 +43,13 @@ def get_repos_dir() -> Path:
     return get_sandbox_home() / "repos"
 
 
-
-def get_claude_configs_dir() -> Path:
-    """Get the Claude configuration directory.
+def get_sandbox_configs_dir() -> Path:
+    """Get the sandbox configuration directory.
 
     Returns:
-        Path to claude-config directory ($SANDBOX_HOME/claude-config)
+        Path to sandboxes directory ($SANDBOX_HOME/sandboxes)
     """
-    return get_sandbox_home() / "claude-config"
+    return get_sandbox_home() / "sandboxes"
 
 
 # ============================================================================
