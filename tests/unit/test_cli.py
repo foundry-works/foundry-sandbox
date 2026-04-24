@@ -56,6 +56,32 @@ class TestCLIGroup:
 # ---------------------------------------------------------------------------
 
 
+class TestLazyCommandLoading:
+    """Verify every _LAZY_COMMANDS entry imports and resolves to a Click command."""
+
+    def test_all_lazy_commands_import(self) -> None:
+        """Each lazy command module and attribute must be importable."""
+        import importlib
+
+        for cmd_name, (module_path, attr_name) in _LAZY_COMMANDS.items():
+            mod = importlib.import_module(module_path)
+            assert hasattr(mod, attr_name), (
+                f"Lazy command '{cmd_name}': {module_path}.{attr_name} not found"
+            )
+
+    def test_all_lazy_commands_are_click_commands(self) -> None:
+        """Each lazy command must resolve to a click.Command (or subclass)."""
+        import importlib
+
+        for cmd_name, (module_path, attr_name) in _LAZY_COMMANDS.items():
+            mod = importlib.import_module(module_path)
+            obj = getattr(mod, attr_name)
+            assert isinstance(obj, click.BaseCommand), (
+                f"Lazy command '{cmd_name}': {module_path}.{attr_name} is "
+                f"{type(obj).__name__}, expected a Click command"
+            )
+
+
 class TestUnknownCommandValidation:
     """Tests that unknown commands are rejected instead of silently falling back."""
 
@@ -67,6 +93,12 @@ class TestUnknownCommandValidation:
     def test_typo_command_fails(self, runner: click.testing.CliRunner) -> None:
         result = runner.invoke(cli, ["destory"])  # typo of 'destroy'
         assert result.exit_code != 0
+
+    def test_info_command_removed(self, runner: click.testing.CliRunner) -> None:
+        """'cast info' was removed — must not resolve."""
+        result = runner.invoke(cli, ["info"])
+        assert result.exit_code != 0
+        assert "Unknown command" in result.output
 
     def test_build_command_removed(self, runner: click.testing.CliRunner) -> None:
         """'cast build' was removed in the sbx migration — must not resolve."""
