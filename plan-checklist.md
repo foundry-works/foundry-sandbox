@@ -13,14 +13,14 @@
 
 ## Phase 2: Hermetic Root Tests
 
-- [ ] Inspect `tests/conftest.py` and `tests/unit/conftest.py`.
-- [ ] Add an autouse fixture that sets `SANDBOX_HOME` to a temp directory.
-- [ ] Set `HOME` to a temp directory if tests or code paths expand `~`.
-- [ ] Ensure the temp directories are created before tests run.
-- [ ] Fix `tests/unit/test_up.py` to patch `foundry_sandbox.commands.up.save_last_attach`.
-- [ ] Check for other tests that patch a module where the function is defined instead of where it is imported.
-- [ ] Run `python -m pytest tests/unit/test_up.py -q`.
-- [ ] Run `python -m pytest tests/unit -q`.
+- [x] Inspect `tests/conftest.py` and `tests/unit/conftest.py`.
+- [x] Add an autouse fixture that sets `SANDBOX_HOME` to a temp directory.
+- [x] Set `HOME` to a temp directory if tests or code paths expand `~`.
+- [x] Ensure the temp directories are created before tests run.
+- [x] Fix `tests/unit/test_up.py` to patch `foundry_sandbox.commands.up.save_last_attach`.
+- [x] Check for other tests that patch a module where the function is defined instead of where it is imported.
+- [x] Run `python -m pytest tests/unit/test_up.py -q`.
+- [x] Run `python -m pytest tests/unit -q`.
 
 ## Phase 3: Hermetic foundry-git-safety Tests
 

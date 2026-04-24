@@ -28,9 +28,9 @@ _UP_MOCKS = [
     patch("foundry_sandbox.commands._helpers.validate_existing_sandbox_name"),
     patch("foundry_sandbox.foundry_config.load_user_ide_config"),
     patch("shutil.which", return_value="/usr/bin/code"),
-    patch("foundry_sandbox.state.load_sandbox_metadata", return_value={}),
-    patch("foundry_sandbox.state.save_last_attach"),
-    patch("foundry_sandbox.state.load_last_ide", return_value=None),
+    patch("foundry_sandbox.commands.up.load_sandbox_metadata", return_value={}),
+    patch("foundry_sandbox.commands.up.save_last_attach"),
+    patch("foundry_sandbox.commands.up.load_last_ide", return_value=None),
 ]
 
 
