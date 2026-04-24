@@ -96,6 +96,9 @@ HMAC_SECRET_FILE="${GIT_HMAC_SECRET_FILE:-}"
 PROXY_TIMEOUT=30
 
 # Discover HMAC secret: prefer tmpfs, fall back to persistent disk
+if [[ -n "$HMAC_SECRET_FILE" && ! -f "$HMAC_SECRET_FILE" ]]; then
+    HMAC_SECRET_FILE=""
+fi
 if [[ -z "$HMAC_SECRET_FILE" ]]; then
     if [[ -f "/run/foundry/hmac-secret" ]]; then
         HMAC_SECRET_FILE="/run/foundry/hmac-secret"

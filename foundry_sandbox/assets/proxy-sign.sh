@@ -34,6 +34,9 @@ trap 'cleanup; exit 143' TERM
 HMAC_SECRET_FILE="${GIT_HMAC_SECRET_FILE:-}"
 SANDBOX_ID="${SANDBOX_ID:-${SANDBOX_VM_ID:-}}"
 
+if [[ -n "$HMAC_SECRET_FILE" && ! -f "$HMAC_SECRET_FILE" ]]; then
+    HMAC_SECRET_FILE=""
+fi
 if [[ -z "$HMAC_SECRET_FILE" ]]; then
     if [[ -f "/run/foundry/hmac-secret" ]]; then
         HMAC_SECRET_FILE="/run/foundry/hmac-secret"
