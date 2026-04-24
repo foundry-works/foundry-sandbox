@@ -36,22 +36,22 @@
 
 ## Phase 4: Validator Tests
 
-- [ ] Create `tests/unit/test_validate.py`.
-- [ ] Add table-driven tests for valid new sandbox names.
-- [ ] Add table-driven tests for invalid new sandbox names.
-- [ ] Add table-driven tests for valid existing sandbox names.
-- [ ] Add table-driven tests for invalid existing sandbox names.
-- [ ] Add table-driven tests for valid HTTPS repo URLs.
-- [ ] Add table-driven tests for valid SSH repo URLs.
-- [ ] Add table-driven tests for valid GitHub shorthand repo inputs.
-- [ ] Add table-driven tests for safe local repo paths.
-- [ ] Add rejection tests for empty repo input.
-- [ ] Add rejection tests for path traversal with `..`.
-- [ ] Add rejection tests for embedded credentials.
-- [ ] Add rejection tests for missing host or missing path.
-- [ ] Add rejection tests for suspicious SSH hosts.
-- [ ] Add rejection tests for sensitive local paths: `/etc`, `/proc`, `/sys`, `/dev`, `/root`, `/boot`, `/var/lib/docker`.
-- [ ] Run `python -m pytest tests/unit/test_validate.py -q`.
+- [x] Create `tests/unit/test_validate.py`.
+- [x] Add table-driven tests for valid new sandbox names.
+- [x] Add table-driven tests for invalid new sandbox names.
+- [x] Add table-driven tests for valid existing sandbox names.
+- [x] Add table-driven tests for invalid existing sandbox names.
+- [x] Add table-driven tests for valid HTTPS repo URLs.
+- [x] Add table-driven tests for valid SSH repo URLs.
+- [x] Add table-driven tests for valid GitHub shorthand repo inputs.
+- [x] Add table-driven tests for safe local repo paths.
+- [x] Add rejection tests for empty repo input.
+- [x] Add rejection tests for path traversal with `..`.
+- [x] Add rejection tests for embedded credentials.
+- [x] Add rejection tests for missing host or missing path.
+- [x] Add rejection tests for suspicious SSH hosts.
+- [x] Add rejection tests for sensitive local paths: `/etc`, `/proc`, `/sys`, `/dev`, `/root`, `/boot`, `/var/lib/docker`.
+- [x] Run `python -m pytest tests/unit/test_validate.py -q`.
 
 ## Phase 5: Version Check Tests
 
