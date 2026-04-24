@@ -72,6 +72,12 @@ class SbxSandboxMetadata(BaseModel):
     profile: str = ""
     """Named dev profile used to create or reuse this sandbox."""
 
+    template_cache_key: str = ""
+    """Cache key of the profile template used, if any (empty = no cached template)."""
+
+    template_profile: str = ""
+    """Profile name whose cached template was used (empty = no cached template)."""
+
 
 class CastNewPreset(BaseModel):
     """Structured representation of cast-new preset arguments."""

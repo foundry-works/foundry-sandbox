@@ -35,23 +35,23 @@
 
 ## Phase 4: Tooling Bundles
 
-- [ ] Design a bundle abstraction for reusable tooling sets.
-- [ ] Allow bundles to expand into Claude skills.
-- [ ] Allow bundles to expand into Claude commands.
-- [ ] Allow bundles to expand into MCP servers.
-- [ ] Allow bundles to declare package prerequisites when needed.
-- [ ] Define conflict handling when multiple bundles set overlapping config.
-- [ ] Keep generated `.claude` and `.mcp.json` files as compiled artifacts, not source of truth.
-- [ ] Document how bundles map to the current Claude and MCP config surfaces.
+- [x] Design a bundle abstraction for reusable tooling sets.
+- [x] Allow bundles to expand into Claude skills.
+- [x] Allow bundles to expand into Claude commands.
+- [x] Allow bundles to expand into MCP servers.
+- [x] Allow bundles to declare package prerequisites when needed.
+- [x] Define conflict handling when multiple bundles set overlapping config.
+- [x] Keep generated `.claude` and `.mcp.json` files as compiled artifacts, not source of truth.
+- [x] Document how bundles map to the current Claude and MCP config surfaces.
 
 ## Phase 5: Template Caching
 
-- [ ] Add a managed-template strategy for profile-backed environments.
-- [ ] Define a stable cache key for template reuse.
-- [ ] Invalidate cached templates when profile inputs change.
-- [ ] Track template provenance in sandbox metadata.
-- [ ] Provide a way to rebuild or refresh cached templates.
-- [ ] Keep secrets, git safety, and other runtime-sensitive state out of templates.
+- [x] Add a managed-template strategy for profile-backed environments.
+- [x] Define a stable cache key for template reuse.
+- [x] Invalidate cached templates when profile inputs change.
+- [x] Track template provenance in sandbox metadata.
+- [x] Provide a way to rebuild or refresh cached templates.
+- [x] Keep secrets, git safety, and other runtime-sensitive state out of templates.
 
 ## Safety And Policy
 

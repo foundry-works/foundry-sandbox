@@ -77,6 +77,8 @@ def new_sbx_setup(
     template: str | None = FOUNDRY_TEMPLATE_TAG,
     ide: str = "",
     packages: dict[str, object] | None = None,
+    profile_name: str = "",
+    skip_package_bootstrap: bool = False,
 ) -> str:
     """Create a new sbx-based sandbox.
 
@@ -233,6 +235,28 @@ def new_sbx_setup(
         # foundry.yaml contents drive compiled artifacts.
         config = resolve_foundry_config(Path(host_worktree_path))
 
+        # Expand tooling bundles if a profile is active
+        if profile_name:
+            from foundry_sandbox.foundry_config import (
+                DevProfile,
+                expand_bundles,
+                normalize_profile_packages,
+                resolve_profile,
+            )
+            try:
+                profile = resolve_profile(config, profile_name)
+                config, bundle_packages = expand_bundles(config, profile)
+                if bundle_packages:
+                    bp = normalize_profile_packages(DevProfile(packages=bundle_packages))
+                    if packages is None:
+                        packages = bp
+                    else:
+                        for k, v in bp.items():
+                            if k not in packages:
+                                packages[k] = v
+            except ValueError as exc:
+                log_warn(f"Bundle expansion skipped: {exc}")
+
         bundles = []
         if config.git_safety:
             bundles.append(compile_git_safety(config.git_safety))
@@ -275,9 +299,9 @@ def new_sbx_setup(
             except Exception as exc:
                 log_warn(f"Failed to copy {host_path}: {exc}")
 
-    if packages:
+    if packages and not skip_package_bootstrap:
         bootstrap_packages(name, packages)
-    elif pip_requirements:
+    elif pip_requirements and not skip_package_bootstrap:
         log_section("Dependencies")
         install_pip_requirements(name, pip_requirements)
 

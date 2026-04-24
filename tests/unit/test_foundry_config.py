@@ -21,14 +21,18 @@ from foundry_sandbox.foundry_config import (
     Permissions,
     ProtectedBranchesAdd,
     SkillSource,
+    ToolingBundle,
     UserService,
     _merge,
     _resolve_host_refs,
+    collect_bundle_packages,
     collect_secret_refs,
     compile_claude_code,
     compile_git_safety,
     compile_mcp_servers,
     compile_user_services,
+    expand_bundles,
+    merge_package_bootstrap,
     normalize_profile_packages,
     render_plan_text,
     resolve_foundry_config,
@@ -1252,3 +1256,490 @@ class TestRenderPlanPackages:
         )
         text = render_plan_text(config)
         assert "packages=" in text
+
+
+# ---------------------------------------------------------------------------
+# Phase 4: Tooling Bundles
+# ---------------------------------------------------------------------------
+
+
+class TestToolingBundle:
+    def test_empty_bundle(self):
+        b = ToolingBundle()
+        assert b.skills == []
+        assert b.commands == []
+        assert b.mcp_servers == []
+        assert b.packages is None
+        assert b.permissions is None
+        assert b.hooks == {}
+
+    def test_bundle_with_skills(self):
+        b = ToolingBundle(skills=[SkillSource(source="/path/to/skill")])
+        assert len(b.skills) == 1
+        assert b.skills[0].source == "/path/to/skill"
+
+    def test_bundle_with_commands(self):
+        b = ToolingBundle(commands=["/path/to/review.md", "/path/to/explain.md"])
+        assert len(b.commands) == 2
+
+    def test_bundle_with_mcp_servers(self):
+        b = ToolingBundle(mcp_servers=[
+            McpServerBuiltin(name="github", type="builtin"),
+        ])
+        assert len(b.mcp_servers) == 1
+
+    def test_bundle_with_packages(self):
+        b = ToolingBundle(packages=PackageBootstrap(pip=["debugpy"], apt=["jq"]))
+        assert b.packages is not None
+        assert b.packages.pip == ["debugpy"]
+        assert b.packages.apt == ["jq"]
+
+    def test_bundle_with_permissions(self):
+        b = ToolingBundle(permissions=Permissions(
+            allow=["Bash(python *)"],
+            deny=["Bash(rm *)"],
+        ))
+        assert b.permissions is not None
+        assert b.permissions.allow == ["Bash(python *)"]
+
+    def test_bundle_with_hooks(self):
+        b = ToolingBundle(hooks={
+            "post-commit": [HookRule(match="*", command="echo done")],
+        })
+        assert "post-commit" in b.hooks
+
+    def test_strict_rejects_unknown(self):
+        with pytest.raises(ValidationError, match="Extra inputs are not permitted"):
+            ToolingBundle(unknown_field=True)
+
+    def test_bundle_in_foundry_config(self):
+        config = FoundryConfig(
+            version="1",
+            tooling_bundles={
+                "review": ToolingBundle(skills=[SkillSource(source="/path")]),
+            },
+        )
+        assert "review" in config.tooling_bundles
+        assert len(config.tooling_bundles["review"].skills) == 1
+
+    def test_tooling_in_profile(self):
+        p = DevProfile(tooling=["github-mcp", "python-dev"])
+        assert p.tooling == ["github-mcp", "python-dev"]
+
+    def test_profile_default_tooling_empty(self):
+        p = DevProfile()
+        assert p.tooling == []
+
+
+class TestToolingBundlesMerge:
+    def test_different_names_collected(self):
+        l1 = FoundryConfig(version="1", tooling_bundles={
+            "a": ToolingBundle(skills=[SkillSource(source="/a")]),
+        })
+        l2 = FoundryConfig(version="1", tooling_bundles={
+            "b": ToolingBundle(skills=[SkillSource(source="/b")]),
+        })
+        result = _merge([l1, l2])
+        assert set(result.tooling_bundles.keys()) == {"a", "b"}
+
+    def test_same_name_later_wins(self):
+        l1 = FoundryConfig(version="1", tooling_bundles={
+            "shared": ToolingBundle(skills=[SkillSource(source="/v1")]),
+        })
+        l2 = FoundryConfig(version="1", tooling_bundles={
+            "shared": ToolingBundle(skills=[SkillSource(source="/v2")]),
+        })
+        result = _merge([l1, l2])
+        assert result.tooling_bundles["shared"].skills[0].source == "/v2"
+
+    def test_empty_dicts_merge_to_empty(self):
+        l1 = FoundryConfig(version="1")
+        l2 = FoundryConfig(version="1")
+        result = _merge([l1, l2])
+        assert result.tooling_bundles == {}
+
+
+class TestExpandBundles:
+    def test_empty_tooling_returns_config_unchanged(self):
+        config = FoundryConfig(version="1")
+        profile = DevProfile()
+        expanded, pkgs = expand_bundles(config, profile)
+        assert expanded is config
+        assert pkgs is None
+
+    def test_unknown_bundle_raises(self):
+        config = FoundryConfig(version="1")
+        profile = DevProfile(tooling=["nonexistent"])
+        with pytest.raises(ValueError, match="Unknown tooling bundle: 'nonexistent'"):
+            expand_bundles(config, profile)
+
+    def test_bundle_skills_merge_into_claude_code(self):
+        config = FoundryConfig(
+            version="1",
+            tooling_bundles={
+                "skills-bundle": ToolingBundle(
+                    skills=[SkillSource(source="/path/to/skill")],
+                ),
+            },
+        )
+        profile = DevProfile(tooling=["skills-bundle"])
+        expanded, _ = expand_bundles(config, profile)
+        assert expanded.claude_code is not None
+        assert len(expanded.claude_code.skills) == 1
+        assert expanded.claude_code.skills[0].source == "/path/to/skill"
+
+    def test_bundle_commands_merge(self):
+        config = FoundryConfig(
+            version="1",
+            tooling_bundles={
+                "cmd-bundle": ToolingBundle(commands=["/path/to/review.md"]),
+            },
+        )
+        profile = DevProfile(tooling=["cmd-bundle"])
+        expanded, _ = expand_bundles(config, profile)
+        assert expanded.claude_code is not None
+        assert expanded.claude_code.commands == ["/path/to/review.md"]
+
+    def test_bundle_mcp_servers_merge(self):
+        config = FoundryConfig(
+            version="1",
+            tooling_bundles={
+                "mcp-bundle": ToolingBundle(
+                    mcp_servers=[McpServerBuiltin(name="github", type="builtin")],
+                ),
+            },
+        )
+        profile = DevProfile(tooling=["mcp-bundle"])
+        expanded, _ = expand_bundles(config, profile)
+        assert len(expanded.mcp_servers) == 1
+        assert expanded.mcp_servers[0].name == "github"
+
+    def test_bundle_hooks_merge_per_key(self):
+        config = FoundryConfig(
+            version="1",
+            tooling_bundles={
+                "hooks-bundle": ToolingBundle(hooks={
+                    "post-commit": [HookRule(match="*", command="echo done")],
+                }),
+            },
+        )
+        profile = DevProfile(tooling=["hooks-bundle"])
+        expanded, _ = expand_bundles(config, profile)
+        assert expanded.claude_code is not None
+        assert "post-commit" in expanded.claude_code.hooks
+        assert expanded.claude_code.hooks["post-commit"][0].command == "echo done"
+
+    def test_bundle_permissions_merge(self):
+        config = FoundryConfig(
+            version="1",
+            tooling_bundles={
+                "perm-bundle": ToolingBundle(
+                    permissions=Permissions(allow=["Bash(python *)"]),
+                ),
+            },
+        )
+        profile = DevProfile(tooling=["perm-bundle"])
+        expanded, _ = expand_bundles(config, profile)
+        assert expanded.claude_code is not None
+        assert expanded.claude_code.permissions is not None
+        assert "Bash(python *)" in expanded.claude_code.permissions.allow
+
+    def test_bundle_packages_returned(self):
+        config = FoundryConfig(
+            version="1",
+            allow_system_packages=True,
+            tooling_bundles={
+                "pkg-bundle": ToolingBundle(
+                    packages=PackageBootstrap(pip=["debugpy"], apt=["jq"]),
+                ),
+            },
+        )
+        profile = DevProfile(tooling=["pkg-bundle"])
+        _, pkgs = expand_bundles(config, profile)
+        assert pkgs is not None
+        assert pkgs.pip == ["debugpy"]
+        assert pkgs.apt == ["jq"]
+
+    def test_multiple_bundles_concatenate(self):
+        config = FoundryConfig(
+            version="1",
+            tooling_bundles={
+                "a": ToolingBundle(
+                    mcp_servers=[McpServerBuiltin(name="github", type="builtin")],
+                    skills=[SkillSource(source="/a")],
+                ),
+                "b": ToolingBundle(
+                    mcp_servers=[McpServerBuiltin(name="memory", type="builtin")],
+                    skills=[SkillSource(source="/b")],
+                ),
+            },
+        )
+        profile = DevProfile(tooling=["a", "b"])
+        expanded, _ = expand_bundles(config, profile)
+        assert len(expanded.mcp_servers) == 2
+        assert len(expanded.claude_code.skills) == 2
+
+    def test_mcp_name_conflict_warning(self, caplog):
+        import logging
+        with caplog.at_level(logging.WARNING):
+            config = FoundryConfig(
+                version="1",
+                tooling_bundles={
+                    "a": ToolingBundle(
+                        mcp_servers=[McpServerBuiltin(name="github", type="builtin")],
+                    ),
+                    "b": ToolingBundle(
+                        mcp_servers=[McpServerBuiltin(name="github", type="builtin")],
+                    ),
+                },
+            )
+            profile = DevProfile(tooling=["a", "b"])
+            expanded, _ = expand_bundles(config, profile)
+        assert "redefines MCP server 'github'" in caplog.text
+        assert len(expanded.mcp_servers) == 2  # both present, dict compile last-wins
+
+    def test_existing_claude_code_preserved(self):
+        config = FoundryConfig(
+            version="1",
+            claude_code=ClaudeCodeConfig(
+                skills=[SkillSource(source="/existing")],
+                commands=["/existing-cmd"],
+            ),
+            tooling_bundles={
+                "extra": ToolingBundle(
+                    skills=[SkillSource(source="/bundle-skill")],
+                ),
+            },
+        )
+        profile = DevProfile(tooling=["extra"])
+        expanded, _ = expand_bundles(config, profile)
+        assert len(expanded.claude_code.skills) == 2
+        assert expanded.claude_code.commands == ["/existing-cmd"]
+
+    def test_existing_mcp_servers_preserved(self):
+        config = FoundryConfig(
+            version="1",
+            mcp_servers=[McpServerBuiltin(name="filesystem", type="builtin")],
+            tooling_bundles={
+                "extra": ToolingBundle(
+                    mcp_servers=[McpServerBuiltin(name="github", type="builtin")],
+                ),
+            },
+        )
+        profile = DevProfile(tooling=["extra"])
+        expanded, _ = expand_bundles(config, profile)
+        assert len(expanded.mcp_servers) == 2
+        assert expanded.mcp_servers[0].name == "filesystem"
+        assert expanded.mcp_servers[1].name == "github"
+
+
+class TestExpandBundlesGates:
+    def test_npm_mcp_rejected_at_schema_level(self):
+        with pytest.raises(ValidationError, match="npm MCP servers"):
+            FoundryConfig(
+                version="1",
+                tooling_bundles={
+                    "bad": ToolingBundle(
+                        mcp_servers=[McpServerNpm(
+                            name="tavily", type="npm", package="mcp-tavily",
+                        )],
+                    ),
+                },
+            )
+
+    def test_npm_mcp_allowed_with_gate(self):
+        config = FoundryConfig(
+            version="1",
+            allow_third_party_mcp=True,
+            tooling_bundles={
+                "ok": ToolingBundle(
+                    mcp_servers=[McpServerNpm(
+                        name="tavily", type="npm", package="mcp-tavily",
+                    )],
+                ),
+            },
+        )
+        profile = DevProfile(tooling=["ok"])
+        expanded, _ = expand_bundles(config, profile)
+        assert len(expanded.mcp_servers) == 1
+
+    def test_apt_rejected_at_schema_level(self):
+        with pytest.raises(ValidationError, match="system packages"):
+            FoundryConfig(
+                version="1",
+                tooling_bundles={
+                    "bad": ToolingBundle(packages=PackageBootstrap(apt=["jq"])),
+                },
+            )
+
+    def test_apt_allowed_with_gate(self):
+        config = FoundryConfig(
+            version="1",
+            allow_system_packages=True,
+            tooling_bundles={
+                "ok": ToolingBundle(packages=PackageBootstrap(apt=["jq"])),
+            },
+        )
+        profile = DevProfile(tooling=["ok"])
+        _, pkgs = expand_bundles(config, profile)
+        assert pkgs is not None
+        assert pkgs.apt == ["jq"]
+
+    def test_pip_allowed_without_any_gate(self):
+        config = FoundryConfig(
+            version="1",
+            tooling_bundles={
+                "ok": ToolingBundle(packages=PackageBootstrap(pip=["ruff"])),
+            },
+        )
+        profile = DevProfile(tooling=["ok"])
+        _, pkgs = expand_bundles(config, profile)
+        assert pkgs is not None
+        assert pkgs.pip == ["ruff"]
+
+
+class TestMergePackageBootstrap:
+    def test_both_none(self):
+        assert merge_package_bootstrap(None, None) is None
+
+    def test_base_none(self):
+        overlay = PackageBootstrap(pip=["a"])
+        result = merge_package_bootstrap(None, overlay)
+        assert result is not None
+        assert result.pip == ["a"]
+
+    def test_overlay_none(self):
+        base = PackageBootstrap(pip=["a"])
+        result = merge_package_bootstrap(base, None)
+        assert result is not None
+        assert result.pip == ["a"]
+
+    def test_list_list_concat(self):
+        base = PackageBootstrap(pip=["a"], apt=["jq"])
+        overlay = PackageBootstrap(pip=["b"], apt=["ripgrep"])
+        result = merge_package_bootstrap(base, overlay)
+        assert result.pip == ["a", "b"]
+        assert result.apt == ["jq", "ripgrep"]
+
+    def test_str_str_becomes_list(self):
+        base = PackageBootstrap(pip="req1.txt")
+        overlay = PackageBootstrap(pip="req2.txt")
+        result = merge_package_bootstrap(base, overlay)
+        assert result.pip == ["req1.txt", "req2.txt"]
+
+    def test_str_str_same_stays_str(self):
+        base = PackageBootstrap(pip="req.txt")
+        overlay = PackageBootstrap(pip="req.txt")
+        result = merge_package_bootstrap(base, overlay)
+        assert result.pip == "req.txt"
+
+    def test_str_list_merges(self):
+        base = PackageBootstrap(pip="req.txt")
+        overlay = PackageBootstrap(pip=["a", "b"])
+        result = merge_package_bootstrap(base, overlay)
+        assert result.pip == ["req.txt", "a", "b"]
+
+    def test_list_str_merges(self):
+        base = PackageBootstrap(pip=["a"])
+        overlay = PackageBootstrap(pip="req.txt")
+        result = merge_package_bootstrap(base, overlay)
+        assert result.pip == ["a", "req.txt"]
+
+    def test_dedup_preserves_order(self):
+        base = PackageBootstrap(pip=["a", "b"])
+        overlay = PackageBootstrap(pip=["b", "c"])
+        result = merge_package_bootstrap(base, overlay)
+        assert result.pip == ["a", "b", "c"]
+
+
+class TestCollectBundlePackages:
+    def test_no_tooling_returns_none(self):
+        config = FoundryConfig(version="1", tooling_bundles={
+            "x": ToolingBundle(packages=PackageBootstrap(pip=["a"])),
+        })
+        result = collect_bundle_packages(config, DevProfile())
+        assert result is None
+
+    def test_extracts_packages(self):
+        config = FoundryConfig(
+            version="1",
+            allow_system_packages=True,
+            tooling_bundles={
+                "x": ToolingBundle(packages=PackageBootstrap(pip=["a"])),
+                "y": ToolingBundle(packages=PackageBootstrap(apt=["jq"])),
+            },
+        )
+        result = collect_bundle_packages(config, DevProfile(tooling=["x", "y"]))
+        assert result is not None
+        assert result.pip == ["a"]
+        assert result.apt == ["jq"]
+
+    def test_unknown_bundle_raises(self):
+        config = FoundryConfig(version="1")
+        with pytest.raises(ValueError, match="Unknown tooling bundle"):
+            collect_bundle_packages(config, DevProfile(tooling=["missing"]))
+
+    def test_bundle_without_packages_skipped(self):
+        config = FoundryConfig(version="1", tooling_bundles={
+            "no-pkgs": ToolingBundle(skills=[SkillSource(source="/s")]),
+        })
+        result = collect_bundle_packages(config, DevProfile(tooling=["no-pkgs"]))
+        assert result is None
+
+
+class TestRenderPlanBundles:
+    def test_shows_bundles_defined(self):
+        config = FoundryConfig(
+            version="1",
+            tooling_bundles={
+                "github-mcp": ToolingBundle(
+                    mcp_servers=[McpServerBuiltin(name="github", type="builtin")],
+                ),
+                "python-dev": ToolingBundle(
+                    packages=PackageBootstrap(pip=["ruff"]),
+                ),
+            },
+        )
+        text = render_plan_text(config)
+        assert "Tooling bundles defined (2)" in text
+        assert "github-mcp:" in text
+        assert "python-dev:" in text
+        assert "1 MCP server(s)" in text
+        assert "packages" in text
+
+    def test_shows_active_bundles_for_profile(self):
+        config = FoundryConfig(
+            version="1",
+            tooling_bundles={
+                "github-mcp": ToolingBundle(
+                    mcp_servers=[McpServerBuiltin(name="github", type="builtin")],
+                ),
+            },
+            profiles={"work": DevProfile(tooling=["github-mcp"])},
+        )
+        text = render_plan_text(config, profile_name="work")
+        assert "Active bundles for profile 'work'" in text
+        assert "- github-mcp" in text
+
+    def test_no_bundles_section_when_empty(self):
+        config = FoundryConfig(version="1")
+        text = render_plan_text(config)
+        assert "Tooling bundles" not in text
+
+    def test_profile_tooling_shown_in_profile_section(self):
+        config = FoundryConfig(
+            version="1",
+            tooling_bundles={"x": ToolingBundle()},
+            profiles={"work": DevProfile(tooling=["x"])},
+        )
+        text = render_plan_text(config, profile_name="work")
+        assert "tooling: ['x']" in text
+
+    def test_profile_tooling_shown_in_all_profiles_view(self):
+        config = FoundryConfig(
+            version="1",
+            tooling_bundles={"x": ToolingBundle()},
+            profiles={"work": DevProfile(tooling=["x"])},
+        )
+        text = render_plan_text(config)
+        assert "tooling=" in text

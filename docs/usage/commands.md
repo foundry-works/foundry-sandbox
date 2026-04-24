@@ -102,7 +102,7 @@ Key options:
 | `--template` | Template tag (default: `foundry-git-wrapper:latest`) |
 | `--plan` | Dry-run: show resolved config without creating |
 
-Resolution order: CLI flags override profile fields, which override hardcoded defaults.
+Resolution order: CLI flags override profile fields, which override hardcoded defaults. Profiles can reference [tooling bundles](../configuration.md#tooling-bundles) that expand into skills, commands, MCP servers, and packages.
 
 Examples:
 

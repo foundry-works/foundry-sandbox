@@ -153,6 +153,18 @@ def dev(
     if pip_requirements:
         effective_packages["pip"] = pip_requirements
 
+    # Merge bundle packages into effective_packages
+    if profile_config.tooling:
+        from foundry_sandbox.foundry_config import collect_bundle_packages
+        bundle_pkgs = collect_bundle_packages(config, profile_config)
+        if bundle_pkgs:
+            from foundry_sandbox.foundry_config import normalize_profile_packages as _npp
+            from foundry_sandbox.foundry_config import DevProfile
+            bp = _npp(DevProfile(packages=bundle_pkgs))
+            for k, v in bp.items():
+                if k not in effective_packages:
+                    effective_packages[k] = v
+
     # --plan: dry-run mode
     if dry_run_plan:
         from foundry_sandbox.foundry_config import render_plan_text
@@ -182,6 +194,30 @@ def dev(
 
     # Create path: resolve branch, build sandbox, attach
     click.echo("Creating new sandbox...")
+
+    # Check for a cached profile template
+    cached_template_tag = None
+    skip_bootstrap = False
+    if profile != "default" and (effective_packages or profile_config.tooling):
+        from foundry_sandbox.template_cache import lookup_cached_template, build_profile_template
+        cached_template_tag = lookup_cached_template(profile)
+        if cached_template_tag:
+            click.echo(f"  Using cached profile template: {cached_template_tag}")
+            effective_template = cached_template_tag
+            skip_bootstrap = True
+        else:
+            click.echo(f"  Building profile template for '{profile}'...")
+            try:
+                cached_template_tag = build_profile_template(
+                    profile_name=profile,
+                    profile=profile_config,
+                    config=config,
+                    base_template=effective_template,
+                )
+                effective_template = cached_template_tag
+                skip_bootstrap = True
+            except Exception as exc:
+                log_warn(f"Profile template build failed, using base template: {exc}")
 
     # Validate agent
     valid_agents = {"claude", "codex", "copilot", "gemini", "kiro", "opencode", "shell"}
@@ -266,6 +302,8 @@ def dev(
             template=effective_template,
             ide=effective_ide,
             packages=effective_packages or None,
+            profile_name=profile,
+            skip_package_bootstrap=skip_bootstrap,
         )
     except RuntimeError as exc:
         log_error(str(exc))
@@ -276,9 +314,16 @@ def dev(
         log_error(f"Sandbox creation failed: {exc}")
         sys.exit(1)
 
-    # Persist profile in metadata
+    # Persist profile and template cache provenance in metadata
     from foundry_sandbox.state import patch_sandbox_metadata
-    patch_sandbox_metadata(name, profile=profile)
+    meta_patch: dict[str, str] = {"profile": profile}
+    if cached_template_tag:
+        from foundry_sandbox.template_cache import derive_cache_key
+        meta_patch["template_cache_key"] = derive_cache_key(
+            profile, profile_config, config, effective_template,
+        )
+        meta_patch["template_profile"] = profile
+    patch_sandbox_metadata(name, **meta_patch)
 
     # Save state
     save_last_cast_new(

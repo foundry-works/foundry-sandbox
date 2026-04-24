@@ -183,6 +183,20 @@ class PackageBootstrap(_Strict):
 
 
 # ---------------------------------------------------------------------------
+# tooling bundles
+# ---------------------------------------------------------------------------
+
+
+class ToolingBundle(_Strict):
+    skills: list[SkillSource] = Field(default_factory=list)
+    commands: list[str] = Field(default_factory=list)
+    mcp_servers: list[McpServer] = Field(default_factory=list)
+    packages: PackageBootstrap | None = None
+    permissions: Permissions | None = None
+    hooks: dict[str, list[HookRule]] = Field(default_factory=dict)
+
+
+# ---------------------------------------------------------------------------
 # dev profiles
 # ---------------------------------------------------------------------------
 
@@ -194,6 +208,7 @@ class DevProfile(_Strict):
     pip_requirements: str | None = None
     packages: PackageBootstrap | None = None
     template: str | None = None
+    tooling: list[str] = Field(default_factory=list)
 
 
 # ---------------------------------------------------------------------------
@@ -211,6 +226,7 @@ class FoundryConfig(_Strict):
     allow_system_packages: bool = False
     ide: IdeConfig | None = None
     profiles: dict[str, DevProfile] = Field(default_factory=dict)
+    tooling_bundles: dict[str, ToolingBundle] = Field(default_factory=dict)
 
     @model_validator(mode="after")
     def _gate_third_party_mcp(self) -> FoundryConfig:
@@ -220,6 +236,13 @@ class FoundryConfig(_Strict):
                 raise ValueError(
                     f"MCP servers {bad} are type=npm but allow_third_party_mcp is off"
                 )
+            for bname, bundle in self.tooling_bundles.items():
+                bad_b = [s.name for s in bundle.mcp_servers if s.type == "npm"]
+                if bad_b:
+                    raise ValueError(
+                        f"Tooling bundle '{bname}' has npm MCP servers {bad_b} "
+                        f"but allow_third_party_mcp is off"
+                    )
         return self
 
     @model_validator(mode="after")
@@ -236,6 +259,17 @@ class FoundryConfig(_Strict):
                         parts.append(f"npm: {profile.packages.npm}")
                     raise ValueError(
                         f"Profile '{name}' has system packages ({', '.join(parts)}) "
+                        f"but allow_system_packages is off"
+                    )
+            for bname, bundle in self.tooling_bundles.items():
+                if bundle.packages and (bundle.packages.apt or bundle.packages.npm):
+                    parts = []
+                    if bundle.packages.apt:
+                        parts.append(f"apt: {bundle.packages.apt}")
+                    if bundle.packages.npm:
+                        parts.append(f"npm: {bundle.packages.npm}")
+                    raise ValueError(
+                        f"Tooling bundle '{bname}' has system packages ({', '.join(parts)}) "
                         f"but allow_system_packages is off"
                     )
         return self
@@ -315,6 +349,12 @@ def _merge(layers: list[FoundryConfig]) -> FoundryConfig:
     for layer in layers:
         merged_profiles.update(layer.profiles)
     result.profiles = merged_profiles
+
+    # Tooling bundles: collect all, later layer wins for same name (same as profiles)
+    merged_bundles: dict[str, ToolingBundle] = {}
+    for layer in layers:
+        merged_bundles.update(layer.tooling_bundles)
+    result.tooling_bundles = merged_bundles
 
     return result
 
@@ -490,6 +530,189 @@ def normalize_profile_packages(profile: DevProfile) -> dict[str, object]:
 
 
 # ---------------------------------------------------------------------------
+# Tooling bundle expansion
+# ---------------------------------------------------------------------------
+
+
+def merge_package_bootstrap(
+    base: PackageBootstrap | None,
+    overlay: PackageBootstrap | None,
+) -> PackageBootstrap | None:
+    """Additively merge two PackageBootstrap objects."""
+    if base is None:
+        return overlay
+    if overlay is None:
+        return base
+
+    pip: str | list[str] | None = base.pip
+    if overlay.pip is not None:
+        if base.pip is None:
+            pip = overlay.pip
+        elif isinstance(base.pip, list) and isinstance(overlay.pip, list):
+            pip = list(dict.fromkeys(base.pip + overlay.pip))
+        elif isinstance(base.pip, str) and isinstance(overlay.pip, str):
+            pip = [base.pip, overlay.pip] if base.pip != overlay.pip else base.pip
+        else:
+            parts: list[str] = []
+            for v in (base.pip, overlay.pip):
+                parts.extend([v] if isinstance(v, str) else v)
+            pip = list(dict.fromkeys(parts))
+
+    uv: str | list[str] | None = base.uv
+    if overlay.uv is not None:
+        if base.uv is None:
+            uv = overlay.uv
+        elif isinstance(base.uv, list) and isinstance(overlay.uv, list):
+            uv = list(dict.fromkeys(base.uv + overlay.uv))
+        elif isinstance(base.uv, str) and isinstance(overlay.uv, str):
+            uv = [base.uv, overlay.uv] if base.uv != overlay.uv else base.uv
+        else:
+            uv_parts: list[str] = []
+            for v in (base.uv, overlay.uv):
+                uv_parts.extend([v] if isinstance(v, str) else v)
+            uv = list(dict.fromkeys(uv_parts))
+
+    apt = list(dict.fromkeys(base.apt + overlay.apt))
+    npm = list(dict.fromkeys(base.npm + overlay.npm))
+
+    return PackageBootstrap(pip=pip, uv=uv, apt=apt, npm=npm)
+
+
+def collect_bundle_packages(
+    config: FoundryConfig,
+    profile: DevProfile,
+) -> PackageBootstrap | None:
+    """Extract only the packages contributions from a profile's bundles."""
+    merged: PackageBootstrap | None = None
+    for bundle_name in profile.tooling:
+        bundle = config.tooling_bundles.get(bundle_name)
+        if bundle is None:
+            raise ValueError(
+                f"Unknown tooling bundle: {bundle_name!r}. "
+                f"Available: {', '.join(sorted(config.tooling_bundles))}"
+                if config.tooling_bundles
+                else f"Unknown tooling bundle: {bundle_name!r}. No bundles are defined."
+            )
+        if bundle.packages:
+            merged = merge_package_bootstrap(merged, bundle.packages)
+    return merged
+
+
+def expand_bundles(
+    config: FoundryConfig,
+    profile: DevProfile,
+) -> tuple[FoundryConfig, PackageBootstrap | None]:
+    """Expand a profile's referenced tooling bundles into the config.
+
+    Returns a new FoundryConfig with bundle contents merged into
+    mcp_servers and claude_code, plus any bundle-derived packages.
+    Raises ValueError for unknown bundle names or gate violations.
+    """
+    if not profile.tooling:
+        return config, None
+
+    # Validate bundle names exist
+    for bundle_name in profile.tooling:
+        if bundle_name not in config.tooling_bundles:
+            raise ValueError(
+                f"Unknown tooling bundle: {bundle_name!r}. "
+                f"Available: {', '.join(sorted(config.tooling_bundles))}"
+                if config.tooling_bundles
+                else f"Unknown tooling bundle: {bundle_name!r}. No bundles are defined."
+            )
+
+    # Check gates on bundle contents
+    if not config.allow_third_party_mcp:
+        for bundle_name in profile.tooling:
+            bundle = config.tooling_bundles[bundle_name]
+            bad = [s.name for s in bundle.mcp_servers if s.type == "npm"]
+            if bad:
+                raise ValueError(
+                    f"Bundle '{bundle_name}' has npm MCP servers {bad} "
+                    f"but allow_third_party_mcp is off"
+                )
+
+    if not config.allow_system_packages:
+        for bundle_name in profile.tooling:
+            bundle = config.tooling_bundles[bundle_name]
+            if bundle.packages and (bundle.packages.apt or bundle.packages.npm):
+                parts = []
+                if bundle.packages.apt:
+                    parts.append(f"apt: {bundle.packages.apt}")
+                if bundle.packages.npm:
+                    parts.append(f"npm: {bundle.packages.npm}")
+                raise ValueError(
+                    f"Bundle '{bundle_name}' has system packages ({', '.join(parts)}) "
+                    f"but allow_system_packages is off"
+                )
+
+    # Collect expanded sections
+    all_skills: list[SkillSource] = list(config.claude_code.skills) if config.claude_code else []
+    all_commands: list[str] = list(config.claude_code.commands) if config.claude_code else []
+    all_mcp: list[McpServer] = list(config.mcp_servers)
+    all_hooks: dict[str, list[HookRule]] = {}
+    all_perm_allow: list[str] = []
+    all_perm_deny: list[str] = []
+    merged_packages: PackageBootstrap | None = None
+
+    # Copy existing hooks
+    if config.claude_code and config.claude_code.hooks:
+        for key, rules in config.claude_code.hooks.items():
+            all_hooks[key] = list(rules)
+
+    # Copy existing permissions
+    if config.claude_code and config.claude_code.permissions:
+        all_perm_allow = list(config.claude_code.permissions.allow)
+        all_perm_deny = list(config.claude_code.permissions.deny)
+
+    # Expand each bundle
+    seen_mcp_names: set[str] = set(s.name for s in all_mcp)
+    for bundle_name in profile.tooling:
+        bundle = config.tooling_bundles[bundle_name]
+
+        all_skills.extend(bundle.skills)
+        all_commands.extend(bundle.commands)
+
+        for srv in bundle.mcp_servers:
+            if srv.name in seen_mcp_names:
+                logger.warning(
+                    "Bundle '%s' redefines MCP server '%s'; later definition wins",
+                    bundle_name, srv.name,
+                )
+            seen_mcp_names.add(srv.name)
+            all_mcp.append(srv)
+
+        for key, rules in bundle.hooks.items():
+            all_hooks.setdefault(key, []).extend(rules)
+
+        if bundle.permissions:
+            all_perm_allow.extend(bundle.permissions.allow)
+            all_perm_deny.extend(bundle.permissions.deny)
+
+        if bundle.packages:
+            merged_packages = merge_package_bootstrap(merged_packages, bundle.packages)
+
+    # Build merged claude_code
+    permissions = None
+    if all_perm_allow or all_perm_deny:
+        permissions = Permissions(allow=all_perm_allow, deny=all_perm_deny)
+    claude_code = ClaudeCodeConfig(
+        skills=all_skills,
+        commands=all_commands,
+        hooks=all_hooks,
+        permissions=permissions,
+    )
+
+    return (
+        config.model_copy(update={
+            "claude_code": claude_code,
+            "mcp_servers": all_mcp,
+        }),
+        merged_packages,
+    )
+
+
+# ---------------------------------------------------------------------------
 # Plan renderer
 # ---------------------------------------------------------------------------
 
@@ -526,6 +749,9 @@ def render_plan_text(config: FoundryConfig, *, profile_name: str | None = None) 
                 for pkg_type, pkg_val in pkgs.items():
                     lines.append(f"    {pkg_type}: {pkg_val}")
                 has_any = True
+        if resolved.tooling:
+            lines.append(f"  tooling: {resolved.tooling}")
+            has_any = True
         if not has_any:
             lines.append("  (empty — all defaults from CLI)")
         lines.append("")
@@ -541,8 +767,37 @@ def render_plan_text(config: FoundryConfig, *, profile_name: str | None = None) 
                 pkgs = normalize_profile_packages(prof)
                 if pkgs:
                     fields.append(f"packages={pkgs}")
+            if prof.tooling:
+                fields.append(f"tooling={prof.tooling}")
             lines.append(f"  {name}: {', '.join(fields) if fields else '(empty)'}")
         lines.append("")
+
+    # Tooling bundles
+    if config.tooling_bundles:
+        lines.append(f"Tooling bundles defined ({len(config.tooling_bundles)}):")
+        for bname, bundle in sorted(config.tooling_bundles.items()):
+            parts = []
+            if bundle.mcp_servers:
+                parts.append(f"{len(bundle.mcp_servers)} MCP server(s)")
+            if bundle.skills:
+                parts.append(f"{len(bundle.skills)} skill(s)")
+            if bundle.commands:
+                parts.append(f"{len(bundle.commands)} command(s)")
+            if bundle.packages:
+                parts.append("packages")
+            if bundle.hooks:
+                parts.append(f"{sum(len(r) for r in bundle.hooks.values())} hook rule(s)")
+            if bundle.permissions and (bundle.permissions.allow or bundle.permissions.deny):
+                parts.append("permissions")
+            lines.append(f"  {bname}: {', '.join(parts) if parts else '(empty)'}")
+        lines.append("")
+        if profile_name is not None:
+            resolved = resolve_profile(config, profile_name)
+            if resolved.tooling:
+                lines.append(f"Active bundles for profile '{profile_name}':")
+                for bname in resolved.tooling:
+                    lines.append(f"  - {bname}")
+                lines.append("")
 
     # Artifacts
     lines.append("Artifacts to apply:")

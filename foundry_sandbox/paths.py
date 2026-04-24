@@ -130,6 +130,17 @@ def path_preset_file(name: str) -> Path:
     return path_presets_dir() / f"{name}.json"
 
 
+def path_template_cache_dir() -> Path:
+    """Get the path to the template cache directory."""
+    return Path.home() / ".foundry" / "template-cache"
+
+
+def path_template_cache_file(profile_name: str) -> Path:
+    """Get the path to a profile's template cache file."""
+    _assert_safe_path_component(profile_name)
+    return path_template_cache_dir() / f"{profile_name}.json"
+
+
 def resolve_host_worktree_path(name: str) -> Path:
     """Resolve the host-side workspace path for a sandbox.
 

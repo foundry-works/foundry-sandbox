@@ -527,6 +527,131 @@ compatibility.
 If `--profile <name>` is given and `<name>` is not defined in any config layer,
 `cast dev` exits with an error listing available profiles.
 
+## Tooling Bundles
+
+Tooling bundles are named, reusable tooling sets that expand into Claude skills,
+Claude commands, MCP servers, and package prerequisites. They let you define a
+tooling setup once and reference it from any profile.
+
+### Schema
+
+Define bundles under `tooling_bundles` in `foundry.yaml`:
+
+```yaml
+version: "1"
+allow_third_party_mcp: true
+allow_system_packages: true
+
+tooling_bundles:
+  github-toolkit:
+    mcp_servers:
+      - name: github
+        type: builtin
+        env:
+          GITHUB_PERSONAL_ACCESS_TOKEN: "${from_host:GITHUB_TOKEN}"
+    skills:
+      - source: ~/.foundry/skills/team-review
+
+  python-dev:
+    packages:
+      pip: [debugpy, pytest-watch]
+      apt: [jq, ripgrep]
+    permissions:
+      allow: ["Bash(python *)", "Bash(pytest *)"]
+
+  research-agent:
+    mcp_servers:
+      - name: tavily-search
+        type: npm
+        package: "@anthropic/mcp-tavily"
+        env:
+          TAVILY_API_KEY: "${from_host:TAVILY_API_KEY}"
+    commands:
+      - ~/.foundry/commands/deep-research.md
+```
+
+Each `ToolingBundle` can contain:
+
+| Field | Type | Purpose |
+|-------|------|---------|
+| `skills` | `list[SkillSource]` | Claude skills (from host path or git URL) |
+| `commands` | `list[str]` | Claude command files (host paths) |
+| `mcp_servers` | `list[McpServer]` | MCP server declarations (builtin, proxy, npm) |
+| `packages` | `PackageBootstrap` | Package prerequisites (pip, uv, apt, npm) |
+| `permissions` | `Permissions` | Claude Code permissions (allow/deny lists) |
+| `hooks` | `dict[str, list[HookRule]]` | Claude Code hooks |
+
+### Referencing bundles from profiles
+
+Profiles reference bundles via a `tooling` field:
+
+```yaml
+profiles:
+  default:
+    agent: claude
+    tooling: [github-toolkit, python-dev]
+
+  research:
+    agent: claude
+    tooling: [github-toolkit, research-agent]
+```
+
+### Expansion
+
+When a profile is activated, its bundles are expanded into the standard config
+surfaces before artifact compilation:
+
+- `skills` → merged into `claude_code.skills`
+- `commands` → merged into `claude_code.commands`
+- `mcp_servers` → merged into top-level `mcp_servers`
+- `packages` → additively merged with profile packages
+- `permissions` → concatenated allow/deny lists
+- `hooks` → merged per-key with rule concatenation
+
+The existing compilers (`compile_mcp_servers`, `compile_claude_code`,
+`bootstrap_packages`) are unchanged — bundles are a pre-compilation step.
+
+### Conflict handling
+
+| Surface | Rule |
+|---------|------|
+| MCP servers (same name) | Warning logged, later definition wins |
+| Skills | Concatenate (idempotent by path) |
+| Commands | Concatenate (idempotent by path) |
+| Packages | Additive merge per type, deduped |
+| Permissions | Concatenate allow/deny lists |
+| Hooks | Merge per-key, concatenate rules |
+
+### Gates
+
+Bundles are subject to the same gates as direct config:
+
+- `mcp_servers` with `type: npm` require `allow_third_party_mcp: true`.
+- `packages` with `apt` or `npm` require `allow_system_packages: true`.
+
+These gates use AND semantics across config layers — any layer setting `false`
+blocks the capability.
+
+### Merge across layers
+
+Bundles follow the same merge rule as profiles:
+
+- Bundles with **different names** across layers are all available.
+- For the **same name**, the user-layer bundle wins entirely.
+
+### Where bundles can live
+
+Bundles can appear in both user config (`~/.foundry/foundry.yaml`) and repo
+config (`<repo>/foundry.yaml`). Since bundles only reference tooling — never
+secrets directly — they are safe in repo config. Secret values use the
+`${from_host:VAR}` syntax resolved at compile time.
+
+### Generated files
+
+The `.claude/` directory contents and `.mcp.json` produced by bundle expansion
+are compiled artifacts, not source of truth. They are regenerated on each
+sandbox creation from the declarative config. Do not edit them directly.
+
 ## Host Paths
 
 The current host-side layout is:
