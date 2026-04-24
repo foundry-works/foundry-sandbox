@@ -50,7 +50,7 @@ claude_code:
 
 Merge behavior:
 
-- `mcp_servers` and `user_services` concatenate across layers
+- `mcp_servers` and `user_services` concatenate across trusted layers
 - `git_safety.protected_branches.add` and
   `git_safety.file_restrictions.blocked_patterns_add` only append
 - `allow_third_party_mcp` and `git_safety.allow_pr_operations` tighten via AND
@@ -58,6 +58,9 @@ Merge behavior:
 - `claude_code` skills, commands, hooks, and permissions merge additively
 - a repo `foundry.yaml` can add config, but it cannot override tighter
   user-layer gates
+- host-bound declarations are user-only: repo `foundry.yaml` files cannot
+  declare `user_services`, proxy MCP servers, `${from_host:...}` env values,
+  or host-path Claude skills/commands
 
 ## Host Authentication
 
@@ -143,7 +146,8 @@ Behavior:
 ## User-Defined Services
 
 For APIs that are not handled directly by the built-in `sbx` secret flow,
-declare proxy-backed service env vars in `foundry.yaml` under `user_services`.
+declare proxy-backed service env vars in your user `~/.foundry/foundry.yaml`
+under `user_services`.
 
 Example:
 
@@ -223,6 +227,9 @@ Each builtin resolves to an `npx` command from `@modelcontextprotocol`.
 Env values containing `${from_host:VAR_NAME}` are replaced with a proxy URL at
 compile time. The real credential stays on the host. The host env var must be
 set when `cast new` runs (fail-fast).
+
+`${from_host:...}` is user-only. Repo `foundry.yaml` files are rejected if they
+try to request host secrets.
 
 ```yaml
 env:
@@ -642,9 +649,9 @@ Bundles follow the same merge rule as profiles:
 ### Where bundles can live
 
 Bundles can appear in both user config (`~/.foundry/foundry.yaml`) and repo
-config (`<repo>/foundry.yaml`). Since bundles only reference tooling — never
-secrets directly — they are safe in repo config. Secret values use the
-`${from_host:VAR}` syntax resolved at compile time.
+config (`<repo>/foundry.yaml`). Repo bundles cannot reference host paths or
+host credentials; put host-path skills, command files, proxy MCP declarations,
+and `${from_host:VAR}` env values in user config.
 
 ### Generated files
 

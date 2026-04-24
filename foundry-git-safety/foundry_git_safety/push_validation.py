@@ -435,20 +435,11 @@ def check_push_protected_branches(
                 "Wildcard push refspecs are not allowed; use explicit branch names"
             )
 
-    # --delete mode uses plain ref names after remote.
+    # Remote branch/tag deletion is blocked globally. Deleting refs is hard to
+    # distinguish safely from destructive cross-sandbox cleanup, and the public
+    # security model promises branch and tag deletion pushes are blocked.
     if _has_push_flag(args, "--delete"):
-        for target in refspecs:
-            qualified = _qualify_ref(target)
-            block_reason = check_protected_branches(
-                refname=qualified,
-                old_sha=_SYNTHETIC_OLD_SHA,
-                new_sha=_ZERO_SHA,  # Deletion
-                bare_repo_path=bare_repo_path,
-                metadata=metadata,
-            )
-            if block_reason:
-                return ValidationError(block_reason)
-        return None
+        return ValidationError("Branch and tag deletion pushes are not allowed")
 
     # Check regular push refspecs (treated as updates).
     # NOTE: synthetic non-zero SHAs mean check_protected_branches always
@@ -477,16 +468,9 @@ def check_push_protected_branches(
             src, dst = spec.split(":", 1)
             if not src and dst:
                 saw_deletion = True
-                qualified = _qualify_ref(dst)
-                block_reason = check_protected_branches(
-                    refname=qualified,
-                    old_sha=_SYNTHETIC_OLD_SHA,
-                    new_sha=_ZERO_SHA,  # Deletion
-                    bare_repo_path=bare_repo_path,
-                    metadata=metadata,
+                return ValidationError(
+                    "Branch and tag deletion pushes are not allowed"
                 )
-                if block_reason:
-                    return ValidationError(block_reason)
 
     if not refnames and not saw_deletion and not _has_push_flag(args, "--tags"):
         return ValidationError(

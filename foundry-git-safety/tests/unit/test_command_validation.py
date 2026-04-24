@@ -217,6 +217,15 @@ class TestValidateCommand:
         assert err is not None
         assert "--exec" in err.reason
 
+    @pytest.mark.parametrize(
+        "flag",
+        ["--batch-all-objects", "--batch", "--batch-check", "--batch-command"],
+    )
+    def test_cat_file_object_wide_modes_blocked(self, flag):
+        err = validate_command(["cat-file", flag])
+        assert err is not None
+        assert flag in err.reason
+
     # -- Per-command blocked flags from COMMAND_BLOCKED_FLAGS --
 
     def test_push_force_blocked(self):

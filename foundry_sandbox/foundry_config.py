@@ -13,7 +13,7 @@ import importlib.resources
 import logging
 import os
 import re
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Annotated, Any, Literal, Union
 
 import yaml
@@ -23,6 +23,7 @@ from foundry_sandbox.artifacts import ArtifactBundle, PolicyPatch, PostStep
 
 logger = logging.getLogger(__name__)
 _ENV_VAR_RE = re.compile(r"^[A-Z_][A-Z0-9_]*$")
+_FROM_HOST_RE = re.compile(r"\$\{from_host:([A-Za-z_][A-Za-z0-9_]*)\}")
 
 
 def slug(name: str) -> str:
@@ -302,6 +303,64 @@ def _load_layer(path: Path) -> FoundryConfig | None:
         raise ValueError(f"Invalid foundry config {path}: {exc}") from exc
 
 
+def _mcp_server_uses_host_secret(server: McpServer) -> bool:
+    if server.type == "proxy":
+        return True
+    return any(_FROM_HOST_RE.search(value) for value in server.env.values())
+
+
+def _claude_code_uses_host_paths(cfg: ClaudeCodeConfig | None) -> bool:
+    if cfg is None:
+        return False
+    return any(skill.source for skill in cfg.skills) or bool(cfg.commands)
+
+
+def _bundle_uses_host_boundary(bundle: ToolingBundle) -> bool:
+    if any(_mcp_server_uses_host_secret(server) for server in bundle.mcp_servers):
+        return True
+    if any(skill.source for skill in bundle.skills):
+        return True
+    return bool(bundle.commands)
+
+
+def _reject_repo_host_bound_config(repo: FoundryConfig, repo_path: Path) -> None:
+    """Reject repo-owned declarations that read host files or host secrets."""
+    reasons: list[str] = []
+
+    if repo.user_services:
+        reasons.append("user_services")
+
+    host_secret_mcp = [
+        server.name for server in repo.mcp_servers
+        if _mcp_server_uses_host_secret(server)
+    ]
+    if host_secret_mcp:
+        reasons.append(
+            "mcp_servers with proxy host_env or ${from_host:...}: "
+            + ", ".join(host_secret_mcp)
+        )
+
+    if _claude_code_uses_host_paths(repo.claude_code):
+        reasons.append("claude_code host-path skills or commands")
+
+    host_bound_bundles = [
+        name for name, bundle in repo.tooling_bundles.items()
+        if _bundle_uses_host_boundary(bundle)
+    ]
+    if host_bound_bundles:
+        reasons.append(
+            "tooling_bundles with host secrets or host paths: "
+            + ", ".join(sorted(host_bound_bundles))
+        )
+
+    if reasons:
+        raise ValueError(
+            f"Repo foundry.yaml at {repo_path} contains host-bound settings "
+            f"({'; '.join(reasons)}). Move host credential and host path "
+            "declarations to ~/.foundry/foundry.yaml."
+        )
+
+
 def _merge(
     layers: list[FoundryConfig],
     *,
@@ -484,6 +543,8 @@ def resolve_foundry_config(repo_root: Path) -> FoundryConfig:
     repo_path = repo_root / "foundry.yaml"
     repo = _load_layer(repo_path)
     if repo is not None:
+        _reject_repo_host_bound_config(repo, repo_path)
+
         # ide is user-only — strip from repo config
         if repo.ide is not None:
             logger.warning(
@@ -926,9 +987,6 @@ def render_plan_text(config: FoundryConfig, *, profile_name: str | None = None) 
 # ---------------------------------------------------------------------------
 
 
-_FROM_HOST_RE = re.compile(r"\$\{from_host:([A-Za-z_][A-Za-z0-9_]*)\}")
-
-
 def collect_secret_refs(config: FoundryConfig) -> list[tuple[str, str]]:
     """Return deduplicated sbx secret refs implied by a resolved config."""
     refs: list[tuple[str, str]] = []
@@ -1183,6 +1241,13 @@ def _skill_name_from_git(url: str) -> str:
     return name
 
 
+def _validate_git_skill_subpath(path: str) -> None:
+    """Reject git skill subpaths that can escape the cloned repository."""
+    posix_path = PurePosixPath(path)
+    if posix_path.is_absolute() or ".." in posix_path.parts:
+        raise ValueError(f"Git skill path must stay within the cloned repo: {path}")
+
+
 def compile_claude_code(cfg: ClaudeCodeConfig) -> ArtifactBundle:
     """Compile a ClaudeCodeConfig into an ArtifactBundle.
 
@@ -1226,10 +1291,16 @@ def compile_claude_code(cfg: ClaudeCodeConfig) -> ArtifactBundle:
                 cmd=["git", "clone", "--depth", "1", skill.git, target],
             ))
             if skill.path:
+                _validate_git_skill_subpath(skill.path)
+                import shlex
+
+                source = shlex.quote(f"{target}/{skill.path}/.")
+                destination = shlex.quote(target)
+                cleanup = shlex.quote(f"{target}/{skill.path}")
                 post_steps.append(PostStep(
                     cmd=["sh", "-c",
-                         f"mv '{target}/{skill.path}/*' '{target}/' 2>/dev/null; "
-                         f"rm -rf '{target}/{skill.path}'"],
+                         f"cp -a {source} {destination}/ 2>/dev/null; "
+                         f"rm -rf {cleanup}"],
                 ))
 
     # -- Commands --

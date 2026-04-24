@@ -76,7 +76,7 @@ class TestLazyCommandLoading:
         for cmd_name, (module_path, attr_name) in _LAZY_COMMANDS.items():
             mod = importlib.import_module(module_path)
             obj = getattr(mod, attr_name)
-            assert isinstance(obj, click.BaseCommand), (
+            assert isinstance(obj, click.Command), (
                 f"Lazy command '{cmd_name}': {module_path}.{attr_name} is "
                 f"{type(obj).__name__}, expected a Click command"
             )

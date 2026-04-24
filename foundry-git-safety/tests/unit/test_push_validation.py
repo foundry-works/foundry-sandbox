@@ -384,6 +384,31 @@ class TestCheckPushProtectedBranches:
                 ["--delete", "origin", "main"], "/fake/repo"
             )
         assert err is not None
+        assert "deletion" in err.reason.lower()
+
+    def test_delete_flag_with_unprotected_branch_blocked(self):
+        """--delete is blocked even for unprotected branches."""
+        with patch(
+            "foundry_git_safety.push_validation.resolve_bare_repo_path",
+            return_value=None,
+        ):
+            err = check_push_protected_branches(
+                ["--delete", "origin", "feature"], "/fake/repo"
+            )
+        assert err is not None
+        assert "deletion" in err.reason.lower()
+
+    def test_delete_tag_refspec_blocked(self):
+        """Deleting tags via :refs/tags/<tag> is blocked."""
+        with patch(
+            "foundry_git_safety.push_validation.resolve_bare_repo_path",
+            return_value=None,
+        ):
+            err = check_push_protected_branches(
+                ["origin", ":refs/tags/v1.0"], "/fake/repo"
+            )
+        assert err is not None
+        assert "deletion" in err.reason.lower()
 
     def test_tags_flag_with_only_remote_allowed(self):
         """--tags with only a remote is allowed (tag-only push)."""

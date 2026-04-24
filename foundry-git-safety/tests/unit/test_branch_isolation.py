@@ -1,6 +1,7 @@
 """Tests for foundry_git_safety.branch_isolation."""
 
 import os
+from unittest.mock import patch
 
 import pytest
 
@@ -10,6 +11,7 @@ from foundry_git_safety.branch_isolation import (
     normalize_pathspec_args,
     resolve_bare_repo_path,
     validate_branch_isolation,
+    validate_sha_reachability,
 )
 from foundry_git_safety.branch_types import ValidationError
 
@@ -355,6 +357,112 @@ class TestTagIsolation:
         result = validate_branch_isolation(
             ["tag", "v1.0", "a" * 40], meta
         )
+        assert result is None
+
+
+# ---------------------------------------------------------------------------
+# TestRefEnumIsolation
+# ---------------------------------------------------------------------------
+
+
+class TestRefEnumIsolation:
+    """Tests for ref enumeration inputs that output filtering depends on."""
+
+    def test_for_each_ref_format_without_refname_blocked(self):
+        meta = _make_metadata(sandbox_branch="sandbox/alice")
+        result = validate_branch_isolation(
+            ["for-each-ref", "--format=%(objectname)"], meta
+        )
+        assert isinstance(result, ValidationError)
+        assert "format" in result.reason
+
+    def test_for_each_ref_format_with_refname_allowed(self):
+        meta = _make_metadata(sandbox_branch="sandbox/alice")
+        result = validate_branch_isolation(
+            ["for-each-ref", "--format=%(objectname) %(refname)"], meta
+        )
+        assert result is None
+
+    def test_for_each_ref_disallowed_pattern_blocked(self):
+        meta = _make_metadata(sandbox_branch="sandbox/alice")
+        result = validate_branch_isolation(
+            ["for-each-ref", "refs/heads/sandbox/bob"], meta
+        )
+        assert isinstance(result, ValidationError)
+        assert "not allowed" in result.reason
+
+    def test_for_each_ref_color_does_not_hide_pattern(self):
+        meta = _make_metadata(sandbox_branch="sandbox/alice")
+        result = validate_branch_isolation(
+            ["for-each-ref", "--color", "refs/heads/sandbox/bob"], meta
+        )
+        assert isinstance(result, ValidationError)
+        assert "not allowed" in result.reason
+
+    def test_show_ref_hash_only_blocked(self):
+        meta = _make_metadata(sandbox_branch="sandbox/alice")
+        result = validate_branch_isolation(["show-ref", "--hash"], meta)
+        assert isinstance(result, ValidationError)
+        assert "hash-only" in result.reason
+
+
+# ---------------------------------------------------------------------------
+# TestTagShaReachability
+# ---------------------------------------------------------------------------
+
+
+class TestTagShaReachability:
+    """Raw SHA tag targets must pass the reachability check."""
+
+    def test_unreachable_tag_sha_blocked(self):
+        meta = _make_metadata(sandbox_branch="sandbox/alice")
+        with (
+            patch(
+                "foundry_git_safety.branch_isolation.resolve_bare_repo_path",
+                return_value="/bare",
+            ),
+            patch(
+                "foundry_git_safety.branch_isolation.os.path.isfile",
+                return_value=False,
+            ),
+            patch(
+                "foundry_git_safety.branch_isolation._get_allowed_refs",
+                return_value=["refs/heads/sandbox/alice"],
+            ),
+            patch(
+                "foundry_git_safety.branch_isolation._check_sha_reachability",
+                return_value=False,
+            ),
+        ):
+            result = validate_sha_reachability(
+                ["tag", "leak", "a" * 40], "/repo", meta
+            )
+        assert isinstance(result, ValidationError)
+        assert "not reachable" in result.reason
+
+    def test_reachable_tag_sha_allowed(self):
+        meta = _make_metadata(sandbox_branch="sandbox/alice")
+        with (
+            patch(
+                "foundry_git_safety.branch_isolation.resolve_bare_repo_path",
+                return_value="/bare",
+            ),
+            patch(
+                "foundry_git_safety.branch_isolation.os.path.isfile",
+                return_value=False,
+            ),
+            patch(
+                "foundry_git_safety.branch_isolation._get_allowed_refs",
+                return_value=["refs/heads/sandbox/alice"],
+            ),
+            patch(
+                "foundry_git_safety.branch_isolation._check_sha_reachability",
+                return_value=True,
+            ),
+        ):
+            result = validate_sha_reachability(
+                ["tag", "v1.0", "a" * 40], "/repo", meta
+            )
         assert result is None
 
 

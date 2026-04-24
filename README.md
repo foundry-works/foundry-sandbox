@@ -87,6 +87,8 @@ The maintained docs for the current product surface are:
 | Document | Description |
 |----------|-------------|
 | [Getting Started](docs/getting-started.md) | Install, authenticate, create, attach |
+| [Foundry and sbx](docs/foundry-and-sbx.md) | What `sbx` provides vs. what Foundry adds |
+| [sbx Compatibility](docs/sbx-compatibility.md) | Supported `sbx` versions and drift checks |
 | [Commands](docs/usage/commands.md) | Current CLI reference |
 | [Configuration](docs/configuration.md) | `foundry.yaml`, credentials, MCP, Claude Code, user services |
 | [Operations](docs/operations.md) | Runbook and troubleshooting |

@@ -91,6 +91,10 @@ The raw `foundry.yaml` file is not the in-sandbox control surface. The
 red-team suite checks for raw-config leakage, unresolved
 `${from_host:VAR}` templates, and unexpected mutability of compiled artifacts.
 
+Host-bound declarations are trusted-user config only. Repo `foundry.yaml` files
+are rejected if they request host credentials (`user_services`, proxy MCP, or
+`${from_host:...}`) or host filesystem reads for Claude skills/commands.
+
 ### Branch Isolation
 
 `foundry-git-safety` limits each sandbox to its own branch plus a small allowlist of well-known branches and tags.

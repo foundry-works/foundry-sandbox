@@ -235,6 +235,22 @@ _PUSH_VALUE_FLAGS: frozenset[str] = frozenset({
     "--repo", "--receive-pack", "--exec", "--push-option", "-o",
 })
 
+# Ref-enumeration flags that either consume the next value or can remove ref
+# names from output. Ref names must remain available for output filtering.
+_REF_ENUM_VALUE_FLAGS: frozenset[str] = frozenset({
+    "--sort", "--count", "--contains", "--no-contains",
+    "--merged", "--no-merged", "--points-at", "--exclude",
+    "--start-after",
+})
+
+_REF_ENUM_FORMAT_FLAGS: frozenset[str] = frozenset({
+    "--format",
+})
+
+_SHOW_REF_HASH_ONLY_FLAGS: frozenset[str] = frozenset({
+    "--hash", "-s",
+})
+
 
 # ---------------------------------------------------------------------------
 # Input Validation: Helpers
@@ -401,9 +417,11 @@ def validate_branch_isolation(
             i += 1
         return None  # branch listing handled by output filtering
 
-    # --- ref enum commands (handled by output filtering) ---
+    # --- ref enum commands (validated here, output still filtered later) ---
     if subcommand in REF_ENUM_CMDS:
-        return None
+        return _validate_ref_enum_isolation(
+            subcommand, sub_args, sandbox_branch, base_branch
+        )
 
     # --- checkout / switch ---
     if subcommand in ("checkout", "switch"):
@@ -785,6 +803,87 @@ def _validate_tag_isolation(
     return None
 
 
+def _format_includes_refname(fmt: str) -> bool:
+    """Return True when a for-each-ref format keeps a ref field in output."""
+    return "%(refname" in fmt or "%(*refname" in fmt
+
+
+def _validate_ref_enum_isolation(
+    subcommand: str,
+    sub_args: list[str],
+    sandbox_branch: str,
+    base_branch: str | None = None,
+) -> ValidationError | None:
+    """Validate commands that enumerate refs before output filtering.
+
+    Output filtering needs ref names to decide which lines to drop.  Formats
+    and flags that emit hashes without refs are therefore blocked.
+    """
+    skip_next = False
+    pending_format = False
+    positionals: list[str] = []
+
+    for a in sub_args:
+        if pending_format:
+            pending_format = False
+            if not _format_includes_refname(a):
+                return ValidationError(
+                    "Branch isolation: for-each-ref --format must include %(refname)"
+                )
+            continue
+
+        if skip_next:
+            skip_next = False
+            continue
+
+        if subcommand == "for-each-ref" and a == "--stdin":
+            return ValidationError(
+                "Branch isolation: for-each-ref --stdin is not allowed"
+            )
+
+        if subcommand == "show-ref":
+            flag_name = a.split("=", 1)[0]
+            if flag_name in _SHOW_REF_HASH_ONLY_FLAGS:
+                return ValidationError(
+                    "Branch isolation: show-ref hash-only output is not allowed"
+                )
+
+        if a in _REF_ENUM_FORMAT_FLAGS:
+            pending_format = True
+            continue
+        if a.startswith("--format="):
+            fmt = a.split("=", 1)[1]
+            if not _format_includes_refname(fmt):
+                return ValidationError(
+                    "Branch isolation: for-each-ref --format must include %(refname)"
+                )
+            continue
+
+        if a in _REF_ENUM_VALUE_FLAGS:
+            skip_next = True
+            continue
+        if "=" in a and a.split("=", 1)[0] in _REF_ENUM_VALUE_FLAGS:
+            continue
+
+        if a.startswith("-"):
+            continue
+
+        positionals.append(a)
+
+    if pending_format:
+        return ValidationError("Branch isolation: missing value for --format")
+
+    # ls-remote's first positional is the remote/repository, not a ref pattern.
+    ref_patterns = positionals[1:] if subcommand == "ls-remote" else positionals
+    for pattern in ref_patterns:
+        if not _is_allowed_ref(pattern, sandbox_branch, base_branch):
+            return ValidationError(
+                f"Branch isolation: ref pattern '{pattern}' not allowed"
+            )
+
+    return None
+
+
 def _validate_ref_reading_isolation(
     sub_args: list[str],
     sandbox_branch: str,
@@ -996,6 +1095,33 @@ def _extract_sha_args(sub_args: list[str]) -> list[str]:
     return shas
 
 
+def _extract_tag_sha_args(sub_args: list[str]) -> list[str]:
+    """Collect SHA-like commit-ish args from `git tag <name> [<commit>]`."""
+    positionals: list[str] = []
+    skip_next = False
+
+    for arg in sub_args:
+        if arg == "--":
+            break
+        if skip_next:
+            skip_next = False
+            continue
+        if arg in _TAG_VALUE_FLAGS:
+            skip_next = True
+            continue
+        if "=" in arg and arg.split("=", 1)[0] in _TAG_VALUE_FLAGS:
+            continue
+        if arg.startswith("-"):
+            continue
+        positionals.append(arg)
+
+    if len(positionals) < 2:
+        return []
+
+    base = _strip_rev_suffixes(positionals[1])
+    return [base] if _is_sha_like(base) else []
+
+
 def _get_allowed_refs(
     bare_repo: str,
     sandbox_branch: str,
@@ -1150,12 +1276,14 @@ def validate_sha_reachability(
     if subcommand is None:
         return None
 
-    # Only check ref-reading commands
-    if subcommand not in _REF_READING_CMDS:
+    # Only check ref-reading commands and tag commit-ish arguments.
+    if subcommand == "tag":
+        shas = _extract_tag_sha_args(sub_args)
+    elif subcommand in _REF_READING_CMDS:
+        shas = _extract_sha_args(sub_args)
+    else:
         return None
 
-    # Extract SHA-like args
-    shas = _extract_sha_args(sub_args)
     if not shas:
         return None
 

@@ -65,6 +65,8 @@ Keep the maintained current-state docs in sync when behavior changes:
 
 - `README.md`
 - `docs/getting-started.md`
+- `docs/foundry-and-sbx.md`
+- `docs/sbx-compatibility.md`
 - `docs/usage/commands.md`
 - `docs/usage/workflows.md`
 - `docs/configuration.md`

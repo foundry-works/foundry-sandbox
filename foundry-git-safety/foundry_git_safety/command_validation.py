@@ -139,6 +139,15 @@ _CLEAN_BLOCKED_FLAGS: frozenset[str] = frozenset({
     "-d", "-x", "-X",
 })
 
+# Object-wide/batch cat-file modes can disclose objects that branch isolation
+# intentionally hides, especially when the client can provide arbitrary stdin.
+_CAT_FILE_BLOCKED_FLAGS: frozenset[str] = frozenset({
+    "--batch-all-objects",
+    "--batch",
+    "--batch-check",
+    "--batch-command",
+})
+
 # Only --dry-run is allowed for clean
 _CLEAN_ALLOWED_FLAGS: frozenset[str] = frozenset({
     "--dry-run", "-n",
@@ -151,6 +160,7 @@ COMMAND_BLOCKED_FLAGS: dict[str, frozenset[str]] = {
     "switch": _SWITCH_BLOCKED_FLAGS,
     "branch": _BRANCH_BLOCKED_FLAGS,
     "clean": _CLEAN_BLOCKED_FLAGS,
+    "cat-file": _CAT_FILE_BLOCKED_FLAGS,
 }
 
 # ---------------------------------------------------------------------------
