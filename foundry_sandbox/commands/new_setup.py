@@ -23,6 +23,7 @@ from foundry_sandbox.sbx import (
     install_pip_requirements,
     sbx_check_available,
     sbx_create,
+    sbx_detect_workspace_dir,
     sbx_exec,
     sbx_get_workspace_info,
     sbx_rm,
@@ -169,6 +170,17 @@ def new_sbx_setup(
     else:
         host_worktree_path = sbx_worktree_path(repo_root, name, branch)
 
+    # Detect the container-internal workspace mount path.
+    # sbx may use "/workspace" (traditional) or the host repo path ("direct mount").
+    mount_dir = info["workspace"] or sbx_detect_workspace_dir(name, repo_root)
+
+    # The git wrapper's WORKSPACE_DIR must point to the container-internal
+    # worktree path so that `to_request_cwd` produces a path relative to the
+    # worktree root (not the repo root).  The server resolves CWD against
+    # the host-side worktree path, so "." from the wrapper must mean "worktree root".
+    _wt_rel = os.path.relpath(host_worktree_path, repo_root)
+    workspace_dir = os.path.join(mount_dir, _wt_rel)
+
     # ------------------------------------------------------------------
     # 4. Write initial metadata (git safety not yet provisioned)
     # ------------------------------------------------------------------
@@ -182,7 +194,7 @@ def new_sbx_setup(
             branch=branch,
             from_branch=from_branch,
             git_safety_enabled=False,
-            workspace_dir="/workspace",
+            workspace_dir=workspace_dir,
             working_dir=wd,
             pip_requirements=pip_requirements,
             packages=packages or {},
@@ -204,7 +216,7 @@ def new_sbx_setup(
     prov_result = provision_git_safety(
         name,
         sandbox_id=name,
-        workspace_dir="/workspace",
+        workspace_dir=workspace_dir,
         branch=branch,
         repo_spec=repo_spec,
         from_branch=from_branch,

@@ -16,12 +16,21 @@ Always run `./scripts/ci-local.sh` before committing to catch CI failures locall
 
 ```bash
 ./scripts/ci-local.sh        # Local CI validation (run before commit)
-./tests/redteam/runner.sh    # Security validation (run inside sandbox)
 ```
 
 Run `./scripts/ci-local.sh` before pushing to catch CI failures early.
 
-Redteam tests **must** be run inside a sandbox. See `tests/redteam/README.md` for the current module layout.
+### Redteam Security Tests
+
+Redteam tests validate sandbox isolation boundaries and **must** run inside a provisioned sandbox:
+
+```bash
+cast new --name redteam-test --agent shell .   # Create provisioned sandbox
+sbx exec redteam-test -- bash -c 'export GIT_SHADOW_ENABLED=1 && ./tests/redteam/runner.sh'
+cast destroy redteam-test                       # Clean up
+```
+
+See `tests/redteam/README.md` for module layout and detailed instructions.
 
 ## Documentation
 

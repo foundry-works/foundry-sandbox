@@ -4,15 +4,38 @@ Adversarial security tests that run **inside** an sbx sandbox to validate isolat
 
 ## Running
 
+### 1. Create a provisioned sandbox
+
 ```bash
-# Inside a running sandbox:
-./tests/redteam/runner.sh
+# Use cast to create a sandbox with git-safety fully provisioned:
+cast new --name redteam-test --agent shell .
+
+# Or if you need a specific branch:
+cast new --name redteam-test --agent shell . my-branch main
+```
+
+The sandbox must be created via `cast new` (not `sbx create` directly) to ensure the git wrapper, HMAC secrets, and git-safety server are all properly provisioned.
+
+### 2. Run the tests
+
+```bash
+# Run all modules from inside the sandbox:
+sbx exec redteam-test -- bash -c './tests/redteam/runner.sh'
+
+# Enable full git shadow mode tests:
+sbx exec redteam-test -- bash -c 'export GIT_SHADOW_ENABLED=1 && ./tests/redteam/runner.sh'
 
 # Run a single module:
-./tests/redteam/runner.sh --module 04-git-security
+sbx exec redteam-test -- bash -c './tests/redteam/runner.sh --module 04-git-security'
 
 # TAP/JUnit output:
-./tests/redteam/runner.sh --output-format tap --output-dir /tmp/results
+sbx exec redteam-test -- bash -c './tests/redteam/runner.sh --output-format tap --output-dir /tmp/results'
+```
+
+### 3. Clean up
+
+```bash
+cast destroy redteam-test
 ```
 
 ## Active Modules (14)
@@ -50,6 +73,7 @@ Network egress control is now covered by `sbx policy` and the chaos test suite.
 
 ## Prerequisites
 
-- Live sbx sandbox with git wrapper installed at `/usr/local/bin/git`
-- `foundry-git-safety` server running on the host
+- Sandbox created via `cast new` (provisions git wrapper, HMAC auth, and git-safety registration)
+- `foundry-git-safety` server running on the host (auto-started by `cast new`)
 - Set `GIT_SHADOW_ENABLED=1` for full git shadow mode tests (modules 04, 11)
+- `sbx` may mount the workspace at `/workspace` or at the host path ("direct mount") — `cast new` detects the correct path automatically

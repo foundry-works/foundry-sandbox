@@ -22,6 +22,7 @@ from foundry_sandbox.sbx import (
     bootstrap_packages,
     install_pip_requirements,
     sbx_check_available,
+    sbx_detect_workspace_dir,
     sbx_run,
     sbx_sandbox_exists,
 )
@@ -93,7 +94,17 @@ def start_sandbox(name: str, watchdog: bool = False) -> None:
 
     if needs_repair:
         sandbox_id = metadata.get("sbx_name", name)
-        workspace_dir = metadata.get("workspace_dir", "/workspace")
+        workspace_dir = metadata.get("workspace_dir", "")
+        # Validate workspace_dir — older sandboxes may have stale "/workspace"
+        # when sbx actually uses a direct mount at the host path.
+        if not workspace_dir or workspace_dir == "/workspace":
+            detected = sbx_detect_workspace_dir(
+                name, metadata.get("host_worktree_path", "/workspace"),
+            )
+            if detected != workspace_dir:
+                log_info(f"Detected workspace dir: {detected} (was {workspace_dir!r})")
+                workspace_dir = detected
+                patch_sandbox_metadata(name, workspace_dir=workspace_dir)
         result = repair_git_safety(
             name,
             sandbox_id=sandbox_id,

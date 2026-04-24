@@ -24,10 +24,17 @@ run_tests() {
         test_pass "No custom CA directory"
     fi
 
-    # HTTPS should work through the sbx proxy without custom CAs
+    # HTTPS should work through the sbx proxy without custom CAs.
+    # Retry once after a short delay to handle transient startup timing.
     info "Testing end-to-end HTTPS through sbx proxy..."
     CURL_HTTPS_RESP=$(curl -s --max-time 10 -o /dev/null -w "%{http_code}" \
         "https://api.github.com/" 2>&1)
+    if [[ "$CURL_HTTPS_RESP" =~ ^(60|77|000) ]]; then
+        info "First HTTPS attempt returned $CURL_HTTPS_RESP — retrying in 3s..."
+        sleep 3
+        CURL_HTTPS_RESP=$(curl -s --max-time 10 -o /dev/null -w "%{http_code}" \
+            "https://api.github.com/" 2>&1)
+    fi
     if [[ "$CURL_HTTPS_RESP" =~ ^(200|301|302|403|404|429) ]]; then
         test_pass "HTTPS request succeeded through proxy (HTTP $CURL_HTTPS_RESP)"
     elif [[ "$CURL_HTTPS_RESP" == "000" ]]; then

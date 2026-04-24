@@ -35,12 +35,16 @@ fi
 
 REAL_GIT="/usr/bin/git"
 
-# Discover configuration from persistent env file when env vars are unset.
-# This handles sbx exec calls that run without a login shell (no profile.d sourcing).
+# Discover configuration from persistent env file.
+# WORKSPACE_DIR is always overridden: sbx sets it to the mount point (repo root),
+# but the env file has the correct worktree path for CWD resolution.
 if [[ -f "/var/lib/foundry/git-safety.env" ]]; then
     while IFS='=' read -r _key _val; do
         case "$_key" in
-            SANDBOX_ID|WORKSPACE_DIR|GIT_API_HOST|GIT_API_PORT)
+            WORKSPACE_DIR)
+                export "$_key=$_val"
+                ;;
+            SANDBOX_ID|GIT_API_HOST|GIT_API_PORT)
                 if [[ -z "${!_key:-}" ]]; then
                     export "$_key=$_val"
                 fi
@@ -164,8 +168,15 @@ PY
 compute_hmac() {
     local method="$1" path="$2" body="$3" timestamp="$4" nonce="$5" secret_file="$6"
 
-    # Pass body via stdin to avoid exposing it in /proc/<pid>/cmdline
-    printf '%s' "$body" | python3 - "$method" "$path" "$timestamp" "$nonce" "$secret_file" <<'PY'
+    # Write body to a temp file to avoid the stdin conflict between the pipe
+    # and the here-document (heredoc wins as python3's stdin, so the pipe
+    # data is lost).  Cleaned up by the trap handler.
+    local body_file
+    body_file=$(mktemp)
+    _TEMP_FILES+=("$body_file")
+    printf '%s' "$body" > "$body_file"
+
+    python3 - "$method" "$path" "$timestamp" "$nonce" "$secret_file" "$body_file" <<'PY'
 import hashlib, hmac, sys
 
 method = sys.argv[1]
@@ -173,8 +184,10 @@ path = sys.argv[2]
 timestamp = sys.argv[3]
 nonce = sys.argv[4]
 secret_file = sys.argv[5]
+body_file = sys.argv[6]
 
-body = sys.stdin.buffer.read()
+with open(body_file, "rb") as f:
+    body = f.read()
 
 with open(secret_file, "rb") as f:
     secret = f.read().rstrip(b"\n")

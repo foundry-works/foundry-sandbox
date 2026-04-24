@@ -689,27 +689,62 @@ def sbx_worktree_path(repo_root: str, sandbox_name: str, branch: str) -> str:
 
 
 def sbx_get_workspace_info(sbx_create_stdout: str) -> dict[str, str]:
-    """Extract worktree path and branch from ``sbx create`` stdout.
+    """Extract workspace, worktree path, and branch from ``sbx create`` stdout.
 
     sbx prints lines like::
 
+        Workspace: /home/user/repo (direct mount)
         Worktree: /home/user/repo/.sbx/<name>-worktrees/<branch>
         Branch: <branch>
+
+    The ``workspace`` key holds the container-internal mount path for the
+    workspace.  When sbx uses a "direct mount", this is the host-side repo
+    path; otherwise it is ``/workspace``.
 
     Args:
         sbx_create_stdout: Raw stdout from ``sbx create``.
 
     Returns:
-        Dict with ``worktree`` and ``branch`` keys (empty string if not found).
+        Dict with ``workspace``, ``worktree`` and ``branch`` keys
+        (empty string if not found).
 
     Raises:
         ValueError: If stdout contains a Worktree line but it cannot be parsed.
     """
-    info: dict[str, str] = {"worktree": "", "branch": ""}
+    info: dict[str, str] = {"workspace": "", "worktree": "", "branch": ""}
     for line in sbx_create_stdout.splitlines():
         stripped = line.strip()
         if stripped.startswith("Worktree:"):
             info["worktree"] = stripped[len("Worktree:"):].strip()
         elif stripped.startswith("Branch:"):
             info["branch"] = stripped[len("Branch:"):].strip()
+        elif "Workspace:" in stripped:
+            # Parse "Workspace: /path (direct mount)" or "Workspace: /workspace"
+            ws = stripped.split("Workspace:", 1)[1].strip()
+            # Remove annotations like "(direct mount)"
+            ws = ws.split("(")[0].strip()
+            info["workspace"] = ws
     return info
+
+
+def sbx_detect_workspace_dir(name: str, fallback: str) -> str:
+    """Detect the actual workspace directory inside a running sandbox.
+
+    sbx may mount the workspace at ``/workspace`` (traditional) or at the
+    host-side repo path ("direct mount").  This probes the sandbox to find
+    which path actually exists.
+
+    Args:
+        name: Sandbox name.
+        fallback: Path to use if probing fails (typically the host repo root).
+
+    Returns:
+        Container-internal workspace directory path.
+    """
+    try:
+        result = sbx_exec(name, ["test", "-d", "/workspace"], quiet=True)
+        if result.returncode == 0:
+            return "/workspace"
+    except Exception:
+        pass
+    return fallback
