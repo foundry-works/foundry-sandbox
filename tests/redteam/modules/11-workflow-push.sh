@@ -45,7 +45,7 @@ WFEOF
             git add .github/workflows/merge.yml
             if git commit --quiet -m "redteam: add auto-merge workflow"; then
                 info "Attempting push with workflow file (should be blocked)..."
-                WORKFLOW_PUSH_OUTPUT=$(git push origin "$WORKFLOW_TEST_BRANCH" 2>&1)
+                WORKFLOW_PUSH_OUTPUT=$(git push origin "HEAD:$WORKFLOW_TEST_BRANCH" 2>&1)
                 WORKFLOW_PUSH_EXIT=$?
 
                 if [[ $WORKFLOW_PUSH_EXIT -ne 0 ]]; then
@@ -74,7 +74,7 @@ WFEOF
             echo "# redteam test" > src_redteam_test.txt
             git add src_redteam_test.txt
             if git commit --quiet -m "redteam: normal code push test"; then
-                NORMAL_PUSH_OUTPUT=$(git push origin "$WORKFLOW_TEST_BRANCH" 2>&1)
+                NORMAL_PUSH_OUTPUT=$(git push origin "HEAD:$WORKFLOW_TEST_BRANCH" 2>&1)
                 NORMAL_PUSH_EXIT=$?
 
                 if [[ $NORMAL_PUSH_EXIT -eq 0 ]]; then
