@@ -55,25 +55,25 @@
 
 ## Phase 5: Version Check Tests
 
-- [ ] Create `tests/unit/test_version_check.py` if it does not exist.
-- [ ] Test `_should_check` with no disabling environment variables.
-- [ ] Test `_should_check` with `CAST_DISABLE_UPDATE_CHECK=1`.
-- [ ] Test `_should_check` with `SANDBOX_NONINTERACTIVE=1`.
-- [ ] Test `_should_check` with `CI=1`.
-- [ ] Test `_should_check` with `CI=true`.
-- [ ] Test `_cache_is_fresh` for missing cache.
-- [ ] Test `_cache_is_fresh` for corrupt or malformed cache.
-- [ ] Test `_cache_is_fresh` for expired cache.
-- [ ] Test `_cache_is_fresh` for fresh cache.
-- [ ] Test `_parse_version` with normal versions.
-- [ ] Test `_parse_version` with suffixes such as `1.2.3rc1`.
-- [ ] Test `_is_newer` for newer, equal, and older versions.
-- [ ] Mock `urllib.request.urlopen` and test valid PyPI JSON.
-- [ ] Mock `urllib.request.urlopen` and test malformed JSON.
-- [ ] Mock `urllib.request.urlopen` and test missing version fields.
-- [ ] Mock `urllib.request.urlopen` and test URL errors.
-- [ ] Test `check_for_update` swallows helper exceptions.
-- [ ] Run `python -m pytest tests/unit/test_version_check.py -q`.
+- [x] Create `tests/unit/test_version_check.py` if it does not exist.
+- [x] Test `_should_check` with no disabling environment variables.
+- [x] Test `_should_check` with `CAST_DISABLE_UPDATE_CHECK=1`.
+- [x] Test `_should_check` with `SANDBOX_NONINTERACTIVE=1`.
+- [x] Test `_should_check` with `CI=1`.
+- [x] Test `_should_check` with `CI=true`.
+- [x] Test `_cache_is_fresh` for missing cache.
+- [x] Test `_cache_is_fresh` for corrupt or malformed cache.
+- [x] Test `_cache_is_fresh` for expired cache.
+- [x] Test `_cache_is_fresh` for fresh cache.
+- [x] Test `_parse_version` with normal versions.
+- [x] Test `_parse_version` with suffixes such as `1.2.3rc1`.
+- [x] Test `_is_newer` for newer, equal, and older versions.
+- [x] Mock `urllib.request.urlopen` and test valid PyPI JSON.
+- [x] Mock `urllib.request.urlopen` and test malformed JSON.
+- [x] Mock `urllib.request.urlopen` and test missing version fields.
+- [x] Mock `urllib.request.urlopen` and test URL errors.
+- [x] Test `check_for_update` swallows helper exceptions.
+- [x] Run `python -m pytest tests/unit/test_version_check.py -q`.
 
 ## Phase 6: CLI And Script Drift Tests
 
