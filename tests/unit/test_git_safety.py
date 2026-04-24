@@ -323,8 +323,8 @@ class TestInjectGitWrapper:
         cmd_str = env_call[0][1][2]  # ["sh", "-c", "..."]
         b64_part = cmd_str.split("echo '")[1].split("' | base64")[0]
         env_content = base64.b64decode(b64_part).decode()
-        assert "WORKSPACE_DIR=/custom/path" in env_content
-        assert 'GIT_HMAC_SECRET_FILE="/run/foundry/hmac-secret"' in env_content
+        assert "export WORKSPACE_DIR=/custom/path" in env_content
+        assert "export GIT_HMAC_SECRET_FILE=/run/foundry/hmac-secret" in env_content
 
         # The persistent env file is the 5th call (index 4)
         persistent_call = mock_exec.call_args_list[4]
@@ -333,8 +333,39 @@ class TestInjectGitWrapper:
         cmd_str_p = persistent_call[0][1][2]
         b64_part_p = cmd_str_p.split("echo '")[1].split("' | base64")[0]
         persistent_content = base64.b64decode(b64_part_p).decode()
-        assert "WORKSPACE_DIR=/custom/path" in persistent_content
-        assert "SANDBOX_ID=sbx-1" in persistent_content
+        assert "export WORKSPACE_DIR=/custom/path" in persistent_content
+        assert "export SANDBOX_ID=sbx-1" in persistent_content
+
+    @patch("foundry_sandbox.sbx.sbx_exec")
+    @patch("foundry_sandbox.git_safety._proxy_sign_script_path")
+    @patch("foundry_sandbox.git_safety._wrapper_script_path")
+    def test_env_scripts_quote_shell_sensitive_values(
+        self, mock_wrapper_fn, mock_proxy_sign_fn, mock_exec,
+    ):
+        mock_path = MagicMock()
+        mock_path.exists.return_value = True
+        mock_path.read_text.return_value = "#!/bin/bash\nwrapper"
+        mock_wrapper_fn.return_value = mock_path
+        mock_proxy_sign_fn.return_value = mock_path
+        mock_exec.return_value = _mock_completed()
+
+        inject_git_wrapper(
+            "test-sandbox",
+            sandbox_id="sbx-1",
+            workspace_dir="/tmp/repo with spaces/$(nope)",
+        )
+
+        import base64
+
+        env_cmd = mock_exec.call_args_list[2][0][1][2]
+        env_b64 = env_cmd.split("echo '")[1].split("' | base64")[0]
+        env_content = base64.b64decode(env_b64).decode()
+        assert "export WORKSPACE_DIR='/tmp/repo with spaces/$(nope)'" in env_content
+
+        persistent_cmd = mock_exec.call_args_list[4][0][1][2]
+        persistent_b64 = persistent_cmd.split("echo '")[1].split("' | base64")[0]
+        persistent_content = base64.b64decode(persistent_b64).decode()
+        assert "export WORKSPACE_DIR='/tmp/repo with spaces/$(nope)'" in persistent_content
 
 
 class TestVerifyGitWrapper:

@@ -35,13 +35,14 @@ fi
 
 REAL_GIT="/usr/bin/git"
 
-# Discover configuration from persistent env file.
-# WORKSPACE_DIR is always overridden: sbx sets it to the mount point (repo root),
-# but the env file has the correct worktree path for CWD resolution.
-if [[ -f "/var/lib/foundry/git-safety.env" ]]; then
-    while IFS='=' read -r _key _val; do
+load_foundry_env() {
+    local env_file="$1"
+    local _key _val
+    while IFS= read -r -d '' _key && IFS= read -r -d '' _val; do
         case "$_key" in
             WORKSPACE_DIR)
+                # Always override: sbx sets this to the mount point, while
+                # foundry stores the worktree path needed for CWD resolution.
                 export "$_key=$_val"
                 ;;
             SANDBOX_ID|GIT_API_HOST|GIT_API_PORT)
@@ -50,7 +51,38 @@ if [[ -f "/var/lib/foundry/git-safety.env" ]]; then
                 fi
                 ;;
         esac
-    done < /var/lib/foundry/git-safety.env
+    done < <(python3 - "$env_file" <<'PY'
+import shlex
+import sys
+
+wanted = {"SANDBOX_ID", "WORKSPACE_DIR", "GIT_API_HOST", "GIT_API_PORT"}
+try:
+    with open(sys.argv[1], encoding="utf-8") as f:
+        for raw in f:
+            line = raw.strip()
+            if not line or line.startswith("#"):
+                continue
+            try:
+                tokens = shlex.split(line, comments=True, posix=True)
+            except ValueError:
+                continue
+            if tokens and tokens[0] == "export":
+                tokens = tokens[1:]
+            for token in tokens:
+                if "=" not in token:
+                    continue
+                key, value = token.split("=", 1)
+                if key in wanted:
+                    sys.stdout.write(key + "\0" + value + "\0")
+except OSError:
+    pass
+PY
+)
+}
+
+# Discover configuration from persistent env file.
+if [[ -f "/var/lib/foundry/git-safety.env" ]]; then
+    load_foundry_env "/var/lib/foundry/git-safety.env"
 fi
 
 GIT_API_HOST="${GIT_API_HOST:-host.docker.internal}"
@@ -176,7 +208,8 @@ compute_hmac() {
     _TEMP_FILES+=("$body_file")
     printf '%s' "$body" > "$body_file"
 
-    python3 - "$method" "$path" "$timestamp" "$nonce" "$secret_file" "$body_file" <<'PY'
+    local sig
+    if ! sig=$(python3 - "$method" "$path" "$timestamp" "$nonce" "$secret_file" "$body_file" <<'PY'
 import hashlib, hmac, sys
 
 method = sys.argv[1]
@@ -197,6 +230,13 @@ canonical = f"{method}\n{path}\n{body_hash}\n{timestamp}\n{nonce}"
 sig = hmac.new(secret, canonical.encode("utf-8"), hashlib.sha256).hexdigest()
 print(sig)
 PY
+); then
+        rm -f "$body_file"
+        return 1
+    fi
+
+    rm -f "$body_file"
+    printf '%s\n' "$sig"
 }
 
 # ---------------------------------------------------------------------------

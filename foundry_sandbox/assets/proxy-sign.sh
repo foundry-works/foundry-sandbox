@@ -21,12 +21,24 @@
 
 set -euo pipefail
 
+_BODY_FILE=""
+cleanup() {
+    if [[ -n "${_BODY_FILE:-}" ]]; then
+        rm -f "$_BODY_FILE" 2>/dev/null || true
+    fi
+}
+trap cleanup EXIT
+trap 'cleanup; exit 130' INT
+trap 'cleanup; exit 143' TERM
+
 HMAC_SECRET_FILE="${GIT_HMAC_SECRET_FILE:-}"
 SANDBOX_ID="${SANDBOX_ID:-${SANDBOX_VM_ID:-}}"
 
 if [[ -z "$HMAC_SECRET_FILE" ]]; then
     if [[ -f "/run/foundry/hmac-secret" ]]; then
         HMAC_SECRET_FILE="/run/foundry/hmac-secret"
+    elif [[ -f "/var/lib/foundry/hmac-secret" ]]; then
+        HMAC_SECRET_FILE="/var/lib/foundry/hmac-secret"
     else
         echo "error: proxy-sign: HMAC secret file not found" >&2
         exit 1
@@ -55,7 +67,10 @@ BODY="${3:-}"
 TIMESTAMP=$(date +%s)
 NONCE=$(head -c 16 /dev/urandom | od -An -tx1 | tr -d ' \n')
 
-SIGNATURE=$(printf '%s' "$BODY" | python3 - "$METHOD" "$PATH_" "$TIMESTAMP" "$NONCE" "$HMAC_SECRET_FILE" <<'PY'
+_BODY_FILE=$(mktemp)
+printf '%s' "$BODY" > "$_BODY_FILE"
+
+SIGNATURE=$(python3 - "$METHOD" "$PATH_" "$TIMESTAMP" "$NONCE" "$HMAC_SECRET_FILE" "$_BODY_FILE" <<'PY'
 import hashlib, hmac, sys
 
 method = sys.argv[1]
@@ -63,8 +78,10 @@ path = sys.argv[2]
 timestamp = sys.argv[3]
 nonce = sys.argv[4]
 secret_file = sys.argv[5]
+body_file = sys.argv[6]
 
-body = sys.stdin.buffer.read()
+with open(body_file, "rb") as f:
+    body = f.read()
 
 with open(secret_file, "rb") as f:
     secret = f.read().rstrip(b"\n")
@@ -75,6 +92,8 @@ sig = hmac.new(secret, canonical.encode("utf-8"), hashlib.sha256).hexdigest()
 print(sig)
 PY
 )
+rm -f "$_BODY_FILE"
+_BODY_FILE=""
 
 echo "X_SANDBOX_ID=\"${SANDBOX_ID}\""
 echo "X_REQUEST_TIMESTAMP=\"${TIMESTAMP}\""

@@ -11,6 +11,7 @@ from __future__ import annotations
 import json
 import os
 import secrets as _secrets
+import shlex
 import subprocess
 import sys
 from dataclasses import dataclass
@@ -30,6 +31,11 @@ _DEFAULT_DATA_DIR = os.environ.get(
 )
 
 _TIMEOUT = 10
+
+
+def _shell_export_lines(env_vars: dict[str, str]) -> str:
+    """Render env vars as source-safe shell export assignments."""
+    return "".join(f"export {k}={shlex.quote(v)}\n" for k, v in env_vars.items())
 
 
 # ============================================================================
@@ -303,7 +309,7 @@ def _emit_profile_d(sandbox_name: str, env_vars: dict[str, str]) -> None:
     from foundry_sandbox.sbx import sbx_exec
     import base64
 
-    lines = "".join(f"export {k}={v}\n" for k, v in env_vars.items())
+    lines = _shell_export_lines(env_vars)
     payload = base64.b64encode(lines.encode()).decode()
     sbx_exec(
         sandbox_name,
@@ -318,7 +324,7 @@ def _emit_bashrc_block(sandbox_name: str, env_vars: dict[str, str]) -> None:
     from foundry_sandbox.sbx import sbx_exec
     import base64
 
-    export_lines = "".join(f"export {k}={v}\n" for k, v in env_vars.items())
+    export_lines = _shell_export_lines(env_vars)
     block = f"# >>> foundry-git-safety >>>\n{export_lines}# <<< foundry-git-safety <<<\n"
     payload = base64.b64encode(block.encode()).decode()
     sbx_exec(
@@ -332,14 +338,14 @@ def _emit_bashrc_block(sandbox_name: str, env_vars: dict[str, str]) -> None:
 
 
 def _emit_plain_env(sandbox_name: str, env_vars: dict[str, str]) -> None:
-    """Write bare KEY=VALUE to /var/lib/foundry/git-safety.env (persists across VM restarts)."""
+    """Write source-safe env assignments to /var/lib/foundry/git-safety.env."""
     from foundry_sandbox.sbx import sbx_exec
     import base64
 
     # Exclude GIT_HMAC_SECRET_FILE from the plain env file — the wrapper
     # discovers the secret via filesystem probing instead.
     plain_vars = {k: v for k, v in env_vars.items() if k != "GIT_HMAC_SECRET_FILE"}
-    lines = "".join(f"{k}={v}\n" for k, v in plain_vars.items())
+    lines = _shell_export_lines(plain_vars)
     payload = base64.b64encode(lines.encode()).decode()
     sbx_exec(
         sandbox_name,
@@ -404,7 +410,7 @@ def inject_git_wrapper(
         "WORKSPACE_DIR": workspace_dir,
         "GIT_API_HOST": git_api_host,
         "GIT_API_PORT": str(git_api_port),
-        "GIT_HMAC_SECRET_FILE": '"/run/foundry/hmac-secret"',
+        "GIT_HMAC_SECRET_FILE": "/run/foundry/hmac-secret",
         "PIP_USER": "1",
         "PIP_BREAK_SYSTEM_PACKAGES": "1",
     }

@@ -7,15 +7,69 @@ set -u
 # Source git-safety environment when running inside a sandbox.
 # sbx exec creates non-login shells, so /etc/profile.d/ is not sourced.
 if [[ -f /var/lib/foundry/git-safety.env ]]; then
-    while IFS='=' read -r _key _val; do
-        case "$_key" in
-            SANDBOX_ID|WORKSPACE_DIR|GIT_API_HOST|GIT_API_PORT|PIP_USER|PIP_BREAK_SYSTEM_PACKAGES)
-                if [[ -z "${!_key:-}" ]]; then
+    if command -v python3 >/dev/null 2>&1; then
+        while IFS= read -r -d '' _key && IFS= read -r -d '' _val; do
+            case "$_key" in
+                WORKSPACE_DIR)
+                    # sbx may set this to the mount point; foundry stores the
+                    # worktree path used by the git wrapper and redteam checks.
                     export "$_key=$_val"
-                fi
-                ;;
-        esac
-    done < /var/lib/foundry/git-safety.env
+                    ;;
+                SANDBOX_ID|GIT_API_HOST|GIT_API_PORT|PIP_USER|PIP_BREAK_SYSTEM_PACKAGES)
+                    if [[ -z "${!_key:-}" ]]; then
+                        export "$_key=$_val"
+                    fi
+                    ;;
+            esac
+        done < <(python3 - /var/lib/foundry/git-safety.env <<'PY'
+import shlex
+import sys
+
+wanted = {
+    "SANDBOX_ID",
+    "WORKSPACE_DIR",
+    "GIT_API_HOST",
+    "GIT_API_PORT",
+    "PIP_USER",
+    "PIP_BREAK_SYSTEM_PACKAGES",
+}
+try:
+    with open(sys.argv[1], encoding="utf-8") as f:
+        for raw in f:
+            line = raw.strip()
+            if not line or line.startswith("#"):
+                continue
+            try:
+                tokens = shlex.split(line, comments=True, posix=True)
+            except ValueError:
+                continue
+            if tokens and tokens[0] == "export":
+                tokens = tokens[1:]
+            for token in tokens:
+                if "=" not in token:
+                    continue
+                key, value = token.split("=", 1)
+                if key in wanted:
+                    sys.stdout.write(key + "\0" + value + "\0")
+except OSError:
+    pass
+PY
+)
+    else
+        while IFS='=' read -r _key _val; do
+            _key="${_key#export }"
+            case "$_key" in
+                WORKSPACE_DIR)
+                    export "$_key=$_val"
+                    ;;
+                SANDBOX_ID|GIT_API_HOST|GIT_API_PORT|PIP_USER|PIP_BREAK_SYSTEM_PACKAGES)
+                    if [[ -z "${!_key:-}" ]]; then
+                        export "$_key=$_val"
+                    fi
+                    ;;
+            esac
+        done < /var/lib/foundry/git-safety.env
+    fi
 fi
 
 # --- Colors ---
