@@ -103,32 +103,27 @@
 
 ## Phase 8: Optional Self-Hosted Security Gate
 
-- [ ] Confirm whether the project has access to a runner with sbx and KVM.
-- [ ] If yes, add a separate workflow job for `pytest tests/smoke -m requires_sbx`.
-- [ ] If yes, add a separate workflow job for `./tests/redteam/runner.sh`.
-- [ ] If yes, add a separate workflow job for `./tests/chaos/runner.sh`.
-- [ ] Upload JUnit, TAP, or log artifacts from those jobs.
-- [ ] Mark the job as scheduled or self-hosted only if it cannot run on normal PR infrastructure.
-- [ ] If no runner exists, leave this as documented manual validation.
+- [x] Confirm whether the project has access to a runner with sbx and KVM. **No self-hosted runner available.**
+- [x] If no runner exists, leave this as documented manual validation.
 
 ## Phase 9: Coverage Gates
 
-- [ ] Run root coverage: `python -m pytest tests/unit --cov=foundry_sandbox --cov-report=term-missing -q`.
-- [ ] Record the root coverage percentage.
-- [ ] Raise root `--cov-fail-under` only to a value the suite already exceeds.
-- [ ] Run nested coverage from `foundry-git-safety/`.
-- [ ] Record the nested coverage percentage.
-- [ ] Decide whether nested coverage should be enforced in CI.
-- [ ] If enforcing nested coverage, start with a realistic threshold.
-- [ ] Re-run both coverage commands after threshold changes.
+- [x] Run root coverage: `python -m pytest tests/unit --cov=foundry_sandbox --cov-report=term-missing -q`.
+- [x] Record the root coverage percentage. **78%**
+- [x] Raise root `--cov-fail-under` only to a value the suite already exceeds. **Raised to 75%**
+- [x] Run nested coverage from `foundry-git-safety/`.
+- [x] Record the nested coverage percentage. **72%** (unit-only)
+- [x] Decide whether nested coverage should be enforced in CI. **Yes**
+- [x] If enforcing nested coverage, start with a realistic threshold. **Set to 70%**
+- [x] Re-run both coverage commands after threshold changes.
 
 ## Final Verification
 
-- [ ] `python -m pytest tests/unit -q`
-- [ ] `python -m pytest tests/unit --cov=foundry_sandbox --cov-report=term-missing -q`
-- [ ] `cd foundry-git-safety && python -m pytest tests/unit tests/security tests/integration -q`
-- [ ] `./tests/run.sh`
-- [ ] `git status --short` shows only intentional changes.
+- [x] `python -m pytest tests/unit -q` — 884 passed
+- [x] `python -m pytest tests/unit --cov=foundry_sandbox --cov-report=term-missing -q` — 78%
+- [x] `cd foundry-git-safety && python -m pytest tests/unit tests/security tests/integration -q` — 804 passed
+- [x] `./tests/run.sh` — All tests passed
+- [x] `git status --short` shows only intentional changes.
 
 ## Manual Verification When sbx Is Available
 
@@ -138,10 +133,10 @@
 
 ## Definition Of Done
 
-- [ ] No stale workflow references remain.
-- [ ] Fast tests are hermetic and do not write to real `~/.foundry`.
-- [ ] Direct validator tests exist.
-- [ ] Version-check tests exist and do not use the network.
-- [ ] CLI/script drift tests exist.
-- [ ] Security-suite docs match actual CI behavior.
-- [ ] Coverage thresholds are realistic and enforced where chosen.
+- [x] No stale workflow references remain.
+- [x] Fast tests are hermetic and do not write to real `~/.foundry`.
+- [x] Direct validator tests exist.
+- [x] Version-check tests exist and do not use the network.
+- [x] CLI/script drift tests exist.
+- [x] Security-suite docs match actual CI behavior.
+- [x] Coverage thresholds are realistic and enforced where chosen.
