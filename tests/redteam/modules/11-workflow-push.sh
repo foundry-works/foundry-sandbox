@@ -13,6 +13,7 @@ run_tests() {
 
         WORKFLOW_TEST_BRANCH="sandbox/redteam-workflow-test-$$"
         WORKFLOW_TEST_DIR="/tmp/workflow-push-test-$$"
+        ORIG_DIR="$PWD"
         rm -rf "$WORKFLOW_TEST_DIR" 2>/dev/null
 
         # Get current repo info from git remote
@@ -23,6 +24,8 @@ run_tests() {
             mkdir -p "$WORKFLOW_TEST_DIR"
             cd "$WORKFLOW_TEST_DIR"
             git init --quiet
+            git config user.email "redteam@example.invalid"
+            git config user.name "Redteam Test"
             git remote add origin "$REMOTE_URL"
             git fetch --depth=1 origin HEAD --quiet 2>/dev/null
             git checkout -b "$WORKFLOW_TEST_BRANCH" FETCH_HEAD --quiet 2>/dev/null
@@ -40,27 +43,29 @@ jobs:
       - run: gh pr merge --auto
 WFEOF
             git add .github/workflows/merge.yml
-            git commit --quiet -m "redteam: add auto-merge workflow"
+            if git commit --quiet -m "redteam: add auto-merge workflow"; then
+                info "Attempting push with workflow file (should be blocked)..."
+                WORKFLOW_PUSH_OUTPUT=$(git push origin "$WORKFLOW_TEST_BRANCH" 2>&1)
+                WORKFLOW_PUSH_EXIT=$?
 
-            info "Attempting push with workflow file (should be blocked)..."
-            WORKFLOW_PUSH_OUTPUT=$(git push origin "$WORKFLOW_TEST_BRANCH" 2>&1)
-            WORKFLOW_PUSH_EXIT=$?
+                if [[ $WORKFLOW_PUSH_EXIT -ne 0 ]]; then
+                    test_pass "Push with .github/workflows/ file was blocked (exit: $WORKFLOW_PUSH_EXIT)"
 
-            if [[ $WORKFLOW_PUSH_EXIT -ne 0 ]]; then
-                test_pass "Push with .github/workflows/ file was blocked (exit: $WORKFLOW_PUSH_EXIT)"
-
-                # Verify error message is generic (does not reveal restricted path)
-                if echo "$WORKFLOW_PUSH_OUTPUT" | grep -qiE "\.github/(workflows|actions)"; then
-                    test_fail "Error message reveals restricted path pattern"
-                    info "Output: $(echo "$WORKFLOW_PUSH_OUTPUT" | head -c 300)"
+                    # Verify error message is generic (does not reveal restricted path)
+                    if echo "$WORKFLOW_PUSH_OUTPUT" | grep -qiE "\.github/(workflows|actions)"; then
+                        test_fail "Error message reveals restricted path pattern"
+                        info "Output: $(echo "$WORKFLOW_PUSH_OUTPUT" | head -c 300)"
+                    else
+                        test_pass "Error message is generic (does not reveal restricted path)"
+                    fi
                 else
-                    test_pass "Error message is generic (does not reveal restricted path)"
+                    test_fail "Push with .github/workflows/ file SUCCEEDED (should be blocked!)"
+                    # Note: Branch cleanup via DELETE /git/refs/ is also blocked by the
+                    # git safety server's ref mutation enforcement. Log the orphan for manual cleanup.
+                    info "Orphan branch '${WORKFLOW_TEST_BRANCH}' may remain on remote (cleanup blocked by enforcement)"
                 fi
             else
-                test_fail "Push with .github/workflows/ file SUCCEEDED (should be blocked!)"
-                # Note: Branch cleanup via DELETE /git/refs/ is also blocked by the
-                # git safety server's ref mutation enforcement. Log the orphan for manual cleanup.
-                info "Orphan branch '${WORKFLOW_TEST_BRANCH}' may remain on remote (cleanup blocked by enforcement)"
+                test_fail "Failed to create workflow-file test commit"
             fi
 
             # Test 2: Normal code push should still work after workflow block
@@ -68,23 +73,25 @@ WFEOF
             git reset --hard HEAD~1 --quiet 2>/dev/null
             echo "# redteam test" > src_redteam_test.txt
             git add src_redteam_test.txt
-            git commit --quiet -m "redteam: normal code push test"
+            if git commit --quiet -m "redteam: normal code push test"; then
+                NORMAL_PUSH_OUTPUT=$(git push origin "$WORKFLOW_TEST_BRANCH" 2>&1)
+                NORMAL_PUSH_EXIT=$?
 
-            NORMAL_PUSH_OUTPUT=$(git push origin "$WORKFLOW_TEST_BRANCH" 2>&1)
-            NORMAL_PUSH_EXIT=$?
-
-            if [[ $NORMAL_PUSH_EXIT -eq 0 ]]; then
-                test_pass "Normal code push succeeded after workflow block"
-                # Note: Branch cleanup via DELETE /git/refs/ is blocked by the
-                # git safety server's ref mutation enforcement. Log the orphan for manual cleanup.
-                info "Orphan branch '${WORKFLOW_TEST_BRANCH}' may remain on remote (cleanup blocked by enforcement)"
+                if [[ $NORMAL_PUSH_EXIT -eq 0 ]]; then
+                    test_pass "Normal code push succeeded after workflow block"
+                    # Note: Branch cleanup via DELETE /git/refs/ is blocked by the
+                    # git safety server's ref mutation enforcement. Log the orphan for manual cleanup.
+                    info "Orphan branch '${WORKFLOW_TEST_BRANCH}' may remain on remote (cleanup blocked by enforcement)"
+                else
+                    test_fail "Normal code push failed after workflow block (exit: $NORMAL_PUSH_EXIT)"
+                    info "Output: $(echo "$NORMAL_PUSH_OUTPUT" | head -c 300)"
+                fi
             else
-                test_fail "Normal code push failed after workflow block (exit: $NORMAL_PUSH_EXIT)"
-                info "Output: $(echo "$NORMAL_PUSH_OUTPUT" | head -c 300)"
+                test_fail "Failed to create normal-code test commit"
             fi
 
             # Return to workspace
-            cd /workspace
+            cd "$ORIG_DIR" || true
             rm -rf "$WORKFLOW_TEST_DIR" 2>/dev/null
 
         else
