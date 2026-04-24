@@ -48,6 +48,14 @@ WFEOF
                 WORKFLOW_PUSH_OUTPUT=$(git push origin "HEAD:$WORKFLOW_TEST_BRANCH" 2>&1)
                 WORKFLOW_PUSH_EXIT=$?
 
+                if echo "$WORKFLOW_PUSH_OUTPUT" | grep -qiE "(cannot run ssh|unable to fork|permission denied \(publickey\)|could not resolve hostname)"; then
+                    test_warn "Git push transport unavailable; skipping live workflow push assertions"
+                    info "Output: $(echo "$WORKFLOW_PUSH_OUTPUT" | head -c 300)"
+                    cd "$ORIG_DIR" || true
+                    rm -rf "$WORKFLOW_TEST_DIR" 2>/dev/null
+                    return
+                fi
+
                 if [[ $WORKFLOW_PUSH_EXIT -ne 0 ]]; then
                     test_pass "Push with .github/workflows/ file was blocked (exit: $WORKFLOW_PUSH_EXIT)"
 
