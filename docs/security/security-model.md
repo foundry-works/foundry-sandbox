@@ -173,13 +173,45 @@ If `cast status <name>` shows `Git safety: False`, or `cast start` reported that
 the sandbox started without enforcement, destroy and recreate the sandbox before
 trusting git policy behavior.
 
-Security behavior in this repo is exercised by:
+## Automated Verification (CI)
 
-- `tests/unit/`
-- `tests/smoke/`
-- `tests/chaos/`
-- `tests/redteam/`
+These suites run on every push to `main` and on every pull request via
+`.github/workflows/test.yml`:
 
-See `tests/redteam/README.md` for the active red-team module list.
-In particular, module `14-foundry-yaml-tamper` covers compiled-config
-immutability and leakage checks.
+| Suite | Scope |
+|-------|-------|
+| `tests/unit/` | Root package unit tests with coverage |
+| `foundry-git-safety/tests/unit/` | Git-safety unit tests |
+| `foundry-git-safety/tests/security/` | Policy and auth security tests |
+| `foundry-git-safety/tests/integration/` | Git-safety integration tests |
+| Smoke gate (installed-wheel) | Packaging, `cast diagnose`, `cast config` |
+
+## Manual Verification
+
+These suites require a live `sbx` microVM with KVM and a running
+`foundry-git-safety` server. They **do not** run in ordinary PR CI.
+
+Run them on a machine that has `sbx` and KVM available:
+
+```bash
+# Red-team — run inside a running sandbox
+./tests/redteam/runner.sh
+
+# Chaos — fault injection against live sbx
+./tests/chaos/runner.sh
+
+# Live sbx smoke — full lifecycle verification
+pytest tests/smoke/ -v -m requires_sbx
+```
+
+Prerequisites for all three:
+
+- `sbx` CLI installed and daemon running
+- KVM support on the host (`/dev/kvm` available)
+- `foundry-git-safety` server running on the host
+- At least one sandbox created via `cast new`
+- `GIT_SHADOW_ENABLED=1` for full git shadow mode tests
+
+See `tests/README.md` for details and `tests/redteam/README.md` for the active
+red-team module list (14 modules). Module `14-foundry-yaml-tamper` covers
+compiled-config immutability and leakage checks.

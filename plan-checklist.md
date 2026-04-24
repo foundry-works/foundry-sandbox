@@ -91,15 +91,15 @@
 
 ## Phase 7: Security Suite Documentation
 
-- [ ] Open `tests/README.md`.
-- [ ] Document which tests run in ordinary CI.
-- [ ] Document that live sbx smoke tests require sbx and supported virtualization.
-- [ ] Document red-team prerequisites.
-- [ ] Document chaos prerequisites.
-- [ ] Open `docs/security/security-model.md`.
-- [ ] Clarify whether red-team, chaos, and live smoke tests are manual or CI-gated.
-- [ ] Include exact commands for manual security validation.
-- [ ] Avoid implying that manual suites run on every PR if they do not.
+- [x] Open `tests/README.md`.
+- [x] Document which tests run in ordinary CI.
+- [x] Document that live sbx smoke tests require sbx and supported virtualization.
+- [x] Document red-team prerequisites.
+- [x] Document chaos prerequisites.
+- [x] Open `docs/security/security-model.md`.
+- [x] Clarify whether red-team, chaos, and live smoke tests are manual or CI-gated.
+- [x] Include exact commands for manual security validation.
+- [x] Avoid implying that manual suites run on every PR if they do not.
 
 ## Phase 8: Optional Self-Hosted Security Gate
 
