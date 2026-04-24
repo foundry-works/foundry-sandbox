@@ -25,7 +25,7 @@ run_test "help"             bash -c "$CLI help >/dev/null"
 run_test "list json"        bash -c "$CLI list --json | validate_json"
 run_test "status json"      bash -c "$CLI status --json | validate_json"
 run_test "config json"      bash -c "$CLI config --json | validate_json"
-run_test "info json"        bash -c "$CLI info --json | validate_json"
+run_test "diagnose json"    bash -c "$CLI diagnose --json | validate_json"
 run_test "cast entry point" python3 -c 'from foundry_sandbox.cli import main; assert callable(main)'
 
 if [ "$failures" -gt 0 ]; then

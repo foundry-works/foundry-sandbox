@@ -194,11 +194,11 @@ jobs:
           OUTPUT=$(cast diagnose --json)
           echo "$OUTPUT" | python3 -c "import json,sys; d=json.load(sys.stdin); assert 'versions' in d; assert 'sbx_diagnose' in d"
 
-      - name: Run migration smoke test
+      - name: Run installed-wheel smoke checks
         run: |
           source /tmp/smoke-venv/bin/activate
-          pip install -q -e ".[dev]"
-          pytest tests/smoke/test_migration_smoke.py -v --tb=short
+          cast --help >/dev/null
+          cast config --json | python3 -c "import json,sys; json.load(sys.stdin)"
 
   # -- Gate --
   all-pass:

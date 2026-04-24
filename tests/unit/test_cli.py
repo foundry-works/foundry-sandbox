@@ -5,13 +5,15 @@ help output, and basic option parsing using Click's CliRunner.
 """
 from __future__ import annotations
 
+import re
 import subprocess
 import sys
+from pathlib import Path
 
 import click.testing
 import pytest
 
-from foundry_sandbox.cli import cli
+from foundry_sandbox.cli import _LAZY_COMMANDS, cli
 
 
 @pytest.fixture()
@@ -223,3 +225,25 @@ class TestCLISmokeTest:
             text=True,
         )
         assert result.returncode != 0
+
+
+# ---------------------------------------------------------------------------
+# Script drift tests
+# ---------------------------------------------------------------------------
+
+
+class TestScriptDrift:
+    """Ensures tests/run.sh only references known CLI commands."""
+
+    RUN_SH = Path(__file__).resolve().parent.parent / "run.sh"
+
+    def test_run_sh_references_known_commands(self) -> None:
+        source = self.RUN_SH.read_text()
+        known = set(_LAZY_COMMANDS) | {"--help", "help"}
+        pattern = re.compile(r'\$CLI\s+(\w[\w-]*)')
+        referenced = set(pattern.findall(source))
+        unknown = referenced - known
+        assert not unknown, (
+            f"tests/run.sh references unknown commands: {unknown}. "
+            f"Known commands: {sorted(known)}"
+        )

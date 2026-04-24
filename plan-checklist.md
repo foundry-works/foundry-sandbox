@@ -1,88 +1,147 @@
-# Local Dev Ergonomics Checklist
+# Testing Gap Remediation Checklist
 
-## Phase 1: `cast dev`
+## Phase 1: Broken Entry Points
 
-- [ ] Add a new `cast dev` command.
-- [ ] Default repo resolution to the current checkout when possible.
-- [ ] Add `--profile` selection.
-- [ ] Add explicit reuse behavior for repo/profile/branch.
-- [ ] Add `--fresh` to force a new sandbox.
-- [ ] Reuse existing `cast new` creation logic instead of duplicating it.
-- [ ] Reuse existing `cast up` behavior for start, IDE launch, and attach.
-- [ ] Persist the selected profile in sandbox metadata.
-- [ ] Print clear output that explains whether the sandbox was reused or created.
+- [x] Open `.github/workflows/test.yml`.
+- [x] Remove the `pytest tests/smoke/test_migration_smoke.py` invocation.
+- [x] Replace it with installed-wheel smoke commands that work without live sbx.
+- [x] Confirm no workflow references missing files.
+- [x] Open `tests/run.sh`.
+- [x] Remove or replace the stale `cast info --json` check.
+- [x] Run `./tests/run.sh` and record any remaining failures.
+- [x] Add a unit test that catches unknown commands referenced by `tests/run.sh`.
 
-## Phase 2: Profile Schema
+## Phase 2: Hermetic Root Tests
 
-- [x] Add profile models to the config layer.
-- [x] Decide where profiles are allowed: user config only, or user config plus repo config with safe merge rules.
-- [x] Define merge and precedence behavior for profiles.
-- [x] Add validation for unknown profile names.
-- [x] Add plan rendering support so `--plan` can show the selected profile.
-- [x] Document the profile schema with examples.
+- [ ] Inspect `tests/conftest.py` and `tests/unit/conftest.py`.
+- [ ] Add an autouse fixture that sets `SANDBOX_HOME` to a temp directory.
+- [ ] Set `HOME` to a temp directory if tests or code paths expand `~`.
+- [ ] Ensure the temp directories are created before tests run.
+- [ ] Fix `tests/unit/test_up.py` to patch `foundry_sandbox.commands.up.save_last_attach`.
+- [ ] Check for other tests that patch a module where the function is defined instead of where it is imported.
+- [ ] Run `python -m pytest tests/unit/test_up.py -q`.
+- [ ] Run `python -m pytest tests/unit -q`.
 
-## Phase 3: Package Bootstrap
+## Phase 3: Hermetic foundry-git-safety Tests
 
-- [x] Replace the narrow `--pip-requirements` mental model with typed package bootstrap.
-- [x] Add support for `pip` bootstrap.
-- [x] Evaluate whether to add `uv` bootstrap.
-- [x] Evaluate whether to add `npm` bootstrap outside MCP-only flows.
-- [x] Evaluate whether to add `apt` bootstrap.
-- [x] Decide whether a generic `bootstrap.commands` escape hatch is needed.
-- [x] Gate higher-risk bootstrap paths explicitly.
-- [x] Persist package bootstrap configuration in metadata and state.
-- [x] Make package bootstrap visible in dry-run plan output.
+- [ ] Inspect `foundry-git-safety/tests/conftest.py`.
+- [ ] Inspect `foundry-git-safety/tests/integration/conftest.py`.
+- [ ] Add or update an autouse fixture for `GIT_SAFETY_DECISION_LOG_DIR`.
+- [ ] Add or update an autouse fixture for `FOUNDRY_DATA_DIR` where needed.
+- [ ] Reset `foundry_git_safety.decision_log._writer` before tests that depend on log state.
+- [ ] Reset or close `foundry_git_safety.decision_log._writer` after those tests.
+- [ ] Ensure Flask app fixtures configure writable decision-log paths.
+- [ ] Run `cd foundry-git-safety && python -m pytest tests/integration -q`.
+- [ ] Run `cd foundry-git-safety && python -m pytest tests/unit tests/security tests/integration -q`.
 
-## Phase 4: Tooling Bundles
+## Phase 4: Validator Tests
 
-- [x] Design a bundle abstraction for reusable tooling sets.
-- [x] Allow bundles to expand into Claude skills.
-- [x] Allow bundles to expand into Claude commands.
-- [x] Allow bundles to expand into MCP servers.
-- [x] Allow bundles to declare package prerequisites when needed.
-- [x] Define conflict handling when multiple bundles set overlapping config.
-- [x] Keep generated `.claude` and `.mcp.json` files as compiled artifacts, not source of truth.
-- [x] Document how bundles map to the current Claude and MCP config surfaces.
+- [ ] Create `tests/unit/test_validate.py`.
+- [ ] Add table-driven tests for valid new sandbox names.
+- [ ] Add table-driven tests for invalid new sandbox names.
+- [ ] Add table-driven tests for valid existing sandbox names.
+- [ ] Add table-driven tests for invalid existing sandbox names.
+- [ ] Add table-driven tests for valid HTTPS repo URLs.
+- [ ] Add table-driven tests for valid SSH repo URLs.
+- [ ] Add table-driven tests for valid GitHub shorthand repo inputs.
+- [ ] Add table-driven tests for safe local repo paths.
+- [ ] Add rejection tests for empty repo input.
+- [ ] Add rejection tests for path traversal with `..`.
+- [ ] Add rejection tests for embedded credentials.
+- [ ] Add rejection tests for missing host or missing path.
+- [ ] Add rejection tests for suspicious SSH hosts.
+- [ ] Add rejection tests for sensitive local paths: `/etc`, `/proc`, `/sys`, `/dev`, `/root`, `/boot`, `/var/lib/docker`.
+- [ ] Run `python -m pytest tests/unit/test_validate.py -q`.
 
-## Phase 5: Template Caching
+## Phase 5: Version Check Tests
 
-- [x] Add a managed-template strategy for profile-backed environments.
-- [x] Define a stable cache key for template reuse.
-- [x] Invalidate cached templates when profile inputs change.
-- [x] Track template provenance in sandbox metadata.
-- [x] Provide a way to rebuild or refresh cached templates.
-- [x] Keep secrets, git safety, and other runtime-sensitive state out of templates.
+- [ ] Create `tests/unit/test_version_check.py` if it does not exist.
+- [ ] Test `_should_check` with no disabling environment variables.
+- [ ] Test `_should_check` with `CAST_DISABLE_UPDATE_CHECK=1`.
+- [ ] Test `_should_check` with `SANDBOX_NONINTERACTIVE=1`.
+- [ ] Test `_should_check` with `CI=1`.
+- [ ] Test `_should_check` with `CI=true`.
+- [ ] Test `_cache_is_fresh` for missing cache.
+- [ ] Test `_cache_is_fresh` for corrupt or malformed cache.
+- [ ] Test `_cache_is_fresh` for expired cache.
+- [ ] Test `_cache_is_fresh` for fresh cache.
+- [ ] Test `_parse_version` with normal versions.
+- [ ] Test `_parse_version` with suffixes such as `1.2.3rc1`.
+- [ ] Test `_is_newer` for newer, equal, and older versions.
+- [ ] Mock `urllib.request.urlopen` and test valid PyPI JSON.
+- [ ] Mock `urllib.request.urlopen` and test malformed JSON.
+- [ ] Mock `urllib.request.urlopen` and test missing version fields.
+- [ ] Mock `urllib.request.urlopen` and test URL errors.
+- [ ] Test `check_for_update` swallows helper exceptions.
+- [ ] Run `python -m pytest tests/unit/test_version_check.py -q`.
 
-## Safety And Policy
+## Phase 6: CLI And Script Drift Tests
 
-- [ ] Preserve current git-safety provisioning as a per-sandbox step.
-- [ ] Preserve proxy-backed credential injection.
-- [ ] Preserve user-level veto behavior for third-party tooling installs.
-- [ ] Ensure repo config cannot silently weaken user restrictions.
-- [ ] Add tests that confirm templates do not capture raw secrets.
+- [ ] Import `_LAZY_COMMANDS` in a CLI test.
+- [ ] Assert every `_LAZY_COMMANDS` entry imports successfully.
+- [ ] Assert every `_LAZY_COMMANDS` entry resolves to a Click command.
+- [ ] Assert `info` is rejected unless intentionally restored.
+- [ ] Assert `build` is rejected.
+- [ ] Assert `migrate-to-sbx` is rejected.
+- [ ] Assert `migrate-from-sbx` is rejected.
+- [ ] Add a test that checks `tests/run.sh` only references known commands.
+- [ ] Keep parsing simple and document any assumptions in the test.
+- [ ] Run `python -m pytest tests/unit/test_cli.py -q`.
+- [ ] Run `./tests/run.sh`.
 
-## Testing
+## Phase 7: Security Suite Documentation
 
-- [ ] Add unit tests for `cast dev` create-or-reuse behavior.
-- [ ] Add unit tests for profile selection and precedence.
-- [ ] Add unit tests for new package bootstrap config parsing.
-- [ ] Add unit tests for bundle expansion.
-- [ ] Add unit tests for template cache hit and miss behavior.
-- [ ] Add smoke coverage for a typical local-dev flow.
-- [ ] Extend red-team coverage for new package/plugin installation paths.
+- [ ] Open `tests/README.md`.
+- [ ] Document which tests run in ordinary CI.
+- [ ] Document that live sbx smoke tests require sbx and supported virtualization.
+- [ ] Document red-team prerequisites.
+- [ ] Document chaos prerequisites.
+- [ ] Open `docs/security/security-model.md`.
+- [ ] Clarify whether red-team, chaos, and live smoke tests are manual or CI-gated.
+- [ ] Include exact commands for manual security validation.
+- [ ] Avoid implying that manual suites run on every PR if they do not.
 
-## Docs
+## Phase 8: Optional Self-Hosted Security Gate
 
-- [ ] Update getting-started docs to recommend the new default workflow.
-- [ ] Update command reference with `cast dev`.
-- [ ] Update configuration docs with profile, bundle, and package bootstrap sections.
-- [ ] Update workflow docs to show create-or-reuse local dev flows.
-- [ ] Add examples for Claude-focused and Python-focused profiles.
+- [ ] Confirm whether the project has access to a runner with sbx and KVM.
+- [ ] If yes, add a separate workflow job for `pytest tests/smoke -m requires_sbx`.
+- [ ] If yes, add a separate workflow job for `./tests/redteam/runner.sh`.
+- [ ] If yes, add a separate workflow job for `./tests/chaos/runner.sh`.
+- [ ] Upload JUnit, TAP, or log artifacts from those jobs.
+- [ ] Mark the job as scheduled or self-hosted only if it cannot run on normal PR infrastructure.
+- [ ] If no runner exists, leave this as documented manual validation.
 
-## Implementation Order
+## Phase 9: Coverage Gates
 
-- [ ] Ship `cast dev` first.
-- [ ] Ship declarative profiles second.
-- [ ] Ship expanded package bootstrap third.
-- [ ] Ship tooling bundles fourth.
-- [ ] Ship managed template caching last.
+- [ ] Run root coverage: `python -m pytest tests/unit --cov=foundry_sandbox --cov-report=term-missing -q`.
+- [ ] Record the root coverage percentage.
+- [ ] Raise root `--cov-fail-under` only to a value the suite already exceeds.
+- [ ] Run nested coverage from `foundry-git-safety/`.
+- [ ] Record the nested coverage percentage.
+- [ ] Decide whether nested coverage should be enforced in CI.
+- [ ] If enforcing nested coverage, start with a realistic threshold.
+- [ ] Re-run both coverage commands after threshold changes.
+
+## Final Verification
+
+- [ ] `python -m pytest tests/unit -q`
+- [ ] `python -m pytest tests/unit --cov=foundry_sandbox --cov-report=term-missing -q`
+- [ ] `cd foundry-git-safety && python -m pytest tests/unit tests/security tests/integration -q`
+- [ ] `./tests/run.sh`
+- [ ] `git status --short` shows only intentional changes.
+
+## Manual Verification When sbx Is Available
+
+- [ ] `python -m pytest tests/smoke -m requires_sbx -q`
+- [ ] `./tests/redteam/runner.sh`
+- [ ] `./tests/chaos/runner.sh`
+
+## Definition Of Done
+
+- [ ] No stale workflow references remain.
+- [ ] Fast tests are hermetic and do not write to real `~/.foundry`.
+- [ ] Direct validator tests exist.
+- [ ] Version-check tests exist and do not use the network.
+- [ ] CLI/script drift tests exist.
+- [ ] Security-suite docs match actual CI behavior.
+- [ ] Coverage thresholds are realistic and enforced where chosen.
