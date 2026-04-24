@@ -661,11 +661,12 @@ class TestInstallAptPackages:
     @patch("foundry_sandbox.sbx.sbx_exec")
     def test_install_apt(self, mock_exec):
         install_apt_packages("test-sbx", ["curl", "jq"])
-        mock_exec.assert_called_once()
-        assert mock_exec.call_args.kwargs["user"] == "root"
-        cmd = mock_exec.call_args.args[1]
-        assert "apt-get update" in cmd[2]
-        assert "apt-get install" in cmd[2]
+        assert mock_exec.call_count == 2
+        assert mock_exec.call_args_list[0].kwargs["user"] == "root"
+        assert mock_exec.call_args_list[0].args[1] == ["apt-get", "update", "-qq"]
+        assert mock_exec.call_args_list[1].args[1] == [
+            "apt-get", "install", "-y", "-qq", "--", "curl", "jq",
+        ]
 
     @patch("foundry_sandbox.sbx.sbx_exec")
     def test_empty_packages_is_noop(self, mock_exec):
@@ -695,7 +696,7 @@ class TestInstallUvRequirements:
         mock_exec.assert_called_once()
         assert mock_exec.call_args.kwargs["user"] == "root"
         cmd = mock_exec.call_args.args[1]
-        assert "uv pip install" in cmd[2]
+        assert cmd == ["uv", "pip", "install", "-r", "requirements.txt"]
 
 
 class TestBootstrapPackages:

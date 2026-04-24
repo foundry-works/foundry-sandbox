@@ -417,7 +417,7 @@ def install_uv_requirements(name: str, requirements: str) -> None:
     """Install uv requirements inside an sbx sandbox."""
     log_info(f"Installing uv requirements: {requirements}")
     try:
-        sbx_exec(name, ["sh", "-c", f"uv pip install -r {requirements}"], user="root")
+        sbx_exec(name, ["uv", "pip", "install", "-r", requirements], user="root")
     except Exception as exc:
         log_warn(f"Failed to install uv requirements: {exc}")
 
@@ -426,7 +426,7 @@ def install_uv_packages(name: str, packages: list[str]) -> None:
     """Install named uv packages inside an sbx sandbox."""
     log_info(f"Installing uv packages: {packages}")
     try:
-        sbx_exec(name, ["sh", "-c", "uv pip install " + " ".join(packages)], user="root")
+        sbx_exec(name, ["uv", "pip", "install", *packages], user="root")
     except Exception as exc:
         log_warn(f"Failed to install uv packages: {exc}")
 
@@ -437,11 +437,8 @@ def install_apt_packages(name: str, packages: list[str]) -> None:
         return
     log_info(f"Installing apt packages: {packages}")
     try:
-        sbx_exec(
-            name,
-            ["sh", "-c", "apt-get update -qq && apt-get install -y -qq " + " ".join(packages)],
-            user="root",
-        )
+        sbx_exec(name, ["apt-get", "update", "-qq"], user="root")
+        sbx_exec(name, ["apt-get", "install", "-y", "-qq", "--", *packages], user="root")
     except Exception as exc:
         log_warn(f"Failed to install apt packages: {exc}")
 

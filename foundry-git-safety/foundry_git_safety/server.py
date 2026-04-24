@@ -149,7 +149,7 @@ def create_git_api(
 
     # Import here to avoid circular imports
     from .command_validation import validate_request
-    from .operations import execute_git
+    from .operations import execute_git_limited
 
     def _resolve_repo_root(sandbox_id: str, metadata: dict | None) -> str:
         if repo_root_resolver:
@@ -238,7 +238,7 @@ def create_git_api(
             )
 
         # Execute git command
-        response, err = execute_git(req, repo_root, metadata)
+        response, err = execute_git_limited(req, repo_root, sandbox_id, metadata)
         if err:
             _record_outcome(verb, sandbox_id, "deny")
             return _make_error(err.reason, 422)
@@ -387,12 +387,13 @@ def create_git_api(
         from .user_services_proxy import create_user_services_blueprint
 
         entries = _resolved_user_services(config)
-        if entries:
+        if entries or config is not None:
             bp = create_user_services_blueprint(
                 entries,
                 secret_store=secrets,
                 nonce_store=nonces,
                 rate_limiter=limiter,
+                data_dir=resolved_data_dir,
             )
             app.register_blueprint(bp)
             logger.info("Registered %d user service proxy routes", len(entries))

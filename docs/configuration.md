@@ -54,7 +54,7 @@ Merge behavior:
 - `git_safety.protected_branches.add` and
   `git_safety.file_restrictions.blocked_patterns_add` only append
 - `allow_third_party_mcp` and `git_safety.allow_pr_operations` tighten via AND
-  semantics across layers
+  semantics across user/repo layers; packaged defaults are neutral
 - `claude_code` skills, commands, hooks, and permissions merge additively
 - a repo `foundry.yaml` can add config, but it cannot override tighter
   user-layer gates
@@ -272,10 +272,10 @@ as builtins.
 ### Supply-chain gates
 
 The `allow_third_party_mcp` flag controls whether npm-type MCP servers are
-allowed. It is **ANDed across all config layers**:
+allowed. It is **ANDed across user and repo config layers**:
 
 ```text
-builtin-defaults  (unset → defaults to false)
+packaged defaults  (neutral)
 ~/.foundry/foundry.yaml  (user can enable)
 repo/foundry.yaml  (repo cannot override user false)
 ```
@@ -471,8 +471,8 @@ and Node tools can find their C dependencies).
 #### System packages gate
 
 `apt` and `npm` bootstrap require the `allow_system_packages` gate to be set
-to `true`. This gate uses AND semantics across config layers — any layer
-setting it to `false` blocks system package installation.
+to `true`. This gate uses AND semantics across user and repo config layers.
+Any user/repo layer setting it to `false` blocks system package installation.
 
 ```yaml
 version: "1"
@@ -629,8 +629,8 @@ Bundles are subject to the same gates as direct config:
 - `mcp_servers` with `type: npm` require `allow_third_party_mcp: true`.
 - `packages` with `apt` or `npm` require `allow_system_packages: true`.
 
-These gates use AND semantics across config layers — any layer setting `false`
-blocks the capability.
+These gates use AND semantics across user and repo config layers. Any user/repo
+layer setting `false` blocks the capability.
 
 ### Merge across layers
 

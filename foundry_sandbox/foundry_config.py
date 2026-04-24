@@ -293,18 +293,20 @@ def _load_layer(path: Path) -> FoundryConfig | None:
     try:
         raw = yaml.safe_load(path.read_text())
     except (yaml.YAMLError, OSError) as exc:
-        logger.warning("Failed to load foundry config %s: %s", path, exc)
-        return None
+        raise ValueError(f"Failed to load foundry config {path}: {exc}") from exc
     if not raw:
         return None
     try:
         return FoundryConfig(**raw)
     except (ValidationError, ValueError) as exc:
-        logger.warning("Invalid foundry config %s: %s", path, exc)
-        return None
+        raise ValueError(f"Invalid foundry config {path}: {exc}") from exc
 
 
-def _merge(layers: list[FoundryConfig]) -> FoundryConfig:
+def _merge(
+    layers: list[FoundryConfig],
+    *,
+    skip_first_gate_layer: bool = False,
+) -> FoundryConfig:
     if not layers:
         return FoundryConfig(version="1")
     if len(layers) == 1:
@@ -318,11 +320,15 @@ def _merge(layers: list[FoundryConfig]) -> FoundryConfig:
 
     result = FoundryConfig(version=layers[0].version)
 
-    # allow_third_party_mcp: AND across layers
-    result.allow_third_party_mcp = all(layer.allow_third_party_mcp for layer in layers)
+    gate_layers = layers[1:] if skip_first_gate_layer and len(layers) > 1 else layers
 
-    # allow_system_packages: AND across layers
-    result.allow_system_packages = all(layer.allow_system_packages for layer in layers)
+    # allow_third_party_mcp: AND across user/repo layers. The packaged
+    # defaults layer is neutral here; explicit user/repo false values still
+    # tighten the gate.
+    result.allow_third_party_mcp = all(layer.allow_third_party_mcp for layer in gate_layers)
+
+    # allow_system_packages: AND across user/repo layers.
+    result.allow_system_packages = all(layer.allow_system_packages for layer in gate_layers)
 
     # Lists: concatenate
     all_mcp: list[McpServer] = []
@@ -356,7 +362,40 @@ def _merge(layers: list[FoundryConfig]) -> FoundryConfig:
         merged_bundles.update(layer.tooling_bundles)
     result.tooling_bundles = merged_bundles
 
+    _enforce_merged_gates(result)
     return result
+
+
+def _enforce_merged_gates(config: FoundryConfig) -> None:
+    """Fail closed when additive merge leaves gated content under a closed gate."""
+    if not config.allow_third_party_mcp:
+        bad = [s.name for s in config.mcp_servers if s.type == "npm"]
+        for bname, bundle in config.tooling_bundles.items():
+            bad_b = [s.name for s in bundle.mcp_servers if s.type == "npm"]
+            if bad_b:
+                raise ValueError(
+                    f"Tooling bundle '{bname}' has npm MCP servers {bad_b} "
+                    f"but allow_third_party_mcp is off after merging layers"
+                )
+        if bad:
+            raise ValueError(
+                f"MCP servers {bad} are type=npm but allow_third_party_mcp "
+                "is off after merging layers"
+            )
+
+    if not config.allow_system_packages:
+        for name, profile in config.profiles.items():
+            if profile.packages and (profile.packages.apt or profile.packages.npm):
+                raise ValueError(
+                    f"Profile '{name}' has system packages but "
+                    "allow_system_packages is off after merging layers"
+                )
+        for bname, bundle in config.tooling_bundles.items():
+            if bundle.packages and (bundle.packages.apt or bundle.packages.npm):
+                raise ValueError(
+                    f"Tooling bundle '{bname}' has system packages but "
+                    "allow_system_packages is off after merging layers"
+                )
 
 
 def _merge_git_safety(layers: list[FoundryConfig]) -> GitSafetyOverlay | None:
@@ -431,9 +470,11 @@ def resolve_foundry_config(repo_root: Path) -> FoundryConfig:
     layer_names: list[str] = []
 
     builtin = _load_layer(_builtin_defaults_path())
+    has_builtin_layer = False
     if builtin is not None:
         layers.append(builtin)
         layer_names.append("builtin-defaults")
+        has_builtin_layer = True
 
     user = _load_layer(_USER_CONFIG_PATH)
     if user is not None:
@@ -471,7 +512,7 @@ def resolve_foundry_config(repo_root: Path) -> FoundryConfig:
     if not layers:
         return FoundryConfig(version="1")
 
-    config = _merge(layers)
+    config = _merge(layers, skip_first_gate_layer=has_builtin_layer)
     config._layer_names = layer_names  # type: ignore[attr-defined]
     return config
 
@@ -991,6 +1032,7 @@ def compile_user_services(
 
     env_vars: dict[str, str] = {}
     sbx_secrets: list[tuple[str, str]] = []
+    user_services: list[dict[str, object]] = []
 
     for svc in services:
         s = slug(svc.name)
@@ -999,8 +1041,13 @@ def compile_user_services(
         # sbx_secret stores (slug, host_env_var) — the applier reads
         # the real value from os.environ[host_env_var] at apply time.
         sbx_secrets.append((s, svc.env_var))
+        user_services.append(svc.model_dump())
 
-    return ArtifactBundle(env_vars=env_vars, sbx_secrets=sbx_secrets)
+    return ArtifactBundle(
+        env_vars=env_vars,
+        sbx_secrets=sbx_secrets,
+        user_services=user_services,
+    )
 
 
 def compile_mcp_servers(
@@ -1025,6 +1072,7 @@ def compile_mcp_servers(
     mcp_servers_json: dict[str, dict[str, Any]] = {}
     env_vars: dict[str, str] = {}
     sbx_secrets: list[tuple[str, str]] = []
+    user_services: list[dict[str, object]] = []
     post_steps: list[PostStep] = []
 
     for server in servers:
@@ -1058,6 +1106,17 @@ def compile_mcp_servers(
             }
             env_vars[f"MCP_PROXY_{s.upper().replace('-', '_')}"] = proxy_url
             sbx_secrets.append((s, server.host_env))
+            user_services.append({
+                "name": server.name,
+                "env_var": server.host_env,
+                "domain": server.target,
+                "header": "Authorization",
+                "format": "bearer",
+                "methods": [],
+                "paths": [],
+                "scheme": "https",
+                "port": 0,
+            })
 
         elif server.type == "npm":
             post_steps.append(PostStep(
@@ -1084,6 +1143,7 @@ def compile_mcp_servers(
         return ArtifactBundle(
             env_vars=env_vars,
             sbx_secrets=sbx_secrets,
+            user_services=user_services,
             post_steps=post_steps,
         )
 
@@ -1107,6 +1167,7 @@ def compile_mcp_servers(
         ],
         env_vars=env_vars,
         sbx_secrets=sbx_secrets,
+        user_services=user_services,
         post_steps=post_steps,
     )
 

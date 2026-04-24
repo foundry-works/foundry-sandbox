@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import json
 import time
 from unittest.mock import MagicMock, patch
 
@@ -199,6 +200,56 @@ class TestProxyRequest:
                 resp = client.get("/proxy/tavily/v1/search", headers=headers)
                 assert resp.status_code == 503
                 assert "not configured" in resp.get_json()["error"]
+
+    def test_sandbox_metadata_registers_service(self, auth_stores, tmp_path):
+        from flask import Flask
+
+        data_dir = tmp_path / "data"
+        sandboxes_dir = data_dir / "sandboxes"
+        sandboxes_dir.mkdir(parents=True)
+        (sandboxes_dir / f"{_TEST_SANDBOX}.json").write_text(json.dumps({
+            "user_services": [
+                {
+                    "name": "Internal API",
+                    "env_var": "INTERNAL_API_KEY",
+                    "domain": "api.internal.example",
+                    "header": "X-Api-Key",
+                    "format": "header",
+                }
+            ],
+        }))
+
+        secret_store, nonce_store, rate_limiter = auth_stores
+        bp = create_user_services_blueprint(
+            [],
+            secret_store=secret_store,
+            nonce_store=nonce_store,
+            rate_limiter=rate_limiter,
+            data_dir=str(data_dir),
+        )
+        app = Flask(__name__)
+        app.register_blueprint(bp)
+
+        mock_response = MagicMock()
+        mock_response.status = 200
+        mock_response.getheaders.return_value = [("content-type", "text/plain")]
+        mock_response.read.side_effect = [b"ok", b""]
+
+        mock_conn = MagicMock()
+        mock_conn.getresponse.return_value = mock_response
+
+        with app.test_client() as client:
+            with patch.dict(os.environ, {"INTERNAL_API_KEY": "internal-secret"}):
+                with patch(
+                    "foundry_git_safety.user_services_proxy.http.client.HTTPSConnection",
+                    return_value=mock_conn,
+                ):
+                    headers = _auth_headers("GET", "/proxy/internal-api/v1/data")
+                    resp = client.get("/proxy/internal-api/v1/data", headers=headers)
+                    assert resp.status_code == 200
+
+                    headers_sent = mock_conn.request.call_args[1].get("headers", {})
+                    assert headers_sent["X-Api-Key"] == "internal-secret"
 
     def test_bearer_format(self, proxy_app):
         mock_response = MagicMock()

@@ -63,6 +63,12 @@ class TestMergeBundles:
         merged = _merge_bundles([a, b])
         assert len(merged.post_steps) == 2
 
+    def test_merge_bundles_user_services(self):
+        a = ArtifactBundle(user_services=[{"name": "A", "env_var": "A_KEY", "domain": "a.example"}])
+        b = ArtifactBundle(user_services=[{"name": "B", "env_var": "B_KEY", "domain": "b.example"}])
+        merged = _merge_bundles([a, b])
+        assert [svc["name"] for svc in merged.user_services] == ["A", "B"]
+
 
 # ---------------------------------------------------------------------------
 # _patch_sandbox_policy
@@ -194,6 +200,27 @@ class TestPolicyPatches:
         result = json.loads(meta_path.read_text())
         # False AND True → False (cannot loosen)
         assert result["allow_pr"] is False
+
+
+class TestUserServiceRegistrations:
+    def test_user_services_patched_into_metadata(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    ):
+        from foundry_sandbox.artifacts import _patch_sandbox_user_services
+
+        monkeypatch.setenv("FOUNDRY_DATA_DIR", str(tmp_path))
+        sandboxes_dir = tmp_path / "sandboxes"
+        sandboxes_dir.mkdir()
+        meta_path = sandboxes_dir / "test-sbx.json"
+        meta_path.write_text(json.dumps({"sandbox_branch": "feature"}))
+
+        _patch_sandbox_user_services("test-sbx", [
+            {"name": "Tavily", "env_var": "TAVILY_API_KEY", "domain": "api.tavily.com"},
+        ])
+
+        result = json.loads(meta_path.read_text())
+        assert result["user_services"][0]["name"] == "Tavily"
+        assert result["user_services"][0]["domain"] == "api.tavily.com"
 
 
 # ---------------------------------------------------------------------------

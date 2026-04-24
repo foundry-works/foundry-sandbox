@@ -3,8 +3,6 @@
 from __future__ import annotations
 
 import click
-
-from foundry_sandbox.sbx import sbx_check_available
 from foundry_sandbox.utils import log_error
 
 
@@ -75,6 +73,7 @@ def show_cmd(profile: str) -> None:
 @click.option("--base-template", default=None, help="Override base template")
 def rebuild_cmd(profile: str, base_template: str | None) -> None:
     """Force rebuild a profile's cached template."""
+    from foundry_sandbox.sbx import sbx_check_available
     from foundry_sandbox.template_cache import (
         build_profile_template,
         invalidate_cached_template,

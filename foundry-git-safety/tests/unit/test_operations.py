@@ -7,9 +7,13 @@ import pytest
 
 from foundry_git_safety.operations import (
     AUDIT_OUTPUT_TRUNCATE,
+    GitExecRequest,
+    GitExecResponse,
     SandboxSemaphorePool,
+    SyncSandboxSemaphorePool,
     _translate_paths,
     audit_log,
+    execute_git_limited,
 )
 
 
@@ -221,6 +225,52 @@ class TestSandboxSemaphorePool:
         pool = SandboxSemaphorePool(max_concurrent=4)
         sem = pool.get("sandbox-abc")
         assert sem._value == 4
+
+
+class TestSyncSandboxSemaphorePool:
+    """Tests for the synchronous Flask-handler concurrency limiter."""
+
+    def test_execute_git_limited_rejects_when_at_capacity(self):
+        pool = SyncSandboxSemaphorePool(max_concurrent=1)
+        sem = pool.get("sandbox-1")
+        assert sem.acquire(blocking=False) is True
+
+        try:
+            with patch("foundry_git_safety.operations._sync_semaphore_pool", pool):
+                with patch("foundry_git_safety.operations.execute_git") as mock_exec:
+                    response, err = execute_git_limited(
+                        GitExecRequest(args=["status"]),
+                        "/repo",
+                        "sandbox-1",
+                        {"sandbox_branch": "feature"},
+                    )
+
+            assert response is None
+            assert err is not None
+            assert "Too many concurrent operations" in err.reason
+            mock_exec.assert_not_called()
+        finally:
+            sem.release()
+
+    def test_execute_git_limited_delegates_when_capacity_available(self):
+        pool = SyncSandboxSemaphorePool(max_concurrent=1)
+        expected = GitExecResponse(exit_code=0, stdout="", stderr="")
+
+        with patch("foundry_git_safety.operations._sync_semaphore_pool", pool):
+            with patch(
+                "foundry_git_safety.operations.execute_git",
+                return_value=(expected, None),
+            ) as mock_exec:
+                response, err = execute_git_limited(
+                    GitExecRequest(args=["status"]),
+                    "/repo",
+                    "sandbox-1",
+                    {"sandbox_branch": "feature"},
+                )
+
+        assert response is expected
+        assert err is None
+        mock_exec.assert_called_once()
 
 
 # ---------------------------------------------------------------------------

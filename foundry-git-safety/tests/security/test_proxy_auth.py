@@ -9,6 +9,7 @@ Validates that:
 """
 
 import os
+import json
 import time
 from unittest.mock import MagicMock, patch
 
@@ -166,6 +167,55 @@ class TestUnauthorizedSandboxCannotUseService:
             assert resp.status_code == 200
             data = resp.get_json()
             assert data["services"][0]["slug"] == "tavily"
+
+    def test_create_git_api_registers_metadata_backed_user_services(self, tmp_path):
+        secrets_dir = tmp_path / "secrets"
+        data_dir = tmp_path / "data"
+        sandboxes_dir = data_dir / "sandboxes"
+        secrets_dir.mkdir()
+        sandboxes_dir.mkdir(parents=True)
+        secret = b"test-secret-key-here-0123456789abcdef\n"
+        (secrets_dir / "test-sandbox").write_bytes(secret)
+        (sandboxes_dir / "test-sandbox.json").write_text(json.dumps({
+            "user_services": [
+                {
+                    "name": "Internal API",
+                    "env_var": "INTERNAL_API_KEY",
+                    "domain": "api.internal.example",
+                }
+            ],
+        }))
+
+        app = create_git_api(
+            secret_store=SecretStore(secrets_path=str(secrets_dir)),
+            nonce_store=NonceStore(),
+            rate_limiter=RateLimiter(),
+            data_dir=str(data_dir),
+            config=FoundryConfig(),
+        )
+
+        mock_response = MagicMock()
+        mock_response.status = 200
+        mock_response.getheaders.return_value = [("Content-Type", "text/plain")]
+        mock_response.read.side_effect = [b"ok", b""]
+        mock_conn = MagicMock()
+        mock_conn.getresponse.return_value = mock_response
+
+        headers = _make_auth_headers(
+            "GET",
+            "/proxy/internal-api/v1/data",
+            b"",
+            secret.rstrip(b"\n"),
+            "test-sandbox",
+        )
+        with app.test_client() as client:
+            with patch.dict(os.environ, {"INTERNAL_API_KEY": "key"}):
+                with patch(
+                    "foundry_git_safety.user_services_proxy.http.client.HTTPSConnection",
+                    return_value=mock_conn,
+                ):
+                    resp = client.get("/proxy/internal-api/v1/data", headers=headers)
+                    assert resp.status_code == 200
 
     def test_no_auth_headers_rejected(self, tmp_path):
         app = _make_app_with_user_services(tmp_path)

@@ -217,6 +217,28 @@ class SandboxSemaphorePool:
 _semaphore_pool = SandboxSemaphorePool()
 
 
+class SyncSandboxSemaphorePool:
+    """Per-sandbox concurrency limiter for synchronous Flask handlers."""
+
+    def __init__(self, max_concurrent: int = MAX_CONCURRENT_PER_SANDBOX):
+        self._semaphores: dict[str, threading.BoundedSemaphore] = {}
+        self._max = max_concurrent
+        self._lock = threading.Lock()
+
+    def get(self, sandbox_id: str) -> threading.BoundedSemaphore:
+        with self._lock:
+            if sandbox_id not in self._semaphores:
+                self._semaphores[sandbox_id] = threading.BoundedSemaphore(self._max)
+            return self._semaphores[sandbox_id]
+
+    def cleanup(self, sandbox_id: str) -> None:
+        with self._lock:
+            self._semaphores.pop(sandbox_id, None)
+
+
+_sync_semaphore_pool = SyncSandboxSemaphorePool()
+
+
 # ---------------------------------------------------------------------------
 # Git Execution
 # ---------------------------------------------------------------------------
@@ -655,6 +677,34 @@ def execute_git(
     )
 
     return response, None
+
+
+def execute_git_limited(
+    request: GitExecRequest,
+    repo_root: str,
+    sandbox_id: str,
+    metadata: dict[str, Any] | None = None,
+) -> tuple[GitExecResponse | None, ValidationError | None]:
+    """Execute git with the synchronous per-sandbox concurrency cap."""
+    semaphore = _sync_semaphore_pool.get(sandbox_id)
+    if not semaphore.acquire(blocking=False):
+        audit_log(
+            event="concurrency_limit",
+            action=" ".join(request.args[:3]) if request.args else "unknown",
+            decision="deny",
+            command_args=request.args,
+            reason=f"Too many concurrent operations for sandbox {sandbox_id}",
+            matched_rule="semaphore",
+            sandbox_id=sandbox_id,
+        )
+        return None, ValidationError(
+            f"Too many concurrent operations for sandbox {sandbox_id}"
+        )
+
+    try:
+        return execute_git(request, repo_root, metadata)
+    finally:
+        semaphore.release()
 
 
 async def execute_git_async(

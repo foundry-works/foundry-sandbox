@@ -127,7 +127,7 @@ It also rate-limits requests and rejects malformed or unauthenticated wrapper tr
 | `sbx` / kernel escape | Out of scope |
 | Data sent to already-allowed destinations | Not prevented by the sandbox |
 | Wrapper removed from inside the sandbox | Accepted risk |
-| Third-party npm MCP servers | Controlled by `allow_third_party_mcp` gate. When enabled, npm packages run inside the sandbox with full agent privileges. The gate is ANDed across layers — a user-level `false` cannot be overridden by a repo config. |
+| Third-party npm MCP servers | Controlled by `allow_third_party_mcp` gate. When enabled, npm packages run inside the sandbox with full agent privileges. The gate is ANDed across user/repo layers — a user-level `false` cannot be overridden by a repo config. |
 
 The wrapper-removal case matters most in practice: a root-capable process in the sandbox can remove `/usr/local/bin/git` and fall back to `/usr/bin/git`. Foundry mitigates that with reinjection and watchdog tooling, but it is not a hard security boundary.
 

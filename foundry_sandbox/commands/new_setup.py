@@ -100,7 +100,30 @@ def new_sbx_setup(
     sbx_check_available()
 
     # ------------------------------------------------------------------
-    # 2. Ensure template exists, then create sbx sandbox
+    # 2. Start git safety server if needed (fail closed)
+    # ------------------------------------------------------------------
+    log_section("Git Safety")
+    if not git_safety_server_is_running():
+        log_info("Starting git safety server...")
+        try:
+            git_safety_server_start(deep_policy=True)
+        except OSError as exc:
+            raise RuntimeError(
+                "foundry-git-safety is not installed. "
+                "Run: pip install foundry-git-safety[server]"
+            ) from exc
+        except Exception as exc:
+            raise RuntimeError(f"Git safety server start failed: {exc}") from exc
+
+        if not git_safety_server_is_running():
+            raise RuntimeError(
+                "Git safety server did not become healthy after start. "
+                "Check `foundry-git-safety status` for details."
+            )
+    log_info("Git safety server running.")
+
+    # ------------------------------------------------------------------
+    # 3. Ensure template exists, then create sbx sandbox
     # ------------------------------------------------------------------
     log_section("Sandbox")
     use_template = template if template and template.lower() != "none" else None
@@ -145,29 +168,6 @@ def new_sbx_setup(
             )
     else:
         host_worktree_path = sbx_worktree_path(repo_root, name, branch)
-
-    # ------------------------------------------------------------------
-    # 3. Start git safety server if needed (fail closed)
-    # ------------------------------------------------------------------
-    log_section("Git Safety")
-    if not git_safety_server_is_running():
-        log_info("Starting git safety server...")
-        try:
-            git_safety_server_start(deep_policy=True)
-        except OSError as exc:
-            raise RuntimeError(
-                "foundry-git-safety is not installed. "
-                "Run: pip install foundry-git-safety[server]"
-            ) from exc
-        except Exception as exc:
-            raise RuntimeError(f"Git safety server start failed: {exc}") from exc
-
-        if not git_safety_server_is_running():
-            raise RuntimeError(
-                "Git safety server did not become healthy after start. "
-                "Check `foundry-git-safety status` for details."
-            )
-    log_info("Git safety server running.")
 
     # ------------------------------------------------------------------
     # 4. Write initial metadata (git safety not yet provisioned)
@@ -277,7 +277,7 @@ def new_sbx_setup(
     except NotImplementedError:
         raise
     except Exception as exc:
-        log_warn(f"Foundry.yaml artifact apply failed: {exc}")
+        raise RuntimeError(f"Foundry.yaml artifact apply failed: {exc}") from exc
 
     # ------------------------------------------------------------------
     # 6. Copy files and install pip requirements

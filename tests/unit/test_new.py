@@ -51,11 +51,12 @@ class TestNewSbxSetup:
         mock_provision.assert_called_once()
         mock_metadata.assert_called_once()
 
+    @patch("foundry_sandbox.commands.new_setup.git_safety_server_is_running", return_value=True)
     @patch("foundry_sandbox.commands.new_setup.ensure_foundry_template", return_value=True)
     @patch("foundry_sandbox.commands.new_setup.sbx_create", side_effect=Exception("sbx failed"))
     @patch("foundry_sandbox.commands.new_setup.sbx_check_available")
     def test_sbx_create_failure(
-        self, mock_check, mock_create, mock_ensure, tmp_path,
+        self, mock_check, mock_create, mock_ensure, mock_gs_running, tmp_path,
     ):
 
         repo_root = str(tmp_path / "repo")
@@ -276,13 +277,14 @@ class TestTemplateValidation:
         mock_ensure.assert_not_called()
         mock_ls.assert_called_once()
 
+    @patch("foundry_sandbox.commands.new_setup.git_safety_server_is_running", return_value=True)
     @patch("foundry_sandbox.commands.new_setup.ensure_foundry_template")
     @patch("foundry_sandbox.commands.new_setup.sbx_template_ls", return_value=[])
     @patch("foundry_sandbox.commands.new_setup.sbx_create")
     @patch("foundry_sandbox.commands.new_setup.sbx_check_available")
     def test_missing_custom_template_raises_setup_error(
         self, mock_check, mock_create,
-        mock_ls, mock_ensure, tmp_path,
+        mock_ls, mock_ensure, mock_gs_running, tmp_path,
     ):
         """Missing custom/managed template surfaces as RuntimeError, not opaque sbx failure."""
 
@@ -372,6 +374,26 @@ class TestGitSafetyFailClosed:
 
         mock_create.return_value = MagicMock(returncode=0, stdout="")
         with pytest.raises(RuntimeError, match="provisioning failed"):
+            new_sbx_setup(**self._base_kwargs(tmp_path))
+
+    @patch(
+        "foundry_sandbox.foundry_config.resolve_foundry_config",
+        side_effect=ValueError("Invalid foundry config"),
+    )
+    @patch("foundry_sandbox.commands.new_setup.write_sandbox_metadata")
+    @patch("foundry_sandbox.commands.new_setup.provision_git_safety", return_value=ProvisioningResult(success=True, wrapper_checksum="abc123"))
+    @patch("foundry_sandbox.commands.new_setup.git_safety_server_is_running", return_value=True)
+    @patch("foundry_sandbox.commands.new_setup.ensure_foundry_template", return_value=True)
+    @patch("foundry_sandbox.commands.new_setup.sbx_create")
+    @patch("foundry_sandbox.commands.new_setup.sbx_check_available")
+    def test_fails_closed_on_invalid_foundry_config(
+        self, mock_check, mock_create,
+        mock_ensure, mock_gs_running, mock_provision, mock_metadata,
+        mock_resolve, tmp_path,
+    ):
+
+        mock_create.return_value = MagicMock(returncode=0, stdout="")
+        with pytest.raises(RuntimeError, match="Foundry.yaml artifact apply failed"):
             new_sbx_setup(**self._base_kwargs(tmp_path))
 
     @patch("foundry_sandbox.commands.new_setup.sbx_rm")

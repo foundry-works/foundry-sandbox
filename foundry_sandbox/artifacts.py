@@ -65,6 +65,7 @@ class ArtifactBundle:
     env_vars: dict[str, str] = field(default_factory=dict)
     policy_patches: list[PolicyPatch] = field(default_factory=list)
     sbx_secrets: list[tuple[str, str]] = field(default_factory=list)
+    user_services: list[dict[str, object]] = field(default_factory=list)
     post_steps: list[PostStep] = field(default_factory=list)
 
 
@@ -81,6 +82,7 @@ def _merge_bundles(bundles: list[ArtifactBundle]) -> ArtifactBundle:
         merged.env_vars.update(b.env_vars)
         merged.policy_patches.extend(b.policy_patches)
         merged.sbx_secrets.extend(b.sbx_secrets)
+        merged.user_services.extend(b.user_services)
         merged.post_steps.extend(b.post_steps)
     return merged
 
@@ -137,6 +139,50 @@ def _patch_sandbox_policy(sandbox_id: str, patches: list[PolicyPatch]) -> None:
             else:
                 meta[key] = list(patch.value)
 
+    atomic_write(meta_path, json.dumps(meta, indent=2))
+    meta_path.chmod(0o644)
+
+
+def _slug(name: str) -> str:
+    import re
+
+    return re.sub(r"[^a-z0-9]+", "-", name.lower()).strip("-") or "unknown"
+
+
+def _patch_sandbox_user_services(
+    sandbox_id: str,
+    services: list[dict[str, object]],
+) -> None:
+    """Store per-sandbox proxy service registrations in git-safety metadata."""
+    if not services:
+        return
+
+    meta_path = _sandbox_metadata_path(sandbox_id)
+    if meta_path.exists():
+        meta: dict[str, object] = json.loads(meta_path.read_text())
+    else:
+        meta = {}
+
+    existing_raw = meta.get("user_services", [])
+    merged_by_slug: dict[str, dict[str, object]] = {}
+
+    if isinstance(existing_raw, list):
+        for entry in existing_raw:
+            if isinstance(entry, dict):
+                name = entry.get("name")
+                if isinstance(name, str):
+                    merged_by_slug[_slug(name)] = dict(entry)
+    elif isinstance(existing_raw, dict):
+        for key, value in existing_raw.items():
+            if isinstance(value, dict):
+                merged_by_slug[str(key)] = dict(value)
+
+    for service in services:
+        name = service.get("name")
+        if isinstance(name, str):
+            merged_by_slug[_slug(name)] = dict(service)
+
+    meta["user_services"] = list(merged_by_slug.values())
     atomic_write(meta_path, json.dumps(meta, indent=2))
     meta_path.chmod(0o644)
 
@@ -263,6 +309,11 @@ def apply_artifacts(
     if bundle.policy_patches:
         logger.info("Applying %d policy patches to %s", len(bundle.policy_patches), sandbox_id)
         _patch_sandbox_policy(sandbox_id, bundle.policy_patches)
+
+    # Step 2b: Per-sandbox proxy service registrations
+    if bundle.user_services:
+        logger.info("Registering %d proxy services for %s", len(bundle.user_services), sandbox_id)
+        _patch_sandbox_user_services(sandbox_id, bundle.user_services)
 
     # Step 3: File writes
     if bundle.file_writes:

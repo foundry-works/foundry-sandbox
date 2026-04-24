@@ -163,6 +163,42 @@ class TestThirdPartyMcpGate:
         )
         assert cfg.mcp_servers[0].name == "ok"
 
+    def test_repo_gate_true_survives_builtin_defaults(self, tmp_path: Path):
+        (tmp_path / "foundry.yaml").write_text(
+            'version: "1"\n'
+            "allow_third_party_mcp: true\n"
+            "mcp_servers:\n"
+            "  - name: ok\n"
+            "    type: npm\n"
+            "    package: ok-pkg\n"
+        )
+        cfg = resolve_foundry_config(tmp_path)
+        assert cfg.allow_third_party_mcp is True
+        assert cfg.mcp_servers[0].type == "npm"
+
+    def test_user_gate_false_blocks_repo_npm(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    ):
+        user_config = tmp_path / "user-foundry.yaml"
+        user_config.write_text('version: "1"\nallow_third_party_mcp: false\n')
+        monkeypatch.setattr(
+            "foundry_sandbox.foundry_config._USER_CONFIG_PATH",
+            user_config,
+        )
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        (repo / "foundry.yaml").write_text(
+            'version: "1"\n'
+            "allow_third_party_mcp: true\n"
+            "mcp_servers:\n"
+            "  - name: ok\n"
+            "    type: npm\n"
+            "    package: ok-pkg\n"
+        )
+
+        with pytest.raises(ValueError, match="allow_third_party_mcp is off"):
+            resolve_foundry_config(repo)
+
 
 # ---------------------------------------------------------------------------
 # Missing layers
@@ -221,14 +257,13 @@ class TestResolver:
 
     def test_invalid_yaml_returns_default(self, tmp_path: Path):
         (tmp_path / "foundry.yaml").write_text("{{invalid")
-        config = resolve_foundry_config(tmp_path)
-        assert config.version == "1"
-        assert config.git_safety is None
+        with pytest.raises(ValueError, match="Failed to load foundry config"):
+            resolve_foundry_config(tmp_path)
 
     def test_invalid_schema_returns_none(self, tmp_path: Path):
         (tmp_path / "foundry.yaml").write_text('version: "1"\nunknown_key: true')
-        config = resolve_foundry_config(tmp_path)
-        assert config.version == "1"
+        with pytest.raises(ValueError, match="Invalid foundry config"):
+            resolve_foundry_config(tmp_path)
 
 
 # ---------------------------------------------------------------------------
@@ -365,6 +400,7 @@ class TestCompileUserServices:
         assert bundle.env_vars["TAVILY_API_KEY"] == "http://host.docker.internal:8083/proxy/tavily"
         assert len(bundle.sbx_secrets) == 1
         assert bundle.sbx_secrets[0] == ("tavily", "TAVILY_API_KEY")
+        assert bundle.user_services[0]["domain"] == "api.tavily.com"
 
     def test_multiple_services(self):
         services = [
@@ -397,6 +433,7 @@ class TestCompileUserServices:
         bundle = compile_user_services(services)
         assert bundle.env_vars["READONLY_API_KEY"] == "http://host.docker.internal:8083/proxy/readonlyapi"
         assert bundle.sbx_secrets[0] == ("readonlyapi", "READONLY_API_KEY")
+        assert bundle.user_services[0]["paths"] == ["/v1/**"]
 
     def test_value_alias_normalizes_to_header(self):
         svc = UserService(
@@ -524,6 +561,8 @@ class TestCompileMcpProxy:
         content = json.loads(bundle.file_writes[0].content)
         assert "internal-api" in content["mcpServers"]
         assert "/proxy/internal-api" in content["mcpServers"]["internal-api"]["url"]
+        assert bundle.user_services[0]["domain"] == "api.internal.com"
+        assert bundle.user_services[0]["env_var"] == "INTERNAL_API_KEY"
 
     def test_proxy_custom_host_and_port(self):
         servers = [McpServerProxy(

@@ -12,10 +12,12 @@ unauthenticated.
 from __future__ import annotations
 
 import http.client
+import json
 import logging
 import os
 import re
 from fnmatch import fnmatch
+from pathlib import Path
 from urllib.parse import parse_qsl, urlencode
 
 try:
@@ -49,6 +51,7 @@ def create_user_services_blueprint(
     secret_store: SecretStore,
     nonce_store: NonceStore,
     rate_limiter: RateLimiter,
+    data_dir: str | None = None,
 ) -> Blueprint:
     """Create a Flask Blueprint that reverse-proxies to declared services.
 
@@ -58,6 +61,40 @@ def create_user_services_blueprint(
     bp = Blueprint("user_services_proxy", __name__)
 
     slug_map: dict[str, UserServiceEntry] = {_slug(s.name): s for s in services}
+
+    def _load_sandbox_services(sandbox_id: str) -> dict[str, UserServiceEntry]:
+        if not data_dir:
+            return {}
+
+        metadata_path = Path(data_dir) / "sandboxes" / f"{sandbox_id}.json"
+        try:
+            metadata = json.loads(metadata_path.read_text())
+        except (FileNotFoundError, OSError, json.JSONDecodeError):
+            return {}
+
+        raw_services = metadata.get("user_services", [])
+        if isinstance(raw_services, dict):
+            candidates = list(raw_services.values())
+        elif isinstance(raw_services, list):
+            candidates = raw_services
+        else:
+            return {}
+
+        result: dict[str, UserServiceEntry] = {}
+        for raw in candidates:
+            if not isinstance(raw, dict):
+                continue
+            try:
+                entry = UserServiceEntry(**raw)
+            except Exception as exc:
+                logger.warning(
+                    "Invalid proxy service metadata for sandbox %s: %s",
+                    sandbox_id,
+                    exc,
+                )
+                continue
+            result[_slug(entry.name)] = entry
+        return result
 
     @bp.route("/proxy/health", methods=["GET"])
     def proxy_health():
@@ -86,7 +123,10 @@ def create_user_services_blueprint(
         if auth_error is not None:
             return auth_error
 
-        svc = slug_map.get(service_slug)
+        effective_services = dict(slug_map)
+        effective_services.update(_load_sandbox_services(sandbox_id))
+
+        svc = effective_services.get(service_slug)
         if svc is None:
             return jsonify({"error": f"Unknown service: {service_slug}"}), 404
 
