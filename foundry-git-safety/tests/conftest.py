@@ -5,6 +5,33 @@ import subprocess
 
 import pytest
 
+from foundry_git_safety import decision_log
+
+
+@pytest.fixture(autouse=True)
+def _isolate_foundry_dirs(monkeypatch, tmp_path):
+    """Ensure tests never write to real ~/.foundry.
+
+    Redirects the decision-log and data directories to per-test temp dirs
+    and resets the decision-log singleton so it picks up the new paths.
+    """
+    log_dir = str(tmp_path / "decision-logs")
+    data_dir = str(tmp_path / "foundry-data")
+    monkeypatch.setenv("GIT_SAFETY_DECISION_LOG_DIR", log_dir)
+    monkeypatch.setenv("FOUNDRY_DATA_DIR", data_dir)
+
+    # Reset the singleton so the next get_decision_log_writer() call
+    # picks up the new env var.
+    if decision_log._writer is not None:
+        decision_log._writer.close()
+    decision_log._writer = None
+
+    yield
+
+    if decision_log._writer is not None:
+        decision_log._writer.close()
+    decision_log._writer = None
+
 
 @pytest.fixture
 def base_branch():

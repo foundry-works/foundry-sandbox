@@ -13,6 +13,7 @@ from foundry_git_safety.auth import (
     SecretStore,
     compute_signature,
 )
+from foundry_git_safety.decision_log import configure_decision_log
 from foundry_git_safety.server import create_git_api
 
 
@@ -29,6 +30,7 @@ def git_api_app(tmp_path_factory):
     """
     secrets_dir = tmp_path_factory.mktemp("secrets")
     data_dir = tmp_path_factory.mktemp("data")
+    logs_dir = tmp_path_factory.mktemp("logs")
 
     # Write a test HMAC secret for the known sandbox id
     test_sandbox_id = "test-sandbox-1"
@@ -50,6 +52,10 @@ def git_api_app(tmp_path_factory):
         rate_limiter=rate_limiter,
         data_dir=str(data_dir),
     )
+
+    # Configure the decision-log singleton for the session so the
+    # session-scoped app never writes to the real ~/.foundry.
+    configure_decision_log(log_dir=str(logs_dir))
 
     # Stash references so tests can inspect internal state if needed
     app._test_secrets_dir = secrets_dir

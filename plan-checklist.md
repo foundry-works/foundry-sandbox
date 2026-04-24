@@ -24,15 +24,15 @@
 
 ## Phase 3: Hermetic foundry-git-safety Tests
 
-- [ ] Inspect `foundry-git-safety/tests/conftest.py`.
-- [ ] Inspect `foundry-git-safety/tests/integration/conftest.py`.
-- [ ] Add or update an autouse fixture for `GIT_SAFETY_DECISION_LOG_DIR`.
-- [ ] Add or update an autouse fixture for `FOUNDRY_DATA_DIR` where needed.
-- [ ] Reset `foundry_git_safety.decision_log._writer` before tests that depend on log state.
-- [ ] Reset or close `foundry_git_safety.decision_log._writer` after those tests.
-- [ ] Ensure Flask app fixtures configure writable decision-log paths.
-- [ ] Run `cd foundry-git-safety && python -m pytest tests/integration -q`.
-- [ ] Run `cd foundry-git-safety && python -m pytest tests/unit tests/security tests/integration -q`.
+- [x] Inspect `foundry-git-safety/tests/conftest.py`.
+- [x] Inspect `foundry-git-safety/tests/integration/conftest.py`.
+- [x] Add or update an autouse fixture for `GIT_SAFETY_DECISION_LOG_DIR`.
+- [x] Add or update an autouse fixture for `FOUNDRY_DATA_DIR` where needed.
+- [x] Reset `foundry_git_safety.decision_log._writer` before tests that depend on log state.
+- [x] Reset or close `foundry_git_safety.decision_log._writer` after those tests.
+- [x] Ensure Flask app fixtures configure writable decision-log paths.
+- [x] Run `cd foundry-git-safety && python -m pytest tests/integration -q`.
+- [x] Run `cd foundry-git-safety && python -m pytest tests/unit tests/security tests/integration -q`.
 
 ## Phase 4: Validator Tests
 
