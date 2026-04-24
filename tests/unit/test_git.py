@@ -171,6 +171,21 @@ class TestEnsureRepoCheckout:
 
     @patch("foundry_sandbox.git.git_with_retry")
     @patch("foundry_sandbox.git.ensure_dir")
+    def test_fresh_clone_remote_default_branch(
+        self, mock_ensure_dir, mock_retry, tmp_path
+    ):
+        """branch=None should let git clone use the remote default branch."""
+        checkout = tmp_path / "checkout"
+
+        git.ensure_repo_checkout(
+            "https://example.com/repo.git", checkout, branch=None
+        )
+
+        args = mock_retry.call_args[0][0]
+        assert args == ["clone", "https://example.com/repo.git", str(checkout)]
+
+    @patch("foundry_sandbox.git.git_with_retry")
+    @patch("foundry_sandbox.git.ensure_dir")
     def test_existing_non_repo_raises(self, mock_ensure_dir, mock_retry, tmp_path):
         """Existing path that isn't a git repo should raise ValueError."""
         checkout = tmp_path / "checkout"

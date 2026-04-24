@@ -154,10 +154,22 @@ def _ensure_repo_root(repo_url: str) -> str:
         ensure_repo_checkout(
             repo_url,
             checkout_path,
-            branch="main",
+            branch=None,
         )
 
     return checkout_path
+
+
+def _sandbox_name_collision_suffix(base_name: str, name: str) -> str:
+    """Return the branch suffix implied by a generated sandbox name collision."""
+    if name == base_name:
+        return ""
+    if name.startswith(base_name):
+        return name[len(base_name):]
+    tail = name.rsplit("-", 1)[-1]
+    if tail.isdigit():
+        return f"-{tail}"
+    return ""
 
 
 # ---------------------------------------------------------------------------
@@ -484,7 +496,7 @@ def new(
     if last or preset:
         name = find_next_sandbox_name(base_name)
         if name != base_name:
-            suffix = name[len(base_name):]
+            suffix = _sandbox_name_collision_suffix(base_name, name)
             branch = f"{base_branch}{suffix}"
 
     # Atomically claim the sandbox name
@@ -506,7 +518,7 @@ def new(
                 sys.exit(1)
             _seen_names.add(name)
             if name != base_name:
-                suffix = name[len(base_name):]
+                suffix = _sandbox_name_collision_suffix(base_name, name)
                 branch = f"{base_branch}{suffix}"
             else:
                 branch = base_branch

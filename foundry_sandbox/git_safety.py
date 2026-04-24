@@ -102,6 +102,15 @@ def generate_hmac_secret() -> str:
     return _secrets.token_hex(32)
 
 
+def _validate_git_safety_sandbox_id(sandbox_id: str) -> None:
+    """Validate sandbox IDs before writing git-safety auth artifacts."""
+    from foundry_sandbox.validate import validate_sandbox_name
+
+    valid, error = validate_sandbox_name(sandbox_id)
+    if not valid:
+        raise ValueError(f"Invalid git-safety sandbox id: {error}")
+
+
 def write_hmac_secret_to_sandbox(
     sandbox_name: str,
     secret: str,
@@ -156,6 +165,7 @@ def write_hmac_secret_for_server(
     Returns:
         Path to the written secret file.
     """
+    _validate_git_safety_sandbox_id(sandbox_id)
     base_dir = secrets_dir or _DEFAULT_SECRETS_DIR
     os.makedirs(base_dir, exist_ok=True)
     secret_path = Path(base_dir) / sandbox_id
@@ -196,6 +206,7 @@ def register_sandbox_with_git_safety(
     Returns:
         Path to the written metadata file.
     """
+    _validate_git_safety_sandbox_id(sandbox_id)
     base_dir = data_dir or _DEFAULT_DATA_DIR
     sandboxes_dir = Path(base_dir) / "sandboxes"
     sandboxes_dir.mkdir(parents=True, exist_ok=True)
@@ -784,6 +795,10 @@ def provision_git_safety(
     from foundry_sandbox.state import patch_sandbox_metadata
 
     sid = sandbox_id or sandbox_name
+    try:
+        _validate_git_safety_sandbox_id(sid)
+    except ValueError as exc:
+        return ProvisioningResult(success=False, error=str(exc))
 
     try:
         hmac_secret = generate_hmac_secret()

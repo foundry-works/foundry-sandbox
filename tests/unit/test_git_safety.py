@@ -152,6 +152,15 @@ class TestWriteHmacSecretForServer:
         write_hmac_secret_for_server("sbx-1", "secret", secrets_dir=str(secrets_dir))
         assert secrets_dir.is_dir()
 
+    def test_rejects_auth_incompatible_sandbox_id(self, tmp_path):
+        secrets_dir = tmp_path / "secrets"
+        with pytest.raises(ValueError, match="Invalid git-safety sandbox id"):
+            write_hmac_secret_for_server(
+                "x" * 65,
+                "secret",
+                secrets_dir=str(secrets_dir),
+            )
+
 
 # ============================================================================
 # Sandbox Registration
@@ -175,6 +184,16 @@ class TestRegisterSandboxWithGitSafety:
         assert metadata["from_branch"] == "main"
         assert metadata["repos"] == ["org/repo"]
         assert metadata["allow_pr"] is True
+
+    def test_rejects_auth_incompatible_sandbox_id(self, tmp_path):
+        data_dir = tmp_path / "data"
+        with pytest.raises(ValueError, match="Invalid git-safety sandbox id"):
+            register_sandbox_with_git_safety(
+                "bad sandbox",
+                branch="feature-x",
+                repo_spec="org/repo",
+                data_dir=str(data_dir),
+            )
 
     def test_minimal(self, tmp_path):
         data_dir = tmp_path / "data"
@@ -601,6 +620,13 @@ class TestProvisionGitSafety:
         result = provision_git_safety("test-sandbox", branch="main", repo_spec="org/repo")
         assert result.success is False
         assert "HMAC generation failed" in result.error
+
+    def test_invalid_auth_id_fails_before_provisioning(self):
+        from foundry_sandbox.git_safety import provision_git_safety
+
+        result = provision_git_safety("x" * 65, branch="main", repo_spec="org/repo")
+        assert result.success is False
+        assert "Invalid git-safety sandbox id" in result.error
 
     @patch("foundry_sandbox.git_safety.write_hmac_secret_to_sandbox", side_effect=OSError("sandbox not running"))
     @patch("foundry_sandbox.git_safety.generate_hmac_secret", return_value="a" * 64)

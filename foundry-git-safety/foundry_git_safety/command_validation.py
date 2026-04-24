@@ -148,6 +148,10 @@ _CAT_FILE_BLOCKED_FLAGS: frozenset[str] = frozenset({
     "--batch-command",
 })
 
+_APPLY_BLOCKED_FLAGS: frozenset[str] = frozenset({
+    "--unsafe-paths",
+})
+
 # Only --dry-run is allowed for clean
 _CLEAN_ALLOWED_FLAGS: frozenset[str] = frozenset({
     "--dry-run", "-n",
@@ -161,6 +165,7 @@ COMMAND_BLOCKED_FLAGS: dict[str, frozenset[str]] = {
     "branch": _BRANCH_BLOCKED_FLAGS,
     "clean": _CLEAN_BLOCKED_FLAGS,
     "cat-file": _CAT_FILE_BLOCKED_FLAGS,
+    "apply": _APPLY_BLOCKED_FLAGS,
 }
 
 # ---------------------------------------------------------------------------

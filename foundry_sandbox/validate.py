@@ -14,6 +14,8 @@ import os
 import re
 from urllib.parse import urlparse
 
+from foundry_sandbox.constants import SANDBOX_NAME_MAX_LENGTH
+
 
 # ============================================================================
 # Name and URL Validation
@@ -31,8 +33,10 @@ def validate_sandbox_name(name: str) -> tuple[bool, str]:
     """
     if not name:
         return False, "Sandbox name required"
-    if len(name) > 128:
-        return False, "Sandbox name too long (max 128 characters)"
+    if len(name) > SANDBOX_NAME_MAX_LENGTH:
+        return False, (
+            f"Sandbox name too long (max {SANDBOX_NAME_MAX_LENGTH} characters)"
+        )
     if name in {".", ".."}:
         return False, "Sandbox name cannot be '.' or '..'"
     if "/" in name or "\\" in name:

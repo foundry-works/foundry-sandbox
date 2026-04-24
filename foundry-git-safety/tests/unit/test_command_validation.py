@@ -226,6 +226,11 @@ class TestValidateCommand:
         assert err is not None
         assert flag in err.reason
 
+    def test_apply_unsafe_paths_blocked(self):
+        err = validate_command(["apply", "--unsafe-paths", "change.patch"])
+        assert err is not None
+        assert "--unsafe-paths" in err.reason
+
     # -- Per-command blocked flags from COMMAND_BLOCKED_FLAGS --
 
     def test_push_force_blocked(self):

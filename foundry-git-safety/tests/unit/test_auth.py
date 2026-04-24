@@ -10,6 +10,7 @@ from foundry_git_safety.auth import (
     RateLimiter,
     SecretStore,
     TokenBucket,
+    authenticate_request,
     compute_signature,
     verify_signature,
 )
@@ -54,6 +55,14 @@ class TestSecretStore:
         store = SecretStore(secrets_path=str(tmp_path))
         with pytest.raises(ValueError, match="Invalid sandbox_id"):
             store.get_secret("bad sandbox!")
+
+    def test_dot_sandbox_id_allowed(self, tmp_path):
+        """Sandbox IDs may contain dots to match cast name validation."""
+        secret_file = tmp_path / "repo.1"
+        secret_file.write_bytes(b"super-secret-key\n")
+        store = SecretStore(secrets_path=str(tmp_path))
+        result = store.get_secret("repo.1")
+        assert result == b"super-secret-key"
 
     def test_revoke_clears_cache(self, tmp_path):
         """After revoke(), the secret is re-read from disk on next get_secret."""
@@ -240,6 +249,38 @@ class TestNonceStore:
         # Store now has: nonce-3, nonce-4, nonce-1
         # nonce-3 should still be present
         assert store.check_and_store("sandbox-1", "nonce-3") is False
+
+
+class TestAuthenticateRequest:
+    """Tests for the Flask request authentication flow."""
+
+    def test_invalid_sandbox_id_returns_401(self, tmp_path):
+        """Malformed IDs fail cleanly instead of escaping as ValueError."""
+        from flask import Flask, request
+
+        app = Flask(__name__)
+        store = SecretStore(secrets_path=str(tmp_path))
+        nonce_store = NonceStore()
+        limiter = RateLimiter()
+        headers = {
+            "X-Sandbox-Id": "bad sandbox!",
+            "X-Request-Signature": "0" * 64,
+            "X-Request-Timestamp": str(time.time()),
+            "X-Request-Nonce": "nonce",
+        }
+
+        with app.test_request_context("/git/exec", method="POST", headers=headers):
+            sandbox_id, error = authenticate_request(
+                request=request,
+                secret_store=store,
+                nonce_store=nonce_store,
+                rate_limiter=limiter,
+            )
+
+        assert sandbox_id is None
+        assert error is not None
+        _, status = error
+        assert status == 401
 
 
 # ---------------------------------------------------------------------------

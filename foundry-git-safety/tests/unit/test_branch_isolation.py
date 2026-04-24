@@ -466,6 +466,61 @@ class TestTagShaReachability:
         assert result is None
 
 
+class TestCheckoutShaReachability:
+    """Raw SHA checkout/switch targets must pass the reachability check."""
+
+    def test_unreachable_checkout_sha_blocked(self):
+        meta = _make_metadata(sandbox_branch="sandbox/alice")
+        with (
+            patch(
+                "foundry_git_safety.branch_isolation.resolve_bare_repo_path",
+                return_value="/bare",
+            ),
+            patch(
+                "foundry_git_safety.branch_isolation.os.path.isfile",
+                return_value=False,
+            ),
+            patch(
+                "foundry_git_safety.branch_isolation._get_allowed_refs",
+                return_value=["refs/heads/sandbox/alice"],
+            ),
+            patch(
+                "foundry_git_safety.branch_isolation._check_sha_reachability",
+                return_value=False,
+            ),
+        ):
+            result = validate_sha_reachability(
+                ["checkout", "a" * 40], "/repo", meta
+            )
+        assert isinstance(result, ValidationError)
+        assert "not reachable" in result.reason
+
+    def test_reachable_checkout_new_branch_sha_allowed(self):
+        meta = _make_metadata(sandbox_branch="sandbox/alice")
+        with (
+            patch(
+                "foundry_git_safety.branch_isolation.resolve_bare_repo_path",
+                return_value="/bare",
+            ),
+            patch(
+                "foundry_git_safety.branch_isolation.os.path.isfile",
+                return_value=False,
+            ),
+            patch(
+                "foundry_git_safety.branch_isolation._get_allowed_refs",
+                return_value=["refs/heads/sandbox/alice"],
+            ),
+            patch(
+                "foundry_git_safety.branch_isolation._check_sha_reachability",
+                return_value=True,
+            ),
+        ):
+            result = validate_sha_reachability(
+                ["checkout", "-b", "feature/x", "a" * 40], "/repo", meta
+            )
+        assert result is None
+
+
 # ---------------------------------------------------------------------------
 # TestNormalizePathspecArgs
 # ---------------------------------------------------------------------------

@@ -148,7 +148,13 @@ def _sbx_attach(name: str, working_dir: str) -> None:
     which is required for git safety environment variables to be available.
     """
     if working_dir:
-        shell_cmd = ["bash", "-lc", f"cd {working_dir} && exec bash -l"]
+        shell_cmd = [
+            "bash",
+            "-lc",
+            'cd -- "$1" && exec bash -l',
+            "bash",
+            working_dir,
+        ]
     else:
         shell_cmd = ["bash", "-l"]
     proc = sbx_exec_streaming(name, shell_cmd, interactive=True)

@@ -16,7 +16,9 @@ from foundry_sandbox.validate import (
 # ============================================================================
 
 
-@pytest.mark.parametrize("name", ["abc", "repo-1", "repo_1", "repo.1", "A", "Z9"])
+@pytest.mark.parametrize(
+    "name", ["abc", "repo-1", "repo_1", "repo.1", "A", "Z9", "x" * 64]
+)
 def test_sandbox_name_valid(name):
     ok, msg = validate_sandbox_name(name)
     assert ok is True
@@ -27,7 +29,7 @@ def test_sandbox_name_valid(name):
     "name, expected_substring",
     [
         ("", "required"),
-        ("x" * 129, "too long"),
+        ("x" * 65, "too long"),
         (".", "cannot be '.'"),
         ("..", "cannot be '.'"),
         ("a/b", "path separators"),

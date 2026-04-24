@@ -140,12 +140,13 @@ def remove_stale_git_locks(repo_path: str | Path) -> None:
 def ensure_repo_checkout(
     repo_url: str,
     checkout_path: str | Path,
-    branch: str = "main",
+    branch: str | None = "main",
 ) -> None:
     """Clone or update a working directory checkout.
 
     Behavior:
-      - If *checkout_path* does not exist, clones the repo on *branch*.
+      - If *checkout_path* does not exist, clones the repo on *branch*, or the
+        remote default branch when *branch* is None/empty.
       - If it exists but is not a git repo, raises ValueError.
       - If there are uncommitted changes, skips pull with a warning.
       - Otherwise, fetches, checks out *branch*, and fast-forward pulls.
@@ -162,7 +163,7 @@ def ensure_repo_checkout(
     if not repo_url or not checkout_path:
         raise ValueError("repo_url and checkout_path are required")
 
-    if branch.startswith("-"):
+    if branch and branch.startswith("-"):
         raise ValueError(f"branch must not start with '-': {branch!r}")
 
     cp = Path(checkout_path)
@@ -177,7 +178,11 @@ def ensure_repo_checkout(
 
         # Fresh clone
         log_info(f"Cloning {repo_url} to {cp}...")
-        git_with_retry(["clone", "--branch", branch, repo_url, str(cp)])
+        clone_args = ["clone"]
+        if branch:
+            clone_args.extend(["--branch", branch])
+        clone_args.extend([repo_url, str(cp)])
+        git_with_retry(clone_args)
         return
 
     # Existing repo — check for uncommitted changes
@@ -201,6 +206,18 @@ def ensure_repo_checkout(
     # Clean working tree — update
     log_info(f"Updating {repo_url} in {cp}...")
     git_with_retry(["-C", str(cp), "fetch", "origin", "--prune"])
+
+    if not branch:
+        pull_result = subprocess.run(
+            ["git", "-C", str(cp), "pull", "--ff-only"],
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=TIMEOUT_GIT_TRANSFER,
+        )
+        if pull_result.returncode != 0:
+            log_warn(f"Could not fast-forward {cp}")
+        return
 
     # Try checking out the branch
     checkout_result = subprocess.run(

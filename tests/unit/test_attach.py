@@ -63,12 +63,39 @@ class TestAttachCommand:
         result = runner.invoke(attach, ["my-sandbox"])
         assert result.exit_code == 0
         cmd = mock_streaming.call_args[0][1]
-        assert "bash" in cmd
-        assert "-lc" in cmd
-        assert "cd src/subdir" in cmd[2]
+        assert cmd == [
+            "bash",
+            "-lc",
+            'cd -- "$1" && exec bash -l',
+            "bash",
+            "src/subdir",
+        ]
         mock_streaming.assert_called_once()
         _, kwargs = mock_streaming.call_args
         assert kwargs["interactive"] is True
+
+    @patch("foundry_sandbox.commands.attach.sbx_check_available")
+    @patch("foundry_sandbox.commands.attach.sbx_is_running", return_value=True)
+    @patch("foundry_sandbox.commands.attach.sbx_exec_streaming")
+    @patch("foundry_sandbox.commands.attach.load_sandbox_metadata")
+    @patch("foundry_sandbox.commands.attach.save_last_attach")
+    @patch("foundry_sandbox.commands.attach.resolve_host_worktree_path")
+    @patch("foundry_sandbox.commands._helpers.validate_existing_sandbox_name")
+    def test_attach_working_dir_is_passed_as_arg(
+        self, mock_validate, mock_resolve, mock_save, mock_meta,
+        mock_streaming, mock_running, mock_check,
+    ):
+        working_dir = "src; touch /tmp/pwned"
+        _mock_sandbox(mock_validate, mock_resolve, mock_meta, mock_streaming,
+                       mock_save, mock_running, mock_check,
+                       working_dir=working_dir)
+
+        runner = CliRunner()
+        result = runner.invoke(attach, ["my-sandbox"])
+        assert result.exit_code == 0
+        cmd = mock_streaming.call_args[0][1]
+        assert cmd[2] == 'cd -- "$1" && exec bash -l'
+        assert cmd[4] == working_dir
 
     @patch("foundry_sandbox.commands.attach._start_sandbox")
     @patch("foundry_sandbox.commands.attach.sbx_check_available")

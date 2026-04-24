@@ -56,8 +56,8 @@ def get_sandbox_configs_dir() -> Path:
 # Name Length
 # ============================================================================
 
-SANDBOX_NAME_MAX_LENGTH: int = 120
-"""Maximum length for auto-generated sandbox names before truncation+hash."""
+SANDBOX_NAME_MAX_LENGTH: int = 64
+"""Maximum sandbox name length supported by git-safety authentication."""
 
 # ============================================================================
 # Subprocess Timeout Constants (seconds)

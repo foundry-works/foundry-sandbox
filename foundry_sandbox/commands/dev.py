@@ -18,6 +18,7 @@ from foundry_sandbox.commands.new import (
     _ensure_repo_root,
     _generate_branch_name,
     _resolve_repo_input,
+    _sandbox_name_collision_suffix,
 )
 from foundry_sandbox.commands.new_setup import _validate_preconditions, new_sbx_setup
 from foundry_sandbox.foundry_config import load_user_ide_config, normalize_profile_packages, resolve_foundry_config, resolve_profile
@@ -271,7 +272,8 @@ def dev(
         os.makedirs(sandbox_config_path, exist_ok=False)
     except FileExistsError:
         name = find_next_sandbox_name(name)
-        suffix = name[len(_helpers_sandbox_name(repo_name, branch)):]
+        base_name = _helpers_sandbox_name(repo_name, branch)
+        suffix = _sandbox_name_collision_suffix(base_name, name)
         if suffix:
             branch = f"{branch}{suffix}"
         sandbox_config_path = path_sandbox_config(name)

@@ -282,7 +282,9 @@ def _is_allowed_ref(
     """Check if a ref argument is allowed under branch isolation.
 
     Allows: HEAD, @{...} forms, own sandbox branch, well-known branches,
-    tags, SHA hashes (>= 12 hex chars), range operators (checked recursively).
+    tags, SHA hashes (>= 12 hex chars, with reachability checked later
+    for commands that accept commit-ish arguments), range operators
+    (checked recursively).
     Blocks: FETCH_HEAD, other sandbox branches, short hex strings.
     """
     # Handle range operators recursively
@@ -1122,6 +1124,53 @@ def _extract_tag_sha_args(sub_args: list[str]) -> list[str]:
     return [base] if _is_sha_like(base) else []
 
 
+def _extract_checkout_sha_args(sub_args: list[str]) -> list[str]:
+    """Collect SHA-like targets from checkout/switch commit-ish arguments."""
+    creating_branch = False
+    skip_next = False
+    positionals: list[str] = []
+
+    idx = 0
+    while idx < len(sub_args):
+        arg = sub_args[idx]
+        if arg == "--":
+            break
+        if skip_next:
+            skip_next = False
+            idx += 1
+            continue
+
+        if arg in _BRANCH_CREATE_FLAGS:
+            creating_branch = True
+            skip_next = True
+            idx += 1
+            continue
+
+        if arg in _CHECKOUT_VALUE_FLAGS:
+            skip_next = True
+            idx += 1
+            continue
+
+        flag_name = arg.split("=", 1)[0]
+        if flag_name in _CHECKOUT_VALUE_FLAGS:
+            if flag_name in _BRANCH_CREATE_FLAGS:
+                creating_branch = True
+            idx += 1
+            continue
+
+        if not arg.startswith("-"):
+            positionals.append(arg)
+
+        idx += 1
+
+    if not positionals:
+        return []
+
+    target = positionals[-1] if creating_branch else positionals[0]
+    base = _strip_rev_suffixes(target)
+    return [base] if _is_sha_like(base) else []
+
+
 def _get_allowed_refs(
     bare_repo: str,
     sandbox_branch: str,
@@ -1276,9 +1325,11 @@ def validate_sha_reachability(
     if subcommand is None:
         return None
 
-    # Only check ref-reading commands and tag commit-ish arguments.
+    # Check commands that can dereference raw commit-ish arguments.
     if subcommand == "tag":
         shas = _extract_tag_sha_args(sub_args)
+    elif subcommand in ("checkout", "switch"):
+        shas = _extract_checkout_sha_args(sub_args)
     elif subcommand in _REF_READING_CMDS:
         shas = _extract_sha_args(sub_args)
     else:

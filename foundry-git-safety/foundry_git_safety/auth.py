@@ -30,7 +30,7 @@ IP_THROTTLE_WINDOW = 60
 IP_THROTTLE_MAX = 100
 MAX_REQUEST_BODY = 256 * 1024
 
-SANDBOX_ID_RE = re.compile(r"^[a-zA-Z0-9_-]{1,64}$")
+SANDBOX_ID_RE = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9._-]{0,63}$")
 
 
 class SecretStore:
@@ -52,7 +52,7 @@ class SecretStore:
 
     @staticmethod
     def _validate_sandbox_id(sandbox_id: str) -> None:
-        if not SANDBOX_ID_RE.match(sandbox_id):
+        if sandbox_id in {".", ".."} or not SANDBOX_ID_RE.match(sandbox_id):
             raise ValueError(f"Invalid sandbox_id: {sandbox_id!r}")
 
     def _get_mtime(self, sandbox_id: str) -> float | None:
@@ -368,7 +368,11 @@ def authenticate_request(
         return None, (jsonify({"error": "Request timestamp outside clock window"}), 401)
 
     # 4. Get sandbox secret
-    secret = secret_store.get_secret(sandbox_id)
+    try:
+        secret = secret_store.get_secret(sandbox_id)
+    except ValueError:
+        logger.warning("Invalid sandbox id in auth request: %r", sandbox_id)
+        return None, (jsonify({"error": "Invalid sandbox id"}), 401)
     if secret is None:
         return None, (jsonify({"error": "Unknown sandbox or missing secret"}), 401)
 

@@ -260,6 +260,22 @@ def sandbox_name(repo_name: str, branch: str) -> str:
     return name
 
 
+def _truncate_sandbox_name(name: str) -> str:
+    """Truncate generated sandbox names without losing uniqueness entirely."""
+    if len(name) <= SANDBOX_NAME_MAX_LENGTH:
+        return name
+    digest = hashlib.sha256(name.encode("utf-8")).hexdigest()[:8]
+    return f"{name[:SANDBOX_NAME_MAX_LENGTH - 9]}-{digest}"
+
+
+def _append_sandbox_name_suffix(base_name: str, suffix: str) -> str:
+    """Append a collision suffix while preserving the suffix itself."""
+    candidate = f"{base_name}{suffix}"
+    if len(candidate) <= SANDBOX_NAME_MAX_LENGTH:
+        return candidate
+    return f"{base_name[:SANDBOX_NAME_MAX_LENGTH - len(suffix)]}{suffix}"
+
+
 def find_next_sandbox_name(base_name: str) -> str:
     """Find next available sandbox name by appending a numeric suffix.
 
@@ -276,14 +292,16 @@ def find_next_sandbox_name(base_name: str) -> str:
     def _taken(candidate: str) -> bool:
         return (configs / candidate).exists()
 
+    base_name = _truncate_sandbox_name(base_name)
+
     if not _taken(base_name):
         return base_name
 
     for i in range(2, 10_000):
-        candidate = f"{base_name}-{i}"
+        candidate = _append_sandbox_name_suffix(base_name, f"-{i}")
         if not _taken(candidate):
             return candidate
-    return f"{base_name}-{os.getpid()}"
+    return _append_sandbox_name_suffix(base_name, f"-{os.getpid()}")
 
 
 def strip_github_url(repo_url: str) -> str:

@@ -330,6 +330,16 @@ class TestFindNextSandboxName:
         result = find_next_sandbox_name("my-sandbox")
         assert result == "my-sandbox-2"
 
+    def test_suffix_keeps_name_within_auth_limit(self, tmp_path):
+        configs = tmp_path / "sandboxes"
+        configs.mkdir()
+        base = "x" * 64
+        (configs / base).mkdir()
+        result = find_next_sandbox_name(base)
+        assert len(result) <= 64
+        assert result != base
+        assert result.endswith("-2")
+
     def test_only_checks_configs_not_worktrees(self, tmp_path):
         configs = tmp_path / "sandboxes"
         configs.mkdir()
