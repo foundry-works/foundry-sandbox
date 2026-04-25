@@ -6,6 +6,7 @@ run git commands through the wrapper, verify push blocking, and destroy.
 """
 
 import json
+import os
 import subprocess
 import time
 
@@ -21,6 +22,7 @@ from foundry_sandbox.git_safety import (
 from foundry_sandbox.sbx import (
     sbx_create,
     sbx_exec,
+    sbx_get_workspace_info,
     sbx_rm,
     sbx_stop,
 )
@@ -39,12 +41,30 @@ def _init_git_repo(repo_dir, branch="main"):
     subprocess.run(["git", "commit", "-m", "initial"], cwd=repo_dir, check=True, capture_output=True)
 
 
+def _run_sbx_exec_no_check(sandbox, cmd):
+    """Run an sbx exec command without raising on non-zero exit."""
+    return subprocess.run(
+        ["sbx", "exec", sandbox, "--", *cmd],
+        capture_output=True,
+        text=True,
+        timeout=60,
+        check=False,
+    )
+
+
 def _setup_and_provision(sandbox, tmp_path, branch="main"):
-    """Create repo, sandbox, metadata, and provision git safety. Returns repo_dir."""
+    """Create repo, sandbox, metadata, and provision git safety."""
     repo_dir = tmp_path / "repo"
     _init_git_repo(repo_dir, branch=branch)
 
-    sbx_create(sandbox, agent="shell", path=str(repo_dir), branch=branch)
+    create_result = sbx_create(sandbox, agent="shell", path=str(repo_dir), branch=branch)
+    info = sbx_get_workspace_info(create_result.stdout or "")
+    host_worktree_path = info["worktree"] or str(repo_dir)
+    mount_dir = info["workspace"] or str(repo_dir)
+    workspace_dir = os.path.join(
+        mount_dir,
+        os.path.relpath(host_worktree_path, str(repo_dir)),
+    )
 
     # Write initial metadata so provision_git_safety can patch it
     write_sandbox_metadata(
@@ -55,6 +75,8 @@ def _setup_and_provision(sandbox, tmp_path, branch="main"):
             repo_url=str(repo_dir),
             branch=branch,
             git_safety_enabled=False,
+            workspace_dir=workspace_dir,
+            host_worktree_path=host_worktree_path,
         ),
     )
 
@@ -63,11 +85,12 @@ def _setup_and_provision(sandbox, tmp_path, branch="main"):
 
     result = provision_git_safety(
         sandbox,
-        workspace_dir="/workspace",
+        workspace_dir=workspace_dir,
         branch=branch,
         repo_spec=str(repo_dir),
+        repo_root=host_worktree_path,
     )
-    return repo_dir, result
+    return repo_dir, workspace_dir, result
 
 
 @pytest.mark.slow
@@ -77,7 +100,7 @@ class TestLiveSbxSmoke:
 
     def test_create_sandbox_and_verify_wrapper(self, sandbox, tmp_path):
         """Create sandbox, verify wrapper exists and checksum matches."""
-        repo_dir, result = _setup_and_provision(sandbox, tmp_path)
+        repo_dir, workspace_dir, result = _setup_and_provision(sandbox, tmp_path)
         assert result.success, f"Provisioning failed: {result.error}"
 
         # Verify wrapper exists inside sandbox
@@ -101,13 +124,13 @@ class TestLiveSbxSmoke:
         The HMAC secret and config are persisted to /var/lib/foundry/ which
         survives VM restarts between sbx exec calls.
         """
-        repo_dir, result = _setup_and_provision(sandbox, tmp_path)
+        repo_dir, workspace_dir, result = _setup_and_provision(sandbox, tmp_path)
         assert result.success, f"Provisioning failed: {result.error}"
 
         # Run a simple read-only git command through the wrapper
         status = sbx_exec(
             sandbox,
-            ["git", "status", "--porcelain"],
+            ["sh", "-lc", f"cd {workspace_dir!r} && git status --porcelain"],
         )
         assert status.returncode == 0, (
             f"git status failed: stdout={status.stdout} stderr={status.stderr}"
@@ -123,13 +146,15 @@ class TestLiveSbxSmoke:
         The HMAC secret and config are persisted to /var/lib/foundry/ which
         survives VM restarts between sbx exec calls.
         """
-        repo_dir, result = _setup_and_provision(sandbox, tmp_path, branch="main")
+        repo_dir, workspace_dir, result = _setup_and_provision(
+            sandbox, tmp_path, branch="main"
+        )
         assert result.success, f"Provisioning failed: {result.error}"
 
         # Attempt to push to the protected 'main' branch — should be blocked
-        push_result = sbx_exec(
+        push_result = _run_sbx_exec_no_check(
             sandbox,
-            ["git", "push", "origin", "main"],
+            ["sh", "-lc", f"cd {workspace_dir!r} && git push origin main"],
         )
         assert push_result.returncode != 0, (
             "Push to protected branch should have been blocked but succeeded"
@@ -170,10 +195,16 @@ class TestLiveSbxSmoke:
         """
         # Restart server with deep-policy enabled
         git_safety_server_stop()
-        start_result = git_safety_server_start(deep_policy=True)
-        assert start_result.returncode == 0, (
-            f"Server start with --deep-policy failed: {start_result.stderr}"
-        )
+        try:
+            start_result = git_safety_server_start(deep_policy=True)
+        except subprocess.TimeoutExpired as exc:
+            assert git_safety_server_is_running(), (
+                f"Server start with --deep-policy timed out: {exc.stderr}"
+            )
+        else:
+            assert start_result.returncode == 0, (
+                f"Server start with --deep-policy failed: {start_result.stderr}"
+            )
         time.sleep(1)
         assert git_safety_server_is_running(), "Server not running after start"
 
@@ -182,13 +213,15 @@ class TestLiveSbxSmoke:
 
         # --- Deny path: PR merge should be blocked by policy ---
         deny_cmd = (
-            'source /var/lib/foundry/git-safety.env && '
+            '. /var/lib/foundry/git-safety.env && '
             'eval "$(proxy-sign PUT /deep-policy/github/repos/owner/repo/pulls/1/merge)" && '
             'curl -s -w \'\\nHTTP_CODE:%{http_code}\\n\' '
             '-X PUT '
             '-H "Content-Type: application/json" '
-            '-H "$X_SANDBOX_ID" -H "$X_REQUEST_SIGNATURE" '
-            '-H "$X_REQUEST_TIMESTAMP" -H "$X_REQUEST_NONCE" '
+            '-H "X-Sandbox-Id: $X_SANDBOX_ID" '
+            '-H "X-Request-Signature: $X_REQUEST_SIGNATURE" '
+            '-H "X-Request-Timestamp: $X_REQUEST_TIMESTAMP" '
+            '-H "X-Request-Nonce: $X_REQUEST_NONCE" '
             '-x http://gateway.docker.internal:3128 '
             '"http://${GIT_API_HOST}:${GIT_API_PORT}/deep-policy/github/repos/owner/repo/pulls/1/merge"'
         )
@@ -205,11 +238,13 @@ class TestLiveSbxSmoke:
         # --- Allow path: GET commits should pass policy eval ---
         # Will fail at upstream (no real GitHub), but should NOT be a 403 block.
         allow_cmd = (
-            'source /var/lib/foundry/git-safety.env && '
+            '. /var/lib/foundry/git-safety.env && '
             'eval "$(proxy-sign GET /deep-policy/github/repos/owner/repo/commits)" && '
             'curl -s -w \'\\nHTTP_CODE:%{http_code}\\n\' '
-            '-H "$X_SANDBOX_ID" -H "$X_REQUEST_SIGNATURE" '
-            '-H "$X_REQUEST_TIMESTAMP" -H "$X_REQUEST_NONCE" '
+            '-H "X-Sandbox-Id: $X_SANDBOX_ID" '
+            '-H "X-Request-Signature: $X_REQUEST_SIGNATURE" '
+            '-H "X-Request-Timestamp: $X_REQUEST_TIMESTAMP" '
+            '-H "X-Request-Nonce: $X_REQUEST_NONCE" '
             '-x http://gateway.docker.internal:3128 '
             '"http://${GIT_API_HOST}:${GIT_API_PORT}/deep-policy/github/repos/owner/repo/commits"'
         )
