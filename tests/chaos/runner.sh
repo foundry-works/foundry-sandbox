@@ -77,6 +77,10 @@ fi
 
 info "Chaos test runner starting"
 info "Output format: ${OUTPUT_FORMAT}"
+if [[ -n "${OUTPUT_DIR}" ]]; then
+    mkdir -p "${OUTPUT_DIR}"
+    info "Output dir: ${OUTPUT_DIR}"
+fi
 
 # Discover modules
 modules=()
@@ -101,11 +105,6 @@ fi
 
 info "Found ${#modules[@]} module(s)"
 
-# Execute modules
-overall_pass=0
-overall_fail=0
-overall_warn=0
-
 for mod in "${modules[@]}"; do
     mod_name="$(basename "${mod}" .sh)"
     info "Running module: ${mod_name}"
@@ -127,12 +126,12 @@ done
 # Summary
 echo ""
 echo "=== Chaos Test Summary ==="
-echo "PASS:  ${PASS_COUNT:-0}"
-echo "FAIL:  ${FAIL_COUNT:-0}"
-echo "WARN:  ${WARN_COUNT:-0}"
+echo "PASS:  ${PASS:-0}"
+echo "FAIL:  ${FAIL:-0}"
+echo "WARN:  ${WARN:-0}"
 echo "========================="
 
-if [[ "${FAIL_COUNT:-0}" -gt 0 ]]; then
+if [[ "${FAIL:-0}" -gt 0 ]]; then
     exit 1
 fi
 exit 0

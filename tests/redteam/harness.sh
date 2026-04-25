@@ -127,6 +127,187 @@ info() {
     echo -e "  ${CYAN}ℹ${NC} $1"
 }
 
+# --- Workspace helpers ---
+workspace_candidates() {
+    local seen=":" candidate
+    for candidate in "${WORKSPACE_DIR:-}" /workspace "$PWD"; do
+        [[ -n "$candidate" ]] || continue
+        [[ -d "$candidate" ]] || continue
+        case "$seen" in
+            *":$candidate:"*) continue ;;
+        esac
+        seen="${seen}${candidate}:"
+        printf '%s\n' "$candidate"
+    done
+}
+
+foundry_workspace_dir() {
+    local candidate
+    while IFS= read -r candidate; do
+        printf '%s\n' "$candidate"
+        return 0
+    done < <(workspace_candidates)
+    printf '%s\n' "$PWD"
+}
+
+# --- Deep-policy proxy helpers ---
+deep_policy_available() {
+    [[ -n "${GIT_API_HOST:-}" ]] \
+        && [[ -n "${GIT_API_PORT:-}" ]] \
+        && command -v proxy-sign >/dev/null 2>&1
+}
+
+deep_policy_request() {
+    local method="$1"
+    local path="$2"
+    local body="${3:-}"
+    local headers_file="${4:-}"
+    local sign_output proxy
+    local X_SANDBOX_ID X_REQUEST_TIMESTAMP X_REQUEST_NONCE X_REQUEST_SIGNATURE
+
+    if ! deep_policy_available; then
+        echo "deep-policy proxy unavailable: need GIT_API_HOST, GIT_API_PORT, and proxy-sign" >&2
+        return 2
+    fi
+
+    if ! sign_output=$(proxy-sign "$method" "$path" "$body" 2>&1); then
+        echo "proxy-sign failed: $sign_output" >&2
+        return 2
+    fi
+    eval "$sign_output"
+
+    proxy="${SBX_PROXY:-http://gateway.docker.internal:3128}"
+    local curl_args=(
+        -s
+        --max-time 10
+        --proxy "$proxy"
+        -w $'\n%{http_code}'
+        -X "$method"
+        -H "X-Sandbox-Id: $X_SANDBOX_ID"
+        -H "X-Request-Signature: $X_REQUEST_SIGNATURE"
+        -H "X-Request-Timestamp: $X_REQUEST_TIMESTAMP"
+        -H "X-Request-Nonce: $X_REQUEST_NONCE"
+    )
+
+    if [[ -n "$headers_file" ]]; then
+        curl_args+=(-D "$headers_file")
+    fi
+    if [[ -n "$body" ]]; then
+        curl_args+=(-H "Content-Type: application/json" --data-binary "$body")
+    fi
+
+    curl "${curl_args[@]}" "http://${GIT_API_HOST}:${GIT_API_PORT}${path}"
+}
+
+http_response_code() {
+    printf '%s\n' "$1" | tail -n 1
+}
+
+http_response_body() {
+    printf '%s\n' "$1" | sed '$d'
+}
+
+deep_policy_response_blocked() {
+    local http_code="$1"
+    local headers_file="$2"
+    local body="$3"
+
+    if [[ "$http_code" == "403" ]] \
+        && [[ -f "$headers_file" ]] \
+        && grep -qi "X-Sandbox-Blocked:[[:space:]]*true" "$headers_file" 2>/dev/null; then
+        return 0
+    fi
+
+    if [[ "$http_code" =~ ^2 ]]; then
+        return 1
+    fi
+
+    printf '%s' "$body" | grep -qiE "(BLOCKED|blocked|not allowed|not permitted|policy|self-approving)"
+}
+
+assert_deep_policy_blocked() {
+    local label="$1"
+    local method="$2"
+    local path="$3"
+    local body="${4:-}"
+    local headers response request_exit http_code response_body
+
+    headers=$(mktemp)
+    response=$(deep_policy_request "$method" "$path" "$body" "$headers" 2>&1)
+    request_exit=$?
+    http_code=$(http_response_code "$response")
+    response_body=$(http_response_body "$response")
+
+    if [[ $request_exit -ne 0 ]]; then
+        rm -f "$headers"
+        test_fail "$label request failed before policy: $(printf '%s' "$response" | head -c 200)"
+        return 1
+    fi
+
+    if deep_policy_response_blocked "$http_code" "$headers" "$response_body"; then
+        rm -f "$headers"
+        test_pass "$label blocked by deep policy (HTTP $http_code)"
+        return 0
+    fi
+
+    rm -f "$headers"
+    case "$http_code" in
+        000)
+            test_fail "$label curl failed (HTTP 000)"
+            ;;
+        401)
+            test_fail "$label was rejected by auth instead of policy"
+            ;;
+        404)
+            test_fail "$label was forwarded upstream (HTTP 404)"
+            ;;
+        2*)
+            test_fail "$label was allowed (HTTP $http_code)"
+            ;;
+        *)
+            test_fail "$label was not clearly blocked (HTTP $http_code)"
+            ;;
+    esac
+    return 1
+}
+
+assert_deep_policy_allowed() {
+    local label="$1"
+    local method="$2"
+    local path="$3"
+    local body="${4:-}"
+    local headers response request_exit http_code response_body
+
+    headers=$(mktemp)
+    response=$(deep_policy_request "$method" "$path" "$body" "$headers" 2>&1)
+    request_exit=$?
+    http_code=$(http_response_code "$response")
+    response_body=$(http_response_body "$response")
+
+    if [[ $request_exit -ne 0 ]]; then
+        rm -f "$headers"
+        test_fail "$label request failed before policy: $(printf '%s' "$response" | head -c 200)"
+        return 1
+    fi
+
+    if deep_policy_response_blocked "$http_code" "$headers" "$response_body"; then
+        rm -f "$headers"
+        test_fail "$label was blocked by deep policy (HTTP $http_code)"
+        return 1
+    fi
+
+    if [[ "$http_code" == "401" ]] \
+        && printf '%s' "$response_body" | grep -qiE "(authentication headers|HMAC|signature)"; then
+        rm -f "$headers"
+        test_fail "$label was rejected by proxy auth"
+        return 1
+    fi
+
+    rm -f "$headers"
+    test_pass "$label reached proxy/upstream without policy block (HTTP $http_code)"
+    return 0
+}
+
 # --- Structured output: TAP ---
 _emit_tap() {
     local status="$1" description="$2"

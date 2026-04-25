@@ -53,7 +53,7 @@ run_tests() {
     fi
 
     # Wait for server to be ready
-    for i in $(seq 1 10); do
+    for _ in $(seq 1 10); do
         if curl -sf http://127.0.0.1:8083/health &>/dev/null; then
             break
         fi

@@ -5,70 +5,9 @@
 # in the policy engine, before identity verification or domain matching.
 # This is defense-in-depth on top of the deep-policy sidecar fallback.
 
-# Helper: assert a merge request is blocked.
-# Checks HTTP status code first (403 = blocked), then falls back to body
-# inspection for proxies that return 200 with an error payload.
+# Helper: assert a merge request is blocked after HMAC authentication.
 _assert_merge_blocked() {
-    local label="$1"
-    shift
-    # Remaining args are the curl flags
-
-    local http_code body headers
-    # Capture both body and response headers to detect deep-policy blocks
-    headers=$(mktemp)
-    body=$(curl -s --max-time 10 -D "$headers" -w "\n%{http_code}" "$@" 2>&1)
-    http_code=$(echo "$body" | tail -n1)
-    body=$(echo "$body" | sed '$d')
-
-    # Deep policy proxy returns 403 with X-Sandbox-Blocked: true
-    if [[ "$http_code" == "403" ]] && grep -qi "X-Sandbox-Blocked.*true" "$headers" 2>/dev/null; then
-        rm -f "$headers"
-        test_pass "$label blocked by deep policy (HTTP 403, X-Sandbox-Blocked)"
-        return
-    elif [[ "$http_code" == "403" ]]; then
-        rm -f "$headers"
-        test_pass "$label blocked (HTTP 403)"
-        return
-    fi
-    rm -f "$headers"
-
-    if [[ "$http_code" =~ ^(401|422)$ ]]; then
-        # 401/422 from proxy means the request was intercepted (not forwarded
-        # with real credentials) — acceptable block signal.
-        if echo "$body" | grep -qiE "(blocked|forbidden|not allowed|not permitted|policy|merge)"; then
-            test_pass "$label blocked (HTTP $http_code with policy message)"
-        else
-            test_pass "$label intercepted (HTTP $http_code — not forwarded to upstream)"
-        fi
-    elif [[ "$http_code" == "404" ]]; then
-        # 404 through the deep-policy proxy means the request was forwarded
-        # to GitHub (policy allowed it through). The 404 comes from GitHub
-        # because the test uses fake PR/repo IDs. If we're routing through
-        # the proxy, this means the proxy *didn't* block — which is a fail.
-        # Without the proxy, 404 from GitHub means the request reached
-        # GitHub without being intercepted (also not blocked).
-        if [[ -n "${GIT_API_HOST:-}" ]] && [[ -n "${GIT_API_PORT:-}" ]]; then
-            test_fail "$label NOT blocked — proxy forwarded to upstream (HTTP 404)"
-        else
-            test_pass "$label intercepted (HTTP 404 — not forwarded to upstream)"
-        fi
-    elif [[ "$http_code" =~ ^2 ]]; then
-        # 2xx is suspicious — check if the body indicates a policy block
-        if echo "$body" | grep -qiE "(blocked|forbidden|not allowed|not permitted|policy)"; then
-            test_pass "$label blocked (HTTP $http_code with block message in body)"
-        else
-            test_fail "$label NOT blocked — got HTTP $http_code with no block indicator"
-        fi
-    elif [[ "$http_code" == "000" ]]; then
-        test_fail "$label — curl failed (connection error, HTTP 000)"
-    else
-        # 4xx/5xx other than 403 — likely blocked but verify
-        if echo "$body" | grep -qiE "(blocked|forbidden|not allowed|not permitted|policy|merge)"; then
-            test_pass "$label blocked (HTTP $http_code)"
-        else
-            test_warn "$label returned HTTP $http_code without clear block message — review"
-        fi
-    fi
+    assert_deep_policy_blocked "$@"
 }
 
 run_tests() {
@@ -78,97 +17,73 @@ run_tests() {
     echo "Testing that merge operations are blocked at foundry-git-safety early-exit..."
     echo "(These are blocked before identity or domain checks for defense-in-depth)"
 
-    # When running inside a sandbox with the git-safety proxy available,
-    # route requests through the proxy so the deep policy engine can
-    # inspect and block them.  Without the proxy, requests go directly
-    # to api.github.com and bypass the policy engine entirely.
-    if [[ -n "${GIT_API_HOST:-}" ]] && [[ -n "${GIT_API_PORT:-}" ]]; then
-        GITHUB_BASE="http://${GIT_API_HOST}:${GIT_API_PORT}/deep-policy/github"
-        info "Routing through git-safety proxy at ${GITHUB_BASE}"
-    else
-        GITHUB_BASE="https://api.github.com"
-        info "No git-safety proxy detected — targeting api.github.com directly"
+    if ! deep_policy_available; then
+        test_fail "Deep-policy proxy signing unavailable (need GIT_API_HOST, GIT_API_PORT, and proxy-sign)"
+        return
     fi
+    info "Routing signed requests through git-safety proxy"
 
     # Test 1: REST PR merge endpoint (PUT /repos/*/pulls/*/merge)
     info "Testing REST PR merge block (PUT /repos/*/pulls/*/merge)..."
-    _assert_merge_blocked "REST PR merge" \
-        -X PUT \
-        -H "Authorization: token ${GH_TOKEN:-}" \
-        -H "Content-Type: application/json" \
-        -d '{"commit_title":"test merge","merge_method":"merge"}' \
-        "${GITHUB_BASE}/repos/octocat/Hello-World/pulls/1/merge"
+    _assert_merge_blocked \
+        "REST PR merge" \
+        PUT \
+        "/deep-policy/github/repos/octocat/Hello-World/pulls/1/merge" \
+        '{"commit_title":"test merge","merge_method":"merge"}'
 
     # Test 2: REST auto-merge endpoint (PUT /repos/*/pulls/*/auto-merge)
     info "Testing REST auto-merge block (PUT /repos/*/pulls/*/auto-merge)..."
-    _assert_merge_blocked "REST auto-merge" \
-        -X PUT \
-        -H "Authorization: token ${GH_TOKEN:-}" \
-        -H "Content-Type: application/json" \
-        -d '{}' \
-        "${GITHUB_BASE}/repos/octocat/Hello-World/pulls/1/auto-merge"
+    _assert_merge_blocked \
+        "REST auto-merge" \
+        PUT \
+        "/deep-policy/github/repos/octocat/Hello-World/pulls/1/auto-merge" \
+        '{}'
 
     # Test 3: GraphQL mergePullRequest mutation
     info "Testing GraphQL mergePullRequest mutation block..."
-    _assert_merge_blocked "GraphQL mergePullRequest" \
-        -X POST \
-        -H "Authorization: token ${GH_TOKEN:-}" \
-        -H "Content-Type: application/json" \
-        -d '{"query":"mutation { mergePullRequest(input: {pullRequestId: \"PR_test123\"}) { pullRequest { id } } }"}' \
-        "${GITHUB_BASE}/graphql"
+    _assert_merge_blocked \
+        "GraphQL mergePullRequest" \
+        POST \
+        "/deep-policy/github/graphql" \
+        '{"query":"mutation { mergePullRequest(input: {pullRequestId: \"PR_test123\"}) { pullRequest { id } } }"}'
 
     # Test 4: GraphQL enablePullRequestAutoMerge mutation
     info "Testing GraphQL enablePullRequestAutoMerge mutation block..."
-    _assert_merge_blocked "GraphQL enablePullRequestAutoMerge" \
-        -X POST \
-        -H "Authorization: token ${GH_TOKEN:-}" \
-        -H "Content-Type: application/json" \
-        -d '{"query":"mutation { enablePullRequestAutoMerge(input: {pullRequestId: \"PR_test123\"}) { pullRequest { id } } }"}' \
-        "${GITHUB_BASE}/graphql"
+    _assert_merge_blocked \
+        "GraphQL enablePullRequestAutoMerge" \
+        POST \
+        "/deep-policy/github/graphql" \
+        '{"query":"mutation { enablePullRequestAutoMerge(input: {pullRequestId: \"PR_test123\"}) { pullRequest { id } } }"}'
 
     # Test 5: /merges path should NOT be caught by early-exit
     # (it's a lower-severity endpoint handled by the Step 3 blocklist)
     info "Testing that /merges path is NOT caught by early-exit..."
-    MERGES_CODE=$(curl -s -o /dev/null -w "%{http_code}" --max-time 10 \
-        -X POST \
-        -H "Authorization: token ${GH_TOKEN:-}" \
-        -H "Content-Type: application/json" \
-        -d '{"base":"main","head":"feature","commit_message":"test"}' \
-        "${GITHUB_BASE}/repos/octocat/Hello-World/merges" 2>&1)
+    MERGES_HEADERS=$(mktemp)
+    MERGES_RESP=$(deep_policy_request \
+        POST \
+        "/deep-policy/github/repos/octocat/Hello-World/merges" \
+        '{"base":"main","head":"feature","commit_message":"test"}' \
+        "$MERGES_HEADERS" 2>&1)
+    MERGES_EXIT=$?
+    MERGES_CODE=$(http_response_code "$MERGES_RESP")
+    MERGES_BODY=$(http_response_body "$MERGES_RESP")
 
     # /merges should be blocked by Step 3 or later, but NOT by the merge_block policy type.
     # We verify it's still blocked (not passed through) — the blocking stage is tested
     # in unit tests, not here.
-    if [[ "$MERGES_CODE" =~ ^(401|403|404|422)$ ]]; then
+    if [[ $MERGES_EXIT -ne 0 ]]; then
+        test_fail "/merges request failed before policy: $(printf '%s' "$MERGES_RESP" | head -c 200)"
+    elif deep_policy_response_blocked "$MERGES_CODE" "$MERGES_HEADERS" "$MERGES_BODY"; then
         test_pass "/merges endpoint blocked (HTTP $MERGES_CODE — by later policy stage)"
-    elif [[ "$MERGES_CODE" =~ ^2 ]]; then
-        test_fail "/merges endpoint NOT blocked — got HTTP $MERGES_CODE"
     else
-        test_warn "/merges response HTTP $MERGES_CODE — verify it's blocked by Step 3"
+        test_fail "/merges endpoint NOT blocked — got HTTP $MERGES_CODE"
     fi
+    rm -f "$MERGES_HEADERS"
 
     # Test 6: Non-merge GitHub API request should pass through
     info "Testing that non-merge GitHub API requests pass through..."
-    LIST_CODE=$(curl -s -o /dev/null -w "%{http_code}" --max-time 10 \
-        -H "Authorization: token ${GH_TOKEN:-}" \
-        "${GITHUB_BASE}/repos/octocat/Hello-World/pulls" 2>&1)
-
-    if [[ "$LIST_CODE" =~ ^(200|301|304|404)$ ]]; then
-        test_pass "Non-merge GitHub API request passes through (HTTP $LIST_CODE)"
-    elif [[ "$LIST_CODE" == "401" ]]; then
-        # 401 = reached GitHub, no valid auth — request was forwarded correctly
-        test_pass "Non-merge GitHub API request forwarded (HTTP 401 — auth required)"
-    elif [[ "$LIST_CODE" == "403" ]]; then
-        # Could be auth failure or merge block — get detail
-        DETAIL_BODY=$(curl -s --max-time 10 \
-            -H "Authorization: token ${GH_TOKEN:-}" \
-            "${GITHUB_BASE}/repos/octocat/Hello-World/pulls" 2>&1)
-        if echo "$DETAIL_BODY" | grep -qiE "merge"; then
-            test_fail "Non-merge request incorrectly blocked by merge policy"
-        else
-            test_pass "Non-merge GitHub API request reaches proxy (403 is auth/rate limit, not merge block)"
-        fi
-    else
-        test_warn "Non-merge request response HTTP $LIST_CODE — verify manually"
-    fi
+    assert_deep_policy_allowed \
+        "Non-merge GitHub API request" \
+        GET \
+        "/deep-policy/github/repos/octocat/Hello-World/pulls"
 }

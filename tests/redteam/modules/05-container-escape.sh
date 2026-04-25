@@ -118,7 +118,7 @@ run_tests() {
     SENSITIVE_MOUNTS=$(mount | grep -E "(credentials|secrets|\.ssh|\.gnupg)" | grep -vE "(hmac-secret|foundry|/run/secrets)" || true)
     if [[ -n "$SENSITIVE_MOUNTS" ]]; then
         test_warn "Potentially sensitive mount detected"
-        echo "$SENSITIVE_MOUNTS" | sed 's/^/    /'
+        printf '%s\n' "$SENSITIVE_MOUNTS" | sed 's/^/    /'
     else
         test_pass "No unexpected credential mounts"
     fi

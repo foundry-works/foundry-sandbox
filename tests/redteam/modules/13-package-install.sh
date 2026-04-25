@@ -53,10 +53,10 @@ run_tests() {
     # Test 5: ~/.local/bin is in PATH
     info "Testing ~/.local/bin is in PATH..."
     if echo "$PATH" | grep -q "$HOME/.local/bin"; then
-        test_pass "~/.local/bin is in PATH"
+        test_pass "$HOME/.local/bin is in PATH"
     else
         info "PATH: $PATH"
-        test_fail "~/.local/bin is not in PATH"
+        test_fail "$HOME/.local/bin is not in PATH"
     fi
 
     # Test 6: npm install -g succeeds (installs to ~/.local/ via npm prefix)
@@ -86,10 +86,18 @@ run_tests() {
     # Test 8: npm install (local, in /tmp test dir) succeeds
     info "Testing npm install (local)..."
     NPM_TEST_DIR=$(mktemp -d)
-    pushd "$NPM_TEST_DIR" > /dev/null 2>&1
+    if ! pushd "$NPM_TEST_DIR" > /dev/null 2>&1; then
+        test_fail "Could not enter npm test dir"
+        rm -rf "$NPM_TEST_DIR"
+        return
+    fi
     NPM_LOCAL_OUTPUT=$(npm init -y 2>&1 && npm install is-even 2>&1)
     NPM_LOCAL_EXIT=$?
-    popd > /dev/null 2>&1
+    if ! popd > /dev/null 2>&1; then
+        test_fail "Could not return from npm test dir"
+        rm -rf "$NPM_TEST_DIR"
+        return
+    fi
     if [[ $NPM_LOCAL_EXIT -eq 0 ]] && [[ -d "$NPM_TEST_DIR/node_modules/is-even" ]]; then
         test_pass "npm install (local) succeeded"
     else
@@ -105,6 +113,7 @@ run_tests() {
     if [[ $APT_EXIT -ne 0 ]]; then
         test_pass "sudo apt-get install denied (exit: $APT_EXIT)"
     else
+        info "apt output: $(echo "$APT_OUTPUT" | tail -3)"
         test_fail "sudo apt-get install succeeded (should be blocked by sudoers)"
     fi
 
@@ -115,6 +124,7 @@ run_tests() {
     if [[ $SYSPIP_EXIT -ne 0 ]]; then
         test_pass "System pip install denied (read-only root FS)"
     else
+        info "system pip output: $(echo "$SYSPIP_OUTPUT" | tail -3)"
         test_fail "System pip install succeeded (root FS should be read-only)"
     fi
 }

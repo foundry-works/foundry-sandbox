@@ -92,7 +92,7 @@ run_tests() {
     # Create a repo with a malicious post-checkout hook
     mkdir -p "$HOOK_REPO_DIR"
     (
-        cd "$HOOK_REPO_DIR"
+        cd "$HOOK_REPO_DIR" || exit
         $_REAL_GIT init --quiet
         $_REAL_GIT commit --allow-empty -m "init" --quiet
         mkdir -p .git/hooks
@@ -152,12 +152,12 @@ HOOKEOF
         if mountpoint -q "$_SHADOW_GIT_DIR" 2>/dev/null; then
             GIT_MOUNT_TYPE=$(mount | grep "$_SHADOW_GIT_DIR " | awk '{print $5}')
             if [[ "$GIT_MOUNT_TYPE" == "tmpfs" ]]; then
-                GIT_DIR_CONTENTS=$(ls -A "$_SHADOW_GIT_DIR" 2>/dev/null | wc -l)
+                GIT_DIR_CONTENTS=$(find "$_SHADOW_GIT_DIR" -mindepth 1 -maxdepth 1 2>/dev/null | wc -l)
                 if [[ "$GIT_DIR_CONTENTS" -eq 0 ]]; then
                     test_pass "$_SHADOW_GIT_DIR is empty tmpfs (mount type: tmpfs, 0 files)"
                 else
                     test_fail "$_SHADOW_GIT_DIR is tmpfs but NOT empty ($GIT_DIR_CONTENTS items found)"
-                    info "Contents: $(ls -A "$_SHADOW_GIT_DIR" 2>/dev/null | head -5)"
+                    info "Contents: $(find "$_SHADOW_GIT_DIR" -mindepth 1 -maxdepth 1 -printf '%f\n' 2>/dev/null | head -5)"
                 fi
             else
                 test_fail "$_SHADOW_GIT_DIR is mounted but not tmpfs (type: $GIT_MOUNT_TYPE)"
@@ -308,7 +308,6 @@ req.setTimeout(10000, () => {
     process.exit(1);
 });
 " 2>&1)
-        NODE_EXIT=$?
 
         if echo "$NODE_OUTPUT" | grep -q "STATUS:"; then
             STATUS_CODE=$(echo "$NODE_OUTPUT" | grep "STATUS:" | cut -d: -f2)

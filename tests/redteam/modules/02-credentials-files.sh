@@ -26,6 +26,7 @@ run_tests() {
             fi
         elif [[ -d "$f" ]]; then
             info "Found directory: $f"
+            # shellcheck disable=SC2012
             ls -la "$f" 2>/dev/null | head -10 | sed 's/^/    /'
         fi
     done

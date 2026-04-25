@@ -9,127 +9,56 @@ run_tests() {
     echo "Testing self-merge prevention controls..."
     echo "(These operations must be blocked to prevent sandbox from merging its own PRs)"
 
-    # Route through deep-policy proxy when available
-    if [[ -n "${GIT_API_HOST:-}" ]] && [[ -n "${GIT_API_PORT:-}" ]]; then
-        GITHUB_BASE="http://${GIT_API_HOST}:${GIT_API_PORT}/deep-policy/github"
-        info "Routing through git-safety proxy at ${GITHUB_BASE}"
-    else
-        GITHUB_BASE="https://api.github.com"
-        info "No git-safety proxy detected — targeting api.github.com directly"
+    if ! deep_policy_available; then
+        test_fail "Deep-policy proxy signing unavailable (need GIT_API_HOST, GIT_API_PORT, and proxy-sign)"
+        return
     fi
+    info "Routing signed requests through git-safety proxy"
 
     # Test 1: gh pr merge (PUT /repos/*/pulls/*/merge) -> expect blocked
     info "Testing PR merge block (PUT /repos/*/pulls/*/merge)..."
-    SELF_MERGE_RESP=$(curl -s --max-time 10 \
-        -X PUT \
-        -H "Authorization: token ${GH_TOKEN:-}" \
-        -H "Content-Type: application/json" \
-        -d '{"commit_title":"self-merge test","merge_method":"merge"}' \
-        "${GITHUB_BASE}/repos/octocat/Hello-World/pulls/1/merge" 2>&1)
-
-    if echo "$SELF_MERGE_RESP" | grep -qiE "(blocked|forbidden|not allowed|policy|authentication headers)"; then
-        test_pass "PR merge blocked (self-merge prevention)"
-    elif echo "$SELF_MERGE_RESP" | grep -qE '"merged"'; then
-        test_fail "PR merge endpoint accessible (self-merge possible!)"
-    else
-        info "Merge response: $(echo "$SELF_MERGE_RESP" | head -c 200)"
-        test_warn "PR merge response unclear - verify manually"
-    fi
+    assert_deep_policy_blocked \
+        "PR merge" \
+        PUT \
+        "/deep-policy/github/repos/octocat/Hello-World/pulls/1/merge" \
+        '{"commit_title":"self-merge test","merge_method":"merge"}'
 
     # Test 2: Auto-merge enablement (PUT /repos/*/pulls/*/auto-merge) -> expect blocked
     info "Testing auto-merge enablement block (PUT /repos/*/pulls/*/auto-merge)..."
-    AUTOMERGE_RESP=$(curl -s --max-time 10 \
-        -X PUT \
-        -H "Authorization: token ${GH_TOKEN:-}" \
-        -H "Content-Type: application/json" \
-        -d '{}' \
-        "${GITHUB_BASE}/repos/octocat/Hello-World/pulls/1/auto-merge" 2>&1)
-
-    if echo "$AUTOMERGE_RESP" | grep -qiE "(blocked|forbidden|not allowed|policy|authentication headers)"; then
-        test_pass "Auto-merge enablement blocked"
-    elif echo "$AUTOMERGE_RESP" | grep -qE '"auto_merge"'; then
-        test_fail "Auto-merge enablement accessible!"
-    else
-        info "Auto-merge response: $(echo "$AUTOMERGE_RESP" | head -c 200)"
-        test_warn "Auto-merge response unclear - verify manually"
-    fi
+    assert_deep_policy_blocked \
+        "Auto-merge enablement" \
+        PUT \
+        "/deep-policy/github/repos/octocat/Hello-World/pulls/1/auto-merge" \
+        '{}'
 
     # Test 3: PR review approval (POST /repos/*/pulls/*/reviews with event=APPROVE) -> expect blocked
     info "Testing PR review approval block (POST /repos/*/pulls/*/reviews, event=APPROVE)..."
-    APPROVE_RESP=$(curl -s --max-time 10 \
-        -X POST \
-        -H "Authorization: token ${GH_TOKEN:-}" \
-        -H "Content-Type: application/json" \
-        -d '{"event":"APPROVE","body":"Looks good"}' \
-        "${GITHUB_BASE}/repos/octocat/Hello-World/pulls/1/reviews" 2>&1)
-
-    if echo "$APPROVE_RESP" | grep -qiE "(blocked|forbidden|not allowed|policy|self-approving|authentication headers)"; then
-        test_pass "PR review approval blocked (self-approval prevention)"
-    elif echo "$APPROVE_RESP" | grep -qE '"state".*"APPROVED"'; then
-        test_fail "PR review approval accessible (self-approval possible!)"
-    else
-        info "Approval response: $(echo "$APPROVE_RESP" | head -c 200)"
-        test_warn "PR review approval response unclear - verify manually"
-    fi
+    assert_deep_policy_blocked \
+        "PR review approval" \
+        POST \
+        "/deep-policy/github/repos/octocat/Hello-World/pulls/1/reviews" \
+        '{"event":"APPROVE","body":"Looks good"}'
 
     # Test 4: PR review comment (POST /repos/*/pulls/*/reviews with event=COMMENT) -> expect success
     info "Testing PR review comment (POST /repos/*/pulls/*/reviews, event=COMMENT)..."
-    COMMENT_REVIEW_RESP=$(curl -s --max-time 10 \
-        -X POST \
-        -H "Authorization: token ${GH_TOKEN:-}" \
-        -H "Content-Type: application/json" \
-        -d '{"event":"COMMENT","body":"non-approval review comment"}' \
-        "${GITHUB_BASE}/repos/octocat/Hello-World/pulls/1/reviews" 2>&1)
-
-    if echo "$COMMENT_REVIEW_RESP" | grep -qiE "(blocked|forbidden|not allowed|policy)"; then
-        test_fail "Non-approval PR review comment unexpectedly blocked"
-    elif echo "$COMMENT_REVIEW_RESP" | grep -qiE "authentication headers"; then
-        # Deep-policy proxy requires HMAC auth — raw curl can't authenticate.
-        # Auth gate means the request never reached policy, so we can't verify
-        # the allow rule for COMMENT events. This is acceptable — the HMAC gate
-        # itself prevents unauthorized access.
-        test_pass "Non-approval review comment blocked by proxy auth (policy not reached)"
-    elif echo "$COMMENT_REVIEW_RESP" | grep -qE '"id"'; then
-        test_pass "Non-approval PR review comment allowed (correct behavior)"
-    elif echo "$COMMENT_REVIEW_RESP" | grep -qE "(not found|404|422)"; then
-        test_pass "Non-approval review comment reached GitHub (not blocked by policy)"
-    else
-        info "Comment review response: $(echo "$COMMENT_REVIEW_RESP" | head -c 200)"
-        test_warn "Non-approval review comment response unclear - verify manually"
-    fi
+    assert_deep_policy_allowed \
+        "Non-approval PR review comment" \
+        POST \
+        "/deep-policy/github/repos/octocat/Hello-World/pulls/1/reviews" \
+        '{"event":"COMMENT","body":"non-approval review comment"}'
 
     # Test 5: Review deletion (DELETE /repos/*/pulls/*/reviews/123) -> expect blocked
     info "Testing review deletion block (DELETE /repos/*/pulls/*/reviews/123)..."
-    DELETE_REVIEW_RESP=$(curl -s --max-time 10 \
-        -X DELETE \
-        -H "Authorization: token ${GH_TOKEN:-}" \
-        "${GITHUB_BASE}/repos/octocat/Hello-World/pulls/1/reviews/123" 2>&1)
-
-    if echo "$DELETE_REVIEW_RESP" | grep -qiE "(blocked|forbidden|not allowed|policy|authentication headers)"; then
-        test_pass "Review deletion blocked (prevents unblocking PRs)"
-    elif echo "$DELETE_REVIEW_RESP" | grep -qE '"message".*"Not Found"'; then
-        test_warn "Review deletion returned 404 - may not have reached policy layer"
-    else
-        info "Delete review response: $(echo "$DELETE_REVIEW_RESP" | head -c 200)"
-        test_warn "Review deletion response unclear - verify manually"
-    fi
+    assert_deep_policy_blocked \
+        "Review deletion" \
+        DELETE \
+        "/deep-policy/github/repos/octocat/Hello-World/pulls/1/reviews/123"
 
     # Test 6: GraphQL updatePullRequestBranch mutation -> expect blocked
     info "Testing GraphQL updatePullRequestBranch block..."
-    GRAPHQL_UPDATE_RESP=$(curl -s --max-time 10 \
-        -X POST \
-        -H "Authorization: token ${GH_TOKEN:-}" \
-        -H "Content-Type: application/json" \
-        -d '{"query":"mutation { updatePullRequestBranch(input: {pullRequestId: \"PR_test123\"}) { pullRequest { id } } }"}' \
-        "${GITHUB_BASE}/graphql" 2>&1)
-
-    if echo "$GRAPHQL_UPDATE_RESP" | grep -qiE "(blocked|forbidden|not allowed|policy|authentication headers)"; then
-        test_pass "GraphQL updatePullRequestBranch blocked"
-    elif echo "$GRAPHQL_UPDATE_RESP" | grep -qE '"errors"'; then
-        info "GraphQL response had errors (may be blocked at filter layer)"
-        test_pass "GraphQL updatePullRequestBranch blocked or rejected"
-    else
-        info "GraphQL response: $(echo "$GRAPHQL_UPDATE_RESP" | head -c 200)"
-        test_warn "GraphQL updatePullRequestBranch response unclear - verify manually"
-    fi
+    assert_deep_policy_blocked \
+        "GraphQL updatePullRequestBranch" \
+        POST \
+        "/deep-policy/github/graphql" \
+        '{"query":"mutation { updatePullRequestBranch(input: {pullRequestId: \"PR_test123\"}) { pullRequest { id } } }"}'
 }

@@ -8,47 +8,70 @@ run_tests() {
     echo ""
     echo "Testing foundry.yaml compiled artifact immutability..."
 
+    _WORKSPACE_BASES=()
+    while IFS= read -r _BASE; do
+        _WORKSPACE_BASES+=("$_BASE")
+    done < <(workspace_candidates)
+
     # ---- 28.1: Raw foundry.yaml must not be present ----
     info "Checking that raw foundry.yaml is not leaked into the sandbox..."
     _FOUND=false
-    for _PATH in /workspace/foundry.yaml /etc/foundry.yaml /workspace/.foundry/foundry.yaml; do
-        if [[ -f "$_PATH" ]]; then
-            _FOUND=true
-            test_fail "Raw foundry.yaml found at $_PATH (should not exist inside sandbox)"
-        fi
+    for _BASE in "${_WORKSPACE_BASES[@]}"; do
+        for _PATH in "$_BASE/foundry.yaml" "$_BASE/.foundry/foundry.yaml"; do
+            if [[ -f "$_PATH" ]]; then
+                _FOUND=true
+                test_fail "Raw foundry.yaml found at $_PATH (should not exist inside sandbox)"
+            fi
+        done
     done
+    if [[ -f /etc/foundry.yaml ]]; then
+        _FOUND=true
+        test_fail "Raw foundry.yaml found at /etc/foundry.yaml (should not exist inside sandbox)"
+    fi
     if [[ "$_FOUND" == "false" ]]; then
         test_pass "No raw foundry.yaml leaked into sandbox"
     fi
 
     # ---- 28.2: .mcp.json tampering blocked ----
     info "Testing .mcp.json write protection..."
-    if [[ -f /workspace/.mcp.json ]]; then
-        _BACKUP=$(cat /workspace/.mcp.json)
-        if echo '{"mcpServers":{"evil":{"command":"python3","args":["-c","import os"]}}}' \
-            > /workspace/.mcp.json 2>/dev/null; then
-            # Restore original
-            echo "$_BACKUP" > /workspace/.mcp.json 2>/dev/null
-            test_fail ".mcp.json is writable (agent could inject MCP endpoints)"
-        else
-            test_pass ".mcp.json is write-protected"
+    _MCP_FOUND=false
+    for _BASE in "${_WORKSPACE_BASES[@]}"; do
+        _MCP_PATH="$_BASE/.mcp.json"
+        if [[ -f "$_MCP_PATH" ]]; then
+            _MCP_FOUND=true
+            _BACKUP=$(cat "$_MCP_PATH")
+            if echo '{"mcpServers":{"evil":{"command":"python3","args":["-c","import os"]}}}' \
+                > "$_MCP_PATH" 2>/dev/null; then
+                # Restore original
+                echo "$_BACKUP" > "$_MCP_PATH" 2>/dev/null
+                test_fail "$_MCP_PATH is writable (agent could inject MCP endpoints)"
+            else
+                test_pass "$_MCP_PATH is write-protected"
+            fi
         fi
-    else
+    done
+    if [[ "$_MCP_FOUND" == "false" ]]; then
         info "No .mcp.json present — skipping write test"
     fi
 
     # ---- 28.3: .claude/settings.json tampering blocked ----
     info "Testing .claude/settings.json write protection..."
-    if [[ -f /workspace/.claude/settings.json ]]; then
-        _BACKUP=$(cat /workspace/.claude/settings.json)
-        if echo '{"permissions":{"allow":["Bash(*)"]}}' \
-            > /workspace/.claude/settings.json 2>/dev/null; then
-            echo "$_BACKUP" > /workspace/.claude/settings.json 2>/dev/null
-            test_fail ".claude/settings.json is writable (agent could loosen permissions)"
-        else
-            test_pass ".claude/settings.json is write-protected"
+    _CLAUDE_FOUND=false
+    for _BASE in "${_WORKSPACE_BASES[@]}"; do
+        _CLAUDE_SETTINGS="$_BASE/.claude/settings.json"
+        if [[ -f "$_CLAUDE_SETTINGS" ]]; then
+            _CLAUDE_FOUND=true
+            _BACKUP=$(cat "$_CLAUDE_SETTINGS")
+            if echo '{"permissions":{"allow":["Bash(*)"]}}' \
+                > "$_CLAUDE_SETTINGS" 2>/dev/null; then
+                echo "$_BACKUP" > "$_CLAUDE_SETTINGS" 2>/dev/null
+                test_fail "$_CLAUDE_SETTINGS is writable (agent could loosen permissions)"
+            else
+                test_pass "$_CLAUDE_SETTINGS is write-protected"
+            fi
         fi
-    else
+    done
+    if [[ "$_CLAUDE_FOUND" == "false" ]]; then
         info "No .claude/settings.json present — skipping write test"
     fi
 
@@ -73,7 +96,9 @@ run_tests() {
 
     # ---- 28.5: Policy registration file immutable ----
     info "Testing git-safety policy file immutability..."
-    if [[ -n "${FOUNDRY_DATA_DIR:-}" ]] && [[ -f "${FOUNDRY_DATA_DIR}/sandboxes/${SANDBOX_ID}.json" ]]; then
+    if [[ -n "${FOUNDRY_DATA_DIR:-}" ]] \
+        && [[ -n "${SANDBOX_ID:-}" ]] \
+        && [[ -f "${FOUNDRY_DATA_DIR}/sandboxes/${SANDBOX_ID}.json" ]]; then
         _POLICY_FILE="${FOUNDRY_DATA_DIR}/sandboxes/${SANDBOX_ID}.json"
         _POLICY_BACKUP=$(cat "$_POLICY_FILE")
         if echo '{"protected_branches":["evil-branch"]}' > "$_POLICY_FILE" 2>/dev/null; then
@@ -106,8 +131,11 @@ run_tests() {
     # shellcheck disable=SC2016
     info 'Checking that ${from_host:VAR} template literals are not in any sandbox file...'
     _TEMPLATE_LEAKED=false
-    for _FPATH in /workspace/.mcp.json /workspace/.claude/settings.json \
-                  /etc/profile.d/foundry-git-safety.sh /var/lib/foundry/git-safety.env; do
+    _SCAN_FILES=(/etc/profile.d/foundry-git-safety.sh /var/lib/foundry/git-safety.env)
+    for _BASE in "${_WORKSPACE_BASES[@]}"; do
+        _SCAN_FILES+=("$_BASE/.mcp.json" "$_BASE/.claude/settings.json")
+    done
+    for _FPATH in "${_SCAN_FILES[@]}"; do
         if [[ -f "$_FPATH" ]] && grep -q 'from_host:' "$_FPATH" 2>/dev/null; then
             _TEMPLATE_LEAKED=true
             _MATCH=$(grep 'from_host:' "$_FPATH" | head -1)
@@ -121,14 +149,16 @@ run_tests() {
     # ---- 28.7: No secret values leaked in compiled artifacts ----
     info "Scanning compiled artifacts for raw secret patterns..."
     _SECRET_LEAK=false
-    for _FPATH in /workspace/.mcp.json /workspace/.claude/settings.json; do
-        if [[ -f "$_FPATH" ]]; then
-            # Look for patterns that look like raw API keys/tokens
-            if grep -qE '(ghp_|gho_|sk-|sk_|xox[bpas]-|AKIA)[A-Za-z0-9]' "$_FPATH" 2>/dev/null; then
-                _SECRET_LEAK=true
-                test_fail "Raw secret pattern found in $_FPATH"
+    for _BASE in "${_WORKSPACE_BASES[@]}"; do
+        for _FPATH in "$_BASE/.mcp.json" "$_BASE/.claude/settings.json"; do
+            if [[ -f "$_FPATH" ]]; then
+                # Look for patterns that look like raw API keys/tokens
+                if grep -qE '(ghp_|gho_|sk-|sk_|xox[bpas]-|AKIA)[A-Za-z0-9]' "$_FPATH" 2>/dev/null; then
+                    _SECRET_LEAK=true
+                    test_fail "Raw secret pattern found in $_FPATH"
+                fi
             fi
-        fi
+        done
     done
     if [[ "$_SECRET_LEAK" == "false" ]]; then
         test_pass "No raw secret values in compiled artifact files"

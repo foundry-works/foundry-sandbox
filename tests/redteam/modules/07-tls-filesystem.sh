@@ -84,7 +84,7 @@ run_tests() {
     fi
 
     if [[ -d /root ]] && ls /root/ >/dev/null 2>&1; then
-        ROOT_CONTENTS=$(ls -A /root/ 2>/dev/null | wc -l)
+        ROOT_CONTENTS=$(find /root -mindepth 1 -maxdepth 1 2>/dev/null | wc -l)
         if [[ $ROOT_CONTENTS -gt 0 ]]; then
             test_warn "/root/ accessible with $ROOT_CONTENTS items"
         else

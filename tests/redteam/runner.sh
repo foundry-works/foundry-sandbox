@@ -10,7 +10,7 @@
 set -u
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-# shellcheck source=harness.sh
+# shellcheck source=/dev/null
 source "$SCRIPT_DIR/harness.sh"
 
 # --- Argument parsing ---
@@ -45,17 +45,18 @@ mkdir -p "$OUTPUT_DIR"
 
 if [[ "$OUTPUT_FORMAT" == "tap" ]] || [[ "$OUTPUT_FORMAT" == "all" ]]; then
     TAP_FILE="$OUTPUT_DIR/redteam.tap"
-    > "$TAP_FILE"
+    export TAP_FILE
+    : > "$TAP_FILE"
 fi
 
 if [[ "$OUTPUT_FORMAT" == "junit" ]] || [[ "$OUTPUT_FORMAT" == "all" ]]; then
     JUNIT_FILE="$OUTPUT_DIR/redteam-junit.xml"
+    export JUNIT_FILE
 fi
 
 # --- Module discovery ---
 MODULES_DIR="$SCRIPT_DIR/modules"
 MODULE_COUNT=0
-MODULE_FAIL=0
 
 for module_file in "$MODULES_DIR"/*.sh; do
     [[ -f "$module_file" ]] || continue
@@ -93,7 +94,8 @@ if [[ $MODULE_COUNT -eq 0 ]]; then
     if [[ -n "$MODULE_FILTER" ]]; then
         echo "ERROR: No module found matching '$MODULE_FILTER'" >&2
         echo "Available modules:" >&2
-        ls "$MODULES_DIR"/*.sh 2>/dev/null | xargs -I{} basename {} .sh | sed 's/^/  /' >&2
+        find "$MODULES_DIR" -maxdepth 1 -type f -name '*.sh' \
+            -exec basename {} .sh \; | sed 's/^/  /' >&2
         exit 2
     else
         echo "ERROR: No modules found in $MODULES_DIR/" >&2

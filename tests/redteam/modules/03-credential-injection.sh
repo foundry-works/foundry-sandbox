@@ -33,7 +33,7 @@ run_tests() {
     info "Checking user-service env vars point to proxy URLs..."
     USER_SERVICE_VARS=$(env | grep -E "^(TAVILY|PERPLEXITY|SEMANTIC_SCHOLAR).*=" 2>/dev/null || true)
     if [[ -n "$USER_SERVICE_VARS" ]]; then
-        echo "$USER_SERVICE_VARS" | while IFS= read -r line; do
+        while IFS= read -r line; do
             VAR_NAME="${line%%=*}"
             VAR_VALUE="${line#*=}"
             if echo "$VAR_VALUE" | grep -qE "^https?://.*:8083/proxy/"; then
@@ -43,7 +43,7 @@ run_tests() {
             else
                 test_warn "$VAR_NAME has unexpected value: ${VAR_VALUE:0:40}..."
             fi
-        done
+        done <<< "$USER_SERVICE_VARS"
     else
         test_pass "No user-service env vars set (or not configured)"
     fi
