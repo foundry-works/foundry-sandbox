@@ -108,12 +108,23 @@ class ObservabilityConfig(BaseModel):
     decision_log_max_bytes: int = 10 * 1024 * 1024
     decision_log_backup_count: int = 5
     metrics_enabled: bool = True
+    admin_endpoints_require_token: bool = True
+    admin_token_env: str = "FOUNDRY_GIT_SAFETY_ADMIN_TOKEN"
 
     @field_validator("decision_log_max_bytes", "decision_log_backup_count")
     @classmethod
     def validate_positive(cls, v: int) -> int:
         if v < 1:
             raise ValueError(f"Must be positive, got {v}")
+        return v
+
+    @field_validator("admin_token_env")
+    @classmethod
+    def validate_admin_token_env(cls, v: str) -> str:
+        if not _ENV_VAR_RE.match(v):
+            raise ValueError(
+                f"admin_token_env must match [A-Z_][A-Z0-9_]*, got {v!r}"
+            )
         return v
 
 
@@ -196,6 +207,7 @@ class UserServiceEntry(BaseModel):
     format: Literal["bearer", "header", "query"] = "bearer"
     methods: List[str] = Field(default_factory=list)
     paths: List[str] = Field(default_factory=list)
+    allow_all: bool = False
     scheme: str = "https"
     port: int = 0
 

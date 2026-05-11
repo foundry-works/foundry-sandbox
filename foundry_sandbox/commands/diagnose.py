@@ -143,11 +143,23 @@ def _collect_tamper_events(n: int = 20) -> list[dict[str, Any]]:
 def _collect_tamper_counter() -> dict[str, Any]:
     """Collect the server-side tamper event counter from /metrics."""
     import urllib.request
-    from foundry_sandbox.git_safety import get_tamper_event_fallback_count
+    from foundry_sandbox.git_safety import (
+        ensure_git_safety_admin_token,
+        get_tamper_event_fallback_count,
+    )
 
-    result: dict[str, Any] = {"total": 0, "reachable": False, "local_fallback": get_tamper_event_fallback_count()}
+    result: dict[str, Any] = {
+        "total": 0,
+        "reachable": False,
+        "local_fallback": get_tamper_event_fallback_count(),
+    }
     try:
         req = urllib.request.Request("http://127.0.0.1:8083/metrics")
+        admin_token = os.environ.get("FOUNDRY_GIT_SAFETY_ADMIN_TOKEN", "")
+        if not admin_token:
+            admin_token = ensure_git_safety_admin_token()
+        if admin_token:
+            req.add_header("X-Foundry-Admin-Token", admin_token)
         with urllib.request.urlopen(req, timeout=3) as resp:
             text = resp.read().decode()
         result["reachable"] = True

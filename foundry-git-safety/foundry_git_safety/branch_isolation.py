@@ -122,6 +122,12 @@ def resolve_bare_repo_path(repo_root: str) -> str | None:
 
         if not os.path.isdir(gitdir):
             return None
+        if not _is_within_boundary(gitdir, boundary):
+            logger.warning(
+                "worktree gitdir escapes repo boundary: %s (boundary: %s)",
+                gitdir, boundary,
+            )
+            return None
 
         # Read commondir from gitdir
         commondir_file = os.path.join(gitdir, "commondir")

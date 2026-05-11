@@ -9,6 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Git-safety admin endpoint token protection** — `/metrics`, `/tamper-event`, `/proxy/health`, and `/deep-policy/health` can now require a host-only admin token, with `cast` creating and reusing `FOUNDRY_GIT_SAFETY_ADMIN_TOKEN` when needed.
+- **Proxy upstream safety limits** — user-service and deep-policy proxies now apply configurable upstream connection timeouts and response-size caps.
+- **Expanded GitHub deep-policy denies** — default GitHub policy now blocks release creation, PR/issue close operations, and GraphQL close mutations.
+- **Proxy MCP method/path restrictions** — `type: proxy` MCP declarations can now provide `methods`, `paths`, and `allow_all` to describe intended proxy scope.
+- **Security review artifacts** — added a security best-practices report and remediation plan for the current proxy and sandbox boundary work.
 - **Redteam module: foundry-yaml-tamper (Phase 7)** — new module `14-foundry-yaml-tamper` verifies that compiled `foundry.yaml` artifacts are immutable at runtime: no raw config leaked, `.mcp.json` and `.claude/settings.json` write-protected, `allow_third_party_mcp` gate not exposed, `${from_host:VAR}` templates fully resolved, no raw secrets in compiled files.
 - **`cast new --plan` documentation** — the `--plan` dry-run flag is now documented in the command reference (`docs/usage/commands.md`).
 - **`type: npm` MCP server compilation (Phase 6)** — `compile_mcp_servers` now handles `type: npm` servers behind the `allow_third_party_mcp` gate. Emits a `PostStep` for `npm install -g` and a `.mcp.json` fragment using `npx`. Supports `${from_host:VAR}` env substitution. The gate is ANDed across layers — a user-level `false` blocks npm servers even if the repo config sets `true`.
@@ -18,6 +23,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **`foundry-git-safety` config loading is explicit** — standalone startup now uses `FOUNDRY_GIT_SAFETY_CONFIG` or `FOUNDRY_CONFIG_PATH`; without an explicit path it falls back to defaults instead of trusting a repo-local current-directory config.
+- **Credential proxy forwarding hardened** — user-service and deep-policy proxy requests now strip Foundry-internal HMAC/admin headers before forwarding upstream.
+- **Unrestricted proxy services require intent** — legacy empty `methods` or `paths` remain compatible, but now warn unless `allow_all: true` marks the broad scope intentionally.
 - **`cast refresh-creds` resolves sandbox config** — credential refresh now loads the sandbox worktree's resolved `foundry.yaml` and refreshes `user_services`, proxy MCP `host_env`, and `${from_host:VAR}` MCP secret refs in addition to the built-in provider keys.
 - **`new_setup.py` unified artifact pipeline** — git-safety overlays and user services now both flow through `compile_*` → `_merge_bundles` → `apply_artifacts` instead of ad-hoc `sbx_exec` calls.
 
@@ -27,6 +35,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Command structure cleanup** — collapsed `new_*.py` fan-out from 4 files to 2 (`new.py` + `new_sbx.py`); extracted `start_sandbox()` from `start.py` for direct reuse by `attach.py` (removing `ctx.invoke()` cross-command coupling)
 - **`cast config` no longer displays `WORKTREES_DIR`** — the deprecated worktrees directory is no longer shown since sbx manages worktrees internally
 - **Installer no longer edits shell rc files** — `install.sh` now installs the Python CLI directly without rewriting legacy aliases or completion snippets in user shell startup files
+
+### Fixed
+
+- **Query-format credential logging** — user-service proxy logs now omit query strings so query-transport API keys are not written to logs.
+- **Prometheus label escaping** — metrics label values now escape backslashes, quotes, and newlines before rendering.
+- **Worktree gitdir boundary validation** — branch isolation now rejects worktree gitdirs that escape the expected repository boundary.
 
 ### Removed
 

@@ -29,6 +29,10 @@ _DEFAULT_SECRETS_DIR = os.environ.get(
 _DEFAULT_DATA_DIR = os.environ.get(
     "FOUNDRY_DATA_DIR", f"{_FOUNDRY_BASE}/data/git-safety"
 )
+_DEFAULT_ADMIN_TOKEN_FILE = os.environ.get(
+    "FOUNDRY_GIT_SAFETY_ADMIN_TOKEN_FILE",
+    f"{_FOUNDRY_BASE}/secrets/git-safety-admin-token",
+)
 
 _TIMEOUT = 10
 
@@ -66,11 +70,14 @@ def git_safety_server_start(
         cmd.extend(["--port", str(port)])
     if deep_policy:
         cmd.append("--deep-policy")
+    env = os.environ.copy()
+    env["FOUNDRY_GIT_SAFETY_ADMIN_TOKEN"] = ensure_git_safety_admin_token()
     return subprocess.run(
         cmd,
         capture_output=True,
         text=True,
         timeout=_TIMEOUT,
+        env=env,
     )
 
 
@@ -106,6 +113,35 @@ def git_safety_server_is_running() -> bool:
 def generate_hmac_secret() -> str:
     """Generate a cryptographically random HMAC secret (64 hex chars)."""
     return _secrets.token_hex(32)
+
+
+def ensure_git_safety_admin_token() -> str:
+    """Ensure a host-only admin token exists for git-safety admin endpoints."""
+    existing = os.environ.get("FOUNDRY_GIT_SAFETY_ADMIN_TOKEN", "")
+    if existing:
+        return existing
+
+    token_file = Path(
+        os.environ.get(
+            "FOUNDRY_GIT_SAFETY_ADMIN_TOKEN_FILE",
+            _DEFAULT_ADMIN_TOKEN_FILE,
+        )
+    ).expanduser()
+
+    try:
+        token = token_file.read_text().strip()
+        if token:
+            os.environ["FOUNDRY_GIT_SAFETY_ADMIN_TOKEN"] = token
+            return token
+    except FileNotFoundError:
+        pass
+
+    token = _secrets.token_urlsafe(32)
+    token_file.parent.mkdir(parents=True, exist_ok=True)
+    token_file.write_text(token)
+    token_file.chmod(0o600)
+    os.environ["FOUNDRY_GIT_SAFETY_ADMIN_TOKEN"] = token
+    return token
 
 
 def _validate_git_safety_sandbox_id(sandbox_id: str) -> None:
@@ -682,10 +718,17 @@ def emit_wrapper_tamper_event(
     try:
         import urllib.request
 
+        headers = {"Content-Type": "application/json"}
+        admin_token = os.environ.get("FOUNDRY_GIT_SAFETY_ADMIN_TOKEN", "")
+        if not admin_token:
+            admin_token = ensure_git_safety_admin_token()
+        if admin_token:
+            headers["X-Foundry-Admin-Token"] = admin_token
+
         req = urllib.request.Request(
             "http://127.0.0.1:8083/tamper-event",
             data=payload,
-            headers={"Content-Type": "application/json"},
+            headers=headers,
             method="POST",
         )
         with urllib.request.urlopen(req, timeout=3) as resp:

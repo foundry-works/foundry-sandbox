@@ -12,6 +12,7 @@ import pytest
 
 from foundry_sandbox.git_safety import (
     compute_wrapper_checksum,
+    ensure_git_safety_admin_token,
     generate_hmac_secret,
     git_safety_server_is_running,
     git_safety_server_start,
@@ -46,15 +47,18 @@ def _mock_completed(
 
 class TestGitSafetyServerStart:
     @patch("foundry_sandbox.git_safety.subprocess.run")
-    def test_default(self, mock_run):
+    def test_default(self, mock_run, monkeypatch):
+        monkeypatch.setenv("FOUNDRY_GIT_SAFETY_ADMIN_TOKEN", "admin-token")
         mock_run.return_value = _mock_completed("Started")
         result = git_safety_server_start()
         assert result.returncode == 0
         cmd = mock_run.call_args[0][0]
         assert cmd == ["foundry-git-safety", "start"]
+        assert mock_run.call_args.kwargs["env"]["FOUNDRY_GIT_SAFETY_ADMIN_TOKEN"] == "admin-token"
 
     @patch("foundry_sandbox.git_safety.subprocess.run")
-    def test_with_port(self, mock_run):
+    def test_with_port(self, mock_run, monkeypatch):
+        monkeypatch.setenv("FOUNDRY_GIT_SAFETY_ADMIN_TOKEN", "admin-token")
         mock_run.return_value = _mock_completed()
         git_safety_server_start(port=9999)
         cmd = mock_run.call_args[0][0]
@@ -62,7 +66,8 @@ class TestGitSafetyServerStart:
         assert "9999" in cmd
 
     @patch("foundry_sandbox.git_safety.subprocess.run")
-    def test_foreground(self, mock_run):
+    def test_foreground(self, mock_run, monkeypatch):
+        monkeypatch.setenv("FOUNDRY_GIT_SAFETY_ADMIN_TOKEN", "admin-token")
         mock_run.return_value = _mock_completed()
         git_safety_server_start(foreground=True)
         cmd = mock_run.call_args[0][0]
@@ -113,6 +118,33 @@ class TestGenerateHmacSecret:
         a = generate_hmac_secret()
         b = generate_hmac_secret()
         assert a != b
+
+
+class TestEnsureGitSafetyAdminToken:
+    def test_uses_existing_env(self, monkeypatch):
+        monkeypatch.setenv("FOUNDRY_GIT_SAFETY_ADMIN_TOKEN", "existing")
+        assert ensure_git_safety_admin_token() == "existing"
+
+    def test_reads_existing_token_file(self, tmp_path, monkeypatch):
+        token_file = tmp_path / "admin-token"
+        token_file.write_text("from-file\n")
+        monkeypatch.delenv("FOUNDRY_GIT_SAFETY_ADMIN_TOKEN", raising=False)
+        monkeypatch.setenv("FOUNDRY_GIT_SAFETY_ADMIN_TOKEN_FILE", str(token_file))
+
+        assert ensure_git_safety_admin_token() == "from-file"
+        assert os.environ["FOUNDRY_GIT_SAFETY_ADMIN_TOKEN"] == "from-file"
+
+    def test_creates_host_only_token_file(self, tmp_path, monkeypatch):
+        token_file = tmp_path / "secrets" / "admin-token"
+        monkeypatch.delenv("FOUNDRY_GIT_SAFETY_ADMIN_TOKEN", raising=False)
+        monkeypatch.setenv("FOUNDRY_GIT_SAFETY_ADMIN_TOKEN_FILE", str(token_file))
+
+        token = ensure_git_safety_admin_token()
+
+        assert token_file.read_text() == token
+        assert token
+        assert token_file.stat().st_mode & 0o777 == 0o600
+        assert os.environ["FOUNDRY_GIT_SAFETY_ADMIN_TOKEN"] == token
 
 
 class TestWriteHmacSecretToSandbox:
@@ -939,10 +971,11 @@ class TestEmitWrapperTamperEvent:
     """Tests for metric-only tamper event delivery."""
 
     @patch("urllib.request.urlopen")
-    def test_posts_to_server_endpoint(self, mock_urlopen):
+    def test_posts_to_server_endpoint(self, mock_urlopen, monkeypatch):
         import foundry_sandbox.git_safety as gs
         from foundry_sandbox.git_safety import emit_wrapper_tamper_event
 
+        monkeypatch.setenv("FOUNDRY_GIT_SAFETY_ADMIN_TOKEN", "admin-token")
         # Reset fallback counter
         gs._tamper_event_fallback_count = 0
 
@@ -964,15 +997,23 @@ class TestEmitWrapperTamperEvent:
         req = call_args[0][0]
         assert req.full_url == "http://127.0.0.1:8083/tamper-event"
         assert req.method == "POST"
+        assert req.headers["X-foundry-admin-token"] == "admin-token"
         assert gs._tamper_event_fallback_count == 0
 
     @patch("foundry_sandbox.git_safety.log_warn")
     @patch("foundry_git_safety.decision_log.write_decision")
     @patch("urllib.request.urlopen", side_effect=OSError("Connection refused"))
-    def test_fallback_on_server_unreachable(self, mock_urlopen, mock_write, mock_warn):
+    def test_fallback_on_server_unreachable(
+        self,
+        mock_urlopen,
+        mock_write,
+        mock_warn,
+        monkeypatch,
+    ):
         import foundry_sandbox.git_safety as gs
         from foundry_sandbox.git_safety import emit_wrapper_tamper_event
 
+        monkeypatch.setenv("FOUNDRY_GIT_SAFETY_ADMIN_TOKEN", "admin-token")
         gs._tamper_event_fallback_count = 0
 
         emit_wrapper_tamper_event(
@@ -990,10 +1031,17 @@ class TestEmitWrapperTamperEvent:
     @patch("foundry_sandbox.git_safety.log_warn")
     @patch("foundry_git_safety.decision_log.write_decision", side_effect=OSError("log dir missing"))
     @patch("urllib.request.urlopen", side_effect=OSError("Connection refused"))
-    def test_both_channels_fail_still_increments_counter(self, mock_urlopen, mock_write, mock_warn):
+    def test_both_channels_fail_still_increments_counter(
+        self,
+        mock_urlopen,
+        mock_write,
+        mock_warn,
+        monkeypatch,
+    ):
         import foundry_sandbox.git_safety as gs
         from foundry_sandbox.git_safety import emit_wrapper_tamper_event
 
+        monkeypatch.setenv("FOUNDRY_GIT_SAFETY_ADMIN_TOKEN", "admin-token")
         gs._tamper_event_fallback_count = 0
 
         # Should not raise despite both channels failing

@@ -64,7 +64,11 @@ foundry-git-safety stop
 
 ## Configuration
 
-foundry-git-safety reads `foundry.yaml` from the workspace root. See `foundry_git_safety/default_config/foundry.yaml.example` for a complete example with all options.
+For standalone use, pass a config path explicitly or set
+`FOUNDRY_GIT_SAFETY_CONFIG` / `FOUNDRY_CONFIG_PATH`. The server does not
+implicitly load a repo-local `foundry.yaml` from the current working directory.
+See `foundry_git_safety/default_config/foundry.yaml.example` for a complete
+example with all options.
 
 ```yaml
 version: "1"
@@ -114,6 +118,10 @@ git_safety:
     burst: 300
     sustained: 120
     global_ceiling: 1000
+
+  observability:
+    admin_endpoints_require_token: true
+    admin_token_env: FOUNDRY_GIT_SAFETY_ADMIN_TOKEN
 ```
 
 `user_services` is a top-level list. Each entry declares a proxy-backed host
@@ -126,7 +134,12 @@ credential with fields such as `name`, `env_var`, `domain`, `header`,
 |----------|-------------|
 | `GIT_PROTECTED_BRANCHES_ENABLED` | Override protected branch enforcement (`true`/`false`) |
 | `GIT_PROTECTED_BRANCHES_PATTERNS` | Comma-separated protected branch patterns |
+| `FOUNDRY_GIT_SAFETY_CONFIG` | Path to `foundry.yaml` for standalone server startup |
 | `FOUNDRY_CONFIG_PATH` | Path to `foundry.yaml` |
+| `FOUNDRY_GIT_SAFETY_ADMIN_TOKEN` | Token for `/metrics`, `/tamper-event`, and proxy health endpoints |
+| `FOUNDRY_GIT_SAFETY_ADMIN_TOKEN_FILE` | Host-only token file used by `cast` when no token env is set |
+| `FOUNDRY_GIT_SAFETY_UPSTREAM_TIMEOUT_SECONDS` | Upstream proxy connection timeout (default `30`) |
+| `FOUNDRY_GIT_SAFETY_UPSTREAM_MAX_RESPONSE_BYTES` | Upstream proxy response cap (default `52428800`) |
 | `FOUNDRY_FILE_RESTRICTIONS_PATH` | Path to `push-file-restrictions.yaml` |
 | `FOUNDRY_DATA_DIR` | Data directory for server state (defaults to `~/.foundry/data/git-safety`) |
 | `GIT_CLIENT_WORKSPACE_ROOT` | Override workspace root path for git operations |

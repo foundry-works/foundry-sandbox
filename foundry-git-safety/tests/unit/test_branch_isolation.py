@@ -704,6 +704,18 @@ class TestResolveBareRepoPath:
         result = resolve_bare_repo_path(str(worktree))
         assert result is None
 
+    def test_git_file_gitdir_without_commondir_outside_boundary_rejected(self, tmp_path):
+        """A crafted .git file cannot point at an unrelated gitdir."""
+        repo_parent = tmp_path / "repo"
+        worktree = repo_parent / "worktree"
+        worktree.mkdir(parents=True)
+        rogue_gitdir = tmp_path / "outside.git"
+        rogue_gitdir.mkdir()
+        (worktree / ".git").write_text("gitdir: " + str(rogue_gitdir) + "\n")
+
+        result = resolve_bare_repo_path(str(worktree))
+        assert result is None
+
     def test_git_file_invalid_content(self, tmp_path):
         """If .git file doesn't start with gitdir:, returns None."""
         worktree = tmp_path / "worktree"

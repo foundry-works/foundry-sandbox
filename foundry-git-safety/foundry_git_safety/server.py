@@ -14,6 +14,7 @@ Security model:
 import json
 import logging
 import os
+import hmac
 import threading
 import time
 
@@ -130,6 +131,21 @@ def create_git_api(
     nonces = nonce_store or NonceStore()
     limiter = rate_limiter or RateLimiter()
     resolved_data_dir = data_dir or DEFAULT_DATA_DIR
+    obs_config = (
+        config.git_safety.observability
+        if config is not None
+        else None
+    )
+    admin_endpoints_require_token = (
+        obs_config.admin_endpoints_require_token
+        if obs_config is not None
+        else True
+    )
+    admin_token_env = (
+        obs_config.admin_token_env
+        if obs_config is not None
+        else "FOUNDRY_GIT_SAFETY_ADMIN_TOKEN"
+    )
 
     # When mtime-based secret rotation is detected (e.g. watchdog writes a
     # new secret file), clear the nonce store for that sandbox so replayed
@@ -173,6 +189,23 @@ def create_git_api(
         resp = _make_error("Rate limit exceeded", 429)
         resp.headers["Retry-After"] = str(int(retry_after) + 1)
         return resp
+
+    def _admin_auth_error() -> Response | None:
+        if not admin_endpoints_require_token:
+            return None
+
+        expected = os.environ.get(admin_token_env, "")
+        if not expected:
+            return _make_error("Admin token is not configured", 403)
+
+        provided = request.headers.get("X-Foundry-Admin-Token", "")
+        auth_header = request.headers.get("Authorization", "")
+        if not provided and auth_header.lower().startswith("bearer "):
+            provided = auth_header.split(" ", 1)[1].strip()
+
+        if not provided or not hmac.compare_digest(provided, expected):
+            return _make_error("Admin authentication required", 401)
+        return None
 
     @app.route("/git/exec", methods=["POST"])
     def git_exec():
@@ -321,6 +354,10 @@ def create_git_api(
 
     @app.route("/metrics", methods=["GET"])
     def metrics():
+        auth_error = _admin_auth_error()
+        if auth_error is not None:
+            return auth_error
+
         from .metrics import registry as metrics_registry
         content = metrics_registry.render_prometheus()
         return Response(content, content_type="text/plain; version=0.0.4; charset=utf-8")
@@ -333,9 +370,13 @@ def create_git_api(
         log on a best-effort basis — a degraded log does not prevent the
         counter from being incremented.
 
-        No HMAC auth: localhost-only (server binds 127.0.0.1), and the
-        endpoint only records observability data.
+        Requires the host admin token by default because sandboxes can reach
+        this listener through the sbx proxy path.
         """
+        auth_error = _admin_auth_error()
+        if auth_error is not None:
+            return auth_error
+
         from .metrics import registry as metrics_registry
 
         try:
@@ -353,6 +394,10 @@ def create_git_api(
 
         if not sandbox or not action:
             return _make_error("Missing required fields: sandbox, action", 400)
+        if not isinstance(sandbox, str) or not SANDBOX_ID_RE.match(sandbox):
+            return _make_error("Invalid sandbox", 400)
+        if action not in {"reinjected", "reinject_failed"}:
+            return _make_error("Invalid action", 400)
 
         # Always increment the counter.
         metrics_registry.inc_counter(
@@ -394,6 +439,7 @@ def create_git_api(
                 nonce_store=nonces,
                 rate_limiter=limiter,
                 data_dir=resolved_data_dir,
+                admin_auth=_admin_auth_error,
             )
             app.register_blueprint(bp)
             logger.info("Registered %d user service proxy routes", len(entries))
@@ -419,6 +465,7 @@ def create_git_api(
                     policy_sets, dp_services,
                     secret_store=secrets, nonce_store=nonces,
                     rate_limiter=limiter, circuit_breaker=cb,
+                    admin_auth=_admin_auth_error,
                 )
                 app.register_blueprint(dp_bp)
                 logger.info(

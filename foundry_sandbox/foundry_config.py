@@ -76,6 +76,9 @@ class McpServerProxy(_Strict):
     type: Literal["proxy"]
     host_env: str
     target: str
+    methods: list[str] = Field(default_factory=list)
+    paths: list[str] = Field(default_factory=list)
+    allow_all: bool = False
 
 
 class McpServerNpm(_Strict):
@@ -132,6 +135,7 @@ class UserService(_Strict):
     format: Literal["bearer", "header", "query"] = "bearer"
     methods: list[str] = Field(default_factory=list)
     paths: list[str] = Field(default_factory=list)
+    allow_all: bool = False
     scheme: str = "https"
     port: int = 0
 
@@ -1170,8 +1174,11 @@ def compile_mcp_servers(
                 "domain": server.target,
                 "header": "Authorization",
                 "format": "bearer",
-                "methods": [],
-                "paths": [],
+                "methods": list(server.methods),
+                "paths": list(server.paths),
+                "allow_all": server.allow_all or (
+                    not server.methods and not server.paths
+                ),
                 "scheme": "https",
                 "port": 0,
             })

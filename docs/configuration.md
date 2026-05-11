@@ -143,6 +143,40 @@ Behavior:
 - `cast new --allow-pr` and `git_safety.allow_pr_operations` combine via AND
   semantics: `false` anywhere wins
 
+### Admin Endpoints
+
+The git-safety server protects operational endpoints by default:
+`/metrics`, `/tamper-event`, `/proxy/health`, and `/deep-policy/health`.
+
+Set an admin token in the server environment:
+
+```bash
+export FOUNDRY_GIT_SAFETY_ADMIN_TOKEN="..."
+```
+
+Clients send it as either `X-Foundry-Admin-Token` or an `Authorization: Bearer`
+token. You can change the environment variable name in trusted config:
+
+```yaml
+git_safety:
+  observability:
+    admin_endpoints_require_token: true
+    admin_token_env: FOUNDRY_GIT_SAFETY_ADMIN_TOKEN
+```
+
+Standalone `foundry-git-safety` only loads `foundry.yaml` from an explicit path
+or from `FOUNDRY_GIT_SAFETY_CONFIG` / `FOUNDRY_CONFIG_PATH`; it does not
+implicitly load a repo-local `foundry.yaml` from the current working directory.
+When `cast` starts the server, it creates a host-only admin token file at
+`~/.foundry/secrets/git-safety-admin-token` unless
+`FOUNDRY_GIT_SAFETY_ADMIN_TOKEN` is already set. Override the file path with
+`FOUNDRY_GIT_SAFETY_ADMIN_TOKEN_FILE`.
+
+Proxy upstreams use bounded transport defaults:
+
+- `FOUNDRY_GIT_SAFETY_UPSTREAM_TIMEOUT_SECONDS` defaults to `30`
+- `FOUNDRY_GIT_SAFETY_UPSTREAM_MAX_RESPONSE_BYTES` defaults to `52428800`
+
 ## User-Defined Services
 
 For APIs that are not handled directly by the built-in `sbx` secret flow,
@@ -181,12 +215,24 @@ Important behavior:
   `bearer` adds `Bearer <secret>` to `header`,
   `header` writes the raw secret to `header`,
   and `query` appends the secret as a query parameter named by `header`.
-- `methods` and `paths` optionally restrict which requests the proxy accepts.
+- `methods` and `paths` restrict which requests the proxy accepts. Empty
+  lists are still accepted for compatibility, but the server logs a warning
+  unless `allow_all: true` marks that broad access as intentional.
 - `scheme` and `port` let you target non-default upstream transport settings.
 - This works best for direct HTTP clients or tools that can adapt to a custom
   proxy/base URL flow.
 - SDKs that assume `*_API_KEY` always contains a raw token will usually need
   extra adaptation or a different integration path.
+
+For intentionally broad service access, set `allow_all: true` explicitly:
+
+```yaml
+user_services:
+  - name: Internal API
+    env_var: INTERNAL_API_KEY
+    domain: api.internal.com
+    allow_all: true
+```
 
 For manual requests inside the sandbox, use the installed `proxy-sign` helper to
 generate the required headers for `/proxy/...` endpoints.
@@ -248,10 +294,14 @@ mcp_servers:
     type: proxy
     host_env: INTERNAL_API_KEY
     target: api.internal.com
+    methods: [GET, POST]
+    paths: ["/v1/**"]
 ```
 
 The `host_env` field names the host environment variable that holds the real
 credential. The `target` field identifies the intended upstream service domain.
+For compatibility, proxy MCP declarations without `methods` or `paths` compile
+to `allow_all: true`; add restrictions when the upstream API supports them.
 
 ### npm servers (third-party)
 

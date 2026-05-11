@@ -8,6 +8,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from foundry_git_safety import proxy_limits
 from foundry_git_safety.auth import (
     NonceStore,
     RateLimiter,
@@ -105,12 +106,21 @@ def app_client(auth_stores):
     return app.test_client()
 
 
-def _signed_request(client, path, method="GET", body: bytes = b""):
+def _signed_request(
+    client,
+    path,
+    method="GET",
+    body: bytes = b"",
+    sign_path: str | None = None,
+    extra_headers: dict[str, str] | None = None,
+):
     """Make an HTTP request with valid auth headers."""
-    headers = _auth_headers(method, path, body)
+    headers = _auth_headers(method, sign_path or path, body)
+    if extra_headers:
+        headers.update(extra_headers)
     http_method = getattr(client, method.lower())
     if body:
-        return http_method(path, headers=headers, data=body)
+        return http_method(path, headers=headers, data=body, content_type="application/json")
     return http_method(path, headers=headers)
 
 
@@ -152,8 +162,140 @@ class TestProxyAllow:
         mock_conn.getresponse.return_value = mock_response
         mock_conn_cls.return_value = mock_conn
 
-        resp = _signed_request(client=app_client, path="/deep-policy/test-svc/v1/items")
+        resp = _signed_request(
+            client=app_client,
+            path="/deep-policy/test-svc/v1/items",
+            extra_headers={"X-Foundry-Admin-Token": "admin-token"},
+        )
         assert resp.status_code == 200
+        assert (
+            mock_conn_cls.call_args.kwargs["timeout"]
+            == proxy_limits.UPSTREAM_TIMEOUT_SECONDS
+        )
+        headers_sent = mock_conn.request.call_args[1].get("headers", {})
+        assert "X-Sandbox-Id" not in headers_sent
+        assert "X-Request-Signature" not in headers_sent
+        assert "X-Request-Timestamp" not in headers_sent
+        assert "X-Request-Nonce" not in headers_sent
+        assert "X-Foundry-Admin-Token" not in headers_sent
+
+    @patch("foundry_git_safety.deep_policy_proxy.http.client.HTTPSConnection")
+    def test_oversized_upstream_response_returns_502(
+        self,
+        mock_conn_cls,
+        app_client,
+        monkeypatch,
+    ):
+        monkeypatch.setattr(proxy_limits, "UPSTREAM_MAX_RESPONSE_BYTES", 4)
+
+        mock_conn = MagicMock()
+        mock_response = MagicMock()
+        mock_response.status = 200
+        mock_response.getheaders.return_value = [("Content-Type", "application/json")]
+        mock_response.read.side_effect = [b"12345"]
+        mock_conn.getresponse.return_value = mock_response
+        mock_conn_cls.return_value = mock_conn
+
+        resp = _signed_request(client=app_client, path="/deep-policy/test-svc/v1/items")
+        assert resp.status_code == 502
+        assert "too large" in resp.get_json()["error"].lower()
+        mock_conn.close.assert_called_once()
+
+
+class TestGithubSecurityPolicies:
+    def _client(self, tmp_path):
+        from foundry_git_safety.server import create_git_api
+
+        secrets_dir = tmp_path / "secrets"
+        secrets_dir.mkdir()
+        (secrets_dir / _TEST_SANDBOX).write_bytes(_TEST_SECRET)
+
+        secret_store = SecretStore(secrets_path=str(secrets_dir))
+        nonce_store = NonceStore()
+        rate_limiter = RateLimiter()
+
+        policy_sets, services = _make_policy_set(
+            slug="github",
+            host="api.github.com",
+            rules=[
+                {
+                    "method": "*",
+                    "path_pattern": r"^/.*$",
+                    "action": "allow",
+                    "priority": 1,
+                }
+            ],
+            default_action="allow",
+        )
+        cb = CircuitBreaker(threshold=5, recovery_seconds=30)
+        app = create_git_api(
+            secret_store=secret_store,
+            nonce_store=nonce_store,
+            rate_limiter=rate_limiter,
+        )
+        bp = create_deep_policy_blueprint(
+            policy_sets,
+            services,
+            secret_store=secret_store,
+            nonce_store=nonce_store,
+            rate_limiter=rate_limiter,
+            circuit_breaker=cb,
+        )
+        app.register_blueprint(bp)
+        return app.test_client()
+
+    def test_release_creation_blocked_before_yaml_allowlist(self, tmp_path):
+        client = self._client(tmp_path)
+        body = b"{}"
+        resp = _signed_request(
+            client=client,
+            path="/deep-policy/github/repos/o/r/releases",
+            method="POST",
+            body=body,
+        )
+        assert resp.status_code == 403
+        assert "release" in resp.get_json()["message"].lower()
+
+    def test_pr_and_issue_close_blocked_before_forwarding(self, tmp_path):
+        client = self._client(tmp_path)
+        body = json.dumps({"state": "closed"}).encode()
+        for path in (
+            "/deep-policy/github/repos/o/r/pulls/1",
+            "/deep-policy/github/repos/o/r/issues/1",
+        ):
+            resp = _signed_request(
+                client=client,
+                path=path,
+                method="PATCH",
+                body=body,
+            )
+            assert resp.status_code == 403
+            assert "clos" in resp.get_json()["message"].lower()
+
+    def test_graphql_close_blocked_before_yaml_allowlist(self, tmp_path):
+        client = self._client(tmp_path)
+        for mutation in ("closePullRequest", "closeIssue"):
+            body = json.dumps({"query": f"mutation {{ {mutation}(input: {{id: \"x\"}}) }}"}).encode()
+            resp = _signed_request(
+                client=client,
+                path="/deep-policy/github/graphql",
+                method="POST",
+                body=body,
+            )
+            assert resp.status_code == 403
+            assert "clos" in resp.get_json()["message"].lower()
+
+    def test_double_encoded_github_path_fails_closed(self, tmp_path):
+        client = self._client(tmp_path)
+        resp = _signed_request(
+            client=client,
+            path="/deep-policy/github/repos/%252E/r/pulls/1/merge",
+            sign_path="/deep-policy/github/repos/%2E/r/pulls/1/merge",
+            method="PUT",
+            body=b"{}",
+        )
+        assert resp.status_code == 403
+        assert "encoded" in resp.get_json()["message"].lower()
 
 
 class TestPolicyContext:

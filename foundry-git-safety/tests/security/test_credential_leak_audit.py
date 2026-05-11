@@ -146,14 +146,19 @@ class TestCredentialLeakThroughGitSafety:
         # The host-side data dir should never appear in responses
         assert str(tmp_path / "data") not in resp_text
 
-    def test_metrics_contain_no_secrets(self, tmp_path):
+    def test_metrics_contain_no_secrets(self, tmp_path, monkeypatch):
         """Prometheus /metrics output must not contain secrets."""
         app = _make_app(tmp_path)
         client = app.test_client()
+        admin_token = "test-admin-token"
+        monkeypatch.setenv("FOUNDRY_GIT_SAFETY_ADMIN_TOKEN", admin_token)
 
         secret_str = app._test_secret.decode()
 
-        resp = client.get("/metrics")
+        resp = client.get(
+            "/metrics",
+            headers={"X-Foundry-Admin-Token": admin_token},
+        )
         assert resp.status_code == 200
         content = resp.data.decode()
         assert secret_str not in content

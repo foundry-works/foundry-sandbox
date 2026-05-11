@@ -83,7 +83,8 @@ Useful local endpoints:
 ```bash
 curl http://127.0.0.1:8083/health
 curl http://127.0.0.1:8083/ready
-curl http://127.0.0.1:8083/metrics
+curl -H "X-Foundry-Admin-Token: $FOUNDRY_GIT_SAFETY_ADMIN_TOKEN" \
+  http://127.0.0.1:8083/metrics
 ```
 
 ## Wrapper Repair

@@ -427,6 +427,7 @@ class TestCompileUserServices:
             format="header",
             methods=["GET"],
             paths=["/v1/**"],
+            allow_all=False,
             scheme="http",
             port=8080,
         )]
@@ -434,6 +435,7 @@ class TestCompileUserServices:
         assert bundle.env_vars["READONLY_API_KEY"] == "http://host.docker.internal:8083/proxy/readonlyapi"
         assert bundle.sbx_secrets[0] == ("readonlyapi", "READONLY_API_KEY")
         assert bundle.user_services[0]["paths"] == ["/v1/**"]
+        assert bundle.user_services[0]["allow_all"] is False
 
     def test_value_alias_normalizes_to_header(self):
         svc = UserService(
@@ -563,6 +565,21 @@ class TestCompileMcpProxy:
         assert "/proxy/internal-api" in content["mcpServers"]["internal-api"]["url"]
         assert bundle.user_services[0]["domain"] == "api.internal.com"
         assert bundle.user_services[0]["env_var"] == "INTERNAL_API_KEY"
+        assert bundle.user_services[0]["allow_all"] is True
+
+    def test_proxy_preserves_restrictions(self):
+        servers = [McpServerProxy(
+            name="internal-api",
+            type="proxy",
+            host_env="INTERNAL_API_KEY",
+            target="api.internal.com",
+            methods=["GET", "POST"],
+            paths=["/v1/**"],
+        )]
+        bundle = compile_mcp_servers(servers)
+        assert bundle.user_services[0]["methods"] == ["GET", "POST"]
+        assert bundle.user_services[0]["paths"] == ["/v1/**"]
+        assert bundle.user_services[0]["allow_all"] is False
 
     def test_proxy_custom_host_and_port(self):
         servers = [McpServerProxy(

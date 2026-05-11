@@ -79,6 +79,11 @@ _MERGE_BODY_KEYWORDS = [
     b"enablePullRequestAutoMerge",
 ]
 
+_CLOSE_MUTATION_KEYWORDS = [
+    b"closePullRequest",
+    b"closeIssue",
+]
+
 
 def is_merge_request(path: str, body: bytes) -> bool:
     """Check if a request is a merge operation (REST or GraphQL).
@@ -228,6 +233,34 @@ def check_github_body_policies(
     Returns block reason if request should be blocked, None otherwise.
     """
     if method not in ("PATCH", "POST"):
+        return None
+
+    # GraphQL: block close mutations even if a YAML policy broadly allows
+    # POST /graphql. Only inspect the query field when the body is valid JSON.
+    if method == "POST" and path.rstrip("/").endswith("/graphql"):
+        if content_encoding:
+            return (
+                "Compressed request bodies are not allowed for "
+                "security-relevant GitHub GraphQL endpoints"
+            )
+        if body is None:
+            return (
+                "Streaming request bodies are not allowed for "
+                "security-relevant GitHub GraphQL endpoints"
+            )
+        try:
+            parsed = json.loads(body)
+            if isinstance(parsed, dict):
+                query_field = parsed.get("query", "")
+                if isinstance(query_field, str):
+                    query_bytes = query_field.encode("utf-8", errors="replace")
+                    if b"closePullRequest" in query_bytes:
+                        return "Closing pull requests via GraphQL is blocked by policy"
+                    if b"closeIssue" in query_bytes:
+                        return "Closing issues via GraphQL is blocked by policy"
+        except (json.JSONDecodeError, ValueError, UnicodeDecodeError):
+            if any(kw in body for kw in _CLOSE_MUTATION_KEYWORDS):
+                return "GitHub close mutations via GraphQL are blocked by policy"
         return None
 
     # POST: PR review approval check

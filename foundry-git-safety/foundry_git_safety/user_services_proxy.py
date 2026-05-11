@@ -5,8 +5,8 @@ routes. The sandbox talks HTTP to the proxy; the proxy reads the real API
 key from the host environment, adds the configured header, and forwards
 via HTTPS to the upstream service. No MITM, no custom CA.
 
-All proxy routes require HMAC authentication. Health endpoints remain
-unauthenticated.
+All proxy routes require HMAC authentication. Health endpoints may be
+protected by server admin auth.
 """
 
 from __future__ import annotations
@@ -18,6 +18,7 @@ import os
 import re
 from fnmatch import fnmatch
 from pathlib import Path
+from typing import Callable
 from urllib.parse import parse_qsl, urlencode
 
 try:
@@ -29,11 +30,14 @@ except ImportError as exc:
     ) from exc
 
 from .auth import NonceStore, RateLimiter, SecretStore, authenticate_request
+from .proxy_limits import (
+    UPSTREAM_TIMEOUT_SECONDS,
+    UpstreamResponseTooLarge,
+    read_capped_response,
+)
 from .schemas.foundry_yaml import UserServiceEntry
 
 logger = logging.getLogger(__name__)
-
-_CHUNK_SIZE = 64 * 1024  # 64 KiB
 
 _HOP_BY_HOP = frozenset({
     "transfer-encoding", "connection", "keep-alive",
@@ -41,9 +45,32 @@ _HOP_BY_HOP = frozenset({
     "content-length",
 })
 
+_INTERNAL_PROXY_HEADERS = frozenset({
+    "x-sandbox-id",
+    "x-request-signature",
+    "x-request-timestamp",
+    "x-request-nonce",
+})
+
 
 def _slug(name: str) -> str:
     return re.sub(r"[^a-z0-9]+", "-", name.lower()).strip("-") or "unknown"
+
+
+def _path_without_query(path: str) -> str:
+    """Return a path safe for logs by dropping query parameters."""
+    return path.split("?", 1)[0]
+
+
+def _should_forward_header(name: str) -> bool:
+    """Keep Foundry auth metadata inside the proxy trust boundary."""
+    lower = name.lower()
+    return (
+        lower not in _HOP_BY_HOP
+        and lower not in _INTERNAL_PROXY_HEADERS
+        and lower != "host"
+        and not lower.startswith("x-foundry-")
+    )
 
 
 def create_user_services_blueprint(
@@ -52,15 +79,40 @@ def create_user_services_blueprint(
     nonce_store: NonceStore,
     rate_limiter: RateLimiter,
     data_dir: str | None = None,
+    admin_auth: Callable[[], Response | tuple | None] | None = None,
 ) -> Blueprint:
     """Create a Flask Blueprint that reverse-proxies to declared services.
 
-    All proxy routes require HMAC authentication. The health endpoint
-    remains unauthenticated.
+    All proxy routes require HMAC authentication. The health endpoint may be
+    protected by server admin auth.
     """
     bp = Blueprint("user_services_proxy", __name__)
 
     slug_map: dict[str, UserServiceEntry] = {_slug(s.name): s for s in services}
+    unrestricted_warnings: set[str] = set()
+
+    def _warn_if_unrestricted(service_slug: str, svc: UserServiceEntry) -> None:
+        if svc.allow_all:
+            return
+
+        missing: list[str] = []
+        if not svc.methods:
+            missing.append("methods")
+        if not svc.paths:
+            missing.append("paths")
+        if not missing:
+            return
+
+        warning_key = f"{service_slug}:{','.join(missing)}"
+        if warning_key in unrestricted_warnings:
+            return
+        unrestricted_warnings.add(warning_key)
+        logger.warning(
+            "Proxy service %s has unrestricted %s without allow_all=true; "
+            "add explicit restrictions or mark the broad access intentionally",
+            service_slug,
+            " and ".join(missing),
+        )
 
     def _load_sandbox_services(sandbox_id: str) -> dict[str, UserServiceEntry]:
         if not data_dir:
@@ -98,6 +150,11 @@ def create_user_services_blueprint(
 
     @bp.route("/proxy/health", methods=["GET"])
     def proxy_health():
+        if admin_auth is not None:
+            auth_error = admin_auth()
+            if auth_error is not None:
+                return auth_error
+
         result = []
         for slug, svc in sorted(slug_map.items()):
             key_present = bool(os.environ.get(svc.env_var, ""))
@@ -129,6 +186,7 @@ def create_user_services_blueprint(
         svc = effective_services.get(service_slug)
         if svc is None:
             return jsonify({"error": f"Unknown service: {service_slug}"}), 404
+        _warn_if_unrestricted(service_slug, svc)
 
         # Method filtering
         if svc.methods:
@@ -165,9 +223,17 @@ def create_user_services_blueprint(
         target_port = svc.port or (443 if svc.scheme == "https" else 80)
         try:
             if svc.scheme == "https":
-                conn = http.client.HTTPSConnection(svc.domain, target_port)
+                conn = http.client.HTTPSConnection(
+                    svc.domain,
+                    target_port,
+                    timeout=UPSTREAM_TIMEOUT_SECONDS,
+                )
             else:
-                conn = http.client.HTTPConnection(svc.domain, target_port)
+                conn = http.client.HTTPConnection(
+                    svc.domain,
+                    target_port,
+                    timeout=UPSTREAM_TIMEOUT_SECONDS,
+                )
         except Exception as exc:
             logger.error("Failed to connect to %s: %s", svc.domain, exc)
             return jsonify({
@@ -177,7 +243,7 @@ def create_user_services_blueprint(
         # Build headers — inject credential
         headers = {}
         for key, value in request.headers:
-            if key.lower() not in _HOP_BY_HOP and key.lower() != "host":
+            if _should_forward_header(key):
                 headers[key] = value
         headers["Host"] = svc.domain
 
@@ -210,31 +276,39 @@ def create_user_services_blueprint(
                 "error": f"Upstream request failed: {svc.domain}",
             }), 502
 
-        # Stream response back
-        def generate():
-            try:
-                while True:
-                    chunk = upstream_response.read(_CHUNK_SIZE)
-                    if not chunk:
-                        break
-                    yield chunk
-            finally:
-                conn.close()
-
         # Build response headers, stripping hop-by-hop
         resp_headers = [
             (k, v) for k, v in upstream_response.getheaders()
             if k.lower() not in _HOP_BY_HOP
         ]
 
+        try:
+            response_body = read_capped_response(upstream_response)
+        except UpstreamResponseTooLarge:
+            logger.warning(
+                "Upstream response from %s exceeded size cap",
+                svc.domain,
+            )
+            return jsonify({"error": "Upstream response too large"}), 502
+        except Exception as exc:
+            logger.error(
+                "Reading upstream response from %s failed: %s",
+                svc.domain,
+                exc,
+            )
+            return jsonify({"error": f"Upstream response failed: {svc.domain}"}), 502
+        finally:
+            conn.close()
+
         logger.info(
             "Proxied %s %s/%s -> %s://%s%s (%d)",
             request.method, service_slug, upstream_path,
-            svc.scheme, svc.domain, full_path, upstream_response.status,
+            svc.scheme, svc.domain, _path_without_query(full_path),
+            upstream_response.status,
         )
 
         return Response(
-            generate(), status=upstream_response.status, headers=resp_headers,
+            response_body, status=upstream_response.status, headers=resp_headers,
         )
 
     return bp

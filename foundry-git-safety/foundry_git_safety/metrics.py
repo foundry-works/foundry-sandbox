@@ -14,7 +14,14 @@ _DEFAULT_BUCKETS = (0.01, 0.05, 0.1, 0.25, 0.5, 1.0, 2.5, 5.0, 10.0)
 
 def _serialize_labels(labels: dict[str, str]) -> str:
     """Sort labels into a deterministic key for dict lookup."""
-    return ",".join(f'{k}="{v}"' for k, v in sorted(labels.items()))
+    return ",".join(
+        f'{k}="{_escape_label_value(v)}"' for k, v in sorted(labels.items())
+    )
+
+
+def _escape_label_value(value: str) -> str:
+    """Escape Prometheus label values."""
+    return str(value).replace("\\", "\\\\").replace("\n", "\\n").replace('"', '\\"')
 
 
 class _MetricsRegistry:
@@ -147,7 +154,9 @@ class _MetricsRegistry:
     def _format_labels(labels: dict[str, str]) -> str:
         if not labels:
             return ""
-        pairs = ",".join(f'{k}="{v}"' for k, v in sorted(labels.items()))
+        pairs = ",".join(
+            f'{k}="{_escape_label_value(v)}"' for k, v in sorted(labels.items())
+        )
         return "{" + pairs + "}"
 
     def reset(self) -> None:

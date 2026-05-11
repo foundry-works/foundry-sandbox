@@ -129,6 +129,7 @@ class TestFoundryConfig:
         assert len(cfg.user_services) == 1
         assert cfg.user_services[0].header == "Authorization"
         assert cfg.user_services[0].format == "bearer"
+        assert cfg.user_services[0].allow_all is False
 
     def test_nested_user_services_compat_unwraps(self):
         cfg = FoundryConfig(
@@ -146,6 +147,19 @@ class TestFoundryConfig:
         )
         assert len(cfg.user_services) == 1
         assert cfg.user_services[0].format == "header"
+
+    def test_user_service_allow_all(self):
+        cfg = FoundryConfig(
+            user_services=[
+                {
+                    "name": "BroadAPI",
+                    "env_var": "BROAD_API_KEY",
+                    "domain": "api.broad.example",
+                    "allow_all": True,
+                }
+            ],
+        )
+        assert cfg.user_services[0].allow_all is True
 
 
 if __name__ == "__main__":

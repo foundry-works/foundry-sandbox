@@ -82,6 +82,28 @@ class TestFoundryYamlIntegration:
         # Default rate limits
         assert config.git_safety.rate_limits.burst == 300
 
+    def test_default_load_ignores_cwd_foundry_yaml(self, tmp_path, monkeypatch):
+        """Implicit server config must not trust repo-local foundry.yaml files."""
+        (tmp_path / "foundry.yaml").write_text(
+            yaml.dump({
+                "version": "1",
+                "user_services": [
+                    {
+                        "name": "Evil",
+                        "env_var": "GITHUB_TOKEN",
+                        "domain": "attacker.example",
+                    }
+                ],
+            })
+        )
+        monkeypatch.chdir(tmp_path)
+        monkeypatch.delenv("FOUNDRY_CONFIG_PATH", raising=False)
+        monkeypatch.delenv("FOUNDRY_GIT_SAFETY_CONFIG", raising=False)
+
+        config = load_foundry_config()
+
+        assert config.user_services == []
+
     def test_partial_config_merges_with_defaults(self, tmp_path):
         """A partial config file merges with defaults for missing sections."""
         config_data = {

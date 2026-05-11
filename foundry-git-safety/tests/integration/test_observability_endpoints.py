@@ -11,6 +11,13 @@ from foundry_git_safety.metrics import registry
 from foundry_git_safety.schemas.foundry_yaml import FoundryConfig, GitSafetyConfig, ObservabilityConfig
 from foundry_git_safety.server import create_git_api
 
+_ADMIN_TOKEN = "test-admin-token"
+
+
+def _admin_headers(monkeypatch):
+    monkeypatch.setenv("FOUNDRY_GIT_SAFETY_ADMIN_TOKEN", _ADMIN_TOKEN)
+    return {"X-Foundry-Admin-Token": _ADMIN_TOKEN}
+
 
 @pytest.fixture
 def app(tmp_path):
@@ -96,8 +103,12 @@ class TestReadyEndpoint:
 
 
 class TestMetricsEndpoint:
-    def test_returns_prometheus_format(self, client):
+    def test_requires_admin_token(self, client):
         resp = client.get("/metrics")
+        assert resp.status_code in (401, 403)
+
+    def test_returns_prometheus_format(self, client, monkeypatch):
+        resp = client.get("/metrics", headers=_admin_headers(monkeypatch))
         assert resp.status_code == 200
         assert "text/plain" in resp.content_type
         text = resp.data.decode()
@@ -105,7 +116,7 @@ class TestMetricsEndpoint:
         assert "# TYPE git_safety_operations_total counter" in text
         assert "process_uptime_seconds" in text
 
-    def test_metrics_increment_after_request(self, tmp_path):
+    def test_metrics_increment_after_request(self, tmp_path, monkeypatch):
         data_dir = str(tmp_path / "data")
         secrets_dir = str(tmp_path / "secrets")
         os.makedirs(os.path.join(data_dir, "sandboxes"), exist_ok=True)
@@ -131,7 +142,7 @@ class TestMetricsEndpoint:
         # Send a request with missing headers -> should record "error" outcome
         c.post("/git/exec", data="{}", content_type="application/json")
 
-        resp = c.get("/metrics")
+        resp = c.get("/metrics", headers=_admin_headers(monkeypatch))
         text = resp.data.decode()
         assert "git_safety_operations_total" in text
 
@@ -259,7 +270,15 @@ class TestDecisionLogHealthChecks:
 class TestTamperEventEndpoint:
     """Tests for POST /tamper-event metric-only delivery."""
 
-    def test_counter_increments_on_valid_post(self, client):
+    def test_requires_admin_token(self, client):
+        resp = client.post(
+            "/tamper-event",
+            data=json.dumps({"sandbox": "sbx-1", "action": "reinjected"}),
+            content_type="application/json",
+        )
+        assert resp.status_code in (401, 403)
+
+    def test_counter_increments_on_valid_post(self, client, monkeypatch):
         registry.reset()
         resp = client.post(
             "/tamper-event",
@@ -270,6 +289,7 @@ class TestTamperEventEndpoint:
                 "actual_sha256": "def456",
             }),
             content_type="application/json",
+            headers=_admin_headers(monkeypatch),
         )
         assert resp.status_code == 200
         data = resp.get_json()
@@ -277,7 +297,7 @@ class TestTamperEventEndpoint:
         assert data["log_written"] is True
 
         # Counter visible on /metrics
-        metrics_resp = client.get("/metrics")
+        metrics_resp = client.get("/metrics", headers=_admin_headers(monkeypatch))
         text = metrics_resp.data.decode()
         assert "wrapper_tamper_events_total" in text
 
@@ -312,6 +332,7 @@ class TestTamperEventEndpoint:
                 "actual_sha256": "bbb",
             }),
             content_type="application/json",
+            headers=_admin_headers(monkeypatch),
         )
         # 202 = counter incremented, log write failed
         assert resp.status_code == 202
@@ -320,33 +341,46 @@ class TestTamperEventEndpoint:
         assert data["log_written"] is False
 
         # Counter still visible on /metrics
-        metrics_resp = client.get("/metrics")
+        metrics_resp = client.get("/metrics", headers=_admin_headers(monkeypatch))
         text = metrics_resp.data.decode()
         assert "wrapper_tamper_events_total" in text
         assert "sbx-degraded" in text
 
         monkeypatch.setattr(decision_log, "_writer", None)
 
-    def test_rejects_missing_fields(self, client):
+    def test_rejects_missing_fields(self, client, monkeypatch):
         registry.reset()
         resp = client.post(
             "/tamper-event",
             data=json.dumps({"sandbox": "sbx-1"}),
             content_type="application/json",
+            headers=_admin_headers(monkeypatch),
         )
         assert resp.status_code == 400
 
-    def test_rejects_invalid_json(self, client):
+    def test_rejects_invalid_json(self, client, monkeypatch):
         registry.reset()
         resp = client.post(
             "/tamper-event",
             data="not json",
             content_type="text/plain",
+            headers=_admin_headers(monkeypatch),
         )
         assert resp.status_code == 400
 
-    def test_multiple_events_accumulate_counter(self, client):
+    def test_rejects_invalid_labels(self, client, monkeypatch):
         registry.reset()
+        resp = client.post(
+            "/tamper-event",
+            data=json.dumps({"sandbox": "bad\nname", "action": "reinjected"}),
+            content_type="application/json",
+            headers=_admin_headers(monkeypatch),
+        )
+        assert resp.status_code == 400
+
+    def test_multiple_events_accumulate_counter(self, client, monkeypatch):
+        registry.reset()
+        headers = _admin_headers(monkeypatch)
         for i in range(3):
             client.post(
                 "/tamper-event",
@@ -357,9 +391,10 @@ class TestTamperEventEndpoint:
                     "actual_sha256": "def",
                 }),
                 content_type="application/json",
+                headers=headers,
             )
 
-        metrics_resp = client.get("/metrics")
+        metrics_resp = client.get("/metrics", headers=headers)
         text = metrics_resp.data.decode()
         # Three distinct label sets, each with count 1
         assert text.count("wrapper_tamper_events_total{") == 3

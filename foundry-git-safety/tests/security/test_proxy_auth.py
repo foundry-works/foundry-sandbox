@@ -35,6 +35,8 @@ from foundry_git_safety.user_services_proxy import create_user_services_blueprin
 
 pytestmark = pytest.mark.security
 
+_ADMIN_TOKEN = "test-admin-token"
+
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -163,10 +165,14 @@ class TestUnauthorizedSandboxCannotUseService:
         )
 
         with app.test_client() as client:
-            resp = client.get("/proxy/health")
-            assert resp.status_code == 200
-            data = resp.get_json()
-            assert data["services"][0]["slug"] == "tavily"
+            with patch.dict(os.environ, {"FOUNDRY_GIT_SAFETY_ADMIN_TOKEN": _ADMIN_TOKEN}):
+                resp = client.get(
+                    "/proxy/health",
+                    headers={"X-Foundry-Admin-Token": _ADMIN_TOKEN},
+                )
+                assert resp.status_code == 200
+                data = resp.get_json()
+                assert data["services"][0]["slug"] == "tavily"
 
     def test_create_git_api_registers_metadata_backed_user_services(self, tmp_path):
         secrets_dir = tmp_path / "secrets"

@@ -2,7 +2,10 @@
 
 ## foundry.yaml
 
-The primary configuration file, read from the workspace root or the path specified by `FOUNDRY_CONFIG_PATH`.
+For standalone use, pass the primary configuration file explicitly or set
+`FOUNDRY_GIT_SAFETY_CONFIG` / `FOUNDRY_CONFIG_PATH`. Without an explicit path,
+the server uses defaults instead of trusting a repo-local current-directory
+`foundry.yaml`.
 
 ### Top-level schema
 
@@ -16,6 +19,7 @@ git_safety:
   file_restrictions: ...
   branch_isolation: ...
   rate_limits: ...
+  observability: ...
 ```
 
 ### user_services
@@ -79,11 +83,26 @@ Top-level proxy credential declarations consumed by the user-services proxy.
 | `sustained` | integer | `120` | Per-sandbox sustained rate (requests per minute) |
 | `global_ceiling` | integer | `1000` | Global requests per minute across all sandboxes |
 
+### observability
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `decision_log_dir` | string | `~/.foundry/logs/git-safety` | Decision-log directory |
+| `decision_log_max_bytes` | integer | `10485760` | Rotating decision-log max file size |
+| `decision_log_backup_count` | integer | `5` | Rotating decision-log backup count |
+| `admin_endpoints_require_token` | boolean | `true` | Require an admin token for `/metrics`, `/tamper-event`, `/proxy/health`, and `/deep-policy/health` |
+| `admin_token_env` | string | `FOUNDRY_GIT_SAFETY_ADMIN_TOKEN` | Environment variable containing the admin token |
+
 ## Environment Variables
 
 | Variable | Default | Description |
 |----------|---------|-------------|
+| `FOUNDRY_GIT_SAFETY_CONFIG` | (none) | Path to `foundry.yaml` |
 | `FOUNDRY_CONFIG_PATH` | (none) | Path to `foundry.yaml` |
+| `FOUNDRY_GIT_SAFETY_ADMIN_TOKEN` | (none) | Token for admin endpoints |
+| `FOUNDRY_GIT_SAFETY_ADMIN_TOKEN_FILE` | `~/.foundry/secrets/git-safety-admin-token` | Host-only token file used by `cast` when no token env is set |
+| `FOUNDRY_GIT_SAFETY_UPSTREAM_TIMEOUT_SECONDS` | `30` | Upstream proxy connection timeout |
+| `FOUNDRY_GIT_SAFETY_UPSTREAM_MAX_RESPONSE_BYTES` | `52428800` | Upstream proxy response cap |
 | `FOUNDRY_FILE_RESTRICTIONS_PATH` | (none) | Path to `push-file-restrictions.yaml` |
 | `FOUNDRY_DATA_DIR` | `~/.foundry/data/git-safety` | Server state directory |
 | `GIT_API_SECRETS_PATH` | `~/.foundry/secrets/sandbox-hmac` | HMAC secrets directory |

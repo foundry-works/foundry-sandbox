@@ -4,11 +4,13 @@ from __future__ import annotations
 
 import os
 import json
+import logging
 import time
 from unittest.mock import MagicMock, patch
 
 import pytest
 
+from foundry_git_safety import proxy_limits
 from foundry_git_safety.auth import (
     NonceStore,
     RateLimiter,
@@ -265,14 +267,24 @@ class TestProxyRequest:
                 with patch(
                     "foundry_git_safety.user_services_proxy.http.client.HTTPSConnection",
                     return_value=mock_conn,
-                ):
+                ) as mock_conn_cls:
                     headers = _auth_headers("GET", "/proxy/tavily/v1/search")
+                    headers["X-Foundry-Admin-Token"] = "admin-token"
                     resp = client.get("/proxy/tavily/v1/search", headers=headers)
                     assert resp.status_code == 200
 
                     call_args = mock_conn.request.call_args
                     headers_sent = call_args[1].get("headers", {})
                     assert headers_sent["Authorization"] == "Bearer tvly-secret"
+                    assert "X-Sandbox-Id" not in headers_sent
+                    assert "X-Request-Signature" not in headers_sent
+                    assert "X-Request-Timestamp" not in headers_sent
+                    assert "X-Request-Nonce" not in headers_sent
+                    assert "X-Foundry-Admin-Token" not in headers_sent
+                    assert (
+                        mock_conn_cls.call_args.kwargs["timeout"]
+                        == proxy_limits.UPSTREAM_TIMEOUT_SECONDS
+                    )
 
     def test_value_format(self, custom_service, auth_stores):
         from flask import Flask
@@ -392,6 +404,33 @@ class TestProxyRequest:
                     resp = client.get("/proxy/tavily/v1/search", headers=headers)
                     assert resp.status_code == 502
 
+    def test_oversized_upstream_response_returns_502(
+        self,
+        proxy_app,
+        monkeypatch,
+    ):
+        monkeypatch.setattr(proxy_limits, "UPSTREAM_MAX_RESPONSE_BYTES", 4)
+
+        mock_response = MagicMock()
+        mock_response.status = 200
+        mock_response.getheaders.return_value = []
+        mock_response.read.side_effect = [b"12345"]
+
+        mock_conn = MagicMock()
+        mock_conn.getresponse.return_value = mock_response
+
+        with proxy_app.test_client() as client:
+            with patch.dict(os.environ, {"TAVILY_API_KEY": "key"}):
+                with patch(
+                    "foundry_git_safety.user_services_proxy.http.client.HTTPSConnection",
+                    return_value=mock_conn,
+                ):
+                    headers = _auth_headers("GET", "/proxy/tavily/v1/search")
+                    resp = client.get("/proxy/tavily/v1/search", headers=headers)
+                    assert resp.status_code == 502
+                    assert "too large" in resp.get_json()["error"].lower()
+                    mock_conn.close.assert_called_once()
+
     def test_query_string_preserved(self, proxy_app):
         mock_response = MagicMock()
         mock_response.status = 200
@@ -449,3 +488,122 @@ class TestProxyRequest:
                     call_args = mock_conn.request.call_args
                     path = call_args[0][1] if call_args[0] else call_args[1].get("path", "")
                     assert path == "/v1/search?q=test&api_key=query-secret"
+
+    def test_query_format_secret_not_logged(self, query_service, auth_stores, caplog):
+        from flask import Flask
+
+        secret_store, nonce_store, rate_limiter = auth_stores
+        bp = create_user_services_blueprint(
+            [query_service],
+            secret_store=secret_store,
+            nonce_store=nonce_store,
+            rate_limiter=rate_limiter,
+        )
+        app = Flask(__name__)
+        app.register_blueprint(bp)
+
+        mock_response = MagicMock()
+        mock_response.status = 200
+        mock_response.getheaders.return_value = []
+        mock_response.read.side_effect = [b"", b""]
+
+        mock_conn = MagicMock()
+        mock_conn.getresponse.return_value = mock_response
+
+        with app.test_client() as client:
+            with patch.dict(os.environ, {"QUERY_API_KEY": "query-secret"}):
+                with patch(
+                    "foundry_git_safety.user_services_proxy.http.client.HTTPSConnection",
+                    return_value=mock_conn,
+                ):
+                    headers = _auth_headers("GET", "/proxy/queryapi/v1/search")
+                    with caplog.at_level(
+                        logging.INFO,
+                        logger="foundry_git_safety.user_services_proxy",
+                    ):
+                        resp = client.get(
+                            "/proxy/queryapi/v1/search?q=test",
+                            headers=headers,
+                        )
+                    assert resp.status_code == 200
+
+        assert "query-secret" not in caplog.text
+        assert "api_key" not in caplog.text
+        assert "https://api.query.example/v1/search (200)" in caplog.text
+
+    def test_unrestricted_service_without_allow_all_logs_warning(
+        self,
+        proxy_app,
+        caplog,
+    ):
+        mock_response = MagicMock()
+        mock_response.status = 200
+        mock_response.getheaders.return_value = []
+        mock_response.read.side_effect = [b"", b""]
+
+        mock_conn = MagicMock()
+        mock_conn.getresponse.return_value = mock_response
+
+        with proxy_app.test_client() as client:
+            with patch.dict(os.environ, {"TAVILY_API_KEY": "key"}):
+                with patch(
+                    "foundry_git_safety.user_services_proxy.http.client.HTTPSConnection",
+                    return_value=mock_conn,
+                ):
+                    headers = _auth_headers("GET", "/proxy/tavily/v1/search")
+                    with caplog.at_level(
+                        logging.WARNING,
+                        logger="foundry_git_safety.user_services_proxy",
+                    ):
+                        resp = client.get("/proxy/tavily/v1/search", headers=headers)
+                    assert resp.status_code == 200
+
+        assert "unrestricted methods and paths" in caplog.text
+        assert "allow_all=true" in caplog.text
+
+    def test_unrestricted_service_with_allow_all_suppresses_warning(
+        self,
+        auth_stores,
+        caplog,
+    ):
+        from flask import Flask
+
+        service = UserServiceEntry(
+            name="BroadAPI",
+            env_var="BROAD_API_KEY",
+            domain="api.broad.example",
+            allow_all=True,
+        )
+        secret_store, nonce_store, rate_limiter = auth_stores
+        bp = create_user_services_blueprint(
+            [service],
+            secret_store=secret_store,
+            nonce_store=nonce_store,
+            rate_limiter=rate_limiter,
+        )
+        app = Flask(__name__)
+        app.register_blueprint(bp)
+
+        mock_response = MagicMock()
+        mock_response.status = 200
+        mock_response.getheaders.return_value = []
+        mock_response.read.side_effect = [b"", b""]
+
+        mock_conn = MagicMock()
+        mock_conn.getresponse.return_value = mock_response
+
+        with app.test_client() as client:
+            with patch.dict(os.environ, {"BROAD_API_KEY": "key"}):
+                with patch(
+                    "foundry_git_safety.user_services_proxy.http.client.HTTPSConnection",
+                    return_value=mock_conn,
+                ):
+                    headers = _auth_headers("GET", "/proxy/broadapi/admin")
+                    with caplog.at_level(
+                        logging.WARNING,
+                        logger="foundry_git_safety.user_services_proxy",
+                    ):
+                        resp = client.get("/proxy/broadapi/admin", headers=headers)
+                    assert resp.status_code == 200
+
+        assert "unrestricted" not in caplog.text

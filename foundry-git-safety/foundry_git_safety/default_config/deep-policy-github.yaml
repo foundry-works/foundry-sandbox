@@ -36,6 +36,12 @@ services:
         reason: "gh release delete: removes release artifacts"
         priority: 100
 
+      - method: POST
+        path_pattern: "^/repos/[^/]+/[^/]+/releases$"
+        action: deny
+        reason: "gh release create: creates release artifacts"
+        priority: 100
+
       - method: DELETE
         path_pattern: "^/repos/[^/]+/[^/]+/git/refs/.*"
         action: deny
@@ -261,6 +267,22 @@ services:
         reason: "gh pr reopen: reopening closed PRs requires human approval"
         priority: 95
 
+      - method: PATCH
+        path_pattern: "^/repos/[^/]+/[^/]+/pulls/\\d+$"
+        body_jsonpath: "state"
+        body_value: "closed"
+        action: deny
+        reason: "gh pr close: closing PRs requires human approval"
+        priority: 95
+
+      - method: PATCH
+        path_pattern: "^/repos/[^/]+/[^/]+/issues/\\d+$"
+        body_jsonpath: "state"
+        body_value: "closed"
+        action: deny
+        reason: "gh issue close: closing issues requires human approval"
+        priority: 95
+
       - method: POST
         path_pattern: "^/repos/[^/]+/[^/]+/pulls/\\d+/reviews$"
         body_jsonpath: "event"
@@ -327,6 +349,22 @@ services:
         reason: "GraphQL mutation 'addPullRequestReview' is not permitted"
         priority: 90
 
+      - method: POST
+        path_pattern: "^/graphql$"
+        body_jsonpath: "query"
+        body_pattern: "\\bclosePullRequest\\s*\\("
+        action: deny
+        reason: "GraphQL mutation 'closePullRequest' is not permitted"
+        priority: 90
+
+      - method: POST
+        path_pattern: "^/graphql$"
+        body_jsonpath: "query"
+        body_pattern: "\\bcloseIssue\\s*\\("
+        action: deny
+        reason: "GraphQL mutation 'closeIssue' is not permitted"
+        priority: 90
+
       # ── Conditional PR GraphQL mutations (priority 50) ─────────
 
       - method: POST
@@ -353,15 +391,6 @@ services:
         body_pattern: "\\bsubmitPullRequestReview\\s*\\("
         action: deny
         reason: "GraphQL mutation 'submitPullRequestReview' requires --allow-pr"
-        priority: 50
-        condition: "allow_pr_operations == false"
-
-      - method: POST
-        path_pattern: "^/graphql$"
-        body_jsonpath: "query"
-        body_pattern: "\\bclosePullRequest\\s*\\("
-        action: deny
-        reason: "GraphQL mutation 'closePullRequest' requires --allow-pr"
         priority: 50
         condition: "allow_pr_operations == false"
 

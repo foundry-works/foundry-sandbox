@@ -142,8 +142,9 @@ def load_foundry_config(path: str | None = None) -> FoundryConfig:
     """Load and validate foundry.yaml configuration.
 
     Returns a FoundryConfig with defaults for any missing sections.
-    If path is not provided, looks for foundry.yaml in the current directory
-    and FOUNDRY_CONFIG_PATH environment variable.
+    If path is not provided, uses FOUNDRY_GIT_SAFETY_CONFIG or
+    FOUNDRY_CONFIG_PATH. Without an explicit path, returns defaults rather
+    than trusting a repo-local current-directory config.
 
     Args:
         path: Optional path to foundry.yaml.
@@ -155,10 +156,11 @@ def load_foundry_config(path: str | None = None) -> FoundryConfig:
         ConfigError: If configuration is invalid.
     """
     if path is None:
-        path = os.environ.get(
-            "FOUNDRY_CONFIG_PATH",
-            "foundry.yaml",
+        path = os.environ.get("FOUNDRY_GIT_SAFETY_CONFIG") or os.environ.get(
+            "FOUNDRY_CONFIG_PATH"
         )
+        if path is None:
+            return FoundryConfig()
 
     path_obj = Path(path)
     if not path_obj.exists():

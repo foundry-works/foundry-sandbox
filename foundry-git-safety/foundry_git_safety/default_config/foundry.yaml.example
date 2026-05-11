@@ -1,5 +1,7 @@
 # foundry.yaml — Git Safety Layer Configuration
-# Place this file in your workspace root or set FOUNDRY_CONFIG_PATH.
+# For standalone foundry-git-safety, pass this file explicitly or set
+# FOUNDRY_GIT_SAFETY_CONFIG / FOUNDRY_CONFIG_PATH. The server does not
+# auto-load a repo-local foundry.yaml when no config path is supplied.
 
 version: "1"
 
@@ -58,6 +60,11 @@ git_safety:
     burst: 300
     sustained: 120
     global_ceiling: 1000
+
+  observability:
+    # Protects /metrics, /tamper-event, /proxy/health, and /deep-policy/health.
+    admin_endpoints_require_token: true
+    admin_token_env: FOUNDRY_GIT_SAFETY_ADMIN_TOKEN
 
   # Deep policy sidecar — YAML-driven request-shape policies.
   # Off by default. Enable to generalize the GitHub API filter to any service.
